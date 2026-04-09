@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.7.0"
+VERSION = "4.8.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -2983,15 +2983,31 @@ class MetadataSaver:
 
 # Video / audio format + codec tables used by the converter post-processor.
 # Keys are the user-facing labels stored in config; values are the ffmpeg
-# codec argument. "copy" means stream copy (no re-encode).
+# encoder name. "copy" means stream copy (no re-encode). HW encoders are
+# filtered at runtime based on what ffmpeg -encoders actually reports.
 VIDEO_CONTAINERS = ["mp4", "mkv", "webm", "mov", "avi", "ts", "flv"]
 VIDEO_CODECS = {
-    "copy":  "copy",
-    "h264":  "libx264",
-    "h265":  "libx265",
-    "vp9":   "libvpx-vp9",
-    "av1":   "libaom-av1",
-    "mpeg4": "mpeg4",
+    "copy":        "copy",
+    "h264":        "libx264",
+    "h265":        "libx265",
+    "vp9":         "libvpx-vp9",
+    "av1":         "libaom-av1",
+    "mpeg4":       "mpeg4",
+    # NVIDIA NVENC (RTX / GTX)
+    "h264 (NVENC)": "h264_nvenc",
+    "h265 (NVENC)": "hevc_nvenc",
+    "av1 (NVENC)":  "av1_nvenc",
+    # Intel Quick Sync
+    "h264 (QSV)":   "h264_qsv",
+    "h265 (QSV)":   "hevc_qsv",
+    "av1 (QSV)":    "av1_qsv",
+    # AMD AMF
+    "h264 (AMF)":   "h264_amf",
+    "h265 (AMF)":   "hevc_amf",
+    "av1 (AMF)":    "av1_amf",
+    # Apple VideoToolbox
+    "h264 (VT)":    "h264_videotoolbox",
+    "h265 (VT)":    "hevc_videotoolbox",
 }
 AUDIO_CONTAINERS = ["mp3", "m4a", "ogg", "opus", "flac", "wav", "aac"]
 AUDIO_CODECS = {
@@ -3003,6 +3019,129 @@ AUDIO_CODECS = {
     "flac":   "flac",
     "pcm":    "pcm_s16le",
 }
+
+# Cached set of installed ffmpeg encoders (populated lazily via
+# `ffmpeg -encoders`). Used to hide hardware codecs the user doesn't have.
+_FFMPEG_ENCODERS_CACHE = None
+
+def _detect_ffmpeg_encoders():
+    """Return a set of ffmpeg video encoder names that are actually available.
+    Result is cached — this only shells out to ffmpeg once per process."""
+    global _FFMPEG_ENCODERS_CACHE
+    if _FFMPEG_ENCODERS_CACHE is not None:
+        return _FFMPEG_ENCODERS_CACHE
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=_CREATE_NO_WINDOW
+        )
+        encoders = set()
+        for line in r.stdout.splitlines():
+            # Format: " V..... libx264              libx264 H.264 ..."
+            s = line.strip()
+            if not s or not s[0] in "VAS":
+                continue
+            parts = s.split()
+            if len(parts) >= 2 and parts[0].startswith("V"):
+                encoders.add(parts[1])
+        _FFMPEG_ENCODERS_CACHE = encoders
+    except Exception:
+        _FFMPEG_ENCODERS_CACHE = set()
+    return _FFMPEG_ENCODERS_CACHE
+
+
+_HW_RUNNABLE_CACHE = None  # set of HW encoder names that actually initialize
+
+def _probe_hw_encoder(encoder_name):
+    """Try to initialize a single HW encoder by encoding 1 frame of lavfi
+    color into /dev/null. Returns True if the encoder actually works on
+    this machine (ffmpeg compile-time presence is not enough — the GPU /
+    driver must also be present)."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=c=black:s=64x64:r=1:d=0.04",
+             "-c:v", encoder_name, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_CREATE_NO_WINDOW
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _available_video_codec_keys():
+    """Return the subset of VIDEO_CODECS keys that can actually be used.
+    Software encoders are included if ffmpeg reports them; hardware
+    encoders (NVENC/QSV/AMF/VT) are additionally probed by running a
+    single frame through ffmpeg to confirm the driver is present. The
+    HW probe runs once per process, in parallel, and is cached."""
+    global _HW_RUNNABLE_CACHE
+    encoders = _detect_ffmpeg_encoders()
+    hw_suffixes = ("_nvenc", "_qsv", "_amf", "_videotoolbox")
+
+    if _HW_RUNNABLE_CACHE is None:
+        hw_to_probe = [
+            enc for enc in VIDEO_CODECS.values()
+            if any(s in enc for s in hw_suffixes) and enc in encoders
+        ]
+        runnable = set()
+        if hw_to_probe:
+            # Parallel probe — single-frame encodes finish in ~100ms each,
+            # so all HW encoders probe in under 2 seconds on 4 threads.
+            try:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {enc: pool.submit(_probe_hw_encoder, enc)
+                               for enc in hw_to_probe}
+                    for enc, fut in futures.items():
+                        try:
+                            if fut.result(timeout=12):
+                                runnable.add(enc)
+                        except Exception:
+                            pass
+            except Exception:
+                # If threading fails for any reason, fall back to the
+                # compile-time list so the user still sees the options.
+                runnable = set(hw_to_probe)
+        _HW_RUNNABLE_CACHE = runnable
+
+    result = []
+    for key, enc in VIDEO_CODECS.items():
+        if enc == "copy":
+            result.append(key)
+        elif any(s in enc for s in hw_suffixes):
+            if enc in _HW_RUNNABLE_CACHE:
+                result.append(key)
+        elif enc in encoders:
+            result.append(key)
+    return result
+
+
+def _video_codec_extra_args(ff_encoder):
+    """Return the quality/preset args tuned for the given ffmpeg encoder."""
+    if ff_encoder in ("libx264", "libx265"):
+        return ["-crf", "23", "-preset", "medium"]
+    if ff_encoder == "libvpx-vp9":
+        return ["-crf", "32", "-b:v", "0"]
+    if ff_encoder == "libaom-av1":
+        return ["-crf", "30", "-b:v", "0", "-cpu-used", "4"]
+    if ff_encoder == "mpeg4":
+        return ["-q:v", "5"]
+    # NVENC — p5 is the "slow" high-quality preset on the new preset scale
+    if ff_encoder in ("h264_nvenc", "hevc_nvenc", "av1_nvenc"):
+        return ["-cq", "23", "-preset", "p5", "-rc", "vbr"]
+    # Intel QSV
+    if ff_encoder in ("h264_qsv", "hevc_qsv", "av1_qsv"):
+        return ["-global_quality", "23", "-preset", "medium"]
+    # AMD AMF
+    if ff_encoder in ("h264_amf", "hevc_amf", "av1_amf"):
+        return ["-quality", "balanced", "-rc", "cqp", "-qp_i", "22", "-qp_p", "24"]
+    # Apple VideoToolbox — q-scale 0..100, 60 ≈ CRF 23
+    if ff_encoder in ("h264_videotoolbox", "hevc_videotoolbox"):
+        return ["-q:v", "60"]
+    return []
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".ts", ".flv", ".m4v"}
 AUDIO_EXTS = {".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac"}
 
@@ -3139,49 +3278,48 @@ class PostProcessor:
     @classmethod
     def _run_video_convert(cls, src, log_fn):
         """Convert a video file to the user-selected container + codec.
-        Uses stream copy when codec is 'copy' (fast remux)."""
+        Uses stream copy when codec is 'copy' (fast remux); supports all
+        installed hardware encoders (NVENC/QSV/AMF/VideoToolbox)."""
         fmt = (cls.convert_video_format or "mp4").lower()
         if fmt not in VIDEO_CONTAINERS:
             fmt = "mp4"
-        codec_key = (cls.convert_video_codec or "h264").lower()
-        ff_codec = VIDEO_CODECS.get(codec_key, "libx264")
+        codec_key = cls.convert_video_codec or "h264"
+        ff_encoder = VIDEO_CODECS.get(codec_key, "libx264")
+
+        # WebM only accepts VP8/VP9/AV1. Auto-rewrite to VP9 software when
+        # the user picks an incompatible combo, so an old config or a
+        # surprise NVENC on a webm container doesn't fail the whole job.
+        webm_ok = {"libvpx", "libvpx-vp9", "libaom-av1",
+                   "av1_nvenc", "av1_qsv", "av1_amf"}
+        if fmt == "webm" and ff_encoder not in webm_ok and ff_encoder != "copy":
+            if log_fn:
+                log_fn(f"[POST] webm requires VP9/AV1 — switching from {ff_encoder}")
+            ff_encoder = "libvpx-vp9"
+            codec_key = "vp9"
 
         base = os.path.splitext(src)[0]
         dst = f"{base}.converted.{fmt}"
-        # If dst collides with the source (same ext + same stem), adjust
         if os.path.abspath(dst) == os.path.abspath(src):
             dst = f"{base}.converted2.{fmt}"
         if os.path.exists(dst):
             return
         if log_fn:
-            log_fn(f"[POST] Convert video -> {fmt}/{codec_key}: {os.path.basename(dst)}")
+            log_fn(f"[POST] Convert video -> {fmt}/{codec_key} ({ff_encoder}): "
+                   f"{os.path.basename(dst)}")
 
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src]
-        if ff_codec == "copy":
+        if ff_encoder == "copy":
             cmd.extend(["-c", "copy"])
         else:
-            cmd.extend(["-c:v", ff_codec])
-            if ff_codec in ("libx264", "libx265"):
-                cmd.extend(["-crf", "23", "-preset", "medium"])
-            elif ff_codec == "libvpx-vp9":
-                cmd.extend(["-crf", "32", "-b:v", "0"])
-            elif ff_codec == "libaom-av1":
-                cmd.extend(["-crf", "30", "-b:v", "0", "-cpu-used", "4"])
-            elif ff_codec == "mpeg4":
-                cmd.extend(["-q:v", "5"])
-            # Audio: copy when possible, else transcode to AAC for mp4/mov,
-            # libvorbis for webm/ogg, libopus for opus container.
-            if fmt in ("webm",):
+            cmd.extend(["-c:v", ff_encoder])
+            cmd.extend(_video_codec_extra_args(ff_encoder))
+            # Audio stream: vorbis/opus for webm/ogg, aac otherwise
+            if fmt == "webm":
+                cmd.extend(["-c:a", "libvorbis"])
+            elif fmt == "ogg":
                 cmd.extend(["-c:a", "libvorbis"])
             else:
                 cmd.extend(["-c:a", "aac", "-b:a", "192k"])
-        # WebM can't mux H.264/H.265 — force VP9 if the user picked a bad combo
-        if fmt == "webm" and ff_codec in ("libx264", "libx265", "mpeg4", "copy"):
-            if log_fn:
-                log_fn(f"[POST] webm container requires VP9/AV1 — switching codec")
-            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src,
-                   "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0",
-                   "-c:a", "libvorbis"]
         cmd.append(dst)
 
         ok = cls._ffmpeg_run(cmd, log_fn, f"video convert -> {fmt}/{codec_key}")
@@ -4070,7 +4208,7 @@ class StreamKeep(QMainWindow):
             if PostProcessor.convert_video_format in VIDEO_CONTAINERS:
                 self.pp_convert_video_format.setCurrentIndex(
                     VIDEO_CONTAINERS.index(PostProcessor.convert_video_format))
-            vc_keys = list(VIDEO_CODECS.keys())
+            vc_keys = _available_video_codec_keys()
             if PostProcessor.convert_video_codec in vc_keys:
                 self.pp_convert_video_codec.setCurrentIndex(
                     vc_keys.index(PostProcessor.convert_video_codec))
@@ -5746,17 +5884,25 @@ class StreamKeep(QMainWindow):
         self.pp_convert_video_format.setCurrentIndex(idx)
         self.pp_convert_video_format.setFixedWidth(80)
         self.pp_convert_video_codec = QComboBox()
-        self.pp_convert_video_codec.addItems(list(VIDEO_CODECS.keys()))
-        vc_keys = list(VIDEO_CODECS.keys())
-        idx = vc_keys.index(PostProcessor.convert_video_codec) \
-            if PostProcessor.convert_video_codec in vc_keys else 1
-        self.pp_convert_video_codec.setCurrentIndex(idx)
-        self.pp_convert_video_codec.setFixedWidth(90)
+        vc_keys = _available_video_codec_keys()
+        self.pp_convert_video_codec.addItems(vc_keys)
+        # Fall back to h264 if the previously-saved codec isn't available
+        saved_vc = PostProcessor.convert_video_codec
+        if saved_vc in vc_keys:
+            self.pp_convert_video_codec.setCurrentIndex(vc_keys.index(saved_vc))
+        elif "h264" in vc_keys:
+            self.pp_convert_video_codec.setCurrentIndex(vc_keys.index("h264"))
+        self.pp_convert_video_codec.setFixedWidth(140)
+        hw_count = sum(1 for k in vc_keys if "(" in k)
+        hw_note = f" ({hw_count} GPU encoder{'s' if hw_count != 1 else ''} detected)" if hw_count else ""
         self.pp_convert_video_codec.setToolTip(
             "copy = fast remux (no re-encode)\n"
-            "h264/h265 = x264/x265 at CRF 23\n"
-            "vp9/av1 = modern codecs, slower\n"
-            "mpeg4 = legacy fallback"
+            "h264/h265/vp9/av1/mpeg4 = software encoders\n"
+            "(NVENC) = NVIDIA GPU (5-20x faster)\n"
+            "(QSV) = Intel Quick Sync\n"
+            "(AMF) = AMD GPU\n"
+            "(VT) = Apple VideoToolbox\n"
+            + hw_note
         )
         vconv_row = QHBoxLayout()
         vconv_row.setSpacing(6)
