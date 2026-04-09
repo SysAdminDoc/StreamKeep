@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -899,6 +899,8 @@ class TwitchExtractor(Extractor):
         re.compile(r'(?:https?://)?(?:www\.)?twitch\.tv/([a-zA-Z0-9_]+)/?$'),
     ]
     CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    # Set by Settings tab — download chat replay alongside Twitch VODs
+    download_chat = False
 
     def _gql(self, query, log_fn=None):
         return _curl_post_json(
@@ -1110,6 +1112,90 @@ class TwitchExtractor(Extractor):
         info.duration_str = "Live"
         self._log(log_fn, f"Twitch live: {len(info.qualities)} qualities")
         return info
+
+    def download_chat(self, vod_id, output_path, log_fn=None, progress_cb=None):
+        """Download the full chat replay for a VOD. Writes two files:
+          {output_path}.chat.json  — raw GraphQL comment data
+          {output_path}.chat.txt   — human-readable [MM:SS] user: message
+        Returns (total_comments, None) on success or (0, error_str)."""
+        headers = {"Client-Id": self.CLIENT_ID, "Content-Type": "application/json"}
+        all_comments = []
+        cursor = None
+        offset_seconds = 0
+        page = 0
+        # Use the persisted query hash known from TwitchDownloader
+        QUERY_HASH = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
+
+        while True:
+            if cursor:
+                variables = {"videoID": str(vod_id), "cursor": cursor}
+            else:
+                variables = {"videoID": str(vod_id), "contentOffsetSeconds": offset_seconds}
+            payload = [{
+                "operationName": "VideoCommentsByOffsetOrCursor",
+                "variables": variables,
+                "extensions": {
+                    "persistedQuery": {"version": 1, "sha256Hash": QUERY_HASH}
+                }
+            }]
+            data = _curl_post_json("https://gql.twitch.tv/gql", payload, headers=headers)
+            if not data or not isinstance(data, list) or not data:
+                return 0, "Empty response from Twitch"
+            video = data[0].get("data", {}).get("video") or {}
+            comments = video.get("comments") or {}
+            edges = comments.get("edges", [])
+            if not edges:
+                break
+            for e in edges:
+                node = e.get("node") or {}
+                all_comments.append(node)
+            page += 1
+            if progress_cb:
+                progress_cb(len(all_comments))
+            self._log(log_fn, f"  [CHAT] Page {page}: {len(all_comments)} comments so far")
+            page_info = comments.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            # Use cursor from last edge
+            cursor = edges[-1].get("cursor") if edges[-1].get("cursor") else None
+            if not cursor:
+                # Fall back to offset pagination
+                last_offset = edges[-1].get("node", {}).get("contentOffsetSeconds", 0)
+                if last_offset <= offset_seconds:
+                    break
+                offset_seconds = last_offset + 1
+                cursor = None
+            if len(all_comments) > 500000:  # safety cap
+                self._log(log_fn, f"  [CHAT] Hit 500k cap — stopping")
+                break
+
+        # Write JSON
+        try:
+            json_path = output_path + ".chat.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump({"vod_id": vod_id, "comments": all_comments}, f,
+                          ensure_ascii=False, indent=2)
+        except Exception as e:
+            return 0, f"Write JSON failed: {e}"
+
+        # Write plain text
+        try:
+            txt_path = output_path + ".chat.txt"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                for node in all_comments:
+                    secs = int(node.get("contentOffsetSeconds", 0) or 0)
+                    hh = secs // 3600
+                    mm = (secs % 3600) // 60
+                    ss = secs % 60
+                    ts = f"{hh:02d}:{mm:02d}:{ss:02d}" if hh else f"{mm:02d}:{ss:02d}"
+                    user = (node.get("commenter") or {}).get("displayName", "?")
+                    fragments = (node.get("message") or {}).get("fragments") or []
+                    msg = "".join(fr.get("text", "") for fr in fragments)
+                    f.write(f"[{ts}] {user}: {msg}\n")
+        except Exception as e:
+            self._log(log_fn, f"  [CHAT] Text export failed: {e}")
+
+        return len(all_comments), None
 
 
 # ── Rumble Extractor ──────────────────────────────────────────────────────
@@ -2327,6 +2413,165 @@ class MetadataSaver:
             except Exception:
                 pass
 
+    @staticmethod
+    def _xml_escape(s):
+        if not s:
+            return ""
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;"))
+
+    @staticmethod
+    def write_nfo(output_dir, stream_info, vod_info=None, file_base=""):
+        """Write a Kodi/Jellyfin/Plex-compatible .nfo file next to the video.
+        Uses <movie> schema which is the most widely supported."""
+        if stream_info is None or not output_dir:
+            return
+        if not os.path.isdir(output_dir):
+            return
+        title = (stream_info.title or (vod_info.title if vod_info else "")).strip() or "Untitled"
+        platform = stream_info.platform or ""
+        channel = ""
+        if vod_info and vod_info.channel:
+            channel = vod_info.channel
+        elif stream_info.channel:
+            channel = stream_info.channel
+        date_str = ""
+        try:
+            if stream_info.start_time:
+                date_str = stream_info.start_time.split("T")[0]
+            elif vod_info and vod_info.date:
+                date_str = vod_info.date.split("T")[0].split(" ")[0]
+        except Exception:
+            pass
+        runtime_min = int((stream_info.total_secs or 0) // 60)
+
+        esc = MetadataSaver._xml_escape
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<movie>',
+            f'  <title>{esc(title)}</title>',
+            f'  <originaltitle>{esc(title)}</originaltitle>',
+            f'  <studio>{esc(platform)}</studio>',
+        ]
+        if channel:
+            lines.append(f'  <director>{esc(channel)}</director>')
+            lines.append(f'  <credits>{esc(channel)}</credits>')
+        if date_str:
+            lines.append(f'  <premiered>{esc(date_str)}</premiered>')
+            lines.append(f'  <year>{esc(date_str[:4])}</year>')
+        if runtime_min > 0:
+            lines.append(f'  <runtime>{runtime_min}</runtime>')
+        if stream_info.url:
+            lines.append(f'  <trailer>{esc(stream_info.url)}</trailer>')
+        if stream_info.thumbnail_url:
+            lines.append(f'  <thumb>{esc(stream_info.thumbnail_url)}</thumb>')
+        lines.append(f'  <plot>Archived from {esc(platform)} on {esc(datetime.now().strftime("%Y-%m-%d"))}.</plot>')
+        lines.append('</movie>')
+
+        try:
+            # Kodi convention: <filebasename>.nfo for movies
+            nfo_path = os.path.join(
+                output_dir,
+                (file_base + ".nfo") if file_base else "movie.nfo"
+            )
+            with open(nfo_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except Exception:
+            pass
+
+
+# ── Post-Processing Engine ────────────────────────────────────────────────
+
+class PostProcessor:
+    """Runs ffmpeg post-processing presets on completed downloads."""
+
+    extract_audio = False       # Extract audio as MP3
+    normalize_loudness = False  # EBU R128 loudness normalization
+    reencode_h265 = False       # Re-encode to H.265/HEVC
+
+    @classmethod
+    def has_any_preset(cls):
+        return cls.extract_audio or cls.normalize_loudness or cls.reencode_h265
+
+    @classmethod
+    def process_directory(cls, out_dir, log_fn=None):
+        """Scan out_dir for .mp4 files and run configured presets on each."""
+        if not cls.has_any_preset() or not out_dir or not os.path.isdir(out_dir):
+            return
+        try:
+            mp4s = [
+                os.path.join(out_dir, f)
+                for f in os.listdir(out_dir)
+                if f.lower().endswith(".mp4") and os.path.isfile(os.path.join(out_dir, f))
+            ]
+        except OSError:
+            return
+        for src in mp4s:
+            if cls.extract_audio:
+                cls._run_audio_extract(src, log_fn)
+            if cls.normalize_loudness:
+                cls._run_loudnorm(src, log_fn)
+            if cls.reencode_h265:
+                cls._run_h265(src, log_fn)
+
+    @staticmethod
+    def _ffmpeg_run(cmd, log_fn, label):
+        try:
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=3600,
+                creationflags=_CREATE_NO_WINDOW
+            )
+            if r.returncode == 0:
+                if log_fn:
+                    log_fn(f"[POST] {label} OK")
+                return True
+            if log_fn:
+                err = r.stderr.strip().split("\n")[-1] if r.stderr else "exit " + str(r.returncode)
+                log_fn(f"[POST] {label} failed: {err[:120]}")
+            return False
+        except Exception as e:
+            if log_fn:
+                log_fn(f"[POST] {label} error: {e}")
+            return False
+
+    @classmethod
+    def _run_audio_extract(cls, src, log_fn):
+        base = os.path.splitext(src)[0]
+        dst = base + ".mp3"
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Extracting audio to MP3: {os.path.basename(dst)}")
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               "-i", src, "-vn", "-acodec", "libmp3lame", "-q:a", "2", dst]
+        cls._ffmpeg_run(cmd, log_fn, "audio extract")
+
+    @classmethod
+    def _run_loudnorm(cls, src, log_fn):
+        base, ext = os.path.splitext(src)
+        dst = base + ".loudnorm" + ext
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Normalizing loudness (EBU R128): {os.path.basename(dst)}")
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               "-i", src, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+               "-c:v", "copy", dst]
+        cls._ffmpeg_run(cmd, log_fn, "loudness normalize")
+
+    @classmethod
+    def _run_h265(cls, src, log_fn):
+        base, ext = os.path.splitext(src)
+        dst = base + ".h265" + ext
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Re-encoding to H.265: {os.path.basename(dst)}")
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               "-i", src, "-c:v", "libx265", "-crf", "23", "-preset", "medium",
+               "-c:a", "copy", dst]
+        cls._ffmpeg_run(cmd, log_fn, "H.265 re-encode")
+
 
 # ── Channel Monitor ───────────────────────────────────────────────────────
 
@@ -2657,6 +2902,7 @@ class StreamKeep(QMainWindow):
         self._webhook_url = ""
         self._check_duplicates = True
         self._download_queue = []  # list of dicts: url, title, platform, status
+        self._write_nfo = False
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
@@ -2731,6 +2977,22 @@ class StreamKeep(QMainWindow):
         self._check_duplicates = bool(cfg.get("check_duplicates", True))
         if hasattr(self, "dup_check"):
             self.dup_check.setChecked(self._check_duplicates)
+        # NFO export
+        self._write_nfo = bool(cfg.get("write_nfo", False))
+        if hasattr(self, "nfo_check"):
+            self.nfo_check.setChecked(self._write_nfo)
+        # Twitch chat download
+        TwitchExtractor.download_chat = bool(cfg.get("download_twitch_chat", False))
+        if hasattr(self, "chat_check"):
+            self.chat_check.setChecked(TwitchExtractor.download_chat)
+        # Post-processing presets
+        PostProcessor.extract_audio = bool(cfg.get("pp_extract_audio", False))
+        PostProcessor.normalize_loudness = bool(cfg.get("pp_normalize_loudness", False))
+        PostProcessor.reencode_h265 = bool(cfg.get("pp_reencode_h265", False))
+        if hasattr(self, "pp_audio_check"):
+            self.pp_audio_check.setChecked(PostProcessor.extract_audio)
+            self.pp_loud_check.setChecked(PostProcessor.normalize_loudness)
+            self.pp_h265_check.setChecked(PostProcessor.reencode_h265)
         # Restore queue
         self._download_queue = [
             q for q in cfg.get("download_queue", [])
@@ -2770,6 +3032,11 @@ class StreamKeep(QMainWindow):
         cfg["webhook_url"] = self._webhook_url
         cfg["check_duplicates"] = self._check_duplicates
         cfg["download_queue"] = list(self._download_queue)
+        cfg["write_nfo"] = self._write_nfo
+        cfg["download_twitch_chat"] = TwitchExtractor.download_chat
+        cfg["pp_extract_audio"] = PostProcessor.extract_audio
+        cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
+        cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
 
@@ -4063,6 +4330,35 @@ class StreamKeep(QMainWindow):
         dup_lay.addWidget(self.dup_check)
         card_lay.addWidget(dup_block)
 
+        # Media library (Kodi / Jellyfin / Plex)
+        lib_block, lib_lay = self._make_field_block(
+            "Media Library",
+            "Write Kodi/Jellyfin/Plex-compatible metadata files and chat replays for archival."
+        )
+        self.nfo_check = QCheckBox("Write .nfo file (movie schema) alongside each download")
+        self.nfo_check.setChecked(self._write_nfo)
+        lib_lay.addWidget(self.nfo_check)
+        self.chat_check = QCheckBox("Download Twitch VOD chat replay (JSON + plain text)")
+        self.chat_check.setChecked(TwitchExtractor.download_chat)
+        lib_lay.addWidget(self.chat_check)
+        card_lay.addWidget(lib_block)
+
+        # Post-processing presets
+        pp_block, pp_lay = self._make_field_block(
+            "Post-Processing",
+            "Automatic ffmpeg operations on each downloaded file. Originals are preserved."
+        )
+        self.pp_audio_check = QCheckBox("Extract audio as MP3 (libmp3lame, VBR quality 2)")
+        self.pp_audio_check.setChecked(PostProcessor.extract_audio)
+        pp_lay.addWidget(self.pp_audio_check)
+        self.pp_loud_check = QCheckBox("Normalize loudness (EBU R128: I=-16, TP=-1.5, LRA=11)")
+        self.pp_loud_check.setChecked(PostProcessor.normalize_loudness)
+        pp_lay.addWidget(self.pp_loud_check)
+        self.pp_h265_check = QCheckBox("Re-encode video to H.265/HEVC (libx265, CRF 23 — slow)")
+        self.pp_h265_check.setChecked(PostProcessor.reencode_h265)
+        pp_lay.addWidget(self.pp_h265_check)
+        card_lay.addWidget(pp_block)
+
         # Save button
         save_row = QHBoxLayout()
         save_row.addStretch()
@@ -4174,6 +4470,13 @@ class StreamKeep(QMainWindow):
         self._webhook_url = self.webhook_input.text().strip()
         # Apply duplicate detection
         self._check_duplicates = self.dup_check.isChecked()
+        # Apply library/NFO + chat
+        self._write_nfo = self.nfo_check.isChecked()
+        TwitchExtractor.download_chat = self.chat_check.isChecked()
+        # Apply post-processing presets
+        PostProcessor.extract_audio = self.pp_audio_check.isChecked()
+        PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()
+        PostProcessor.reencode_h265 = self.pp_h265_check.isChecked()
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
@@ -5291,6 +5594,31 @@ class StreamKeep(QMainWindow):
     def _save_metadata(self, out_dir, quality_name=""):
         if self.stream_info:
             MetadataSaver.save(out_dir, self.stream_info)
+            # NFO metadata for Kodi/Jellyfin/Plex libraries
+            if self._write_nfo:
+                file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
+                MetadataSaver.write_nfo(out_dir, self.stream_info, file_base=file_base)
+                self._log(f"[NFO] Wrote {file_base or 'movie'}.nfo for media library")
+            # Twitch chat replay
+            if (TwitchExtractor.download_chat
+                    and self.stream_info.platform == "Twitch"
+                    and self.stream_info.url):
+                m = re.search(r'/vod/(\d+)\.m3u8', self.stream_info.url)
+                if m:
+                    vod_id = m.group(1)
+                    file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else "chat"
+                    chat_base = os.path.join(out_dir, file_base)
+                    self._log(f"[CHAT] Fetching chat replay for VOD {vod_id}...")
+                    count, err = TwitchExtractor().download_chat(
+                        vod_id, chat_base, log_fn=self._log
+                    )
+                    if err:
+                        self._log(f"[CHAT] Failed: {err}")
+                    else:
+                        self._log(f"[CHAT] Saved {count} comments to {file_base}.chat.json/.txt")
+            # Post-processing presets (audio extract, loudnorm, H.265)
+            if PostProcessor.has_any_preset():
+                PostProcessor.process_directory(out_dir, log_fn=self._log)
         # Add to history (use the URL from the input box so we can retry later)
         platform = self.stream_info.platform if self.stream_info else "?"
         title = self.stream_info.title if self.stream_info else "?"
