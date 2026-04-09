@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 def _bootstrap():
     """Auto-install dependencies before imports."""
     required = {"PyQt6": "PyQt6"}
-    optional = {"yt_dlp": "yt-dlp"}
+    optional = {"yt_dlp": "yt-dlp", "deno": "deno"}
     import importlib
     for mod, pkg in {**required}.items():
         try:
@@ -1379,9 +1379,10 @@ class YtDlpExtractor(Extractor):
             return None, str(e)
 
     def _copy_locked_cookie_db(self, cookie_db_path, log_fn=None):
-        """Copy a locked Chromium cookie DB by elevating to admin via UAC.
-        Creates a temp profile directory that yt-dlp can read.
-        Returns the --cookies-from-browser arg string, or None."""
+        """Copy a locked Chromium cookie DB using Volume Shadow Copy (VSS).
+        Requires a UAC admin elevation prompt. Creates a temp profile
+        directory that yt-dlp can read.
+        Returns the temp profile path, or None."""
         import tempfile, shutil
         try:
             parts = Path(cookie_db_path).parts
@@ -1405,62 +1406,81 @@ class YtDlpExtractor(Extractor):
             tmp_network = os.path.join(tmp_profile, "Network")
             os.makedirs(tmp_network, exist_ok=True)
 
-            # Copy Local State (not locked)
+            # Copy Local State (not locked — contains decryption key)
             shutil.copy2(local_state_path, os.path.join(tmp_base, "Local State"))
 
-            # Determine destination for cookies
             if "Network" in cookie_db_path:
                 dst_cookies = os.path.join(tmp_network, "Cookies")
             else:
                 dst_cookies = os.path.join(tmp_profile, "Cookies")
 
-            # Try non-elevated copy first (works if browser is closed)
+            # Try direct copy first (works if browser is closed)
             try:
                 shutil.copy2(cookie_db_path, dst_cookies)
                 self._log(log_fn, "  Copied cookie DB directly")
                 return tmp_profile
-            except PermissionError:
+            except (PermissionError, OSError):
                 pass
 
-            # Elevated copy via UAC — creates a small PowerShell script that runs as admin
-            self._log(log_fn, "  Cookie DB exclusively locked — requesting admin to copy...")
-            ps_script = os.path.join(tempfile.gettempdir(), "sk_copy_cookies.ps1")
+            # Browser has exclusive lock — use Volume Shadow Copy via elevated PowerShell
+            self._log(log_fn, "  Cookie DB locked — using Volume Shadow Copy (admin required)...")
+
+            drive = cookie_db_path[:3]  # e.g. "C:\"
+            rel_path = cookie_db_path[3:]  # path relative to drive root
             done_flag = os.path.join(tempfile.gettempdir(), "sk_copy_done")
-            if os.path.exists(done_flag):
-                os.remove(done_flag)
+            err_log = os.path.join(tempfile.gettempdir(), "sk_copy_err.txt")
+            for f in [done_flag, err_log]:
+                if os.path.exists(f):
+                    os.remove(f)
 
-            with open(ps_script, "w") as f:
-                f.write(f'Copy-Item -LiteralPath "{cookie_db_path}" -Destination "{dst_cookies}" -Force\n')
-                f.write(f'"done" | Out-File -FilePath "{done_flag}"\n')
+            ps_file = os.path.join(tempfile.gettempdir(), "sk_vss.ps1")
+            with open(ps_file, "w", encoding="utf-8") as f:
+                lines = [
+                    "try {",
+                    f"  $s = (Get-WmiObject -List Win32_ShadowCopy).Create('{drive}','ClientAccessible')",
+                    "  $sc = Get-WmiObject Win32_ShadowCopy | Sort-Object InstallDate -Descending | Select-Object -First 1",
+                    "  $dev = $sc.DeviceObject",
+                    '  $src = "$dev\\' + rel_path + '"',
+                    '  Copy-Item -LiteralPath $src -Destination "' + dst_cookies + '" -Force',
+                    "  $sc.Delete()",
+                    '  "done" | Out-File "' + done_flag + '"',
+                    "} catch {",
+                    '  $_.Exception.Message | Out-File "' + err_log + '"',
+                    '  "error" | Out-File "' + done_flag + '"',
+                    "}",
+                ]
+                f.write("\n".join(lines))
 
-            # Launch elevated PowerShell (triggers UAC prompt)
             import ctypes
             ret = ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", "powershell.exe",
-                f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps_script}"',
-                None, 0  # SW_HIDE
+                f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps_file}"',
+                None, 0
             )
-
             if ret <= 32:
-                self._log(log_fn, "  UAC elevation denied or failed")
+                self._log(log_fn, "  UAC elevation denied")
                 return None
 
-            # Wait for the elevated script to finish (up to 10s)
-            for _ in range(20):
+            # Wait for VSS copy (can take 5-10s)
+            for _ in range(40):
                 time.sleep(0.5)
                 if os.path.exists(done_flag):
-                    os.remove(done_flag)
                     break
             else:
-                self._log(log_fn, "  Elevated copy timed out")
+                self._log(log_fn, "  VSS copy timed out")
+                return None
+
+            if os.path.exists(err_log):
+                with open(err_log, encoding="utf-8") as f:
+                    self._log(log_fn, f"  VSS error: {f.read().strip()}")
                 return None
 
             if os.path.exists(dst_cookies) and os.path.getsize(dst_cookies) > 0:
-                self._log(log_fn, "  Copied cookie DB via admin elevation")
+                self._log(log_fn, f"  Copied cookie DB via VSS shadow copy")
                 return tmp_profile
-            else:
-                self._log(log_fn, "  Elevated copy produced no output")
-                return None
+
+            self._log(log_fn, "  VSS copy produced no output")
+            return None
 
         except Exception as e:
             self._log(log_fn, f"  Cookie DB copy failed: {e}")
