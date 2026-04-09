@@ -594,6 +594,69 @@ def _safe_path_component(s, max_len=80):
     """Sanitize a path component (filename or folder name)."""
     return _safe_filename(s, max_len=max_len) or "download"
 
+
+def _user_videos_dir():
+    """Return the current user's Videos folder (platform-specific).
+    On Windows queries SHGetKnownFolderPath for FOLDERID_Videos to honor
+    redirected / OneDrive-mapped profiles. Falls back to ~/Videos (Linux,
+    Windows default) or ~/Movies (macOS)."""
+    # Windows: use the shell API so we get the correct path even when the
+    # user's profile has been redirected (OneDrive, custom location, etc.)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            # FOLDERID_Videos = {18989B1D-99B5-455B-841C-AB7C74E4DDFC}
+            class _GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", ctypes.c_ubyte * 8),
+                ]
+            FOLDERID_Videos = _GUID(
+                0x18989B1D, 0x99B5, 0x455B,
+                (ctypes.c_ubyte * 8)(0x84, 0x1C, 0xAB, 0x7C, 0x74, 0xE4, 0xDD, 0xFC),
+            )
+            SHGetKnownFolderPath = ctypes.windll.shell32.SHGetKnownFolderPath
+            SHGetKnownFolderPath.argtypes = [
+                ctypes.POINTER(_GUID), wintypes.DWORD, wintypes.HANDLE,
+                ctypes.POINTER(ctypes.c_wchar_p),
+            ]
+            SHGetKnownFolderPath.restype = ctypes.HRESULT
+            out_ptr = ctypes.c_wchar_p()
+            hr = SHGetKnownFolderPath(
+                ctypes.byref(FOLDERID_Videos), 0, 0, ctypes.byref(out_ptr)
+            )
+            if hr == 0 and out_ptr.value:
+                result = Path(out_ptr.value)
+                ctypes.windll.ole32.CoTaskMemFree(out_ptr)
+                return result
+        except Exception:
+            pass
+        return Path.home() / "Videos"
+    # macOS: the user's video folder is ~/Movies
+    if sys.platform == "darwin":
+        return Path.home() / "Movies"
+    # Linux / BSD: honor XDG_VIDEOS_DIR if present, else ~/Videos
+    xdg_config = Path.home() / ".config" / "user-dirs.dirs"
+    try:
+        if xdg_config.exists():
+            text = xdg_config.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r'XDG_VIDEOS_DIR\s*=\s*"(.+)"', text)
+            if m:
+                # Expand $HOME
+                path = m.group(1).replace("$HOME", str(Path.home()))
+                return Path(path)
+    except Exception:
+        pass
+    return Path.home() / "Videos"
+
+
+def _default_output_dir():
+    """Default root directory for new downloads: <User Videos>/StreamKeep."""
+    return _user_videos_dir() / "StreamKeep"
+
 def _render_template(template, context):
     """Render a filename template. Each path segment is sanitized
     separately so that '{channel}/{title}' produces a valid nested path.
@@ -3820,7 +3883,7 @@ class StreamKeep(QMainWindow):
 
     def _can_autofill_output(self):
         current = self.output_input.text().strip() if hasattr(self, "output_input") else ""
-        default_output = str(Path.home() / "Desktop" / "StreamKeep")
+        default_output = str(_default_output_dir())
         return not current or current == default_output or current == self._last_auto_output
 
     def _apply_auto_output(self, path_text):
@@ -4151,7 +4214,7 @@ class StreamKeep(QMainWindow):
             "Selection", "Not ready", "segments appear after fetch"
         )
         output_card, self.download_output_value, self.download_output_sub = self._make_metric_card(
-            "Output", _path_label(str(Path.home() / "Desktop" / "StreamKeep")), ""
+            "Output", _path_label(str(_default_output_dir())), ""
         )
         metrics_row.addWidget(duration_card)
         metrics_row.addWidget(selection_card)
@@ -4339,7 +4402,7 @@ class StreamKeep(QMainWindow):
         )
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
-        self.output_input = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
+        self.output_input = QLineEdit(str(_default_output_dir()))
         self.output_input.textChanged.connect(self._refresh_download_summary)
         output_row.addWidget(self.output_input, 1)
         browse_btn = QPushButton("Browse")
@@ -4945,7 +5008,7 @@ class StreamKeep(QMainWindow):
         )
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
-        self.settings_output = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
+        self.settings_output = QLineEdit(str(_default_output_dir()))
         output_row.addWidget(self.settings_output, 1)
         browse = QPushButton("Browse")
         browse.setObjectName("secondary")
@@ -5420,7 +5483,7 @@ class StreamKeep(QMainWindow):
             self._update_badge(ext.NAME)
             ch = ext.extract_channel_id(text.strip())
             if ch and self._can_autofill_output():
-                self._apply_auto_output(str(Path.home() / "Desktop" / _safe_filename(ch)))
+                self._apply_auto_output(str(_default_output_dir() / _safe_filename(ch)))
         else:
             self._update_badge(None)
         self._refresh_download_summary()
@@ -6332,7 +6395,7 @@ class StreamKeep(QMainWindow):
                 return
             q = info.qualities[0]
             try:
-                base_out = self.output_input.text().strip() or str(Path.home() / "Desktop" / "StreamKeep")
+                base_out = self.output_input.text().strip() or str(_default_output_dir())
                 out_dir = os.path.join(
                     base_out,
                     f"auto_{_safe_filename(channel_id)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
