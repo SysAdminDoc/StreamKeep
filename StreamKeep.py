@@ -1249,8 +1249,10 @@ class YtDlpExtractor(Extractor):
     URL_PATTERNS = [
         re.compile(r'https?://.+'),  # Catch-all — must be registered last
     ]
-    # Set by Settings tab — browser name for --cookies-from-browser (chrome, firefox, edge, brave, etc.)
+    # Set by Settings tab — browser name for --cookies-from-browser
     cookies_browser = ""
+    # Set by Settings tab — path to Netscape cookies.txt file for --cookies
+    cookies_file = ""
 
     def _has_ytdlp(self):
         try:
@@ -1274,7 +1276,9 @@ class YtDlpExtractor(Extractor):
 
     def _build_cmd(self, url):
         cmd = ["yt-dlp", "--dump-json", "--no-download"]
-        if self.cookies_browser:
+        if self.cookies_file and os.path.isfile(self.cookies_file):
+            cmd.extend(["--cookies", self.cookies_file])
+        elif self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         cmd.append(url)
         return cmd
@@ -2292,23 +2296,61 @@ class StreamKeep(QMainWindow):
         row1.addWidget(browse)
         card_lay.addLayout(row1)
 
-        # Browser cookies for yt-dlp (age-restricted / auth-required content)
+        # Browser cookies section
+        cookies_sec = QLabel("Browser Cookies")
+        cookies_sec.setStyleSheet(f"color: {CAT['lavender']}; font-weight: bold; font-size: 13px;")
+        card_lay.addWidget(cookies_sec)
+        cookies_hint = QLabel(
+            "For age-restricted or auth-required content (YouTube, etc.). "
+            "Select a browser to use its cookies, or browse for a cookies.txt file."
+        )
+        cookies_hint.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
+        cookies_hint.setWordWrap(True)
+        card_lay.addWidget(cookies_hint)
+
+        # Browser combo + Scan
         row_cookies = QHBoxLayout()
-        row_cookies.addWidget(QLabel("Browser cookies (for age-restricted content):"))
+        row_cookies.addWidget(QLabel("Browser:"))
         self.cookies_combo = QComboBox()
-        self.cookies_combo.setFixedWidth(180)
-        self.cookies_combo.addItems(["None", "chrome", "firefox", "edge", "brave", "opera", "vivaldi", "safari"])
+        self.cookies_combo.setFixedWidth(220)
+        self.cookies_combo.addItem("None")
+        row_cookies.addWidget(self.cookies_combo)
+        scan_btn = QPushButton("Scan for Browsers")
+        scan_btn.clicked.connect(self._on_scan_browsers)
+        row_cookies.addWidget(scan_btn)
+        row_cookies.addStretch()
+        card_lay.addLayout(row_cookies)
+
+        # Cookies file browse
+        row_cookiefile = QHBoxLayout()
+        row_cookiefile.addWidget(QLabel("Or cookies file:"))
+        self.cookies_file_input = QLineEdit()
+        self.cookies_file_input.setPlaceholderText("Path to cookies.txt (Netscape format)")
+        row_cookiefile.addWidget(self.cookies_file_input, 1)
+        browse_cookies = QPushButton("Browse")
+        browse_cookies.clicked.connect(self._on_browse_cookies_file)
+        row_cookiefile.addWidget(browse_cookies)
+        card_lay.addLayout(row_cookiefile)
+
+        # Scan results label
+        self.cookies_scan_label = QLabel("")
+        self.cookies_scan_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        self.cookies_scan_label.setWordWrap(True)
+        card_lay.addWidget(self.cookies_scan_label)
+
+        # Load saved settings
         saved_browser = self._config.get("cookies_browser", "")
+        saved_file = self._config.get("cookies_file", "")
+        if saved_file:
+            self.cookies_file_input.setText(saved_file)
+            YtDlpExtractor.cookies_file = saved_file
+        # Auto-scan on load to populate the combo
+        self._scan_browsers_silent()
         if saved_browser:
             idx = self.cookies_combo.findText(saved_browser)
             if idx >= 0:
                 self.cookies_combo.setCurrentIndex(idx)
             YtDlpExtractor.cookies_browser = saved_browser
-        row_cookies.addWidget(self.cookies_combo)
-        cookies_hint = QLabel("Passes --cookies-from-browser to yt-dlp for YouTube age gates, etc.")
-        cookies_hint.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
-        row_cookies.addWidget(cookies_hint, 1)
-        card_lay.addLayout(row_cookies)
 
         # ffmpeg / yt-dlp info
         row2 = QHBoxLayout()
@@ -2347,16 +2389,132 @@ class StreamKeep(QMainWindow):
         if d:
             line_edit.setText(d)
 
+    def _scan_browsers(self):
+        """Scan for installed browsers by checking cookie database locations."""
+        local = os.environ.get("LOCALAPPDATA", "")
+        roaming = os.environ.get("APPDATA", "")
+        home = str(Path.home())
+
+        # (display_name, yt-dlp_name, cookie_db_paths)
+        browsers = [
+            ("Chrome", "chrome", [
+                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Cookies"),
+                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("Chromium", "chromium", [
+                os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
+                os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("Ungoogled Chromium", "chromium", [
+                os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
+                os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("Firefox", "firefox", [
+                os.path.join(roaming, "Mozilla", "Firefox", "Profiles"),
+            ]),
+            ("Edge", "edge", [
+                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Cookies"),
+                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("Brave", "brave", [
+                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cookies"),
+                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("Opera", "opera", [
+                os.path.join(roaming, "Opera Software", "Opera Stable", "Cookies"),
+                os.path.join(roaming, "Opera Software", "Opera Stable", "Network", "Cookies"),
+            ]),
+            ("Opera GX", "opera", [
+                os.path.join(roaming, "Opera Software", "Opera GX Stable", "Cookies"),
+                os.path.join(roaming, "Opera Software", "Opera GX Stable", "Network", "Cookies"),
+            ]),
+            ("Vivaldi", "vivaldi", [
+                os.path.join(local, "Vivaldi", "User Data", "Default", "Cookies"),
+                os.path.join(local, "Vivaldi", "User Data", "Default", "Network", "Cookies"),
+            ]),
+            ("LibreWolf", "firefox", [
+                os.path.join(roaming, "librewolf", "Profiles"),
+            ]),
+            ("Waterfox", "firefox", [
+                os.path.join(roaming, "Waterfox", "Profiles"),
+            ]),
+        ]
+
+        found = []
+        for display, ytdlp_name, paths in browsers:
+            for p in paths:
+                if os.path.exists(p):
+                    found.append((display, ytdlp_name, p))
+                    break
+
+        return found
+
+    def _scan_browsers_silent(self):
+        """Populate combo with scanned browsers without UI feedback."""
+        found = self._scan_browsers()
+        self.cookies_combo.clear()
+        self.cookies_combo.addItem("None")
+        seen = set()
+        for display, ytdlp_name, path in found:
+            label = f"{display} ({ytdlp_name})"
+            if label not in seen:
+                self.cookies_combo.addItem(label, ytdlp_name)
+                seen.add(label)
+        # Also add manual entries for common browsers not found
+        for name in ["chrome", "chromium", "firefox", "edge", "brave", "opera", "vivaldi", "safari"]:
+            manual_label = f"{name} (manual)"
+            if not any(name == ytdlp for _, ytdlp, _ in found):
+                self.cookies_combo.addItem(manual_label, name)
+
+    def _on_scan_browsers(self):
+        found = self._scan_browsers()
+        self.cookies_combo.clear()
+        self.cookies_combo.addItem("None")
+        seen = set()
+        for display, ytdlp_name, path in found:
+            label = f"{display} ({ytdlp_name})"
+            if label not in seen:
+                self.cookies_combo.addItem(label, ytdlp_name)
+                seen.add(label)
+        # Manual fallbacks
+        for name in ["chrome", "chromium", "firefox", "edge", "brave"]:
+            manual_label = f"{name} (manual)"
+            if not any(name == ytdlp for _, ytdlp, _ in found):
+                self.cookies_combo.addItem(manual_label, name)
+
+        if found:
+            details = "\n".join(f"  {d} -> {p}" for d, _, p in found)
+            self.cookies_scan_label.setText(f"Found {len(found)} browser(s):\n{details}")
+            self._log(f"[SCAN] Found {len(found)} browser cookie stores:")
+            for d, y, p in found:
+                self._log(f"  {d} ({y}) -> {p}")
+        else:
+            self.cookies_scan_label.setText("No browser cookie stores found.")
+
+    def _on_browse_cookies_file(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select Cookies File", str(Path.home()),
+            "Cookie files (*.txt *.sqlite);;All files (*)"
+        )
+        if f:
+            self.cookies_file_input.setText(f)
+
     def _on_save_settings(self):
         self.output_input.setText(self.settings_output.text())
-        # Apply cookies setting
-        browser = self.cookies_combo.currentText()
-        if browser == "None":
+        # Apply browser cookies setting
+        browser_text = self.cookies_combo.currentText()
+        browser_data = self.cookies_combo.currentData()
+        if browser_text == "None":
             YtDlpExtractor.cookies_browser = ""
             self._config["cookies_browser"] = ""
         else:
-            YtDlpExtractor.cookies_browser = browser
-            self._config["cookies_browser"] = browser
+            ytdlp_name = browser_data if browser_data else browser_text
+            YtDlpExtractor.cookies_browser = ytdlp_name
+            self._config["cookies_browser"] = ytdlp_name
+        # Apply cookies file
+        cookies_file = self.cookies_file_input.text().strip()
+        YtDlpExtractor.cookies_file = cookies_file
+        self._config["cookies_file"] = cookies_file
         self._persist_config()
         self.status_label.setText("Settings saved")
 
