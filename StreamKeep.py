@@ -1379,17 +1379,12 @@ class YtDlpExtractor(Extractor):
             return None, str(e)
 
     def _copy_locked_cookie_db(self, cookie_db_path, log_fn=None):
-        """Copy a locked Chromium cookie DB using sqlite3 backup API.
+        """Copy a locked Chromium cookie DB by elevating to admin via UAC.
         Creates a temp profile directory that yt-dlp can read.
         Returns the --cookies-from-browser arg string, or None."""
-        import sqlite3 as _sqlite3
         import tempfile, shutil
         try:
-            # Find the User Data dir (parent of Default/ or the profile folder)
-            # cookie_db_path is like .../User Data/Default/Network/Cookies
-            # We need User Data dir for Local State, and the profile dir (Default)
             parts = Path(cookie_db_path).parts
-            # Find "User Data" in the path
             user_data_idx = None
             for i, p in enumerate(parts):
                 if p == "User Data":
@@ -1403,32 +1398,69 @@ class YtDlpExtractor(Extractor):
             if not os.path.exists(local_state_path):
                 return None
 
-            # Create temp profile structure
             tmp_base = os.path.join(tempfile.gettempdir(), "streamkeep_cookies")
             if os.path.exists(tmp_base):
                 shutil.rmtree(tmp_base, ignore_errors=True)
-            tmp_userdata = tmp_base
-            tmp_profile = os.path.join(tmp_userdata, "Default")
+            tmp_profile = os.path.join(tmp_base, "Default")
             tmp_network = os.path.join(tmp_profile, "Network")
             os.makedirs(tmp_network, exist_ok=True)
 
             # Copy Local State (not locked)
-            shutil.copy2(local_state_path, os.path.join(tmp_userdata, "Local State"))
+            shutil.copy2(local_state_path, os.path.join(tmp_base, "Local State"))
 
-            # Copy Cookies DB using sqlite3 backup (handles WAL locks)
+            # Determine destination for cookies
             if "Network" in cookie_db_path:
                 dst_cookies = os.path.join(tmp_network, "Cookies")
             else:
                 dst_cookies = os.path.join(tmp_profile, "Cookies")
 
-            src_conn = _sqlite3.connect(f"file:{cookie_db_path}?mode=ro&nolock=1", uri=True)
-            dst_conn = _sqlite3.connect(dst_cookies)
-            src_conn.backup(dst_conn)
-            src_conn.close()
-            dst_conn.close()
+            # Try non-elevated copy first (works if browser is closed)
+            try:
+                shutil.copy2(cookie_db_path, dst_cookies)
+                self._log(log_fn, "  Copied cookie DB directly")
+                return tmp_profile
+            except PermissionError:
+                pass
 
-            self._log(log_fn, f"  Copied locked cookie DB to temp profile")
-            return tmp_profile
+            # Elevated copy via UAC — creates a small PowerShell script that runs as admin
+            self._log(log_fn, "  Cookie DB exclusively locked — requesting admin to copy...")
+            ps_script = os.path.join(tempfile.gettempdir(), "sk_copy_cookies.ps1")
+            done_flag = os.path.join(tempfile.gettempdir(), "sk_copy_done")
+            if os.path.exists(done_flag):
+                os.remove(done_flag)
+
+            with open(ps_script, "w") as f:
+                f.write(f'Copy-Item -LiteralPath "{cookie_db_path}" -Destination "{dst_cookies}" -Force\n')
+                f.write(f'"done" | Out-File -FilePath "{done_flag}"\n')
+
+            # Launch elevated PowerShell (triggers UAC prompt)
+            import ctypes
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", "powershell.exe",
+                f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps_script}"',
+                None, 0  # SW_HIDE
+            )
+
+            if ret <= 32:
+                self._log(log_fn, "  UAC elevation denied or failed")
+                return None
+
+            # Wait for the elevated script to finish (up to 10s)
+            for _ in range(20):
+                time.sleep(0.5)
+                if os.path.exists(done_flag):
+                    os.remove(done_flag)
+                    break
+            else:
+                self._log(log_fn, "  Elevated copy timed out")
+                return None
+
+            if os.path.exists(dst_cookies) and os.path.getsize(dst_cookies) > 0:
+                self._log(log_fn, "  Copied cookie DB via admin elevation")
+                return tmp_profile
+            else:
+                self._log(log_fn, "  Elevated copy produced no output")
+                return None
 
         except Exception as e:
             self._log(log_fn, f"  Cookie DB copy failed: {e}")
