@@ -1,0 +1,88 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyQt6 yt-dlp pyinstaller
+
+      - name: Build exe
+        run: |
+          pyinstaller --onefile --windowed --name StreamKeep --icon NONE StreamKeep.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamKeep-Windows
+          path: dist/StreamKeep.exe
+
+      - name: Upload to release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          $tag = "v" + (python -c "import re; print(re.search(r'VERSION = \"(.+?)\"', open('StreamKeep.py').read()).group(1))")
+          gh release create $tag dist/StreamKeep.exe --title "StreamKeep $tag" --generate-notes 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release upload $tag dist/StreamKeep.exe --clobber }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyQt6 yt-dlp pyinstaller
+
+      - name: Build app
+        run: |
+          pyinstaller --onefile --windowed --name StreamKeep StreamKeep.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamKeep-macOS
+          path: dist/StreamKeep
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+
+      - name: Install dependencies
+        run: pip install PyQt6 yt-dlp pyinstaller
+
+      - name: Build binary
+        run: |
+          pyinstaller --onefile --name StreamKeep StreamKeep.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamKeep-Linux
+          path: dist/StreamKeep
