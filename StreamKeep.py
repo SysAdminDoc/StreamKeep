@@ -1,5 +1,5 @@
 """
-StreamForge v1.0.0
+StreamKeep v1.0.0
 Multi-platform stream/VOD downloader with native extractors and yt-dlp fallback.
 Supports: Kick, Twitch, Rumble, and any yt-dlp-compatible site.
 """
@@ -55,7 +55,7 @@ from PyQt6.QtGui import QColor, QDesktopServices
 VERSION = "2.0.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamForge"
+CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
@@ -1406,10 +1406,10 @@ QPushButton#tabActive {{
 """
 
 
-class StreamForge(QMainWindow):
+class StreamKeep(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"StreamForge v{VERSION}")
+        self.setWindowTitle(f"StreamKeep v{VERSION}")
         self.setMinimumSize(900, 750)
         self.resize(980, 830)
         self.stream_info = None
@@ -1461,7 +1461,7 @@ class StreamForge(QMainWindow):
 
         # ── Header + Tabs ─────────────────────────────────────────────
         header = QHBoxLayout()
-        title = QLabel("StreamForge")
+        title = QLabel("StreamKeep")
         title.setObjectName("title")
         ver = QLabel(f"v{VERSION}")
         ver.setObjectName("subtitle")
@@ -1640,7 +1640,7 @@ class StreamForge(QMainWindow):
 
         settings_lay.addSpacing(16)
         settings_lay.addWidget(QLabel("Output:"))
-        self.output_input = QLineEdit(str(Path.home() / "Desktop" / "StreamForge"))
+        self.output_input = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
         self.output_input.setMinimumWidth(200)
         settings_lay.addWidget(self.output_input, 1)
 
@@ -1850,7 +1850,7 @@ class StreamForge(QMainWindow):
         # Default output
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Default output directory:"))
-        self.settings_output = QLineEdit(str(Path.home() / "Desktop" / "StreamForge"))
+        self.settings_output = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
         row1.addWidget(self.settings_output, 1)
         browse = QPushButton("Browse")
         browse.clicked.connect(lambda: self._settings_browse(self.settings_output))
@@ -2510,13 +2510,13 @@ def main():
     except FileNotFoundError:
         from PyQt6.QtWidgets import QMessageBox
         app = QApplication(sys.argv)
-        QMessageBox.critical(None, "StreamForge", "ffmpeg not found in PATH.\nInstall ffmpeg and try again.")
+        QMessageBox.critical(None, "StreamKeep", "ffmpeg not found in PATH.\nInstall ffmpeg and try again.")
         sys.exit(1)
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
-    win = StreamForge()
+    win = StreamKeep()
     win.show()
     sys.exit(app.exec())
 

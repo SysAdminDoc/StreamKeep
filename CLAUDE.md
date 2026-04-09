@@ -1,4 +1,4 @@
-# StreamForge - Project Notes
+# StreamKeep - Project Notes
 
 ## Tech Stack
 - Python 3.10+ with PyQt6 GUI (single-file app)
@@ -15,7 +15,7 @@
 - **Data classes**: `StreamInfo`, `QualityInfo`, `VODInfo` (dataclasses)
 - **Utility functions**: `_curl()`, `_curl_json()`, `_curl_post_json()`, `_parse_hls_master()`, `_parse_hls_duration()`
 - **Workers**: `FetchWorker` (QThread) resolves URLs via extractors, `DownloadWorker` (QThread) runs ffmpeg
-- **GUI**: `StreamForge(QMainWindow)` with VOD table, segment table, quality/segment combos, batch download
+- **GUI**: `StreamKeep(QMainWindow)` with VOD table, segment table, quality/segment combos, batch download
 - Catppuccin Mocha dark theme via global QSS
 
 ## Key API Details
@@ -26,7 +26,7 @@
 
 ## Build/Run
 ```bash
-python StreamForge.py
+python StreamKeep.py
 ```
 No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 
@@ -36,7 +36,7 @@ No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 - **ChannelMonitor**: Round-robin polling via QTimer (15s tick), auto-record on live detection
 - **MetadataSaver**: Writes metadata.json + downloads thumbnails alongside videos
 - **HistoryEntry**: Tracks completed downloads, persisted in config.json
-- **Config persistence**: JSON at `%APPDATA%\StreamForge\config.json` — saves output dir, segment pref, history, monitor channels
+- **Config persistence**: JSON at `%APPDATA%\StreamKeep\config.json` — saves output dir, segment pref, history, monitor channels
 
 ## Version History
 - v2.0.0 — Tab UI (Download/Monitor/History/Settings), channel monitoring + auto-record, download history, metadata saving, config persistence, enhanced speed/ETA tracking

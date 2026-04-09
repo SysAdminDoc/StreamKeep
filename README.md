@@ -1,4 +1,4 @@
-# StreamForge
+# StreamKeep
 
 A multi-platform desktop GUI tool for downloading VODs and live streams with native extractors, segmented downloads, and batch operations.
 
@@ -16,7 +16,7 @@ A multi-platform desktop GUI tool for downloading VODs and live streams with nat
 ## Features
 
 - **Multi-platform** — native extractors for Kick, Twitch, Rumble + yt-dlp fallback for everything else
-- **Auto-detect** — paste any URL, StreamForge identifies the platform and resolves the stream
+- **Auto-detect** — paste any URL, StreamKeep identifies the platform and resolves the stream
 - **Platform badge** — colored badge shows which extractor matched your URL
 - **VOD browser** — list all VODs for a channel, check the ones you want, batch download
 - **Quality picker** — choose from all available qualities (1080p, 720p, 480p, etc.)
@@ -37,7 +37,7 @@ A multi-platform desktop GUI tool for downloading VODs and live streams with nat
 ## Usage
 
 ```bash
-python StreamForge.py
+python StreamKeep.py
 ```
 
 ### Quick Start
@@ -53,4 +53,4 @@ python StreamForge.py
 
 ### Extractor Architecture
 
-StreamForge uses a plugin-style extractor system. Each platform is a self-contained class that auto-registers via `__init_subclass__`. Native extractors provide VOD listing, live detection, and direct API access. The yt-dlp fallback catches any URL not handled by native extractors.
+StreamKeep uses a plugin-style extractor system. Each platform is a self-contained class that auto-registers via `__init_subclass__`. Native extractors provide VOD listing, live detection, and direct API access. The yt-dlp fallback catches any URL not handled by native extractors.
