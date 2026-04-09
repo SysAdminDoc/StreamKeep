@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.2.0"
+VERSION = "4.3.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -1886,6 +1886,49 @@ class YtDlpExtractor(Extractor):
         self._log(log_fn, "All browsers tried — none had valid cookies for this URL.")
         return None
 
+    def list_playlist_entries(self, url, log_fn=None, limit=200):
+        """Probe URL for a playlist/channel. If it's a list container,
+        return a list of (title, url) entries (empty list for single videos).
+        Uses --flat-playlist which is fast and doesn't fetch each entry."""
+        if not self._has_ytdlp():
+            return []
+        self._log(log_fn, f"Probing for playlist/channel: {url}")
+        cmd = ["yt-dlp", "--flat-playlist", "--dump-single-json",
+               "--playlist-end", str(limit), "--no-warnings"]
+        if self.cookies_browser:
+            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        if self.proxy:
+            cmd.extend(["--proxy", self.proxy])
+        cmd.append(url)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                               creationflags=_CREATE_NO_WINDOW)
+            if r.returncode != 0:
+                return []
+            data = json.loads(r.stdout)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError):
+            return []
+        # Single video (not a playlist/channel)
+        if data.get("_type") not in ("playlist", "multi_video"):
+            return []
+        entries = data.get("entries") or []
+        results = []
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            entry_url = e.get("url") or e.get("webpage_url") or ""
+            if not entry_url:
+                continue
+            # Some entries return just the ID instead of a full URL
+            if entry_url and not entry_url.startswith("http"):
+                entry_url = f"https://www.youtube.com/watch?v={entry_url}"
+            results.append({
+                "title": (e.get("title") or "Untitled")[:120],
+                "url": entry_url,
+                "duration": e.get("duration"),
+            })
+        return results
+
     def resolve(self, url, log_fn=None):
         if not self._has_ytdlp():
             self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
@@ -2051,6 +2094,24 @@ class YtDlpExtractor(Extractor):
 
 
 # ── Worker Threads ────────────────────────────────────────────────────────
+
+class _PlaylistExpandWorker(QThread):
+    """Probe a URL for playlist entries via yt-dlp --flat-playlist."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            entries = YtDlpExtractor().list_playlist_entries(self.url, log_fn=self.log.emit)
+            self.finished.emit(entries)
+        except Exception as e:
+            self.error.emit(str(e))
+
 
 class FetchWorker(QThread):
     """Resolves URLs using the extractor system."""
@@ -2563,14 +2624,19 @@ class PostProcessor:
     extract_audio = False       # Extract audio as MP3
     normalize_loudness = False  # EBU R128 loudness normalization
     reencode_h265 = False       # Re-encode to H.265/HEVC
+    contact_sheet = False       # Generate 3x3 thumbnail grid
+    split_by_chapter = False    # Split into per-chapter files
 
     @classmethod
     def has_any_preset(cls):
-        return cls.extract_audio or cls.normalize_loudness or cls.reencode_h265
+        return (cls.extract_audio or cls.normalize_loudness
+                or cls.reencode_h265 or cls.contact_sheet
+                or cls.split_by_chapter)
 
     @classmethod
-    def process_directory(cls, out_dir, log_fn=None):
-        """Scan out_dir for .mp4 files and run configured presets on each."""
+    def process_directory(cls, out_dir, log_fn=None, chapters=None):
+        """Scan out_dir for .mp4 files and run configured presets on each.
+        `chapters` is an optional list of {title,start,end} for split-by-chapter."""
         if not cls.has_any_preset() or not out_dir or not os.path.isdir(out_dir):
             return
         try:
@@ -2578,6 +2644,8 @@ class PostProcessor:
                 os.path.join(out_dir, f)
                 for f in os.listdir(out_dir)
                 if f.lower().endswith(".mp4") and os.path.isfile(os.path.join(out_dir, f))
+                and not f.lower().endswith(".h265.mp4")
+                and not f.lower().endswith(".loudnorm.mp4")
             ]
         except OSError:
             return
@@ -2588,6 +2656,10 @@ class PostProcessor:
                 cls._run_loudnorm(src, log_fn)
             if cls.reencode_h265:
                 cls._run_h265(src, log_fn)
+            if cls.contact_sheet:
+                cls._run_contact_sheet(src, log_fn)
+            if cls.split_by_chapter and chapters:
+                cls._run_split_by_chapter(src, chapters, log_fn)
 
     @staticmethod
     def _ffmpeg_run(cmd, log_fn, label):
@@ -2646,6 +2718,73 @@ class PostProcessor:
                "-i", src, "-c:v", "libx265", "-crf", "23", "-preset", "medium",
                "-c:a", "copy", dst]
         cls._ffmpeg_run(cmd, log_fn, "H.265 re-encode")
+
+    @classmethod
+    def _run_contact_sheet(cls, src, log_fn):
+        """Generate a 3x3 grid of evenly-spaced thumbnails as a contact sheet."""
+        base = os.path.splitext(src)[0]
+        dst = base + ".contact.jpg"
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Building contact sheet: {os.path.basename(dst)}")
+        # Probe duration via ffprobe
+        try:
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", src],
+                capture_output=True, text=True, timeout=15,
+                creationflags=_CREATE_NO_WINDOW
+            )
+            dur = float((r.stdout or "0").strip() or 0)
+        except Exception:
+            dur = 0
+        if dur <= 1:
+            if log_fn:
+                log_fn(f"[POST] Contact sheet skipped: unknown duration")
+            return
+        # 9 evenly-spaced thumbnails via the select filter
+        # fps = 9 / (duration - 1 second of padding each side)
+        nb_frames = 9
+        fps = nb_frames / max(dur - 2, 1)
+        vf = (
+            f"fps={fps:.6f},scale=480:-1,"
+            f"tile={3}x{3}:margin=8:padding=6"
+        )
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               "-ss", "1", "-i", src,
+               "-vf", vf, "-frames:v", "1", "-qscale:v", "3", dst]
+        cls._ffmpeg_run(cmd, log_fn, "contact sheet")
+
+    @classmethod
+    def _run_split_by_chapter(cls, src, chapters, log_fn):
+        """Split a video into one file per chapter using stream copy."""
+        if not chapters:
+            return
+        base, ext = os.path.splitext(src)
+        out_dir = base + "_chapters"
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as e:
+            if log_fn:
+                log_fn(f"[POST] Chapter split: cannot create folder: {e}")
+            return
+        if log_fn:
+            log_fn(f"[POST] Splitting by chapter ({len(chapters)} chapters)...")
+        for i, ch in enumerate(chapters):
+            start = float(ch.get("start", 0) or 0)
+            end = float(ch.get("end", 0) or 0)
+            title = _safe_filename(ch.get("title", f"Chapter {i+1}"), max_len=80)
+            label = f"{i+1:02d} - {title}{ext}"
+            dst = os.path.join(out_dir, label)
+            if os.path.exists(dst):
+                continue
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                   "-ss", str(start), "-i", src]
+            if end > start:
+                cmd.extend(["-to", str(end - start)])
+            cmd.extend(["-c", "copy", dst])
+            cls._ffmpeg_run(cmd, log_fn, f"chapter {i+1}")
 
 
 # ── Channel Monitor ───────────────────────────────────────────────────────
@@ -3065,10 +3204,14 @@ class StreamKeep(QMainWindow):
         PostProcessor.extract_audio = bool(cfg.get("pp_extract_audio", False))
         PostProcessor.normalize_loudness = bool(cfg.get("pp_normalize_loudness", False))
         PostProcessor.reencode_h265 = bool(cfg.get("pp_reencode_h265", False))
+        PostProcessor.contact_sheet = bool(cfg.get("pp_contact_sheet", False))
+        PostProcessor.split_by_chapter = bool(cfg.get("pp_split_by_chapter", False))
         if hasattr(self, "pp_audio_check"):
             self.pp_audio_check.setChecked(PostProcessor.extract_audio)
             self.pp_loud_check.setChecked(PostProcessor.normalize_loudness)
             self.pp_h265_check.setChecked(PostProcessor.reencode_h265)
+            self.pp_contact_check.setChecked(PostProcessor.contact_sheet)
+            self.pp_split_check.setChecked(PostProcessor.split_by_chapter)
         # Restore queue
         self._download_queue = [
             q for q in cfg.get("download_queue", [])
@@ -3119,6 +3262,8 @@ class StreamKeep(QMainWindow):
         cfg["pp_extract_audio"] = PostProcessor.extract_audio
         cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
         cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
+        cfg["pp_contact_sheet"] = PostProcessor.contact_sheet
+        cfg["pp_split_by_chapter"] = PostProcessor.split_by_chapter
         cfg["recent_urls"] = list(self._recent_urls)
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
@@ -3687,6 +3832,13 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.clicked.connect(self._on_fetch)
         url_row.addWidget(self.fetch_btn)
 
+        self.expand_btn = QPushButton("Expand Playlist")
+        self.expand_btn.setObjectName("secondary")
+        self.expand_btn.setFixedWidth(130)
+        self.expand_btn.setToolTip("For playlist/channel URLs, queue every video via yt-dlp")
+        self.expand_btn.clicked.connect(self._on_expand_playlist)
+        url_row.addWidget(self.expand_btn)
+
         self.clip_btn = QPushButton("Clipboard Watch")
         self.clip_btn.setObjectName("toggleAccent")
         self.clip_btn.setCheckable(True)
@@ -3952,6 +4104,51 @@ class StreamKeep(QMainWindow):
         self._refresh_queue_table()
 
         return page
+
+    def _on_expand_playlist(self):
+        """Probe the URL for playlist/channel entries and queue them all."""
+        url = self.url_input.text().strip()
+        if not url:
+            self._set_status("Paste a URL first.", "warning")
+            return
+        self.expand_btn.setEnabled(False)
+        self._set_status("Probing for playlist/channel entries...", "working")
+        self._log(f"[PLAYLIST] Probing: {url}")
+        # Run in a throwaway thread to avoid blocking the UI
+        worker = _PlaylistExpandWorker(url)
+        worker.finished.connect(lambda entries, u=url: self._on_expand_done(u, entries))
+        worker.error.connect(self._on_expand_error)
+        worker.log.connect(self._log)
+        self._expand_worker = worker
+        worker.start()
+
+    def _on_expand_done(self, source_url, entries):
+        self.expand_btn.setEnabled(True)
+        if not entries:
+            self._set_status(
+                "No playlist entries found. This URL may be a single video — use Fetch instead.",
+                "warning",
+            )
+            return
+        added = 0
+        for e in entries:
+            if self._queue_add(e.get("url", ""), title=e.get("title", ""), platform="yt-dlp"):
+                added += 1
+        self._log(f"[PLAYLIST] Queued {added} new of {len(entries)} total entries")
+        self._set_status(
+            f"Playlist expanded. Queued {added} new entries "
+            f"({len(entries) - added} already in the queue).",
+            "success",
+        )
+        # Kick off the queue if nothing's downloading
+        worker = getattr(self, "download_worker", None)
+        if worker is None or not worker.isRunning():
+            self._advance_queue()
+
+    def _on_expand_error(self, err):
+        self.expand_btn.setEnabled(True)
+        self._log(f"[PLAYLIST] {err}")
+        self._set_status(f"Playlist probe failed: {err}", "error")
 
     def _on_queue_url(self):
         """Add the current URL input to the persistent queue."""
@@ -4492,10 +4689,26 @@ class StreamKeep(QMainWindow):
         self.pp_h265_check = QCheckBox("Re-encode video to H.265/HEVC (libx265, CRF 23 — slow)")
         self.pp_h265_check.setChecked(PostProcessor.reencode_h265)
         pp_lay.addWidget(self.pp_h265_check)
+        self.pp_contact_check = QCheckBox("Generate contact sheet (3x3 thumbnail grid .jpg)")
+        self.pp_contact_check.setChecked(PostProcessor.contact_sheet)
+        pp_lay.addWidget(self.pp_contact_check)
+        self.pp_split_check = QCheckBox("Split by chapters into per-chapter files (for videos with chapters)")
+        self.pp_split_check.setChecked(PostProcessor.split_by_chapter)
+        pp_lay.addWidget(self.pp_split_check)
         card_lay.addWidget(pp_block)
 
-        # Save button
+        # Save / Import / Export row
         save_row = QHBoxLayout()
+        import_btn = QPushButton("Import Config")
+        import_btn.setObjectName("secondary")
+        import_btn.setToolTip("Replace current settings with a backup file")
+        import_btn.clicked.connect(self._on_import_config)
+        save_row.addWidget(import_btn)
+        export_btn = QPushButton("Export Config")
+        export_btn.setObjectName("secondary")
+        export_btn.setToolTip("Write current settings to a backup file")
+        export_btn.clicked.connect(self._on_export_config)
+        save_row.addWidget(export_btn)
         save_row.addStretch()
         save_btn = QPushButton("Save Settings")
         save_btn.setObjectName("primary")
@@ -4505,6 +4718,65 @@ class StreamKeep(QMainWindow):
 
         lay.addWidget(card, 1)
         return page
+
+    def _on_export_config(self):
+        """Write current config to a user-chosen JSON file."""
+        self._persist_config()  # sync latest UI state first
+        default_name = f"StreamKeep-config-{datetime.now().strftime('%Y%m%d')}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export StreamKeep Config",
+            str(Path.home() / default_name),
+            "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._config, f, indent=2)
+            self._log(f"[CONFIG] Exported to {path}")
+            self._set_status(f"Config exported to {path}", "success")
+        except Exception as e:
+            self._log(f"[CONFIG] Export failed: {e}")
+            self._set_status(f"Export failed: {e}", "error")
+
+    def _on_import_config(self):
+        """Replace current config with the contents of a chosen JSON file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import StreamKeep Config",
+            str(Path.home()),
+            "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                new_cfg = json.load(f)
+            if not isinstance(new_cfg, dict):
+                self._set_status("Import failed: not a valid config file.", "error")
+                return
+        except Exception as e:
+            self._log(f"[CONFIG] Import failed: {e}")
+            self._set_status(f"Import failed: {e}", "error")
+            return
+        # Replace config and re-apply
+        self._config = new_cfg
+        _save_config(new_cfg)
+        # Clear mutable state that _apply_config appends to
+        self._history.clear()
+        self.monitor.entries.clear()
+        self.monitor.load_from_config(new_cfg)
+        # Re-apply config to all UI elements
+        self._apply_config()
+        # Refresh derived views
+        self._refresh_history_table()
+        self._refresh_download_summary()
+        self._refresh_monitor_table()
+        self._refresh_monitor_summary()
+        self._refresh_history_summary()
+        if hasattr(self, "queue_table"):
+            self._refresh_queue_table()
+        self._log(f"[CONFIG] Imported from {path}")
+        self._set_status(f"Config imported from {path}. Some changes may require a restart.", "success")
 
     def _settings_browse(self, line_edit):
         d = QFileDialog.getExistingDirectory(self, "Select Folder", line_edit.text())
@@ -4612,6 +4884,8 @@ class StreamKeep(QMainWindow):
         PostProcessor.extract_audio = self.pp_audio_check.isChecked()
         PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()
         PostProcessor.reencode_h265 = self.pp_h265_check.isChecked()
+        PostProcessor.contact_sheet = self.pp_contact_check.isChecked()
+        PostProcessor.split_by_chapter = self.pp_split_check.isChecked()
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
@@ -5772,9 +6046,13 @@ class StreamKeep(QMainWindow):
                         self._log(f"[CHAT] Failed: {err}")
                     else:
                         self._log(f"[CHAT] Saved {count} comments to {file_base}.chat.json/.txt")
-            # Post-processing presets (audio extract, loudnorm, H.265)
+            # Post-processing presets (audio extract, loudnorm, H.265, contact sheet, split)
             if PostProcessor.has_any_preset():
-                PostProcessor.process_directory(out_dir, log_fn=self._log)
+                PostProcessor.process_directory(
+                    out_dir,
+                    log_fn=self._log,
+                    chapters=self.stream_info.chapters or None,
+                )
         # Add to history (use the URL from the input box so we can retry later)
         platform = self.stream_info.platform if self.stream_info else "?"
         title = self.stream_info.title if self.stream_info else "?"
