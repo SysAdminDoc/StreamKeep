@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -962,6 +962,284 @@ class RumbleExtractor(Extractor):
         return info
 
 
+# ── SoundCloud Extractor ───────────────────────────────────────────────────
+
+class SoundCloudExtractor(Extractor):
+    NAME = "SoundCloud"
+    ICON = "S"
+    COLOR = "peach"
+    URL_PATTERNS = [
+        re.compile(r'(?:https?://)?(?:www\.)?soundcloud\.com/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)'),
+        re.compile(r'(?:https?://)?(?:www\.)?soundcloud\.com/([a-zA-Z0-9_-]+)/sets/([a-zA-Z0-9_-]+)'),
+    ]
+    _client_id = None
+
+    def extract_channel_id(self, url):
+        m = re.match(r'(?:https?://)?(?:www\.)?soundcloud\.com/([a-zA-Z0-9_-]+)', url.strip())
+        return m.group(1) if m else None
+
+    def _get_client_id(self, log_fn=None):
+        if self._client_id:
+            return self._client_id
+        self._log(log_fn, "Extracting SoundCloud client_id...")
+        page = _curl("https://soundcloud.com/", headers={"User-Agent": CURL_UA})
+        if not page:
+            return None
+        scripts = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', page)
+        for js_url in scripts:
+            js = _curl(js_url)
+            if js:
+                m = re.search(r'client_id:"([a-zA-Z0-9]+)"', js)
+                if m:
+                    SoundCloudExtractor._client_id = m.group(1)
+                    self._log(log_fn, f"Got client_id: {self._client_id[:8]}...")
+                    return self._client_id
+        return None
+
+    def resolve(self, url, log_fn=None):
+        cid = self._get_client_id(log_fn)
+        if not cid:
+            self._log(log_fn, "Could not get SoundCloud client_id")
+            return None
+
+        self._log(log_fn, f"Resolving SoundCloud: {url}")
+        data = _curl_json(
+            f"https://api-v2.soundcloud.com/resolve?url={urllib.parse.quote(url, safe='')}&client_id={cid}"
+        )
+        if not data or not isinstance(data, dict):
+            self._log(log_fn, "Failed to resolve SoundCloud URL")
+            return None
+
+        info = StreamInfo(
+            platform="SoundCloud",
+            url=url,
+            title=data.get("title", ""),
+            total_secs=data.get("duration", 0) / 1000,
+        )
+        info.duration_str = _fmt_duration(info.total_secs)
+
+        for t in data.get("media", {}).get("transcodings", []):
+            fmt = t.get("format", {})
+            protocol = fmt.get("protocol", "")
+            mime = fmt.get("mime_type", "")
+            trans_url = t.get("url", "")
+            if not trans_url:
+                continue
+            # Resolve the actual stream URL
+            stream_data = _curl_json(f"{trans_url}?client_id={cid}")
+            if stream_data and stream_data.get("url"):
+                ft = "mp4" if protocol == "progressive" else "hls"
+                name = f"{protocol} ({mime.split('/')[-1].split(';')[0]})"
+                info.qualities.append(QualityInfo(
+                    name=name, url=stream_data["url"],
+                    resolution="audio", bandwidth=0, format_type=ft,
+                ))
+
+        self._log(log_fn, f"SoundCloud: {info.title}, {len(info.qualities)} formats, {info.duration_str}")
+        return info
+
+
+# ── Reddit Extractor ──────────────────────────────────────────────────────
+
+class RedditExtractor(Extractor):
+    NAME = "Reddit"
+    ICON = "R"
+    COLOR = "peach"
+    URL_PATTERNS = [
+        re.compile(r'(?:https?://)?(?:www\.|old\.)?reddit\.com/r/\w+/comments/\w+'),
+        re.compile(r'(?:https?://)?v\.redd\.it/\w+'),
+    ]
+
+    def extract_channel_id(self, url):
+        m = re.search(r'/r/(\w+)/comments/(\w+)', url)
+        if m:
+            return f"r_{m.group(1)}_{m.group(2)}"
+        m = re.search(r'v\.redd\.it/(\w+)', url)
+        return m.group(1) if m else None
+
+    def resolve(self, url, log_fn=None):
+        self._log(log_fn, f"Resolving Reddit: {url}")
+
+        # Normalize v.redd.it URLs — need to follow redirect to get the post
+        if "v.redd.it" in url:
+            body = _curl(url, headers={"User-Agent": "StreamKeep/2.0"})
+            if body:
+                m = re.search(r'reddit\.com/r/\w+/comments/\w+', body)
+                if m:
+                    url = "https://www." + m.group(0)
+
+        json_url = url.rstrip("/") + ".json"
+        data = _curl_json(json_url, headers={"User-Agent": "StreamKeep/2.0"})
+        if not data or not isinstance(data, list) or len(data) == 0:
+            self._log(log_fn, "Failed to fetch Reddit post data")
+            return None
+
+        post = data[0].get("data", {}).get("children", [{}])[0].get("data", {})
+        if not post.get("is_video"):
+            self._log(log_fn, "Reddit post is not a video")
+            return None
+
+        rv = post.get("secure_media", {}).get("reddit_video", {})
+        if not rv:
+            rv = post.get("media", {}).get("reddit_video", {})
+        if not rv:
+            return None
+
+        info = StreamInfo(
+            platform="Reddit",
+            url=url,
+            title=post.get("title", ""),
+            total_secs=rv.get("duration", 0),
+        )
+        info.duration_str = _fmt_duration(info.total_secs)
+
+        # Fallback URL (video+audio muxed, lower quality)
+        fallback = rv.get("fallback_url", "")
+        if fallback:
+            h = rv.get("height", "?")
+            info.qualities.append(QualityInfo(
+                name=f"fallback ({h}p)", url=fallback,
+                resolution=f"?x{h}", bandwidth=0, format_type="mp4",
+            ))
+
+        # DASH URL (higher quality, needs audio merge — ffmpeg handles this)
+        dash = rv.get("dash_url", "")
+        if dash:
+            info.qualities.insert(0, QualityInfo(
+                name="DASH (best)", url=dash,
+                resolution=f"{rv.get('width', '?')}x{rv.get('height', '?')}",
+                bandwidth=rv.get("bitrate_kbps", 0) * 1000,
+                format_type="hls",  # ffmpeg handles DASH via -i
+            ))
+
+        self._log(log_fn, f"Reddit: {info.title[:50]}, {len(info.qualities)} formats, {info.duration_str}")
+        return info
+
+
+# ── Audius Extractor ──────────────────────────────────────────────────────
+
+class AudiusExtractor(Extractor):
+    NAME = "Audius"
+    ICON = "A"
+    COLOR = "mauve"
+    URL_PATTERNS = [
+        re.compile(r'(?:https?://)?(?:www\.)?audius\.co/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)'),
+    ]
+    API_BASE = "https://discoveryprovider.audius.co/v1"
+
+    def extract_channel_id(self, url):
+        m = re.match(r'(?:https?://)?(?:www\.)?audius\.co/([a-zA-Z0-9_-]+)', url.strip())
+        return m.group(1) if m else None
+
+    def resolve(self, url, log_fn=None):
+        self._log(log_fn, f"Resolving Audius: {url}")
+
+        # Resolve the URL to a track
+        data = _curl_json(
+            f"{self.API_BASE}/resolve?url={urllib.parse.quote(url, safe='')}&app_name=StreamKeep"
+        )
+        if not data or not data.get("data"):
+            self._log(log_fn, "Failed to resolve Audius URL")
+            return None
+
+        track = data["data"]
+        track_id = track.get("id", "")
+
+        info = StreamInfo(
+            platform="Audius",
+            url=url,
+            title=track.get("title", ""),
+            total_secs=track.get("duration", 0),
+        )
+        info.duration_str = _fmt_duration(info.total_secs)
+
+        stream_url = f"{self.API_BASE}/tracks/{track_id}/stream?app_name=StreamKeep"
+        info.qualities.append(QualityInfo(
+            name="stream (mp3)", url=stream_url,
+            resolution="audio", bandwidth=0, format_type="mp4",
+        ))
+
+        self._log(log_fn, f"Audius: {info.title}, {info.duration_str}")
+        return info
+
+
+# ── Podcast RSS Extractor ─────────────────────────────────────────────────
+
+class PodcastRSSExtractor(Extractor):
+    NAME = "Podcast"
+    ICON = "P"
+    COLOR = "yellow"
+    URL_PATTERNS = [
+        re.compile(r'(?:https?://).+\.(rss|xml)(\?.*)?$'),
+        re.compile(r'(?:https?://).+/feed/?(\?.*)?$'),
+        re.compile(r'(?:https?://).+/rss/?(\?.*)?$'),
+    ]
+
+    def extract_channel_id(self, url):
+        try:
+            parsed = urllib.parse.urlparse(url.strip())
+            return parsed.netloc.replace(".", "_")
+        except Exception:
+            return "podcast"
+
+    def supports_vod_listing(self):
+        return True
+
+    def list_vods(self, url, log_fn=None):
+        self._log(log_fn, f"Fetching podcast RSS: {url}")
+        body = _curl(url, headers={"User-Agent": CURL_UA, "Accept": "application/rss+xml, application/xml, text/xml"})
+        if not body:
+            self._log(log_fn, "Failed to fetch RSS feed")
+            return []
+
+        vods = []
+        # Simple XML parsing without external deps
+        items = re.findall(r'<item>(.*?)</item>', body, re.DOTALL)
+        for item in items:
+            title_m = re.search(r'<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>', item)
+            title = title_m.group(1).strip() if title_m else "Untitled"
+
+            date_m = re.search(r'<pubDate>(.*?)</pubDate>', item)
+            date = date_m.group(1).strip() if date_m else ""
+
+            enc_m = re.search(r'<enclosure[^>]+url="([^"]+)"', item)
+            if not enc_m:
+                enc_m = re.search(r"<enclosure[^>]+url='([^']+)'", item)
+            if not enc_m:
+                continue
+            enc_url = enc_m.group(1)
+
+            dur_m = re.search(r'<itunes:duration>([\d:]+)</itunes:duration>', item)
+            dur_str = ""
+            if dur_m:
+                parts = dur_m.group(1).split(":")
+                if len(parts) == 3:
+                    dur_str = f"{parts[0]}h {parts[1]}m"
+                elif len(parts) == 2:
+                    dur_str = f"{parts[0]}m {parts[1]}s"
+                else:
+                    dur_str = f"{parts[0]}s"
+
+            vods.append(VODInfo(
+                title=title, date=date, source=enc_url,
+                is_live=False, viewers=0, duration=dur_str,
+                duration_ms=0, platform="Podcast", channel="",
+            ))
+
+        self._log(log_fn, f"Found {len(vods)} episode(s)")
+        return vods
+
+    def resolve(self, url, log_fn=None):
+        # If it's a direct media URL from a podcast
+        if any(url.endswith(ext) for ext in (".mp3", ".m4a", ".ogg", ".wav", ".aac")):
+            info = StreamInfo(platform="Podcast", url=url, title=url.split("/")[-1])
+            info.qualities.append(QualityInfo(
+                name="audio", url=url, resolution="audio", format_type="mp4",
+            ))
+            return info
+        return None  # list_vods handles the RSS feed
+
+
 # ── yt-dlp Fallback Extractor ─────────────────────────────────────────────
 
 class YtDlpExtractor(Extractor):
@@ -1105,8 +1383,20 @@ class FetchWorker(QThread):
 
             ext = Extractor.detect(self.url)
             if not ext:
+                # Try direct media URL detection before giving up
+                direct = _detect_direct_media(self.url, log_fn=self.log.emit)
+                if direct:
+                    self.finished.emit(direct)
+                    return
                 self.error.emit("No extractor found for this URL")
                 return
+
+            # If yt-dlp fallback matched, try direct media detection first (faster)
+            if ext.NAME == "yt-dlp":
+                direct = _detect_direct_media(self.url, log_fn=self.log.emit)
+                if direct:
+                    self.finished.emit(direct)
+                    return
 
             self.log.emit(f"Detected platform: {ext.NAME}")
 
@@ -1385,6 +1675,100 @@ class ChannelMonitor(QObject):
             self.add_channel(ch["url"], ch.get("interval", 120), ch.get("auto_record", False))
 
 
+# ── Direct URL Detection ──────────────────────────────────────────────────
+
+def _detect_direct_media(url, log_fn=None):
+    """Sniff a URL via HEAD request. Returns StreamInfo if it's a direct media file, else None."""
+    MEDIA_TYPES = {
+        "video/mp4": "mp4", "video/webm": "mp4", "video/x-matroska": "mp4",
+        "video/quicktime": "mp4", "video/x-msvideo": "mp4", "video/x-flv": "mp4",
+        "audio/mpeg": "mp4", "audio/mp3": "mp4", "audio/mp4": "mp4",
+        "audio/ogg": "mp4", "audio/flac": "mp4", "audio/wav": "mp4",
+        "audio/x-wav": "mp4", "audio/aac": "mp4",
+        "application/vnd.apple.mpegurl": "hls", "audio/mpegurl": "hls",
+        "application/x-mpegurl": "hls", "application/dash+xml": "hls",
+        "application/octet-stream": "mp4",
+    }
+    MEDIA_EXTS = {
+        ".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv", ".wmv",
+        ".mp3", ".m4a", ".ogg", ".flac", ".wav", ".aac", ".opus",
+        ".m3u8", ".mpd", ".ts",
+    }
+
+    # Check by extension first (fast)
+    parsed = urllib.parse.urlparse(url)
+    ext = os.path.splitext(parsed.path)[1].lower()
+    if ext in MEDIA_EXTS:
+        fmt = "hls" if ext in (".m3u8", ".mpd") else "mp4"
+        if log_fn:
+            log_fn(f"Direct media URL detected by extension: {ext}")
+        info = StreamInfo(platform="Direct", url=url, title=parsed.path.split("/")[-1])
+        info.qualities.append(QualityInfo(name=f"direct ({ext})", url=url, format_type=fmt))
+        return info
+
+    # HEAD request to sniff Content-Type
+    try:
+        cmd = ["curl", "-sI", "-L", "-o", "/dev/null",
+               "-w", "%{content_type}\\n%{url_effective}\\n%{size_download}",
+               "-H", f"User-Agent: {CURL_UA}", url]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                           creationflags=_CREATE_NO_WINDOW)
+        if r.returncode == 0:
+            lines = r.stdout.strip().split("\n")
+            ct = lines[0].split(";")[0].strip().lower() if lines else ""
+            if ct in MEDIA_TYPES:
+                fmt = MEDIA_TYPES[ct]
+                if log_fn:
+                    log_fn(f"Direct media URL detected: {ct}")
+                info = StreamInfo(platform="Direct", url=url, title=parsed.path.split("/")[-1])
+                info.qualities.append(QualityInfo(name=f"direct ({ct})", url=url, format_type=fmt))
+                return info
+    except Exception:
+        pass
+
+    return None
+
+
+# ── Clipboard Monitor ─────────────────────────────────────────────────────
+
+class ClipboardMonitor(QObject):
+    """Monitors clipboard for new URLs and emits them."""
+    url_detected = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self._last_clip = ""
+        self._enabled = False
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._check)
+
+    def start(self):
+        self._enabled = True
+        self._last_clip = QApplication.clipboard().text() or ""
+        self._timer.start(800)
+
+    def stop(self):
+        self._enabled = False
+        self._timer.stop()
+
+    @property
+    def is_running(self):
+        return self._enabled
+
+    def _check(self):
+        if not self._enabled:
+            return
+        try:
+            text = QApplication.clipboard().text() or ""
+            if text != self._last_clip and text.startswith("http"):
+                self._last_clip = text
+                # Basic URL validation
+                if re.match(r'https?://[^\s]+', text):
+                    self.url_detected.emit(text.strip())
+        except Exception:
+            pass
+
+
 # ── Download History ───────────────────────────────────────────────────────
 
 @dataclass
@@ -1400,10 +1784,15 @@ class HistoryEntry:
 # ── Main Window ───────────────────────────────────────────────────────────
 
 PLATFORM_BADGES = {
-    "Kick":    {"color": CAT["green"],   "text": "Kick"},
-    "Twitch":  {"color": CAT["mauve"],   "text": "Twitch"},
-    "Rumble":  {"color": CAT["green"],   "text": "Rumble"},
-    "yt-dlp":  {"color": CAT["overlay1"],"text": "yt-dlp"},
+    "Kick":       {"color": CAT["green"],   "text": "Kick"},
+    "Twitch":     {"color": CAT["mauve"],   "text": "Twitch"},
+    "Rumble":     {"color": CAT["green"],   "text": "Rumble"},
+    "SoundCloud": {"color": CAT["peach"],   "text": "SoundCloud"},
+    "Reddit":     {"color": CAT["peach"],   "text": "Reddit"},
+    "Audius":     {"color": CAT["mauve"],   "text": "Audius"},
+    "Podcast":    {"color": CAT["yellow"],  "text": "Podcast"},
+    "Direct":     {"color": CAT["blue"],    "text": "Direct"},
+    "yt-dlp":     {"color": CAT["overlay1"],"text": "yt-dlp"},
 }
 
 TAB_STYLE = f"""
@@ -1453,6 +1842,8 @@ class StreamKeep(QMainWindow):
         self.monitor.channel_went_live.connect(self._on_channel_live)
         self.monitor.log.connect(self._log)
         self.monitor.load_from_config(self._config)
+        self.clipboard_monitor = ClipboardMonitor()
+        self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
         self._apply_config()
 
@@ -1583,6 +1974,12 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.setFixedWidth(90)
         self.fetch_btn.clicked.connect(self._on_fetch)
         url_row.addWidget(self.fetch_btn)
+
+        self.clip_btn = QPushButton("Clipboard Watch")
+        self.clip_btn.setCheckable(True)
+        self.clip_btn.setFixedWidth(130)
+        self.clip_btn.clicked.connect(self._on_toggle_clipboard)
+        url_row.addWidget(self.clip_btn)
         url_lay.addLayout(url_row)
 
         self.info_label = QLabel("")
@@ -1955,6 +2352,26 @@ class StreamKeep(QMainWindow):
                 self.output_input.setText(str(Path.home() / "Desktop" / _safe_filename(ch)))
         else:
             self._update_badge(None)
+
+    def _on_toggle_clipboard(self, checked):
+        if checked:
+            self.clipboard_monitor.start()
+            self.clip_btn.setStyleSheet(
+                f"background-color: {CAT['green']}; color: {CAT['crust']}; "
+                f"border: none; border-radius: 6px; font-weight: 600;"
+            )
+            self._log("[CLIPBOARD] Monitoring started — copy a URL to auto-load")
+            self.status_label.setText("Clipboard monitoring active")
+        else:
+            self.clipboard_monitor.stop()
+            self.clip_btn.setStyleSheet("")
+            self._log("[CLIPBOARD] Monitoring stopped")
+
+    def _on_clipboard_url(self, url):
+        self._log(f"[CLIPBOARD] Detected: {url}")
+        self.url_input.setText(url)
+        self._switch_tab(0)  # Switch to Download tab
+        self._on_fetch()
 
     def _on_fetch(self, vod_source=None, vod_platform=None):
         url = self.url_input.text().strip()
