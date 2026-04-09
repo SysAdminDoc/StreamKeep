@@ -30,17 +30,18 @@ python StreamForge.py
 ```
 No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 
+## Architecture (v2.0.0)
+- **Tab-based UI**: QStackedWidget with Download, Monitor, History, Settings tabs
+- **DownloadWorker**: Enhanced ffmpeg progress parsing with speed/ETA/size tracking
+- **ChannelMonitor**: Round-robin polling via QTimer (15s tick), auto-record on live detection
+- **MetadataSaver**: Writes metadata.json + downloads thumbnails alongside videos
+- **HistoryEntry**: Tracks completed downloads, persisted in config.json
+- **Config persistence**: JSON at `%APPDATA%\StreamForge\config.json` — saves output dir, segment pref, history, monitor channels
+
 ## Version History
+- v2.0.0 — Tab UI (Download/Monitor/History/Settings), channel monitoring + auto-record, download history, metadata saving, config persistence, enhanced speed/ETA tracking
 - v1.0.0 — Multi-platform rewrite: extractor plugin system, Kick/Twitch/Rumble/yt-dlp support, platform badges
 - v0.4.0 — Batch VOD download with checkbox table
 - v0.3.0 — Kick channel URL auto-resolve via API
 - v0.2.0 — Configurable segment length
 - v0.1.0 — Initial KickVODRipper release
-
-## Roadmap (Planned)
-- Phase 4: Enhanced download engine (speed/ETA tracking)
-- Phase 5: Download queue manager
-- Phase 6: TikTok Live, Trovo, DLive, Odysee extractors
-- Phase 7: Tab-based UI (Download/Monitor/History/Settings)
-- Phase 8: Channel monitoring + auto-record
-- Phase 9: Metadata saving + polish
