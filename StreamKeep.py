@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -408,8 +408,10 @@ class QualityInfo:
     url: str = ""
     resolution: str = ""
     bandwidth: int = 0
-    format_type: str = "hls"  # hls, mp4, dash, ytdlp
+    format_type: str = "hls"  # hls, mp4, dash, ytdlp_direct
     audio_url: str = ""  # If set, video is video-only and needs audio merge
+    ytdlp_source: str = ""  # Original page URL for ytdlp_direct downloads
+    ytdlp_format: str = ""  # Format spec (e.g. "137+140" or "best[height<=1080]")
 
 @dataclass
 class StreamInfo:
@@ -1723,53 +1725,49 @@ class YtDlpExtractor(Extractor):
             is_live=data.get("is_live", False),
         )
 
-        # First pass — identify the best audio-only format
-        best_audio_url = ""
+        # First pass — identify best audio-only format ID for pairing
+        best_audio_id = ""
         best_audio_abr = 0
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") != "none":
                 continue
             if fmt.get("acodec") == "none":
                 continue
-            abr = fmt.get("abr", 0) or 0
-            fmt_url = fmt.get("url", "")
-            if fmt_url and abr > best_audio_abr:
+            abr = fmt.get("abr") or 0
+            fid = fmt.get("format_id", "")
+            if fid and abr > best_audio_abr:
                 best_audio_abr = abr
-                best_audio_url = fmt_url
+                best_audio_id = fid
 
-        # Second pass — parse video formats, pair video-only with best audio
+        # Second pass — build QualityInfo entries using format IDs.
+        # We use ytdlp_direct mode so yt-dlp handles URL refresh, DASH
+        # merge, and format selection — this avoids expiring-URL issues.
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") == "none":
                 continue
             ext = fmt.get("ext", "?")
-            w = fmt.get("width", 0)
-            h = fmt.get("height", 0)
+            w = fmt.get("width") or 0
+            h = fmt.get("height") or 0
             note = fmt.get("format_note", fmt.get("format_id", "?"))
-            fmt_url = fmt.get("url", "")
-            if not fmt_url:
+            fid = fmt.get("format_id", "")
+            if not fid:
                 continue
 
-            # Determine format type
-            if "m3u8" in fmt_url or fmt.get("protocol", "") == "m3u8_native":
-                ft = "hls"
-            elif ext in ("mp4", "webm"):
-                ft = "mp4"
-            else:
-                ft = "ytdlp"
-
-            # Detect video-only format and pair with best audio for merge
-            audio_url = ""
-            if fmt.get("acodec") == "none" and best_audio_url:
-                audio_url = best_audio_url
+            # Build format spec: video+audio for video-only streams
+            if fmt.get("acodec") == "none" and best_audio_id:
+                format_spec = f"{fid}+{best_audio_id}"
                 note = f"{note} +audio"
+            else:
+                format_spec = fid
 
             info.qualities.append(QualityInfo(
                 name=f"{note} ({ext})",
-                url=fmt_url,
+                url=fmt.get("url", ""),  # kept for display only; download uses source+format
                 resolution=f"{w}x{h}" if w and h else "?",
                 bandwidth=int((fmt.get("tbr", 0) or 0) * 1000),
-                format_type=ft,
-                audio_url=audio_url,
+                format_type="ytdlp_direct",
+                ytdlp_source=url,
+                ytdlp_format=format_spec,
             ))
 
         # Duration
@@ -1793,8 +1791,8 @@ class YtDlpExtractor(Extractor):
         info.qualities = unique
 
         self._log(log_fn, f"yt-dlp: {info.title}, {len(info.qualities)} formats, {info.duration_str}")
-        if best_audio_url:
-            self._log(log_fn, f"  Audio merge enabled (best audio: {best_audio_abr:.0f} kbps)")
+        if best_audio_id:
+            self._log(log_fn, f"  Audio merge enabled (best audio id={best_audio_id}, {best_audio_abr:.0f} kbps)")
         return info
 
 
@@ -1907,12 +1905,89 @@ class DownloadWorker(QThread):
         self.output_dir = output_dir
         self.format_type = format_type
         self.audio_url = ""  # Set externally for video+audio merge
+        self.ytdlp_source = ""  # Page URL for ytdlp_direct mode
+        self.ytdlp_format = ""  # Format spec for ytdlp_direct mode
+        self.cookies_browser = ""  # Passed through for yt-dlp cookie auth
+        self.max_retries = 2  # Retry failed segments up to N times
         self._cancel = False
 
     def cancel(self):
         self._cancel = True
         if hasattr(self, '_proc') and self._proc and self._proc.poll() is None:
             self._proc.terminate()
+
+    def _download_with_ytdlp(self, seg_idx, label, outfile):
+        """Download via yt-dlp directly. Handles URL refresh, DASH merge,
+        and format selection. Returns True on success, False on failure."""
+        cmd = ["yt-dlp",
+               "-f", self.ytdlp_format,
+               "--no-part",
+               "--newline",
+               "--progress",
+               "-o", outfile,
+               "--no-playlist"]
+        if self.cookies_browser:
+            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        cmd.append(self.ytdlp_source)
+
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW
+            )
+            output_lines = []
+            for line in self._proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                output_lines.append(line)
+                # Parse "[download]  45.3% of 123.45MiB at 2.34MiB/s ETA 00:42"
+                pct_match = re.search(r'(\d+\.\d+)%\s+of\s+(~?[\d.]+\w+)', line)
+                if pct_match:
+                    pct = int(float(pct_match.group(1)))
+                    size_str = pct_match.group(2)
+                    speed_match = re.search(r'at\s+([\d.]+\w+/s)', line)
+                    eta_match = re.search(r'ETA\s+([\d:]+)', line)
+                    extra = ""
+                    if speed_match:
+                        extra += f" | {speed_match.group(1)}"
+                    if eta_match:
+                        extra += f" | ETA {eta_match.group(1)}"
+                    self.progress.emit(seg_idx, min(99, pct), f"{size_str}{extra}")
+                elif "[Merger]" in line or "Merging" in line:
+                    self.progress.emit(seg_idx, 99, "Merging video+audio")
+
+            self._proc.wait()
+            if self._cancel:
+                if os.path.exists(outfile):
+                    try:
+                        os.remove(outfile)
+                    except OSError:
+                        pass
+                return False
+
+            if self._proc.returncode == 0 and os.path.exists(outfile) and os.path.getsize(outfile) > 0:
+                size = os.path.getsize(outfile)
+                self.progress.emit(seg_idx, 100, "Complete")
+                self.segment_done.emit(seg_idx, _fmt_size(size))
+                self.log.emit(f"[DONE] {label} - {_fmt_size(size)}")
+                return True
+
+            if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                try:
+                    os.remove(outfile)
+                except OSError:
+                    pass
+            err_tail = "\n".join(output_lines[-5:])
+            self.log.emit(f"[FAIL] {label}\n{err_tail}")
+            return False
+
+        except FileNotFoundError:
+            self.log.emit(f"[ERROR] {label}: yt-dlp not in PATH")
+            return False
+        except Exception as e:
+            self.log.emit(f"[ERROR] {label}: {e}")
+            return False
 
     def run(self):
         for seg_idx, label, start, duration in self.segments:
@@ -1921,6 +1996,7 @@ class DownloadWorker(QThread):
                 return
 
             outfile = os.path.join(self.output_dir, f"{label}.mp4")
+            is_live_capture = duration <= 0
             if os.path.exists(outfile):
                 size = os.path.getsize(outfile)
                 if size > 1024:
@@ -1928,8 +2004,19 @@ class DownloadWorker(QThread):
                     self.segment_done.emit(seg_idx, _fmt_size(size))
                     continue
 
-            self.log.emit(f"[DL] {label} — start: {start}s, duration: {duration}s")
+            duration_label = "live" if is_live_capture else f"{duration}s"
+            self.log.emit(f"[DL] {label} - start: {start}s, duration: {duration_label}")
             self.progress.emit(seg_idx, 0, "Starting...")
+
+            # yt-dlp direct download: yt-dlp handles URL refresh, DASH merge,
+            # and format selection. Bypasses expiring-URL issues.
+            if self.format_type == "ytdlp_direct" and self.ytdlp_source and self.ytdlp_format:
+                success = self._download_with_ytdlp(seg_idx, label, outfile)
+                if self._cancel:
+                    return
+                if not success:
+                    self.error.emit(seg_idx, "yt-dlp download failed")
+                continue
 
             # Build ffmpeg command with optional audio merge
             if self.audio_url:
@@ -1943,79 +2030,113 @@ class DownloadWorker(QThread):
                     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
                            "-ss", str(start), "-i", self.playlist_url,
                            "-ss", str(start), "-i", self.audio_url,
-                           "-t", str(duration),
                            "-map", "0:v:0", "-map", "1:a:0",
-                           "-c", "copy", "-y", outfile]
+                           "-c", "copy"]
+                    if not is_live_capture:
+                        cmd.extend(["-t", str(duration)])
+                    cmd.extend(["-y", outfile])
             elif self.format_type == "mp4":
                 cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
                        "-i", self.playlist_url, "-c", "copy", "-y", outfile]
             else:
                 cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
-                       "-ss", str(start), "-i", self.playlist_url,
-                       "-t", str(duration), "-c", "copy", "-y", outfile]
+                       "-ss", str(start), "-i", self.playlist_url, "-c", "copy"]
+                if not is_live_capture:
+                    cmd.extend(["-t", str(duration)])
+                cmd.extend(["-y", outfile])
 
-            try:
-                self._proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW
-                )
-                output_lines = []
-                for line in self._proc.stderr:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    output_lines.append(line)
-                    time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
-                    if time_match:
-                        h, m, s = int(time_match.group(1)), int(time_match.group(2)), int(time_match.group(3))
-                        elapsed = h * 3600 + m * 60 + s
-                        pct = min(99, int((elapsed / max(duration, 1)) * 100))
-                        # Parse speed and size
-                        speed_m = re.search(r'speed=\s*([\d.]+)x', line)
-                        size_m = re.search(r'size=\s*(\d+\w+)', line)
-                        extra = ""
-                        if speed_m:
-                            spd = float(speed_m.group(1))
-                            extra += f" | {spd:.1f}x"
-                            if spd > 0 and duration > 0:
-                                remaining = (duration - elapsed) / spd
-                                extra += f" | ETA {_fmt_duration(remaining)}"
-                        if size_m:
-                            extra += f" | {size_m.group(1)}"
-                        self.progress.emit(seg_idx, pct, f"{elapsed}s / {duration}s{extra}")
-
-                self._proc.wait()
+            # Retry loop for transient ffmpeg failures
+            attempts = self.max_retries + 1
+            last_error = ""
+            segment_done_flag = False
+            for attempt in range(attempts):
                 if self._cancel:
-                    if os.path.exists(outfile):
-                        os.remove(outfile)
                     return
+                if attempt > 0:
+                    backoff = 2 ** attempt  # 2s, 4s, 8s...
+                    self.log.emit(f"[RETRY {attempt}/{self.max_retries}] {label} (waiting {backoff}s)")
+                    for _ in range(backoff * 2):
+                        if self._cancel:
+                            return
+                        time.sleep(0.5)
+                try:
+                    self._proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW
+                    )
+                    output_lines = []
+                    for line in self._proc.stderr:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        output_lines.append(line)
+                        time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
+                        if time_match:
+                            h, m, s = int(time_match.group(1)), int(time_match.group(2)), int(time_match.group(3))
+                            elapsed = h * 3600 + m * 60 + s
+                            pct = 0 if is_live_capture else min(99, int((elapsed / max(duration, 1)) * 100))
+                            speed_m = re.search(r'speed=\s*([\d.]+)x', line)
+                            size_m = re.search(r'size=\s*(\d+\w+)', line)
+                            extra = ""
+                            if speed_m:
+                                spd = float(speed_m.group(1))
+                                extra += f" | {spd:.1f}x"
+                                if spd > 0 and duration > 0:
+                                    remaining = (duration - elapsed) / spd
+                                    extra += f" | ETA {_fmt_duration(remaining)}"
+                            if size_m:
+                                extra += f" | {size_m.group(1)}"
+                            status = f"{elapsed}s captured{extra}" if is_live_capture else f"{elapsed}s / {duration}s{extra}"
+                            self.progress.emit(seg_idx, pct, status)
 
-                if self._proc.returncode == 0 and os.path.exists(outfile) and os.path.getsize(outfile) > 0:
-                    size = os.path.getsize(outfile)
-                    self.progress.emit(seg_idx, 100, "Complete")
-                    self.segment_done.emit(seg_idx, _fmt_size(size))
-                    self.log.emit(f"[DONE] {label} — {_fmt_size(size)}")
-                else:
-                    # Clean up empty/corrupt output file
-                    if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
-                        try:
-                            os.remove(outfile)
-                        except OSError:
-                            pass
-                    err = "\n".join(output_lines[-5:])
-                    self.error.emit(seg_idx, f"ffmpeg exit {self._proc.returncode}")
-                    self.log.emit(f"[FAIL] {label}\n{err}")
+                    self._proc.wait()
+                    if self._cancel:
+                        if is_live_capture and os.path.exists(outfile):
+                            size = os.path.getsize(outfile)
+                            if size > 1024:
+                                self.segment_done.emit(seg_idx, _fmt_size(size))
+                                self.log.emit(f"[STOP] Kept partial live capture {label} - {_fmt_size(size)}")
+                        elif os.path.exists(outfile):
+                            try:
+                                os.remove(outfile)
+                            except OSError:
+                                pass
+                        return
 
-            except FileNotFoundError:
-                self.error.emit(seg_idx, "ffmpeg not found in PATH")
-                self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
-                return
-            except PermissionError as e:
-                self.error.emit(seg_idx, f"Permission denied: {e}")
-                self.log.emit(f"[ERROR] {label}: {e}")
-            except Exception as e:
-                self.error.emit(seg_idx, str(e))
-                self.log.emit(f"[ERROR] {label}: {e}")
+                    if self._proc.returncode == 0 and os.path.exists(outfile) and os.path.getsize(outfile) > 0:
+                        size = os.path.getsize(outfile)
+                        self.progress.emit(seg_idx, 100, "Complete")
+                        self.segment_done.emit(seg_idx, _fmt_size(size))
+                        self.log.emit(f"[DONE] {label} - {_fmt_size(size)}")
+                        segment_done_flag = True
+                        break
+                    else:
+                        if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                            try:
+                                os.remove(outfile)
+                            except OSError:
+                                pass
+                        last_error = "\n".join(output_lines[-5:]) or f"ffmpeg exit {self._proc.returncode}"
+                        self.log.emit(f"[FAIL attempt {attempt + 1}/{attempts}] {label}")
+                        # Live captures aren't retried (they don't fail transiently)
+                        if is_live_capture:
+                            break
+
+                except FileNotFoundError:
+                    self.error.emit(seg_idx, "ffmpeg not found in PATH")
+                    self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
+                    return
+                except PermissionError as e:
+                    self.error.emit(seg_idx, f"Permission denied: {e}")
+                    self.log.emit(f"[ERROR] {label}: {e}")
+                    break  # permission errors don't get better with retry
+                except Exception as e:
+                    last_error = str(e)
+                    self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
+
+            if not segment_done_flag and not self._cancel and not is_live_capture:
+                self.error.emit(seg_idx, f"Failed after {attempts} attempt(s): {last_error[:120]}")
+                self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
 
         if not self._cancel:
             self.all_done.emit()
@@ -3649,7 +3770,10 @@ class StreamKeep(QMainWindow):
         self._build_segments(info.total_secs)
         self.download_btn.setEnabled(True)
         self._refresh_download_summary()
-        self._set_status("Source ready. Review the segments and start the download when you are happy.", "success")
+        if info.is_live or info.total_secs <= 0:
+            self._set_status("Live source ready. Start recording and stop it when you have enough footage.", "success")
+        else:
+            self._set_status("Source ready. Review the segments and start the download when you are happy.", "success")
 
     def _on_fetch_error(self, err):
         self.fetch_btn.setEnabled(True)
@@ -3766,6 +3890,8 @@ class StreamKeep(QMainWindow):
         playlist_url = None
         fmt_type = "hls"
         audio_url = ""
+        ytdlp_source = ""
+        ytdlp_format = ""
         selected_q = None
         for q in info.qualities:
             if "1080" in q.name or "source" in q.name.lower():
@@ -3777,8 +3903,10 @@ class StreamKeep(QMainWindow):
             playlist_url = selected_q.url
             fmt_type = selected_q.format_type
             audio_url = selected_q.audio_url
+            ytdlp_source = selected_q.ytdlp_source
+            ytdlp_format = selected_q.ytdlp_format
 
-        if not playlist_url:
+        if not playlist_url and not ytdlp_source:
             self._log(f"[ERROR] No playback URL for {vod.title}")
             self._batch_idx += 1
             self._batch_next()
@@ -3792,7 +3920,8 @@ class StreamKeep(QMainWindow):
         if not title_safe:
             title_safe = f"{info.platform}_download"
 
-        if fmt_type == "mp4" or seg_secs == 0 or total_secs <= 0 or total_secs <= seg_secs:
+        # ytdlp_direct and mp4 formats download monolithically — no segment splitting
+        if fmt_type in ("ytdlp_direct", "mp4") or seg_secs == 0 or total_secs <= 0 or total_secs <= seg_secs:
             segments = [(0, title_safe, 0, int(total_secs) if total_secs > 0 else 0)]
         else:
             segments = []
@@ -3823,8 +3952,11 @@ class StreamKeep(QMainWindow):
             "working",
         )
 
-        worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
+        worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         worker.audio_url = audio_url
+        worker.ytdlp_source = ytdlp_source
+        worker.ytdlp_format = ytdlp_format
+        worker.cookies_browser = YtDlpExtractor.cookies_browser
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)
@@ -3870,12 +4002,19 @@ class StreamKeep(QMainWindow):
         """Detect if the current stream is audio-only based on its qualities."""
         if not self.stream_info:
             return False
-        return all(q.resolution in ("audio", "?", "") for q in self.stream_info.qualities)
+        if not self.stream_info.qualities:
+            return False
+        return all(
+            (q.resolution or "").lower() == "audio" or "audio" in (q.name or "").lower()
+            for q in self.stream_info.qualities
+        )
 
     def _content_label(self, idx, total_segments, seg_secs, total_secs):
         """Generate a content-aware segment label."""
         is_audio = self._is_audio_only()
         kind = "Audio" if is_audio else "Video"
+        if total_secs <= 0:
+            return "Live Capture" if not is_audio else "Live Audio"
 
         if total_segments == 1:
             # Single segment — use the content type
@@ -3897,23 +4036,21 @@ class StreamKeep(QMainWindow):
 
     def _build_segments(self, total_secs):
         if total_secs <= 0:
-            self.table.setRowCount(0)
-            self._segment_checks = []
-            self._segment_progress = []
-            self._refresh_download_summary()
-            return
-        seg_secs = self._get_segment_secs()
-
-        # Auto-collapse: if content is shorter than segment length, use one segment
-        if seg_secs == 0 or total_secs <= seg_secs:
-            segments = [(0, total_secs)]
+            segments = [(0, 0)]
+            seg_secs = 0
         else:
-            segments = []
-            pos = 0
-            while pos < total_secs:
-                end = min(pos + seg_secs, total_secs)
-                segments.append((pos, end))
-                pos = end
+            seg_secs = self._get_segment_secs()
+
+            # Auto-collapse: if content is shorter than segment length, use one segment
+            if seg_secs == 0 or total_secs <= seg_secs:
+                segments = [(0, total_secs)]
+            else:
+                segments = []
+                pos = 0
+                while pos < total_secs:
+                    end = min(pos + seg_secs, total_secs)
+                    segments.append((pos, end))
+                    pos = end
 
         self.table.setRowCount(len(segments))
         self._segment_checks = []
@@ -3937,14 +4074,21 @@ class StreamKeep(QMainWindow):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 1, item)
 
-            s_str = f"{int(start//3600):02d}:{int((start%3600)//60):02d}:{int(start%60):02d}"
-            e_str = f"{int(end//3600):02d}:{int((end%3600)//60):02d}:{int(end%60):02d}"
-            t_item = QTableWidgetItem(f"{s_str} - {e_str}  ({int(duration//60)}m {int(duration%60)}s)")
+            if total_secs <= 0:
+                range_text = "Starts now - runs until stopped"
+            else:
+                s_str = f"{int(start//3600):02d}:{int((start%3600)//60):02d}:{int(start%60):02d}"
+                e_str = f"{int(end//3600):02d}:{int((end%3600)//60):02d}:{int(end%60):02d}"
+                range_text = f"{s_str} - {e_str}  ({int(duration//60)}m {int(duration%60)}s)"
+            t_item = QTableWidgetItem(range_text)
             t_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 2, t_item)
 
             pbar = QProgressBar()
-            pbar.setValue(0)
+            if total_secs <= 0:
+                pbar.setMaximum(0)
+            else:
+                pbar.setValue(0)
             self.table.setCellWidget(i, 3, pbar)
             self._segment_progress.append(pbar)
 
@@ -3976,17 +4120,18 @@ class StreamKeep(QMainWindow):
         if not self.stream_info:
             return
         total_secs = self.stream_info.total_secs
-        if total_secs <= 0:
-            self._log("[ERROR] No duration info")
-            self._set_status("This source does not expose duration metadata yet.", "error")
-            return
+        is_live_capture = bool(self.stream_info.is_live or total_secs <= 0)
 
         q_data = self.quality_combo.currentData()
         audio_url = ""
+        ytdlp_source = ""
+        ytdlp_format = ""
         if q_data:
             playlist_url = q_data.url
             fmt_type = q_data.format_type
             audio_url = q_data.audio_url
+            ytdlp_source = q_data.ytdlp_source
+            ytdlp_format = q_data.ytdlp_format
         elif self.stream_info.url:
             playlist_url = self.stream_info.url
             fmt_type = "hls"
@@ -4001,12 +4146,13 @@ class StreamKeep(QMainWindow):
             title_safe = f"{self.stream_info.platform}_download"
 
         seg_secs = self._get_segment_secs()
-        single_segment = (fmt_type == "mp4" or seg_secs == 0 or total_secs <= seg_secs)
+        single_segment = (is_live_capture or fmt_type in ("mp4", "ytdlp_direct")
+                          or seg_secs == 0 or total_secs <= seg_secs)
         segments = []
         for i, cb in enumerate(self._segment_checks):
             if cb.isChecked():
                 if single_segment:
-                    segments.append((0, title_safe, 0, int(total_secs)))
+                    segments.append((0, title_safe, 0, 0 if is_live_capture else int(total_secs)))
                     break
                 else:
                     start = i * seg_secs
@@ -4036,15 +4182,26 @@ class StreamKeep(QMainWindow):
         self.overall_progress.setVisible(True)
         self.overall_progress.setValue(0)
         self.overall_progress.setMaximum(len(segments))
-        self._set_status(
-            f"Downloading 0 of {len(segments)} segment(s) to {_path_label(out_dir)}.",
-            "working",
-        )
+        if is_live_capture:
+            self._set_status(
+                f"Live capture started. Recording to {_path_label(out_dir)} until you stop it.",
+                "working",
+            )
+        else:
+            self._set_status(
+                f"Downloading 0 of {len(segments)} segment(s) to {_path_label(out_dir)}.",
+                "working",
+            )
 
-        self.download_worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
+        self.download_worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         self.download_worker.audio_url = audio_url
+        self.download_worker.ytdlp_source = ytdlp_source
+        self.download_worker.ytdlp_format = ytdlp_format
+        self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
         if audio_url:
             self._log(f"Audio merge: enabled (video-only format detected)")
+        if fmt_type == "ytdlp_direct":
+            self._log(f"Download mode: yt-dlp direct (handles URL refresh + format merge)")
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
@@ -4054,7 +4211,11 @@ class StreamKeep(QMainWindow):
 
     def _on_dl_progress(self, idx, pct, status):
         if idx < len(self._segment_progress):
-            self._segment_progress[idx].setValue(pct)
+            if self.stream_info and (self.stream_info.is_live or self.stream_info.total_secs <= 0):
+                self._segment_progress[idx].setMaximum(0)
+            else:
+                self._segment_progress[idx].setMaximum(100)
+                self._segment_progress[idx].setValue(pct)
         if hasattr(self, "_total_segments") and self._total_segments:
             self._set_status(
                 f"Downloading {self._completed_segments}/{self._total_segments}. Segment {idx + 1}: {status}",
@@ -4063,6 +4224,7 @@ class StreamKeep(QMainWindow):
 
     def _on_segment_done(self, idx, size_str):
         if idx < len(self._segment_progress):
+            self._segment_progress[idx].setMaximum(100)
             self._segment_progress[idx].setValue(100)
             self._segment_progress[idx].setStyleSheet(
                 f"QProgressBar::chunk {{ background-color: {CAT['green']}; border-radius: 6px; }}"
@@ -4095,16 +4257,23 @@ class StreamKeep(QMainWindow):
         self._log(f"\n{'=' * 50}")
         self._log("All downloads complete!")
         self._log(f"{'=' * 50}")
-        self._set_status(
-            f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
-            "success",
-        )
+        if self.stream_info and (self.stream_info.is_live or self.stream_info.total_secs <= 0):
+            self._set_status("Live capture finished and was saved to the selected folder.", "success")
+        else:
+            self._set_status(
+                f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
+                "success",
+            )
         out_dir = self.output_input.text().strip()
         q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
         self._save_metadata(out_dir, q_name)
         self._persist_config()
 
     def _on_stop(self):
+        worker = self.download_worker
+        live_capture = bool(
+            worker and any(len(seg) >= 4 and seg[3] <= 0 for seg in getattr(worker, "segments", []))
+        )
         # Halt any in-progress batch by marking it done
         if hasattr(self, '_batch_vods') and hasattr(self, '_batch_total'):
             self._batch_idx = self._batch_total
@@ -4122,8 +4291,15 @@ class StreamKeep(QMainWindow):
         if hasattr(self, 'vod_dl_all_btn'):
             self.vod_dl_all_btn.setEnabled(True)
             self.vod_load_btn.setEnabled(True)
+        for entry in self.monitor.entries:
+            entry.is_recording = False
+        self._refresh_monitor_summary()
         self._log("[CANCELLED] Download stopped by user.")
-        self._set_status("Download cancelled. You can adjust the selection and try again.", "warning")
+        if live_capture:
+            self.open_folder_btn.setVisible(True)
+            self._set_status("Recording stopped. Any captured portion was kept on disk.", "warning")
+        else:
+            self._set_status("Download cancelled. You can adjust the selection and try again.", "warning")
 
     def _on_open_folder(self):
         out_dir = self.output_input.text().strip()
