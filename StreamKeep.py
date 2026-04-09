@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "3.3.0"
+VERSION = "4.0.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -560,6 +560,79 @@ def _safe_filename(s, max_len=60):
     if cleaned.upper() in reserved:
         cleaned = f"_{cleaned}"
     return cleaned[:max_len].strip() or "download"
+
+
+DEFAULT_FOLDER_TEMPLATE = "{channel}/{date} - {title}"
+DEFAULT_FILE_TEMPLATE = "{title}"
+
+def _safe_path_component(s, max_len=80):
+    """Sanitize a path component (filename or folder name)."""
+    return _safe_filename(s, max_len=max_len) or "download"
+
+def _render_template(template, context):
+    """Render a filename template. Each path segment is sanitized
+    separately so that '{channel}/{title}' produces a valid nested path.
+    Returns a list of path components (to be joined with os.path.join)."""
+    if not template:
+        return []
+    result = []
+    for segment in template.split("/"):
+        if not segment.strip():
+            continue
+        try:
+            rendered = segment.format(**context)
+        except (KeyError, IndexError, ValueError):
+            # Fallback: replace unknown vars with their raw placeholder
+            def safe_sub(m):
+                key = m.group(1)
+                return str(context.get(key, "")) or m.group(0)
+            rendered = re.sub(r'\{(\w+)\}', safe_sub, segment)
+        rendered = _safe_path_component(rendered)
+        if rendered:
+            result.append(rendered)
+    return result
+
+def _build_template_context(stream_info, vod_info=None):
+    """Build the variable dict for template rendering.
+    Variables: {title}, {channel}, {platform}, {date}, {year}, {month},
+    {day}, {id}, {quality}, {ext}"""
+    from datetime import datetime as _dt
+    now = _dt.now()
+    title = (stream_info.title if stream_info else "") or (
+        vod_info.title if vod_info else "") or "download"
+    channel = ""
+    if vod_info and vod_info.channel:
+        channel = vod_info.channel
+    elif stream_info and stream_info.channel:
+        channel = stream_info.channel
+    # Parse date from stream or VOD
+    date_str = ""
+    try:
+        if stream_info and stream_info.start_time:
+            dt = _dt.fromisoformat(stream_info.start_time.replace("Z", "+00:00"))
+            date_str = dt.strftime("%Y-%m-%d")
+        elif vod_info and vod_info.date:
+            raw = vod_info.date.replace("T", " ").split(".")[0].split("+")[0]
+            dt = _dt.fromisoformat(raw[:19])
+            date_str = dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    if not date_str:
+        date_str = now.strftime("%Y-%m-%d")
+
+    year, month, day = date_str.split("-") if "-" in date_str else ("", "", "")
+    return {
+        "title": title,
+        "channel": channel or "unknown",
+        "platform": stream_info.platform if stream_info else "",
+        "date": date_str,
+        "year": year,
+        "month": month,
+        "day": day,
+        "id": "",  # reserved for future use
+        "quality": "",  # filled in at download time
+        "ext": "mp4",
+    }
 
 
 def _scan_browser_cookies():
@@ -2264,14 +2337,17 @@ class MonitorEntry:
     channel_id: str = ""
     interval_secs: int = 120
     auto_record: bool = False
+    subscribe_vods: bool = False  # Check for new VODs and queue them
     last_check: float = 0
     last_status: str = "unknown"  # live, offline, error
     is_recording: bool = False
+    archive_ids: list = field(default_factory=list)  # Already-seen VOD source IDs
 
 class ChannelMonitor(QObject):
     """Polls channels for live status via round-robin."""
     status_changed = pyqtSignal()
     channel_went_live = pyqtSignal(str)  # channel_id
+    new_vods_found = pyqtSignal(str, list)  # channel_id, list[VODInfo]
     log = pyqtSignal(str)
 
     def __init__(self):
@@ -2282,9 +2358,12 @@ class ChannelMonitor(QObject):
         self._timer.timeout.connect(self._poll_tick)
         self._timer.start(15_000)  # check one channel every 15s
 
-    def add_channel(self, url, interval=120, auto_record=False):
+    def add_channel(self, url, interval=120, auto_record=False, subscribe_vods=False):
         ext = Extractor.detect(url)
-        if not ext or not ext.supports_live_check():
+        if not ext:
+            return False
+        # Allow subscribe-only even if extractor doesn't support live check
+        if not ext.supports_live_check() and not (subscribe_vods and ext.supports_vod_listing()):
             return False
         ch_id = ext.extract_channel_id(url) or url
         # Don't add duplicates
@@ -2293,7 +2372,8 @@ class ChannelMonitor(QObject):
                 return False
         self.entries.append(MonitorEntry(
             url=url, platform=ext.NAME, channel_id=ch_id,
-            interval_secs=interval, auto_record=auto_record
+            interval_secs=interval, auto_record=auto_record,
+            subscribe_vods=subscribe_vods,
         ))
         self.status_changed.emit()
         return True
@@ -2323,27 +2403,75 @@ class ChannelMonitor(QObject):
             self.status_changed.emit()
             return
         try:
-            is_live = ext.check_live(entry.url)
-            prev = entry.last_status
-            entry.last_status = "live" if is_live else "offline"
-            if is_live and prev != "live":
-                self.channel_went_live.emit(entry.channel_id)
-                self.log.emit(f"[LIVE] {entry.platform}/{entry.channel_id} went live!")
+            if ext.supports_live_check():
+                is_live = ext.check_live(entry.url)
+                prev = entry.last_status
+                entry.last_status = "live" if is_live else "offline"
+                if is_live and prev != "live":
+                    self.channel_went_live.emit(entry.channel_id)
+                    self.log.emit(f"[LIVE] {entry.platform}/{entry.channel_id} went live!")
+            # Subscribe mode: check for new VODs
+            if entry.subscribe_vods and ext.supports_vod_listing():
+                try:
+                    vods = ext.list_vods(entry.url, log_fn=self.log.emit)
+                    new_vods = []
+                    for v in vods:
+                        if v.source and v.source not in entry.archive_ids:
+                            new_vods.append(v)
+                    if new_vods:
+                        # Remember the IDs we've seen so we don't re-queue them
+                        for v in new_vods:
+                            entry.archive_ids.append(v.source)
+                        # Cap archive list to avoid unbounded growth
+                        if len(entry.archive_ids) > 500:
+                            entry.archive_ids = entry.archive_ids[-500:]
+                        self.log.emit(
+                            f"[SUBSCRIBE] {entry.channel_id}: "
+                            f"{len(new_vods)} new VOD(s) found"
+                        )
+                        self.new_vods_found.emit(entry.channel_id, new_vods)
+                except Exception as sub_ex:
+                    self.log.emit(f"[SUBSCRIBE ERROR] {entry.channel_id}: {sub_ex}")
             self.status_changed.emit()
         except Exception as ex:
             entry.last_status = "error"
             self.log.emit(f"[MONITOR ERROR] {entry.channel_id}: {ex}")
             self.status_changed.emit()
 
+    def seed_archive(self, channel_id, vod_sources):
+        """Populate the archive list for a channel (e.g. on first subscribe
+        so we don't download the entire backlog)."""
+        for e in self.entries:
+            if e.channel_id == channel_id:
+                for vs in vod_sources:
+                    if vs and vs not in e.archive_ids:
+                        e.archive_ids.append(vs)
+                break
+
     def save_to_config(self, cfg):
         cfg["monitor_channels"] = [
-            {"url": e.url, "interval": e.interval_secs, "auto_record": e.auto_record}
+            {"url": e.url, "interval": e.interval_secs,
+             "auto_record": e.auto_record,
+             "subscribe_vods": e.subscribe_vods,
+             "archive_ids": list(e.archive_ids)}
             for e in self.entries
         ]
 
     def load_from_config(self, cfg):
         for ch in cfg.get("monitor_channels", []):
-            self.add_channel(ch["url"], ch.get("interval", 120), ch.get("auto_record", False))
+            ok = self.add_channel(
+                ch["url"], ch.get("interval", 120),
+                ch.get("auto_record", False),
+                ch.get("subscribe_vods", False),
+            )
+            if ok:
+                archive_ids = ch.get("archive_ids", [])
+                if isinstance(archive_ids, list):
+                    # Restore the archive list on the entry we just added
+                    for e in self.entries:
+                        if e.url == ch["url"]:
+                            e.archive_ids = [str(x) for x in archive_ids if x]
+                            break
 
 
 # ── Direct URL Detection ──────────────────────────────────────────────────
@@ -2524,9 +2652,15 @@ class StreamKeep(QMainWindow):
         self._history = []
         self._config = _load_config()
         self._tray_icon = None
+        self._folder_template = DEFAULT_FOLDER_TEMPLATE
+        self._file_template = DEFAULT_FILE_TEMPLATE
+        self._webhook_url = ""
+        self._check_duplicates = True
+        self._download_queue = []  # list of dicts: url, title, platform, status
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
+        self.monitor.new_vods_found.connect(self._on_new_vods_found)
         self.monitor.log.connect(self._log)
         self.monitor.load_from_config(self._config)
         self.clipboard_monitor = ClipboardMonitor()
@@ -2582,6 +2716,26 @@ class StreamKeep(QMainWindow):
         seg_idx = cfg.get("segment_idx")
         if isinstance(seg_idx, int) and 0 <= seg_idx < self.segment_combo.count():
             self.segment_combo.setCurrentIndex(seg_idx)
+        # Templates
+        self._folder_template = cfg.get("folder_template") or DEFAULT_FOLDER_TEMPLATE
+        self._file_template = cfg.get("file_template") or DEFAULT_FILE_TEMPLATE
+        if hasattr(self, "folder_template_input"):
+            self.folder_template_input.setText(self._folder_template)
+        if hasattr(self, "file_template_input"):
+            self.file_template_input.setText(self._file_template)
+        # Webhook
+        self._webhook_url = cfg.get("webhook_url", "") or ""
+        if hasattr(self, "webhook_input"):
+            self.webhook_input.setText(self._webhook_url)
+        # Duplicate detection
+        self._check_duplicates = bool(cfg.get("check_duplicates", True))
+        if hasattr(self, "dup_check"):
+            self.dup_check.setChecked(self._check_duplicates)
+        # Restore queue
+        self._download_queue = [
+            q for q in cfg.get("download_queue", [])
+            if isinstance(q, dict) and q.get("url")
+        ]
         for h in cfg.get("history", []):
             if not isinstance(h, dict):
                 continue
@@ -2611,6 +2765,11 @@ class StreamKeep(QMainWindow):
                            "quality": h.quality, "size": h.size, "path": h.path,
                            "url": h.url}
                           for h in self._history[-200:]]  # keep last 200
+        cfg["folder_template"] = self._folder_template
+        cfg["file_template"] = self._file_template
+        cfg["webhook_url"] = self._webhook_url
+        cfg["check_duplicates"] = self._check_duplicates
+        cfg["download_queue"] = list(self._download_queue)
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
 
@@ -2649,6 +2808,53 @@ class StreamKeep(QMainWindow):
             self._tray_icon.showMessage(title, message, icon, 5000)
         except Exception:
             pass
+
+    def _send_webhook(self, event, title, details=""):
+        """POST a webhook notification. Auto-detects Discord URLs and
+        formats as an embed; otherwise sends plain JSON."""
+        url = (self._webhook_url or "").strip()
+        if not url:
+            return
+        is_discord = "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url
+        platform = self.stream_info.platform if self.stream_info else "unknown"
+        src_url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        color_map = {"complete": 5763719, "failed": 15548997, "started": 3447003}
+        color = color_map.get(event, 5763719)
+        if is_discord:
+            payload = {
+                "username": "StreamKeep",
+                "embeds": [{
+                    "title": f"StreamKeep: {event}",
+                    "description": f"**{title[:200]}**",
+                    "color": color,
+                    "fields": [
+                        {"name": "Platform", "value": platform or "—", "inline": True},
+                        {"name": "Source", "value": (src_url or "—")[:1000], "inline": False},
+                    ] + ([{"name": "Details", "value": details[:1000]}] if details else []),
+                    "footer": {"text": f"StreamKeep v{VERSION}"},
+                }],
+            }
+        else:
+            payload = {
+                "app": "StreamKeep",
+                "version": VERSION,
+                "event": event,
+                "title": title,
+                "platform": platform,
+                "source": src_url,
+                "details": details,
+            }
+        # Fire-and-forget via curl — don't block the UI on webhook latency
+        try:
+            cmd = ["curl", "-s", "-X", "POST",
+                   "-H", "Content-Type: application/json",
+                   "-d", json.dumps(payload),
+                   "--max-time", "10",
+                   url]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=_CREATE_NO_WINDOW)
+        except Exception as e:
+            self._log(f"[WEBHOOK] Send failed: {e}")
 
     def closeEvent(self, event):
         # Stop active download worker cleanly
@@ -3300,6 +3506,11 @@ class StreamKeep(QMainWindow):
         dl_hint.setObjectName("subtleText")
         dl_row.addWidget(dl_hint)
         dl_row.addStretch(1)
+        self.queue_btn = QPushButton("Queue URL")
+        self.queue_btn.setObjectName("secondary")
+        self.queue_btn.setToolTip("Add the current URL to the download queue instead of downloading now")
+        self.queue_btn.clicked.connect(self._on_queue_url)
+        dl_row.addWidget(self.queue_btn)
         self.download_btn = QPushButton("Download Selected")
         self.download_btn.setObjectName("primary")
         self.download_btn.setEnabled(False)
@@ -3307,9 +3518,69 @@ class StreamKeep(QMainWindow):
         dl_row.addWidget(self.download_btn)
         root.addLayout(dl_row)
 
+        # Queue panel — shows pending items
+        queue_card = QFrame()
+        queue_card.setObjectName("card")
+        qcard_lay = QVBoxLayout(queue_card)
+        qcard_lay.setContentsMargins(18, 14, 18, 14)
+        qcard_lay.setSpacing(8)
+        queue_header = QHBoxLayout()
+        qt = QLabel("Download Queue")
+        qt.setObjectName("sectionTitle")
+        queue_header.addWidget(qt)
+        queue_header.addStretch()
+        clear_queue_btn = QPushButton("Clear Queue")
+        clear_queue_btn.setObjectName("ghost")
+        clear_queue_btn.clicked.connect(self._on_clear_queue)
+        queue_header.addWidget(clear_queue_btn)
+        qcard_lay.addLayout(queue_header)
+        self.queue_table = QTableWidget()
+        self.queue_table.setColumnCount(5)
+        self.queue_table.setHorizontalHeaderLabels(["Status", "Platform", "Title", "Added", ""])
+        self.queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.queue_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.queue_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.queue_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.queue_table.setColumnWidth(0, 84)
+        self.queue_table.setColumnWidth(1, 90)
+        self.queue_table.setColumnWidth(3, 140)
+        self.queue_table.setColumnWidth(4, 90)
+        self.queue_table.verticalHeader().setVisible(False)
+        self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.queue_table.setMaximumHeight(150)
+        self._style_table(self.queue_table, 36)
+        qcard_lay.addWidget(self.queue_table)
+        root.addWidget(queue_card)
+
         self._refresh_download_summary()
+        self._refresh_queue_table()
 
         return page
+
+    def _on_queue_url(self):
+        """Add the current URL input to the persistent queue."""
+        url = self.url_input.text().strip()
+        if not url:
+            self._set_status("Paste a URL first.", "warning")
+            return
+        title = ""
+        platform = ""
+        if self.stream_info:
+            title = self.stream_info.title or ""
+            platform = self.stream_info.platform or ""
+        added = self._queue_add(url, title=title, platform=platform)
+        if added:
+            self._set_status(f"Queued: {title or url[:60]}", "success")
+        else:
+            self._set_status("URL already in the queue.", "warning")
+
+    def _on_clear_queue(self):
+        self._download_queue = [q for q in self._download_queue if q.get("status") != "queued"]
+        self._persist_config()
+        self._refresh_queue_table()
+        self._set_status("Queue cleared.", "success")
 
     # ── Monitor Tab ───────────────────────────────────────────────────
 
@@ -3395,10 +3666,12 @@ class StreamKeep(QMainWindow):
         controls_row.addWidget(interval_block)
 
         auto_block, auto_block_lay = self._make_field_block(
-            "Automation", "Record automatically when live"
+            "Automation", "Live auto-record + VOD subscription"
         )
-        self.monitor_auto_cb = QCheckBox("Enable auto-record")
+        self.monitor_auto_cb = QCheckBox("Enable auto-record (live)")
         auto_block_lay.addWidget(self.monitor_auto_cb)
+        self.monitor_subscribe_cb = QCheckBox("Subscribe — queue new VODs")
+        auto_block_lay.addWidget(self.monitor_subscribe_cb)
         auto_block_lay.addStretch(1)
         controls_row.addWidget(auto_block)
 
@@ -3744,6 +4017,52 @@ class StreamKeep(QMainWindow):
 
         card_lay.addWidget(yt_block)
 
+        # Filename templates
+        tpl_block, tpl_lay = self._make_field_block(
+            "Filename Templates",
+            "Variables: {title} {channel} {platform} {date} {year} {month} {day}. "
+            "Use / to create subfolders. Each segment is sanitized."
+        )
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        folder_label = QLabel("Folder:")
+        folder_label.setFixedWidth(100)
+        folder_row.addWidget(folder_label)
+        self.folder_template_input = QLineEdit(self._folder_template)
+        self.folder_template_input.setPlaceholderText(DEFAULT_FOLDER_TEMPLATE)
+        folder_row.addWidget(self.folder_template_input, 1)
+        tpl_lay.addLayout(folder_row)
+        file_row = QHBoxLayout()
+        file_row.setSpacing(8)
+        file_label = QLabel("Filename:")
+        file_label.setFixedWidth(100)
+        file_row.addWidget(file_label)
+        self.file_template_input = QLineEdit(self._file_template)
+        self.file_template_input.setPlaceholderText(DEFAULT_FILE_TEMPLATE)
+        file_row.addWidget(self.file_template_input, 1)
+        tpl_lay.addLayout(file_row)
+        card_lay.addWidget(tpl_block)
+
+        # Webhook notifications
+        hook_block, hook_lay = self._make_field_block(
+            "Webhook Notifications",
+            "POST a JSON payload when downloads complete. Discord webhook URLs are auto-detected and formatted as embeds."
+        )
+        self.webhook_input = QLineEdit(self._webhook_url)
+        self.webhook_input.setPlaceholderText("https://discord.com/api/webhooks/... or any POST endpoint")
+        hook_lay.addWidget(self.webhook_input)
+        card_lay.addWidget(hook_block)
+
+        # Duplicate detection
+        dup_block, dup_lay = self._make_field_block(
+            "Duplicate Detection",
+            "Warn before downloading something already in your history."
+        )
+        self.dup_check = QCheckBox("Check history for URL and title matches before download")
+        self.dup_check.setChecked(self._check_duplicates)
+        dup_lay.addWidget(self.dup_check)
+        card_lay.addWidget(dup_block)
+
         # Save button
         save_row = QHBoxLayout()
         save_row.addStretch()
@@ -3848,6 +4167,13 @@ class StreamKeep(QMainWindow):
         self._config["download_subs"] = YtDlpExtractor.download_subs
         YtDlpExtractor.sponsorblock = self.sponsorblock_check.isChecked()
         self._config["sponsorblock"] = YtDlpExtractor.sponsorblock
+        # Apply filename templates
+        self._folder_template = self.folder_template_input.text().strip() or DEFAULT_FOLDER_TEMPLATE
+        self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
+        # Apply webhook
+        self._webhook_url = self.webhook_input.text().strip()
+        # Apply duplicate detection
+        self._check_duplicates = self.dup_check.isChecked()
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
@@ -3914,10 +4240,35 @@ class StreamKeep(QMainWindow):
         self._switch_tab(0)  # Switch to Download tab
         self._on_fetch()
 
+    def _find_duplicate(self, url, title=""):
+        """Check history for a matching URL (exact) or title (fuzzy).
+        Returns matching HistoryEntry or None."""
+        if not self._check_duplicates:
+            return None
+        if url:
+            for h in self._history:
+                if h.url == url and h.path:
+                    return h
+        if title:
+            norm = title.strip().lower()
+            for h in self._history:
+                if h.title and h.title.strip().lower() == norm and h.path:
+                    return h
+        return None
+
     def _on_fetch(self, vod_source=None, vod_platform=None):
         url = self.url_input.text().strip()
         if not url:
             return
+        # Check for URL-based duplicate before hitting the network
+        if not vod_source:
+            dup = self._find_duplicate(url)
+            if dup:
+                self._log(f"[DUPLICATE] Already downloaded on {dup.date} to {dup.path}")
+                self._set_status(
+                    f"Already downloaded {dup.date} to {dup.path}. Fetching anyway.",
+                    "warning",
+                )
         self.fetch_btn.setEnabled(False)
         self.fetch_btn.setText("Fetching")
         self.download_btn.setEnabled(False)
@@ -4012,7 +4363,16 @@ class StreamKeep(QMainWindow):
         self._build_segments(info.total_secs)
         self.download_btn.setEnabled(True)
         self._refresh_download_summary()
-        if info.is_live or info.total_secs <= 0:
+
+        # Title-based duplicate check after resolve (more accurate than URL match)
+        dup = self._find_duplicate("", info.title)
+        if dup:
+            self._log(f"[DUPLICATE] Title match: already downloaded {dup.date} to {dup.path}")
+            self._set_status(
+                f"Title matches a previous download ({dup.date}). Proceed if intentional.",
+                "warning",
+            )
+        elif info.is_live or info.total_secs <= 0:
             self._set_status("Live source ready. Start recording and stop it when you have enough footage.", "success")
         else:
             self._set_status("Source ready. Review the segments and start the download when you are happy.", "success")
@@ -4157,10 +4517,15 @@ class StreamKeep(QMainWindow):
         total_secs = info.total_secs
         seg_secs = self._get_segment_secs()
 
-        # Title-based filenames
-        title_safe = _safe_filename(info.title) if info.title else _safe_filename(vod.title)
-        if not title_safe:
-            title_safe = f"{info.platform}_download"
+        # Render folder + filename from templates
+        ctx = _build_template_context(info, vod)
+        folder_parts = _render_template(
+            self._folder_template, ctx
+        ) or [_safe_filename(vod.title) or f"{info.platform}_download"]
+        file_parts = _render_template(self._file_template, ctx)
+        title_safe = file_parts[-1] if file_parts else (
+            _safe_filename(info.title) or _safe_filename(vod.title) or f"{info.platform}_download"
+        )
 
         # ytdlp_direct and mp4 formats download monolithically — no segment splitting
         if fmt_type in ("ytdlp_direct", "mp4") or seg_secs == 0 or total_secs <= 0 or total_secs <= seg_secs:
@@ -4174,10 +4539,7 @@ class StreamKeep(QMainWindow):
                 pos = end
                 idx += 1
 
-        date_part = vod.date.replace(" ", "_").replace(":", "-")[:16]
-        safe_title = _safe_filename(vod.title)
-        vod_folder = f"{date_part}_{safe_title}"
-        out_dir = os.path.join(self.output_input.text().strip(), vod_folder)
+        out_dir = os.path.join(self.output_input.text().strip(), *folder_parts)
         os.makedirs(out_dir, exist_ok=True)
 
         self._build_segments(total_secs)
@@ -4229,6 +4591,8 @@ class StreamKeep(QMainWindow):
         self._log(f"{'=' * 50}")
         self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
         self._notify("StreamKeep — Batch complete", f"Downloaded {self._batch_total} VOD(s)")
+        self._send_webhook("batch complete", f"{self._batch_total} VODs",
+                           f"Batch download finished")
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.vod_dl_all_btn.setEnabled(True)
@@ -4428,10 +4792,15 @@ class StreamKeep(QMainWindow):
             self._set_status("Pick a quality before starting the download.", "warning")
             return
 
-        # Determine title-based filename for single-segment downloads
-        title_safe = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
-        if not title_safe:
-            title_safe = f"{self.stream_info.platform}_download"
+        # Render filename + folder from templates (templates can produce
+        # nested paths like "{channel}/{date} - {title}")
+        ctx = _build_template_context(self.stream_info)
+        folder_parts = _render_template(self._folder_template, ctx)
+        file_parts = _render_template(self._file_template, ctx)
+        title_safe = file_parts[-1] if file_parts else (
+            _safe_filename(self.stream_info.title)
+            or f"{self.stream_info.platform}_download"
+        )
 
         seg_secs = self._get_segment_secs()
         single_segment = (is_live_capture or fmt_type in ("mp4", "ytdlp_direct")
@@ -4453,7 +4822,14 @@ class StreamKeep(QMainWindow):
             self._set_status("Select at least one segment before downloading.", "warning")
             return
 
-        out_dir = self.output_input.text().strip()
+        # For non-channel content, user's output box is the base; folder template
+        # adds a subfolder. For channel content the template already has
+        # {channel} in it, so joining still works.
+        base_out = self.output_input.text().strip()
+        if folder_parts:
+            out_dir = os.path.join(base_out, *folder_parts)
+        else:
+            out_dir = base_out
         os.makedirs(out_dir, exist_ok=True)
 
         self._log(f"\n{'=' * 50}")
@@ -4553,16 +4929,22 @@ class StreamKeep(QMainWindow):
         if self.stream_info and (self.stream_info.is_live or self.stream_info.total_secs <= 0):
             self._set_status("Live capture finished and was saved to the selected folder.", "success")
             self._notify("StreamKeep — Capture finished", title[:80])
+            self._send_webhook("capture finished", title,
+                               f"Segments: {self._completed_segments}")
         else:
             self._set_status(
                 f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
                 "success",
             )
             self._notify("StreamKeep — Download complete", title[:80])
+            self._send_webhook("download complete", title,
+                               f"Segments: {self._completed_segments}")
         out_dir = self.output_input.text().strip()
         q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
         self._save_metadata(out_dir, q_name)
         self._persist_config()
+        # Auto-advance the queue if there's a pending item
+        self._advance_queue()
 
     def _on_stop(self):
         worker = self.download_worker
@@ -4609,9 +4991,27 @@ class StreamKeep(QMainWindow):
             return
         interval = self.monitor_interval_spin.value()
         auto = self.monitor_auto_cb.isChecked()
-        if self.monitor.add_channel(url, interval, auto):
+        subscribe = self.monitor_subscribe_cb.isChecked()
+        if self.monitor.add_channel(url, interval, auto, subscribe):
             self.monitor_url_input.clear()
-            self._log(f"[MONITOR] Added: {url} (every {interval}s, auto-record: {auto})")
+            self._log(
+                f"[MONITOR] Added: {url} (every {interval}s, "
+                f"auto-record: {auto}, subscribe: {subscribe})"
+            )
+            # Seed the archive with current VODs so we don't download the backlog
+            if subscribe:
+                ext = Extractor.detect(url)
+                if ext and ext.supports_vod_listing():
+                    try:
+                        existing = ext.list_vods(url, log_fn=self._log)
+                        ch_id = ext.extract_channel_id(url) or url
+                        self.monitor.seed_archive(ch_id, [v.source for v in existing if v.source])
+                        self._log(
+                            f"[SUBSCRIBE] Seeded archive with {len(existing)} existing VOD(s). "
+                            f"Only new VODs will be queued from now on."
+                        )
+                    except Exception as e:
+                        self._log(f"[SUBSCRIBE] Seed failed: {e}")
             self._persist_config()
             self._set_status("Channel added to the watch list.", "success")
         else:
@@ -4727,6 +5127,101 @@ class StreamKeep(QMainWindow):
         self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
         self._refresh_monitor_summary()
         self._set_status(f"Auto-record finished for {channel_id}.", "success")
+
+    # ── Download Queue ────────────────────────────────────────────────
+
+    def _queue_add(self, url, title="", platform="", note=""):
+        """Append a URL to the persistent download queue."""
+        if not url:
+            return False
+        if any(q.get("url") == url and q.get("status") == "queued"
+               for q in self._download_queue):
+            return False
+        self._download_queue.append({
+            "url": url,
+            "title": title or url,
+            "platform": platform or "?",
+            "status": "queued",
+            "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "note": note,
+        })
+        self._persist_config()
+        if hasattr(self, "queue_table"):
+            self._refresh_queue_table()
+        return True
+
+    def _queue_remove(self, idx):
+        if 0 <= idx < len(self._download_queue):
+            removed = self._download_queue.pop(idx)
+            self._persist_config()
+            if hasattr(self, "queue_table"):
+                self._refresh_queue_table()
+            return removed
+        return None
+
+    def _advance_queue(self):
+        """Start the next queued item if nothing is downloading."""
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        # Pop the next queued item
+        next_item = None
+        for i, q in enumerate(self._download_queue):
+            if q.get("status") == "queued":
+                next_item = self._download_queue.pop(i)
+                break
+        if not next_item:
+            return
+        self._log(f"[QUEUE] Auto-starting: {next_item.get('title', '')[:60]}")
+        self._persist_config()
+        if hasattr(self, "queue_table"):
+            self._refresh_queue_table()
+        self.url_input.setText(next_item["url"])
+        self._switch_tab(0)
+        self._on_fetch()
+
+    def _refresh_queue_table(self):
+        if not hasattr(self, "queue_table"):
+            return
+        self.queue_table.setRowCount(len(self._download_queue))
+        for i, q in enumerate(self._download_queue):
+            status = q.get("status", "queued")
+            status_item = QTableWidgetItem(status.upper())
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if status == "queued":
+                status_item.setForeground(QColor(CAT["yellow"]))
+            self.queue_table.setItem(i, 0, status_item)
+            self.queue_table.setItem(i, 1, QTableWidgetItem(q.get("platform", "?")))
+            self.queue_table.setItem(i, 2, QTableWidgetItem(q.get("title", "")[:80]))
+            self.queue_table.setItem(i, 3, QTableWidgetItem(q.get("added", "")))
+            rm_btn = QPushButton("Remove")
+            rm_btn.setObjectName("secondary")
+            rm_btn.clicked.connect(lambda _c=False, row=i: self._queue_remove(row))
+            self.queue_table.setCellWidget(i, 4, rm_btn)
+
+    def _on_new_vods_found(self, channel_id, vods):
+        """New VODs from a subscribed channel — queue their source URLs
+        so they get downloaded in the background."""
+        for v in vods:
+            # Skip if already in history (prevents re-downloading on seed)
+            if self._find_duplicate("", v.title):
+                continue
+            entry = {
+                "url": v.source,
+                "title": v.title,
+                "platform": v.platform,
+                "status": "queued",
+                "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "vod_date": v.date,
+            }
+            if not any(q.get("url") == v.source for q in self._download_queue):
+                self._download_queue.append(entry)
+                self._log(f"[SUBSCRIBE] Queued: {v.title[:60]}")
+        self._persist_config()
+        self._refresh_queue_table() if hasattr(self, "queue_table") else None
+        # Kick off the queue if nothing is downloading
+        if getattr(self.download_worker, "isRunning", lambda: False)() is False:
+            self._advance_queue()
 
     # ── History Actions ───────────────────────────────────────────────
 
