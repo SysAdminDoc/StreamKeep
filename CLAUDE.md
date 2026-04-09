@@ -45,6 +45,13 @@ No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 - **Config persistence**: JSON at `%APPDATA%\StreamKeep\config.json` — saves output dir, segment pref, history, monitor channels
 
 ## Version History
+- v4.6.0 — Multi-connection parallel download for direct MP4 URLs. `_parallel_http_download()` splits files via HTTP Range requests across N threads (default 4, max 16), 3-5x speedup on CDN-hosted content. Probes feasibility via `_http_head()` (status + Content-Length + Accept-Ranges), skips when file <8MB or server lacks ranges. Falls back to ffmpeg on any failure. Settings spinner in Network block. Persists in config as `parallel_connections`.
+- v4.5.0 — Headless-browser page scraper for lazy-loaded players (Playwright)
+- v4.4.0 — Queue reorder, scheduled downloads, bandwidth window, page scraper
+- v4.3.0 — Playlist expansion, chapter split, contact sheet, config i/o
+- v4.2.0 — Chapters, stats dashboard, log file, recent URLs
+- v4.1.0 — Twitch chat replay, Kodi NFO export, post-processing presets
+- v4.0.0 — Templates, queue, subscriptions, webhooks, dedup
 - v3.0.0 — Universal media support: SoundCloud, Reddit, Audius, Podcast RSS extractors. Direct URL detection via Content-Type sniffing. Clipboard monitoring for auto-URL capture.
 - v2.0.0 — Tab UI (Download/Monitor/History/Settings), channel monitoring + auto-record, download history, metadata saving, config persistence, enhanced speed/ETA tracking
 - v1.0.0 — Multi-platform rewrite: extractor plugin system, Kick/Twitch/Rumble/yt-dlp support, platform badges

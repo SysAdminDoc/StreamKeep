@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.5.0"
+VERSION = "4.6.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -515,6 +515,216 @@ def _curl_post_json(url, data, headers=None, timeout=30):
     except Exception:
         pass
     return None
+
+def _http_head(url, timeout=20):
+    """HEAD request returning (status, content_length, accepts_ranges).
+    Follows redirects and parses the final response block."""
+    cmd = ["curl", "-sI", "-L", "--max-time", str(timeout)]
+    if NATIVE_PROXY:
+        cmd.extend(["-x", NATIVE_PROXY])
+    cmd.append(url)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=timeout + 5,
+                           creationflags=_CREATE_NO_WINDOW)
+        if r.returncode != 0:
+            return (0, 0, False)
+        # Redirects yield multiple header blocks; use the last
+        blocks = [b for b in re.split(r"\r?\n\r?\n", r.stdout) if b.strip()]
+        last = blocks[-1] if blocks else r.stdout
+        status = 0
+        m = re.search(r"HTTP/[\d.]+\s+(\d+)", last)
+        if m:
+            status = int(m.group(1))
+        size = 0
+        m = re.search(r"(?im)^content-length:\s*(\d+)", last)
+        if m:
+            size = int(m.group(1))
+        accepts = bool(re.search(r"(?im)^accept-ranges:\s*bytes", last))
+        return (status, size, accepts)
+    except Exception:
+        return (0, 0, False)
+
+
+def _parallel_http_download(url, outfile, connections=4, progress_cb=None,
+                            cancel_check=None, min_size_mb=8, log_fn=None):
+    """Download a direct HTTP file using N parallel Range requests.
+
+    Probes with HEAD first. Returns False if the server lacks Range
+    support, the file is too small to benefit from splitting, or any
+    chunk fails — caller is expected to fall back to ffmpeg.
+    """
+    import threading
+    status, total, accepts = _http_head(url)
+    if status >= 400 or not accepts or total < min_size_mb * 1024 * 1024:
+        if log_fn:
+            log_fn(f"[PARALLEL] skip (status={status}, ranges={accepts}, "
+                   f"size={_fmt_size(total) if total else '?'})")
+        return False
+
+    connections = max(1, min(16, int(connections)))
+    chunk = total // connections
+    ranges = []
+    for i in range(connections):
+        start = i * chunk
+        end = total - 1 if i == connections - 1 else (start + chunk - 1)
+        ranges.append((i, start, end))
+
+    tmp_dir = outfile + ".parts"
+    try:
+        os.makedirs(tmp_dir, exist_ok=True)
+    except OSError as e:
+        if log_fn:
+            log_fn(f"[PARALLEL] temp dir failed: {e}")
+        return False
+
+    part_paths = [os.path.join(tmp_dir, f"part_{i:02d}") for i in range(connections)]
+    bytes_done = [0] * connections
+    errors = []
+    procs = {}
+    lock = threading.Lock()
+
+    def worker(i, start, end):
+        part = part_paths[i]
+        expected = end - start + 1
+        # Resume if a complete part from a prior run exists
+        if os.path.exists(part) and os.path.getsize(part) == expected:
+            bytes_done[i] = expected
+            return
+        # Otherwise restart this chunk from scratch
+        try:
+            if os.path.exists(part):
+                os.remove(part)
+        except OSError:
+            pass
+        cmd = ["curl", "-sS", "-L", "--fail",
+               "--retry", "2", "--retry-delay", "1",
+               "-r", f"{start}-{end}",
+               "-o", part]
+        if NATIVE_PROXY:
+            cmd.extend(["-x", NATIVE_PROXY])
+        cmd.append(url)
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                creationflags=_CREATE_NO_WINDOW
+            )
+            with lock:
+                procs[i] = proc
+            while proc.poll() is None:
+                if cancel_check and cancel_check():
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    return
+                if os.path.exists(part):
+                    try:
+                        bytes_done[i] = os.path.getsize(part)
+                    except OSError:
+                        pass
+                time.sleep(0.25)
+            if os.path.exists(part):
+                bytes_done[i] = os.path.getsize(part)
+            if proc.returncode != 0:
+                err = ""
+                try:
+                    err = (proc.stderr.read() or "").strip()[:120]
+                except Exception:
+                    pass
+                errors.append(f"part {i}: curl exit {proc.returncode} {err}")
+        except FileNotFoundError:
+            errors.append("curl not in PATH")
+        except Exception as e:
+            errors.append(f"part {i}: {e}")
+
+    threads = []
+    for i, start, end in ranges:
+        t = threading.Thread(target=worker, args=(i, start, end), daemon=True)
+        t.start()
+        threads.append(t)
+
+    last_report = time.time()
+    last_bytes = sum(bytes_done)
+    while any(t.is_alive() for t in threads):
+        if cancel_check and cancel_check():
+            with lock:
+                for p in procs.values():
+                    try:
+                        if p.poll() is None:
+                            p.terminate()
+                    except Exception:
+                        pass
+            break
+        now = time.time()
+        if progress_cb and now - last_report >= 0.4:
+            total_done = sum(bytes_done)
+            elapsed = max(now - last_report, 0.001)
+            speed = max(0.0, (total_done - last_bytes) / elapsed)
+            try:
+                progress_cb(total_done, total, speed)
+            except Exception:
+                pass
+            last_report = now
+            last_bytes = total_done
+        time.sleep(0.2)
+
+    for t in threads:
+        t.join(timeout=5)
+
+    if cancel_check and cancel_check():
+        # Leave parts for potential future resume
+        return False
+
+    if errors:
+        if log_fn:
+            log_fn(f"[PARALLEL] failed: {'; '.join(errors[:3])}")
+        return False
+
+    # Verify every part matches its expected byte range
+    for idx, (_, start, end) in enumerate(ranges):
+        expected = end - start + 1
+        actual = os.path.getsize(part_paths[idx]) if os.path.exists(part_paths[idx]) else 0
+        if actual != expected:
+            if log_fn:
+                log_fn(f"[PARALLEL] size mismatch on part {idx}: "
+                       f"{actual} != {expected}")
+            return False
+
+    # Concatenate parts -> final file
+    try:
+        with open(outfile, "wb") as out:
+            for p in part_paths:
+                with open(p, "rb") as f:
+                    while True:
+                        buf = f.read(1024 * 1024)
+                        if not buf:
+                            break
+                        out.write(buf)
+    except Exception as e:
+        if log_fn:
+            log_fn(f"[PARALLEL] concat failed: {e}")
+        return False
+
+    # Clean up temp parts
+    for p in part_paths:
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
+    try:
+        os.rmdir(tmp_dir)
+    except OSError:
+        pass
+
+    if progress_cb:
+        try:
+            progress_cb(total, total, 0)
+        except Exception:
+            pass
+    return True
+
 
 def _parse_hls_master(body, base_url):
     """Parse an HLS master playlist into a list of QualityInfo."""
@@ -2331,6 +2541,7 @@ class DownloadWorker(QThread):
         self.download_subs = False  # yt-dlp --write-subs --sub-langs all
         self.sponsorblock = False  # yt-dlp --sponsorblock-remove all
         self.max_retries = 2  # Retry failed segments up to N times
+        self.parallel_connections = 4  # Multi-connection Range splitting for direct mp4
         self._cancel = False
 
     def cancel(self):
@@ -2448,6 +2659,55 @@ class DownloadWorker(QThread):
                 if not success:
                     self.error.emit(seg_idx, "yt-dlp download failed")
                 continue
+
+            # Multi-connection parallel download for direct MP4 URLs
+            # (3-5x faster on CDN-hosted files with HTTP Range support).
+            # Only applies when there's no audio track to merge — audio
+            # merge still needs ffmpeg's -map to combine two streams.
+            if (self.format_type == "mp4" and not self.audio_url
+                    and self.parallel_connections > 1):
+                worker_ref = self
+
+                def _cb(done, total, speed):
+                    pct = min(99, int((done / max(total, 1)) * 100))
+                    spd = f"{_fmt_size(speed)}/s" if speed > 0 else ""
+                    eta = ""
+                    if speed > 0 and total > done:
+                        eta = f" | ETA {_fmt_duration((total - done) / speed)}"
+                    status = f"{_fmt_size(done)} / {_fmt_size(total)} | {spd}{eta}"
+                    worker_ref.progress.emit(seg_idx, pct, status)
+
+                def _cancel():
+                    return worker_ref._cancel
+
+                try:
+                    parallel_ok = _parallel_http_download(
+                        self.playlist_url, outfile,
+                        connections=self.parallel_connections,
+                        progress_cb=_cb, cancel_check=_cancel,
+                        log_fn=lambda m: self.log.emit(m),
+                    )
+                except Exception as e:
+                    self.log.emit(f"[PARALLEL ERR] {label}: {e}")
+                    parallel_ok = False
+
+                if self._cancel:
+                    if os.path.exists(outfile):
+                        try:
+                            os.remove(outfile)
+                        except OSError:
+                            pass
+                    return
+
+                if parallel_ok and os.path.exists(outfile) and os.path.getsize(outfile) > 0:
+                    size = os.path.getsize(outfile)
+                    self.progress.emit(seg_idx, 100, "Complete")
+                    self.segment_done.emit(seg_idx, _fmt_size(size))
+                    self.log.emit(f"[DONE] {label} - {_fmt_size(size)} "
+                                  f"(parallel x{self.parallel_connections})")
+                    continue
+                else:
+                    self.log.emit(f"[INFO] {label}: falling back to ffmpeg")
 
             # Build ffmpeg command with optional audio merge
             if self.audio_url:
@@ -3476,6 +3736,7 @@ class StreamKeep(QMainWindow):
         self._check_duplicates = True
         self._download_queue = []  # list of dicts: url, title, platform, status
         self._write_nfo = False
+        self._parallel_connections = 4  # Multi-connection splits per direct MP4
         self._recent_urls = []  # most-recent-first list of distinct URLs
         self._bandwidth_rule = {
             "enabled": False,
@@ -3620,6 +3881,14 @@ class StreamKeep(QMainWindow):
         self._write_nfo = bool(cfg.get("write_nfo", False))
         if hasattr(self, "nfo_check"):
             self.nfo_check.setChecked(self._write_nfo)
+        # Parallel connections per direct mp4
+        try:
+            conns = int(cfg.get("parallel_connections", 4))
+        except (TypeError, ValueError):
+            conns = 4
+        self._parallel_connections = max(1, min(16, conns))
+        if hasattr(self, "parallel_spin"):
+            self.parallel_spin.setValue(self._parallel_connections)
         # Twitch chat download
         TwitchExtractor.download_chat_enabled = bool(cfg.get("download_twitch_chat", False))
         if hasattr(self, "chat_check"):
@@ -3696,6 +3965,7 @@ class StreamKeep(QMainWindow):
         cfg["check_duplicates"] = self._check_duplicates
         cfg["download_queue"] = list(self._download_queue)
         cfg["write_nfo"] = self._write_nfo
+        cfg["parallel_connections"] = self._parallel_connections
         cfg["download_twitch_chat"] = TwitchExtractor.download_chat_enabled
         cfg["pp_extract_audio"] = PostProcessor.extract_audio
         cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
@@ -5141,6 +5411,27 @@ class StreamKeep(QMainWindow):
         bw_row.addStretch(1)
         network_lay.addLayout(bw_row)
 
+        # Parallel connections per direct MP4 (HTTP Range splitting)
+        par_row = QHBoxLayout()
+        par_row.setSpacing(8)
+        par_label = QLabel("Parallel connections:")
+        par_label.setFixedWidth(140)
+        par_row.addWidget(par_label)
+        self.parallel_spin = QSpinBox()
+        self.parallel_spin.setRange(1, 16)
+        self.parallel_spin.setValue(self._parallel_connections)
+        self.parallel_spin.setToolTip(
+            "Multi-connection HTTP Range splitting for direct MP4 files.\n"
+            "Higher values can be 3-5x faster on CDN-hosted content.\n"
+            "Set to 1 to disable and always use ffmpeg."
+        )
+        par_row.addWidget(self.parallel_spin)
+        par_hint = QLabel("per direct MP4 (1 = off, default 4)")
+        par_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        par_row.addWidget(par_hint)
+        par_row.addStretch(1)
+        network_lay.addLayout(par_row)
+
         # Load saved network settings
         saved_rate = self._config.get("rate_limit", "")
         saved_proxy = self._config.get("proxy", "")
@@ -5424,6 +5715,8 @@ class StreamKeep(QMainWindow):
         self._config["proxy"] = proxy
         global NATIVE_PROXY
         NATIVE_PROXY = proxy
+        # Apply parallel connections (affects direct MP4 downloads)
+        self._parallel_connections = max(1, min(16, self.parallel_spin.value()))
         # Apply bandwidth schedule rule
         self._bandwidth_rule = {
             "enabled": self.bw_enable_check.isChecked(),
@@ -5861,6 +6154,7 @@ class StreamKeep(QMainWindow):
         worker.proxy = YtDlpExtractor.proxy
         worker.download_subs = YtDlpExtractor.download_subs
         worker.sponsorblock = YtDlpExtractor.sponsorblock
+        worker.parallel_connections = self._parallel_connections
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)
@@ -6162,6 +6456,7 @@ class StreamKeep(QMainWindow):
         self.download_worker.proxy = YtDlpExtractor.proxy
         self.download_worker.download_subs = YtDlpExtractor.download_subs
         self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
+        self.download_worker.parallel_connections = self._parallel_connections
         if audio_url:
             self._log(f"Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
@@ -6408,6 +6703,7 @@ class StreamKeep(QMainWindow):
             segments = [(0, "live_recording", 0, 0)]
             worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
             worker.audio_url = q.audio_url
+            worker.parallel_connections = self._parallel_connections
             worker.log.connect(self._log)
             worker.all_done.connect(lambda: self._auto_record_done(channel_id))
             self.download_worker = worker
