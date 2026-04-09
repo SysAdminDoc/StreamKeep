@@ -502,9 +502,24 @@ def _scan_browser_cookies():
     seen_ytdlp = set()
     for display, ytdlp_name, paths in browsers:
         for p in paths:
-            if os.path.exists(p) and ytdlp_name not in seen_ytdlp:
-                found.append((display, ytdlp_name, p))
-                seen_ytdlp.add(ytdlp_name)
+            if os.path.exists(p):
+                # For Firefox-based browsers with non-standard profile paths,
+                # generate a yt-dlp arg that includes the profile path
+                actual_ytdlp = ytdlp_name
+                if ytdlp_name == "firefox" and display != "Firefox":
+                    # Find the actual profile dir (contains cookies.sqlite)
+                    if os.path.isdir(p):
+                        for entry in os.listdir(p):
+                            profile_dir = os.path.join(p, entry)
+                            if os.path.isdir(profile_dir) and os.path.exists(
+                                os.path.join(profile_dir, "cookies.sqlite")
+                            ):
+                                actual_ytdlp = f"firefox:{profile_dir}"
+                                break
+                key = actual_ytdlp if actual_ytdlp.startswith("firefox:") else ytdlp_name
+                if key not in seen_ytdlp:
+                    found.append((display, actual_ytdlp, p))
+                    seen_ytdlp.add(key)
                 break
     return found
 
@@ -1363,6 +1378,97 @@ class YtDlpExtractor(Extractor):
         except Exception as e:
             return None, str(e)
 
+    def _copy_locked_cookie_db(self, cookie_db_path, log_fn=None):
+        """Copy a locked Chromium cookie DB using sqlite3 backup API.
+        Creates a temp profile directory that yt-dlp can read.
+        Returns the --cookies-from-browser arg string, or None."""
+        import sqlite3 as _sqlite3
+        import tempfile, shutil
+        try:
+            # Find the User Data dir (parent of Default/ or the profile folder)
+            # cookie_db_path is like .../User Data/Default/Network/Cookies
+            # We need User Data dir for Local State, and the profile dir (Default)
+            parts = Path(cookie_db_path).parts
+            # Find "User Data" in the path
+            user_data_idx = None
+            for i, p in enumerate(parts):
+                if p == "User Data":
+                    user_data_idx = i
+                    break
+            if user_data_idx is None:
+                return None
+
+            user_data_dir = str(Path(*parts[:user_data_idx + 1]))
+            local_state_path = os.path.join(user_data_dir, "Local State")
+            if not os.path.exists(local_state_path):
+                return None
+
+            # Create temp profile structure
+            tmp_base = os.path.join(tempfile.gettempdir(), "streamkeep_cookies")
+            if os.path.exists(tmp_base):
+                shutil.rmtree(tmp_base, ignore_errors=True)
+            tmp_userdata = tmp_base
+            tmp_profile = os.path.join(tmp_userdata, "Default")
+            tmp_network = os.path.join(tmp_profile, "Network")
+            os.makedirs(tmp_network, exist_ok=True)
+
+            # Copy Local State (not locked)
+            shutil.copy2(local_state_path, os.path.join(tmp_userdata, "Local State"))
+
+            # Copy Cookies DB using sqlite3 backup (handles WAL locks)
+            if "Network" in cookie_db_path:
+                dst_cookies = os.path.join(tmp_network, "Cookies")
+            else:
+                dst_cookies = os.path.join(tmp_profile, "Cookies")
+
+            src_conn = _sqlite3.connect(f"file:{cookie_db_path}?mode=ro&nolock=1", uri=True)
+            dst_conn = _sqlite3.connect(dst_cookies)
+            src_conn.backup(dst_conn)
+            src_conn.close()
+            dst_conn.close()
+
+            self._log(log_fn, f"  Copied locked cookie DB to temp profile")
+            return tmp_profile
+
+        except Exception as e:
+            self._log(log_fn, f"  Cookie DB copy failed: {e}")
+            return None
+
+    def _find_cookie_db_path(self, ytdlp_name):
+        """Find the actual Cookies file path for a browser."""
+        local = os.environ.get("LOCALAPPDATA", "")
+        roaming = os.environ.get("APPDATA", "")
+        candidates = {
+            "chrome": [
+                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Network", "Cookies"),
+                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Cookies"),
+            ],
+            "chromium": [
+                os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
+                os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
+            ],
+            "edge": [
+                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Network", "Cookies"),
+                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Cookies"),
+            ],
+            "brave": [
+                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Network", "Cookies"),
+                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cookies"),
+            ],
+            "opera": [
+                os.path.join(roaming, "Opera Software", "Opera Stable", "Network", "Cookies"),
+                os.path.join(roaming, "Opera Software", "Opera Stable", "Cookies"),
+            ],
+            "vivaldi": [
+                os.path.join(local, "Vivaldi", "User Data", "Default", "Network", "Cookies"),
+                os.path.join(local, "Vivaldi", "User Data", "Default", "Cookies"),
+            ],
+        }
+        for p in candidates.get(ytdlp_name, []):
+            if os.path.exists(p):
+                return p
+        return None
+
     def _auto_retry_with_browsers(self, url, original_stderr, log_fn=None):
         """Scan for installed browsers and try each one's cookies until one works."""
         err_line = original_stderr.strip().split("\n")[-1] if original_stderr else ""
@@ -1381,9 +1487,27 @@ class YtDlpExtractor(Extractor):
             data, err = self._try_with_browser(url, ytdlp_name, log_fn)
             if data:
                 self._log(log_fn, f"Success with {display}! Saving as default.")
-                # Remember this browser for future use
                 YtDlpExtractor.cookies_browser = ytdlp_name
                 return data
+
+            # If "Could not copy" error — browser has the DB locked.
+            # Copy it ourselves using sqlite3 backup API and retry.
+            if err and "could not copy" in err.lower():
+                self._log(log_fn, f"  DB locked — copying with sqlite3 backup...")
+                db_path = self._find_cookie_db_path(ytdlp_name)
+                if db_path:
+                    tmp_profile = self._copy_locked_cookie_db(db_path, log_fn)
+                    if tmp_profile:
+                        # Retry with the temp profile copy
+                        browser_arg = f"{ytdlp_name}:{tmp_profile}"
+                        self._log(log_fn, f"  Retrying with copied profile...")
+                        data2, err2 = self._try_with_browser(url, browser_arg, log_fn)
+                        if data2:
+                            self._log(log_fn, f"Success with {display} (copied profile)! Saving as default.")
+                            YtDlpExtractor.cookies_browser = browser_arg
+                            return data2
+                        else:
+                            self._log(log_fn, f"  {display} (copied) failed: {err2}")
             else:
                 self._log(log_fn, f"  {display} failed: {err}")
 
