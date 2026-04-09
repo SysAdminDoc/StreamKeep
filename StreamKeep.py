@@ -47,12 +47,12 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
-    QSpinBox, QMessageBox, QGridLayout, QScrollArea
+    QSpinBox, QMessageBox, QGridLayout, QScrollArea, QSystemTrayIcon
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
-from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -443,9 +443,15 @@ class VODInfo:
 
 # ── Utility ───────────────────────────────────────────────────────────────
 
+# Module-level proxy URL — set by Settings tab so all native extractor curl
+# calls (Kick API, Twitch GraphQL, Rumble embed, etc.) honor the same proxy.
+NATIVE_PROXY = ""
+
 def _curl(url, headers=None, timeout=30):
     """Run curl and return stdout or None."""
     cmd = ["curl", "-s", "-L"]
+    if NATIVE_PROXY:
+        cmd.extend(["-x", NATIVE_PROXY])
     for k, v in (headers or {}).items():
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
@@ -471,6 +477,8 @@ def _curl_post_json(url, data, headers=None, timeout=30):
     cmd = ["curl", "-s", "-L", "-X", "POST",
            "-H", "Content-Type: application/json",
            "-d", json.dumps(data)]
+    if NATIVE_PROXY:
+        cmd.extend(["-x", NATIVE_PROXY])
     for k, v in (headers or {}).items():
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
@@ -1436,6 +1444,10 @@ class YtDlpExtractor(Extractor):
     rate_limit = ""
     # Set by Settings tab — proxy URL like "socks5://127.0.0.1:1080"
     proxy = ""
+    # Set by Settings tab — download subtitles for video formats
+    download_subs = False
+    # Set by Settings tab — remove SponsorBlock segments from YouTube
+    sponsorblock = False
 
     def _has_ytdlp(self):
         try:
@@ -1953,6 +1965,8 @@ class DownloadWorker(QThread):
         self.cookies_browser = ""  # Passed through for yt-dlp cookie auth
         self.rate_limit = ""  # e.g. "500K" or "2M" (yt-dlp --limit-rate)
         self.proxy = ""  # e.g. "socks5://127.0.0.1:1080"
+        self.download_subs = False  # yt-dlp --write-subs --sub-langs all
+        self.sponsorblock = False  # yt-dlp --sponsorblock-remove all
         self.max_retries = 2  # Retry failed segments up to N times
         self._cancel = False
 
@@ -1977,6 +1991,11 @@ class DownloadWorker(QThread):
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
+        if self.download_subs:
+            cmd.extend(["--write-subs", "--write-auto-subs",
+                        "--sub-langs", "en.*,en", "--embed-subs"])
+        if self.sponsorblock:
+            cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
         cmd.append(self.ytdlp_source)
 
         try:
@@ -2494,6 +2513,7 @@ class StreamKeep(QMainWindow):
         self.setWindowTitle(f"StreamKeep v{VERSION}")
         self.setMinimumSize(1020, 800)
         self.resize(1120, 900)
+        self.setAcceptDrops(True)  # Enable drag-and-drop URL support
         self.stream_info = None
         self.download_worker = None
         self._vod_list = []
@@ -2503,6 +2523,7 @@ class StreamKeep(QMainWindow):
         self._last_auto_output = ""
         self._history = []
         self._config = _load_config()
+        self._tray_icon = None
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
@@ -2512,6 +2533,46 @@ class StreamKeep(QMainWindow):
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
         self._apply_config()
+        self._init_tray_icon()
+
+    # ── Drag and Drop ─────────────────────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasUrls() or mime.hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        mime = event.mimeData()
+        url = ""
+        if mime.hasUrls():
+            for u in mime.urls():
+                s = u.toString()
+                if s.startswith("http"):
+                    url = s
+                    break
+                # Local file dropped → treat as direct media URL
+                if u.isLocalFile():
+                    url = u.toLocalFile()
+                    break
+        if not url and mime.hasText():
+            text = mime.text().strip()
+            if text.startswith("http") or os.path.exists(text):
+                url = text
+        if not url:
+            event.ignore()
+            return
+        if "\n" in url or "\r" in url or len(url) > 2048:
+            self._set_status("Dropped content is not a valid URL.", "warning")
+            event.ignore()
+            return
+        self._log(f"[DRAG] Loaded URL: {url[:100]}")
+        self.url_input.setText(url)
+        self._switch_tab(0)
+        self._on_fetch()
+        event.acceptProposedAction()
 
     def _apply_config(self):
         cfg = self._config
@@ -2552,6 +2613,42 @@ class StreamKeep(QMainWindow):
                           for h in self._history[-200:]]  # keep last 200
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
+
+    def _init_tray_icon(self):
+        """Create a system tray icon for completion notifications.
+        Falls back gracefully if tray isn't supported."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        # Build a simple colored icon programmatically (no asset file needed)
+        pix = QPixmap(32, 32)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(CAT["green"])))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(2, 2, 28, 28, 6, 6)
+        painter.end()
+        self._tray_icon = QSystemTrayIcon(QIcon(pix), self)
+        self._tray_icon.setToolTip(f"StreamKeep v{VERSION}")
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.showNormal()
+            self.activateWindow()
+            self.raise_()
+
+    def _notify(self, title, message, icon=QSystemTrayIcon.MessageIcon.Information):
+        """Show a tray notification if the window is not focused."""
+        if self._tray_icon is None:
+            return
+        if self.isActiveWindow():
+            return  # don't bother user if they're already looking at the app
+        try:
+            self._tray_icon.showMessage(title, message, icon, 5000)
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         # Stop active download worker cleanly
@@ -3622,8 +3719,30 @@ class StreamKeep(QMainWindow):
         if saved_proxy:
             self.proxy_input.setText(saved_proxy)
             YtDlpExtractor.proxy = saved_proxy
+            global NATIVE_PROXY
+            NATIVE_PROXY = saved_proxy
 
         card_lay.addWidget(network_block)
+
+        # YouTube extras — subtitles + SponsorBlock
+        yt_block, yt_lay = self._make_field_block(
+            "YouTube Extras",
+            "Optional yt-dlp features for YouTube videos."
+        )
+        self.subs_check = QCheckBox("Download subtitles (English) and embed in video")
+        self.sponsorblock_check = QCheckBox("Skip SponsorBlock segments (sponsor / self-promo / interaction)")
+        yt_lay.addWidget(self.subs_check)
+        yt_lay.addWidget(self.sponsorblock_check)
+
+        # Load saved yt-dlp extras
+        if self._config.get("download_subs"):
+            self.subs_check.setChecked(True)
+            YtDlpExtractor.download_subs = True
+        if self._config.get("sponsorblock"):
+            self.sponsorblock_check.setChecked(True)
+            YtDlpExtractor.sponsorblock = True
+
+        card_lay.addWidget(yt_block)
 
         # Save button
         save_row = QHBoxLayout()
@@ -3718,10 +3837,17 @@ class StreamKeep(QMainWindow):
         rate_limit = self.rate_limit_input.text().strip()
         YtDlpExtractor.rate_limit = rate_limit
         self._config["rate_limit"] = rate_limit
-        # Apply proxy
+        # Apply proxy (also routes native extractor curl calls through it)
         proxy = self.proxy_input.text().strip()
         YtDlpExtractor.proxy = proxy
         self._config["proxy"] = proxy
+        global NATIVE_PROXY
+        NATIVE_PROXY = proxy
+        # Apply YouTube extras
+        YtDlpExtractor.download_subs = self.subs_check.isChecked()
+        self._config["download_subs"] = YtDlpExtractor.download_subs
+        YtDlpExtractor.sponsorblock = self.sponsorblock_check.isChecked()
+        self._config["sponsorblock"] = YtDlpExtractor.sponsorblock
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
@@ -4075,6 +4201,8 @@ class StreamKeep(QMainWindow):
         worker.cookies_browser = YtDlpExtractor.cookies_browser
         worker.rate_limit = YtDlpExtractor.rate_limit
         worker.proxy = YtDlpExtractor.proxy
+        worker.download_subs = YtDlpExtractor.download_subs
+        worker.sponsorblock = YtDlpExtractor.sponsorblock
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)
@@ -4100,6 +4228,7 @@ class StreamKeep(QMainWindow):
         self._log(f"Batch complete! {self._batch_total} VOD(s) downloaded.")
         self._log(f"{'=' * 50}")
         self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
+        self._notify("StreamKeep — Batch complete", f"Downloaded {self._batch_total} VOD(s)")
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.vod_dl_all_btn.setEnabled(True)
@@ -4359,6 +4488,8 @@ class StreamKeep(QMainWindow):
         self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
         self.download_worker.rate_limit = YtDlpExtractor.rate_limit
         self.download_worker.proxy = YtDlpExtractor.proxy
+        self.download_worker.download_subs = YtDlpExtractor.download_subs
+        self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
         if audio_url:
             self._log(f"Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
@@ -4418,13 +4549,16 @@ class StreamKeep(QMainWindow):
         self._log(f"\n{'=' * 50}")
         self._log("All downloads complete!")
         self._log(f"{'=' * 50}")
+        title = self.stream_info.title if self.stream_info and self.stream_info.title else "Download"
         if self.stream_info and (self.stream_info.is_live or self.stream_info.total_secs <= 0):
             self._set_status("Live capture finished and was saved to the selected folder.", "success")
+            self._notify("StreamKeep — Capture finished", title[:80])
         else:
             self._set_status(
                 f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
                 "success",
             )
+            self._notify("StreamKeep — Download complete", title[:80])
         out_dir = self.output_input.text().strip()
         q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
         self._save_metadata(out_dir, q_name)
