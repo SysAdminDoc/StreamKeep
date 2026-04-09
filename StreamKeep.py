@@ -455,6 +455,60 @@ def _safe_filename(s, max_len=60):
     return re.sub(r'[<>:"/\\|?*]', '', s)[:max_len].strip()
 
 
+def _scan_browser_cookies():
+    """Scan for installed browsers with cookie stores. Returns list of (display_name, ytdlp_name, path)."""
+    local = os.environ.get("LOCALAPPDATA", "")
+    roaming = os.environ.get("APPDATA", "")
+    browsers = [
+        ("Chrome", "chrome", [
+            os.path.join(local, "Google", "Chrome", "User Data", "Default", "Cookies"),
+            os.path.join(local, "Google", "Chrome", "User Data", "Default", "Network", "Cookies"),
+        ]),
+        ("Chromium", "chromium", [
+            os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
+            os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
+        ]),
+        ("Firefox", "firefox", [
+            os.path.join(roaming, "Mozilla", "Firefox", "Profiles"),
+        ]),
+        ("Edge", "edge", [
+            os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Cookies"),
+            os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Network", "Cookies"),
+        ]),
+        ("Brave", "brave", [
+            os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cookies"),
+            os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Network", "Cookies"),
+        ]),
+        ("Opera", "opera", [
+            os.path.join(roaming, "Opera Software", "Opera Stable", "Cookies"),
+            os.path.join(roaming, "Opera Software", "Opera Stable", "Network", "Cookies"),
+        ]),
+        ("Opera GX", "opera", [
+            os.path.join(roaming, "Opera Software", "Opera GX Stable", "Cookies"),
+            os.path.join(roaming, "Opera Software", "Opera GX Stable", "Network", "Cookies"),
+        ]),
+        ("Vivaldi", "vivaldi", [
+            os.path.join(local, "Vivaldi", "User Data", "Default", "Cookies"),
+            os.path.join(local, "Vivaldi", "User Data", "Default", "Network", "Cookies"),
+        ]),
+        ("LibreWolf", "firefox", [
+            os.path.join(roaming, "librewolf", "Profiles"),
+        ]),
+        ("Waterfox", "firefox", [
+            os.path.join(roaming, "Waterfox", "Profiles"),
+        ]),
+    ]
+    found = []
+    seen_ytdlp = set()
+    for display, ytdlp_name, paths in browsers:
+        for p in paths:
+            if os.path.exists(p) and ytdlp_name not in seen_ytdlp:
+                found.append((display, ytdlp_name, p))
+                seen_ytdlp.add(ytdlp_name)
+                break
+    return found
+
+
 # ── Extractor Base & Registry ─────────────────────────────────────────────
 
 class Extractor:
@@ -1283,12 +1337,67 @@ class YtDlpExtractor(Extractor):
         cmd.append(url)
         return cmd
 
+    # Errors that indicate cookies/auth are needed
+    _AUTH_ERRORS = ["Sign in", "age", "confirm your age", "login", "cookies", "authentication",
+                    "members-only", "private video", "This video is available to this channel"]
+
+    def _is_auth_error(self, stderr):
+        lower = stderr.lower()
+        return any(phrase.lower() in lower for phrase in self._AUTH_ERRORS)
+
+    def _try_with_browser(self, url, browser_name, log_fn=None):
+        """Attempt yt-dlp extraction with a specific browser's cookies. Returns (data_dict, None) or (None, error_str)."""
+        cmd = ["yt-dlp", "--dump-json", "--no-download",
+               "--cookies-from-browser", browser_name, url]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                               creationflags=_CREATE_NO_WINDOW)
+            if r.returncode == 0:
+                return json.loads(r.stdout), None
+            err = r.stderr.strip().split("\n")[-1] if r.stderr else "Unknown error"
+            return None, err
+        except subprocess.TimeoutExpired:
+            return None, "Timed out"
+        except json.JSONDecodeError:
+            return None, "Bad JSON"
+        except Exception as e:
+            return None, str(e)
+
+    def _auto_retry_with_browsers(self, url, original_stderr, log_fn=None):
+        """Scan for installed browsers and try each one's cookies until one works."""
+        err_line = original_stderr.strip().split("\n")[-1] if original_stderr else ""
+        self._log(log_fn, f"Auth required: {err_line}")
+        self._log(log_fn, "Auto-scanning for browser cookies...")
+
+        browsers = _scan_browser_cookies()
+        if not browsers:
+            self._log(log_fn, "No browsers found on this system.")
+            return None
+
+        self._log(log_fn, f"Found {len(browsers)} browser(s) to try: {', '.join(d for d, _, _ in browsers)}")
+
+        for display, ytdlp_name, path in browsers:
+            self._log(log_fn, f"Trying cookies from {display} ({ytdlp_name})...")
+            data, err = self._try_with_browser(url, ytdlp_name, log_fn)
+            if data:
+                self._log(log_fn, f"Success with {display}! Saving as default.")
+                # Remember this browser for future use
+                YtDlpExtractor.cookies_browser = ytdlp_name
+                return data
+            else:
+                self._log(log_fn, f"  {display} failed: {err}")
+
+        self._log(log_fn, "All browsers tried — none had valid cookies for this URL.")
+        return None
+
     def resolve(self, url, log_fn=None):
         if not self._has_ytdlp():
             self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
             return None
 
         self._log(log_fn, f"Running yt-dlp extraction for: {url}")
+
+        # First attempt — use configured cookies (if any) or plain
         if self.cookies_browser:
             self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
         try:
@@ -1297,12 +1406,17 @@ class YtDlpExtractor(Extractor):
                 capture_output=True, text=True, timeout=60,
                 creationflags=_CREATE_NO_WINDOW
             )
-            if r.returncode != 0:
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+            elif self._is_auth_error(r.stderr):
+                # Auth/age error — auto-scan browsers and retry each one
+                data = self._auto_retry_with_browsers(url, r.stderr, log_fn)
+                if data is None:
+                    return None
+            else:
                 err = r.stderr.strip().split("\n")[-1] if r.stderr else "Unknown error"
                 self._log(log_fn, f"yt-dlp error: {err}")
                 return None
-
-            data = json.loads(r.stdout)
         except subprocess.TimeoutExpired:
             self._log(log_fn, "yt-dlp timed out")
             return None
@@ -2391,63 +2505,7 @@ class StreamKeep(QMainWindow):
 
     def _scan_browsers(self):
         """Scan for installed browsers by checking cookie database locations."""
-        local = os.environ.get("LOCALAPPDATA", "")
-        roaming = os.environ.get("APPDATA", "")
-        home = str(Path.home())
-
-        # (display_name, yt-dlp_name, cookie_db_paths)
-        browsers = [
-            ("Chrome", "chrome", [
-                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Cookies"),
-                os.path.join(local, "Google", "Chrome", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("Chromium", "chromium", [
-                os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
-                os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("Ungoogled Chromium", "chromium", [
-                os.path.join(local, "Chromium", "User Data", "Default", "Cookies"),
-                os.path.join(local, "Chromium", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("Firefox", "firefox", [
-                os.path.join(roaming, "Mozilla", "Firefox", "Profiles"),
-            ]),
-            ("Edge", "edge", [
-                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Cookies"),
-                os.path.join(local, "Microsoft", "Edge", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("Brave", "brave", [
-                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cookies"),
-                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("Opera", "opera", [
-                os.path.join(roaming, "Opera Software", "Opera Stable", "Cookies"),
-                os.path.join(roaming, "Opera Software", "Opera Stable", "Network", "Cookies"),
-            ]),
-            ("Opera GX", "opera", [
-                os.path.join(roaming, "Opera Software", "Opera GX Stable", "Cookies"),
-                os.path.join(roaming, "Opera Software", "Opera GX Stable", "Network", "Cookies"),
-            ]),
-            ("Vivaldi", "vivaldi", [
-                os.path.join(local, "Vivaldi", "User Data", "Default", "Cookies"),
-                os.path.join(local, "Vivaldi", "User Data", "Default", "Network", "Cookies"),
-            ]),
-            ("LibreWolf", "firefox", [
-                os.path.join(roaming, "librewolf", "Profiles"),
-            ]),
-            ("Waterfox", "firefox", [
-                os.path.join(roaming, "Waterfox", "Profiles"),
-            ]),
-        ]
-
-        found = []
-        for display, ytdlp_name, paths in browsers:
-            for p in paths:
-                if os.path.exists(p):
-                    found.append((display, ytdlp_name, p))
-                    break
-
-        return found
+        return _scan_browser_cookies()
 
     def _scan_browsers_silent(self):
         """Populate combo with scanned browsers without UI feedback."""
