@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 def _bootstrap():
     """Auto-install dependencies before imports."""
     required = {"PyQt6": "PyQt6"}
-    optional = {"yt_dlp": "yt-dlp", "deno": "deno"}
+    optional = {"yt_dlp": "yt-dlp", "deno": "deno", "playwright": "playwright"}
     import importlib
     for mod, pkg in {**required}.items():
         try:
@@ -38,7 +38,7 @@ def _bootstrap():
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
             except Exception:
-                pass  # yt-dlp is optional
+                pass  # optional deps — graceful fallback
 
 _bootstrap()
 
@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.4.0"
+VERSION = "4.5.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -2114,19 +2114,40 @@ class _PlaylistExpandWorker(QThread):
 
 
 class _PageScrapeWorker(QThread):
-    """Fetch a webpage and extract media/video links from its HTML."""
+    """Fetch a webpage and extract media/video links from its HTML.
+    Runs the headless-browser scraper first (catches lazy-loaded players)
+    and merges with the regex scraper's results."""
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
-    def __init__(self, url):
+    def __init__(self, url, use_headless=True):
         super().__init__()
         self.url = url
+        self.use_headless = use_headless
 
     def run(self):
         try:
-            links = _scrape_media_links(self.url, log_fn=self.log.emit)
-            self.finished.emit(links)
+            all_links = []
+            seen = set()
+
+            def merge(pairs):
+                for url, hint in pairs:
+                    if url in seen:
+                        continue
+                    seen.add(url)
+                    all_links.append((url, hint))
+
+            # Headless-browser pass: captures lazy-loaded players, JS-injected
+            # <video> elements, and blob-fed HLS streams.
+            if self.use_headless:
+                merge(_scrape_media_links_headless(self.url, log_fn=self.log.emit))
+
+            # Static-HTML pass: cheap regex scan for anything the headless
+            # pass might have missed (e.g. pages with many linked videos).
+            merge(_scrape_media_links(self.url, log_fn=self.log.emit))
+
+            self.finished.emit(all_links)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -2952,6 +2973,182 @@ class ChannelMonitor(QObject):
 
 
 # ── Direct URL Detection ──────────────────────────────────────────────────
+
+# Module-level flag so we only probe browser install once per session
+_PLAYWRIGHT_READY = None
+
+def _ensure_playwright_browser(log_fn=None):
+    """Check that Playwright is importable AND has a Chromium install.
+    Attempts `playwright install chromium` on first use. Returns True
+    if the browser is ready to use."""
+    global _PLAYWRIGHT_READY
+    if _PLAYWRIGHT_READY is not None:
+        return _PLAYWRIGHT_READY
+    try:
+        import playwright.sync_api  # noqa: F401
+    except ImportError:
+        if log_fn:
+            log_fn("[HEADLESS] Playwright not installed — falling back to regex scraper.")
+        _PLAYWRIGHT_READY = False
+        return False
+    # Try a minimal launch to see if the browser is installed
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+        _PLAYWRIGHT_READY = True
+        return True
+    except Exception as e:
+        err_str = str(e)
+        if "Executable doesn't exist" in err_str or "playwright install" in err_str:
+            if log_fn:
+                log_fn("[HEADLESS] Installing Chromium for Playwright (one-time, ~120MB)...")
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=300,
+                )
+            except Exception as install_err:
+                if log_fn:
+                    log_fn(f"[HEADLESS] Install failed: {install_err}")
+                _PLAYWRIGHT_READY = False
+                return False
+            # Retry the probe after install
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    browser.close()
+                _PLAYWRIGHT_READY = True
+                return True
+            except Exception as retry_err:
+                if log_fn:
+                    log_fn(f"[HEADLESS] Still can't launch after install: {retry_err}")
+                _PLAYWRIGHT_READY = False
+                return False
+        if log_fn:
+            log_fn(f"[HEADLESS] Launch failed: {err_str[:120]}")
+        _PLAYWRIGHT_READY = False
+        return False
+
+
+def _scrape_media_links_headless(page_url, log_fn=None, max_links=100, wait_seconds=8):
+    """Load a page in a headless Chromium browser and capture any network
+    requests that look like media streams. Catches lazy-loaded players
+    that the regex scraper can't see.
+
+    Returns a list of (url, hint) tuples. Falls back to empty list if
+    Playwright isn't available or fails."""
+    if not _ensure_playwright_browser(log_fn):
+        return []
+
+    media_ext_re = re.compile(
+        r'\.(mp4|webm|mkv|mov|mp3|m4a|ogg|flac|wav|m3u8|mpd|ts|aac|opus)'
+        r'(?:\?|$|/)',
+        re.IGNORECASE,
+    )
+    media_ct_prefixes = ("video/", "audio/", "application/vnd.apple.mpegurl",
+                         "application/x-mpegurl", "application/dash+xml")
+
+    captured = []
+    seen = set()
+
+    def add(u, hint):
+        if not u or u in seen:
+            return
+        if len(captured) >= max_links:
+            return
+        # Skip obvious non-content (sprites, icons, etc.)
+        lower = u.lower()
+        if any(x in lower for x in ("/ads/", "doubleclick", "analytics",
+                                    "telemetry", "/ping", "googlevideo.com/ptracking")):
+            return
+        seen.add(u)
+        captured.append((u, hint))
+
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True,
+                                        args=["--mute-audio", "--no-sandbox"])
+            context = browser.new_context(
+                user_agent=CURL_UA,
+                viewport={"width": 1280, "height": 800},
+            )
+            page = context.new_page()
+
+            def on_request(req):
+                u = req.url
+                rtype = req.resource_type
+                # By resource_type (most reliable)
+                if rtype in ("media", "xhr", "fetch"):
+                    if media_ext_re.search(u):
+                        add(u, f"headless {rtype}")
+                        return
+                # By URL extension
+                if media_ext_re.search(u):
+                    add(u, "headless url-ext")
+
+            def on_response(resp):
+                try:
+                    ct = (resp.headers.get("content-type", "") or "").lower()
+                except Exception:
+                    return
+                if any(ct.startswith(p) for p in media_ct_prefixes):
+                    add(resp.url, f"headless {ct.split(';')[0]}")
+
+            page.on("request", on_request)
+            page.on("response", on_response)
+
+            if log_fn:
+                log_fn(f"[HEADLESS] Loading {page_url[:80]} (up to {wait_seconds}s)")
+            try:
+                page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
+            except Exception as nav_err:
+                if log_fn:
+                    log_fn(f"[HEADLESS] Navigation warning: {str(nav_err)[:80]}")
+
+            # Try to trigger the player: scroll to it and click common play selectors
+            try:
+                # Find any <video> element and scroll it into view — often
+                # triggers lazy-load of the source
+                page.evaluate("""
+                    const v = document.querySelector('video');
+                    if (v) v.scrollIntoView({behavior:'instant',block:'center'});
+                """)
+            except Exception:
+                pass
+            try:
+                # Click common play buttons (best-effort, ignore failures)
+                for sel in ["button[aria-label*='play' i]", ".play-button",
+                            ".vjs-big-play-button", "button.ytp-large-play-button",
+                            ".plyr__control--overlaid"]:
+                    try:
+                        page.locator(sel).first.click(timeout=500)
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # Let the network settle and capture whatever loads
+            try:
+                page.wait_for_timeout(int(wait_seconds * 1000))
+            except Exception:
+                pass
+
+            browser.close()
+    except Exception as e:
+        if log_fn:
+            log_fn(f"[HEADLESS] Error: {str(e)[:120]}")
+        return []
+
+    if log_fn:
+        log_fn(f"[HEADLESS] Captured {len(captured)} media request(s)")
+    return captured
+
 
 def _scrape_media_links(page_url, log_fn=None, max_links=100):
     """Fetch a webpage and extract URLs that look like media or embeddable
