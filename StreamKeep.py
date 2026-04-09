@@ -47,7 +47,7 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
-    QSpinBox, QMessageBox
+    QSpinBox, QMessageBox, QGridLayout, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices
@@ -105,7 +105,7 @@ def _save_config(cfg):
         pass
 
 
-# ── Catppuccin Mocha ──────────────────────────────────────────────────────
+# ── Premium Midnight Theme ────────────────────────────────────────────────
 CAT = {
     "base": "#1e1e2e", "mantle": "#181825", "crust": "#11111b",
     "surface0": "#313244", "surface1": "#45475a", "surface2": "#585b70",
@@ -116,70 +116,137 @@ CAT = {
     "yellow": "#f9e2af", "peach": "#fab387", "maroon": "#eba0ac",
     "red": "#f38ba8", "mauve": "#cba6f7", "pink": "#f5c2e7",
     "flamingo": "#f2cdcd", "rosewater": "#f5e0dc",
+    "panel": "#131b2f", "panelHi": "#1a2440", "panelSoft": "#10192b",
+    "stroke": "#2b3652", "muted": "#8f9ab8", "accent": "#7dd3fc",
+    "accentSoft": "#6ee7b7", "gold": "#f8d38a",
 }
 
 STYLESHEET = f"""
-QMainWindow, QWidget {{
-    background-color: {CAT['base']};
+QMainWindow {{
+    background-color: {CAT['crust']};
+}}
+QWidget {{
     color: {CAT['text']};
-    font-family: 'Segoe UI', sans-serif;
+    font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
     font-size: 13px;
 }}
-QFrame#card {{
+QWidget#chrome {{
+    background-color: {CAT['crust']};
+}}
+QFrame#heroCard {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {CAT['panelHi']},
+        stop: 0.58 {CAT['panel']},
+        stop: 1 {CAT['panelSoft']}
+    );
+    border: 1px solid {CAT['stroke']};
+    border-radius: 22px;
+}}
+QFrame#card, QFrame#panel, QFrame#footerBar {{
     background-color: {CAT['mantle']};
-    border: 1px solid {CAT['surface0']};
-    border-radius: 10px;
-    padding: 12px;
+    border: 1px solid {CAT['stroke']};
+    border-radius: 18px;
+}}
+QFrame#subtleCard, QFrame#metricCard, QFrame#toolbar {{
+    background-color: {CAT['panelSoft']};
+    border: 1px solid {CAT['stroke']};
+    border-radius: 16px;
 }}
 QLabel {{
     color: {CAT['text']};
     border: none;
 }}
 QLabel#title {{
-    font-size: 20px;
-    font-weight: bold;
-    color: {CAT['green']};
+    font-size: 28px;
+    font-weight: 700;
+    color: {CAT['rosewater']};
 }}
 QLabel#subtitle {{
     font-size: 12px;
-    color: {CAT['overlay1']};
+    color: {CAT['muted']};
+}}
+QLabel#eyebrow {{
+    color: {CAT['accent']};
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#heroTitle {{
+    font-size: 24px;
+    font-weight: 700;
+    color: {CAT['rosewater']};
+}}
+QLabel#heroBody {{
+    font-size: 13px;
+    color: {CAT['subtext1']};
 }}
 QLabel#sectionTitle {{
-    font-size: 14px;
-    font-weight: bold;
-    color: {CAT['lavender']};
+    font-size: 16px;
+    font-weight: 700;
+    color: {CAT['rosewater']};
+}}
+QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint, QLabel#subtleText {{
+    color: {CAT['muted']};
+    font-size: 12px;
+}}
+QLabel#fieldLabel {{
+    color: {CAT['subtext1']};
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#metricLabel {{
+    color: {CAT['muted']};
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#metricValue {{
+    color: {CAT['rosewater']};
+    font-size: 18px;
+    font-weight: 700;
+}}
+QLabel#metricSubvalue {{
+    color: {CAT['subtext1']};
+    font-size: 12px;
+}}
+QLabel#statusLabel {{
+    color: {CAT['subtext1']};
+    font-size: 12px;
 }}
 QLabel#streamInfo {{
     font-size: 12px;
-    color: {CAT['subtext0']};
-    padding: 4px 8px;
-    background-color: {CAT['surface0']};
-    border-radius: 6px;
+    color: {CAT['subtext1']};
+    padding: 10px 12px;
+    background-color: {CAT['panelSoft']};
+    border: 1px solid {CAT['stroke']};
+    border-radius: 12px;
 }}
-QLineEdit {{
+QLineEdit, QComboBox, QSpinBox {{
     background-color: {CAT['surface0']};
     color: {CAT['text']};
-    border: 1px solid {CAT['surface1']};
-    border-radius: 6px;
-    padding: 8px 12px;
+    border: 1px solid {CAT['stroke']};
+    border-radius: 12px;
+    padding: 10px 12px;
     font-size: 13px;
     selection-background-color: {CAT['surface2']};
 }}
-QLineEdit:focus {{
-    border: 1px solid {CAT['lavender']};
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
+    border-color: {CAT['accent']};
+}}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+    border: 1px solid {CAT['accent']};
 }}
 QPushButton {{
     background-color: {CAT['surface0']};
     color: {CAT['text']};
-    border: 1px solid {CAT['surface1']};
-    border-radius: 6px;
-    padding: 8px 16px;
+    border: 1px solid {CAT['stroke']};
+    border-radius: 12px;
+    padding: 10px 16px;
     font-weight: 600;
     font-size: 13px;
 }}
 QPushButton:hover {{
     background-color: {CAT['surface1']};
-    border-color: {CAT['lavender']};
+    border-color: {CAT['accent']};
 }}
 QPushButton:pressed {{
     background-color: {CAT['surface2']};
@@ -190,10 +257,14 @@ QPushButton:disabled {{
     border-color: {CAT['surface0']};
 }}
 QPushButton#primary {{
-    background-color: {CAT['green']};
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {CAT['accentSoft']},
+        stop: 1 {CAT['green']}
+    );
     color: {CAT['crust']};
     border: none;
-    padding: 10px 24px;
+    padding: 10px 22px;
     font-size: 14px;
 }}
 QPushButton#primary:hover {{
@@ -203,6 +274,22 @@ QPushButton#primary:disabled {{
     background-color: {CAT['surface1']};
     color: {CAT['overlay0']};
 }}
+QPushButton#secondary {{
+    background-color: {CAT['panelSoft']};
+    color: {CAT['rosewater']};
+}}
+QPushButton#ghost {{
+    background-color: transparent;
+    color: {CAT['subtext1']};
+}}
+QPushButton#ghost:hover {{
+    background-color: {CAT['panelSoft']};
+}}
+QPushButton#toggleAccent:checked {{
+    background-color: {CAT['accent']};
+    color: {CAT['crust']};
+    border-color: {CAT['accent']};
+}}
 QPushButton#danger {{
     background-color: {CAT['red']};
     color: {CAT['crust']};
@@ -211,97 +298,92 @@ QPushButton#danger {{
 QPushButton#danger:hover {{
     background-color: {CAT['maroon']};
 }}
-QComboBox {{
-    background-color: {CAT['surface0']};
-    color: {CAT['text']};
-    border: 1px solid {CAT['surface1']};
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-}}
-QComboBox:hover {{
-    border-color: {CAT['lavender']};
-}}
 QComboBox::drop-down {{
     border: none;
-    padding-right: 8px;
+    width: 24px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {CAT['surface0']};
     color: {CAT['text']};
     selection-background-color: {CAT['surface2']};
-    border: 1px solid {CAT['surface1']};
-    border-radius: 4px;
+    border: 1px solid {CAT['stroke']};
+    border-radius: 10px;
 }}
 QTableWidget {{
     background-color: {CAT['mantle']};
     color: {CAT['text']};
-    border: 1px solid {CAT['surface0']};
-    border-radius: 8px;
-    gridline-color: {CAT['surface0']};
-    selection-background-color: {CAT['surface1']};
+    alternate-background-color: {CAT['panelSoft']};
+    border: 1px solid {CAT['stroke']};
+    border-radius: 16px;
+    gridline-color: transparent;
+    selection-background-color: {CAT['panelHi']};
     font-size: 13px;
+    padding: 4px;
 }}
 QTableWidget::item {{
-    padding: 6px 8px;
-    border-bottom: 1px solid {CAT['surface0']};
+    padding: 10px 12px;
+    border-bottom: 1px solid {CAT['stroke']};
 }}
 QTableWidget::item:selected {{
-    background-color: {CAT['surface1']};
+    background-color: {CAT['panelHi']};
 }}
 QHeaderView::section {{
-    background-color: {CAT['surface0']};
-    color: {CAT['subtext1']};
+    background-color: {CAT['panelSoft']};
+    color: {CAT['muted']};
     border: none;
-    border-bottom: 2px solid {CAT['surface1']};
-    padding: 8px;
-    font-weight: 600;
+    border-bottom: 1px solid {CAT['stroke']};
+    padding: 12px;
+    font-weight: 700;
     font-size: 12px;
 }}
 QTextEdit#log {{
     background-color: {CAT['crust']};
     color: {CAT['subtext0']};
-    border: 1px solid {CAT['surface0']};
-    border-radius: 8px;
-    padding: 8px;
+    border: 1px solid {CAT['stroke']};
+    border-radius: 16px;
+    padding: 10px;
     font-family: 'Cascadia Code', 'Consolas', monospace;
     font-size: 11px;
 }}
 QProgressBar {{
-    background-color: {CAT['surface0']};
+    background-color: {CAT['panelSoft']};
     border: none;
-    border-radius: 4px;
-    height: 6px;
+    border-radius: 6px;
+    height: 10px;
     text-align: center;
     color: transparent;
 }}
 QProgressBar::chunk {{
-    background-color: {CAT['green']};
-    border-radius: 4px;
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 {CAT['accent']},
+        stop: 1 {CAT['green']}
+    );
+    border-radius: 6px;
 }}
 QCheckBox {{
     color: {CAT['text']};
-    spacing: 6px;
+    spacing: 8px;
 }}
 QCheckBox::indicator {{
     width: 16px;
     height: 16px;
     border-radius: 4px;
-    border: 1px solid {CAT['surface2']};
+    border: 1px solid {CAT['stroke']};
     background-color: {CAT['surface0']};
 }}
 QCheckBox::indicator:checked {{
-    background-color: {CAT['green']};
-    border-color: {CAT['green']};
+    background-color: {CAT['accentSoft']};
+    border-color: {CAT['accentSoft']};
 }}
 QScrollBar:vertical {{
-    background-color: {CAT['mantle']};
-    width: 8px;
-    border-radius: 4px;
+    background-color: transparent;
+    width: 10px;
+    margin: 4px;
 }}
 QScrollBar::handle:vertical {{
     background-color: {CAT['surface2']};
-    border-radius: 4px;
+    border-radius: 5px;
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
@@ -311,8 +393,9 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
 }}
 QSplitter::handle {{
-    background-color: {CAT['surface0']};
-    height: 2px;
+    background-color: {CAT['stroke']};
+    height: 1px;
+    margin: 6px 0;
 }}
 """
 
@@ -2141,44 +2224,57 @@ PLATFORM_BADGES = {
 
 TAB_STYLE = f"""
 QPushButton#tab {{
-    background-color: transparent;
-    color: {CAT['overlay1']};
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 10px 20px;
+    background-color: {CAT['panelSoft']};
+    color: {CAT['muted']};
+    border: 1px solid {CAT['stroke']};
+    padding: 10px 18px;
     font-weight: 600;
     font-size: 13px;
-    border-radius: 0px;
+    border-radius: 999px;
 }}
 QPushButton#tab:hover {{
     color: {CAT['text']};
-    background-color: {CAT['surface0']};
+    border-color: {CAT['accent']};
+    background-color: {CAT['panel']};
 }}
 QPushButton#tabActive {{
-    background-color: transparent;
-    color: {CAT['green']};
-    border: none;
-    border-bottom: 2px solid {CAT['green']};
-    padding: 10px 20px;
+    background-color: {CAT['accent']};
+    color: {CAT['crust']};
+    border: 1px solid {CAT['accent']};
+    padding: 10px 18px;
     font-weight: 600;
     font-size: 13px;
-    border-radius: 0px;
+    border-radius: 999px;
 }}
 """
+
+
+def _path_label(path_text, fallback="Choose folder"):
+    path_text = (path_text or "").strip()
+    if not path_text:
+        return fallback
+    try:
+        p = Path(path_text)
+        if p.name:
+            return p.name
+    except Exception:
+        pass
+    return path_text
 
 
 class StreamKeep(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"StreamKeep v{VERSION}")
-        self.setMinimumSize(900, 750)
-        self.resize(980, 830)
+        self.setMinimumSize(1020, 800)
+        self.resize(1120, 900)
         self.stream_info = None
         self.download_worker = None
         self._vod_list = []
         self._vod_checks = []
         self._segment_checks = []
         self._segment_progress = []
+        self._last_auto_output = ""
         self._history = []
         self._config = _load_config()
         self.monitor = ChannelMonitor()
@@ -2195,11 +2291,15 @@ class StreamKeep(QMainWindow):
         cfg = self._config
         if cfg.get("output_dir"):
             self.output_input.setText(cfg["output_dir"])
+            self.settings_output.setText(cfg["output_dir"])
         if cfg.get("segment_idx") is not None:
             self.segment_combo.setCurrentIndex(cfg["segment_idx"])
         for h in cfg.get("history", []):
             self._history.append(HistoryEntry(**h))
         self._refresh_history_table()
+        self._refresh_download_summary()
+        self._refresh_monitor_summary()
+        self._refresh_history_summary()
 
     def _persist_config(self):
         cfg = self._config
@@ -2215,22 +2315,259 @@ class StreamKeep(QMainWindow):
         self._persist_config()
         super().closeEvent(event)
 
+    def _make_metric_card(self, label_text, value_text="--", sub_text=""):
+        card = QFrame()
+        card.setObjectName("metricCard")
+        card.setMinimumHeight(92)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(4)
+
+        label = QLabel(label_text)
+        label.setObjectName("metricLabel")
+        value = QLabel(value_text)
+        value.setObjectName("metricValue")
+        value.setWordWrap(True)
+        sub = QLabel(sub_text)
+        sub.setObjectName("metricSubvalue")
+        sub.setWordWrap(True)
+        sub.setVisible(bool(sub_text))
+
+        lay.addWidget(label)
+        lay.addWidget(value)
+        lay.addWidget(sub)
+        lay.addStretch(1)
+        return card, value, sub
+
+    def _make_field_block(self, title, hint=""):
+        card = QFrame()
+        card.setObjectName("subtleCard")
+        card.setMinimumHeight(108)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+
+        label = QLabel(title)
+        label.setObjectName("fieldLabel")
+        lay.addWidget(label)
+
+        if hint:
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("fieldHint")
+            hint_label.setWordWrap(True)
+            lay.addWidget(hint_label)
+
+        return card, lay
+
+    def _wrap_scroll_page(self, page):
+        page.setObjectName("chrome")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.viewport().setObjectName("chrome")
+        scroll.setWidget(page)
+        return scroll
+
+    def _style_table(self, table, row_height=46):
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.verticalHeader().setDefaultSectionSize(row_height)
+        table.horizontalHeader().setHighlightSections(False)
+
+    def _set_metric(self, value_label, sub_label, value, sub=""):
+        value_label.setText(value)
+        sub_label.setText(sub)
+        sub_label.setVisible(bool(sub))
+
+    def _can_autofill_output(self):
+        current = self.output_input.text().strip() if hasattr(self, "output_input") else ""
+        default_output = str(Path.home() / "Desktop" / "StreamKeep")
+        return not current or current == default_output or current == self._last_auto_output
+
+    def _apply_auto_output(self, path_text):
+        self._last_auto_output = path_text
+        self.output_input.setText(path_text)
+
+    def _set_status(self, message, tone="idle"):
+        tones = {
+            "idle": ("Standby", CAT["panelSoft"], CAT["subtext1"], CAT["stroke"]),
+            "working": ("Working", CAT["accent"], CAT["crust"], CAT["accent"]),
+            "success": ("Ready", CAT["accentSoft"], CAT["crust"], CAT["accentSoft"]),
+            "warning": ("Alert", CAT["gold"], CAT["crust"], CAT["gold"]),
+            "error": ("Error", CAT["red"], CAT["crust"], CAT["red"]),
+        }
+        pill, bg, fg, border = tones.get(tone, tones["idle"])
+        self.status_pill.setText(pill)
+        self.status_pill.setStyleSheet(
+            f"background-color: {bg}; color: {fg}; border: 1px solid {border}; "
+            "border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700;"
+        )
+        self.status_label.setText(message)
+        self.status_label.setToolTip(message)
+
+    def _refresh_download_summary(self):
+        if not hasattr(self, "download_hero_title"):
+            return
+
+        url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        if self.stream_info:
+            title = self.stream_info.title or "Source ready"
+            summary_parts = []
+            if self.stream_info.platform:
+                summary_parts.append(self.stream_info.platform)
+            if self.stream_info.channel:
+                summary_parts.append(self.stream_info.channel)
+            if self.stream_info.duration_str:
+                summary_parts.append(self.stream_info.duration_str)
+            if self.stream_info.is_live:
+                summary_parts.append("Live capture")
+            body = " | ".join(summary_parts) if summary_parts else "Metadata loaded and ready for download."
+        elif url:
+            ext = Extractor.detect(url)
+            title = "Source detected" if ext else "Paste a supported URL"
+            if ext:
+                body = f"{ext.NAME} recognized. Click Fetch to inspect quality options and segment timing."
+            else:
+                body = "Kick, Twitch, Rumble, podcasts, audio sources, and yt-dlp compatible links are supported."
+        else:
+            title = "Capture streams and VODs with cleaner control"
+            body = "Paste a source URL to inspect quality options, split recordings into segments, and keep output folders tidy."
+
+        self.download_hero_title.setText(title)
+        self.download_hero_body.setText(body)
+
+        platform_value = self.stream_info.platform if self.stream_info else "Auto detect"
+        platform_sub = "Detected after fetch" if self.stream_info else "Waiting for a supported URL"
+        duration_value = self.stream_info.duration_str if self.stream_info and self.stream_info.duration_str else "Waiting"
+        duration_sub = "Stream length" if self.stream_info else "Metadata not loaded yet"
+
+        total_segments = len(self._segment_checks)
+        checked_segments = sum(1 for cb in self._segment_checks if cb.isChecked())
+        if total_segments:
+            selection_value = f"{checked_segments}/{total_segments}"
+            selection_sub = "segments selected"
+        elif self.stream_info and self.stream_info.total_secs <= 0:
+            selection_value = "Live"
+            selection_sub = "capture runs until you stop it"
+        else:
+            selection_value = "Not ready"
+            selection_sub = "segments appear after fetch"
+
+        output_path = self.output_input.text().strip() if hasattr(self, "output_input") else ""
+        output_sub = output_path if len(output_path) <= 50 else f"...{output_path[-47:]}"
+
+        self._set_metric(self.download_platform_value, self.download_platform_sub, platform_value, platform_sub)
+        self._set_metric(self.download_duration_value, self.download_duration_sub, duration_value, duration_sub)
+        self._set_metric(self.download_selection_value, self.download_selection_sub, selection_value, selection_sub)
+        self._set_metric(
+            self.download_output_value,
+            self.download_output_sub,
+            _path_label(output_path),
+            output_sub or "Choose a destination folder",
+        )
+        self.download_output_value.setToolTip(output_path)
+        self.download_output_sub.setToolTip(output_path)
+
+        if hasattr(self, "segment_summary_label"):
+            if total_segments:
+                self.segment_summary_label.setText(f"{checked_segments} of {total_segments} segment(s) selected")
+            else:
+                self.segment_summary_label.setText("Segments will appear after metadata is loaded.")
+
+    def _refresh_vod_summary(self):
+        if not hasattr(self, "vod_summary_label"):
+            return
+        total = len(self._vod_checks)
+        checked = sum(1 for cb in self._vod_checks if cb.isChecked())
+        if total:
+            self.vod_summary_label.setText(f"{checked} of {total} VOD(s) selected")
+        else:
+            self.vod_summary_label.setText("Inspect a channel to browse available VODs.")
+
+    def _refresh_monitor_summary(self):
+        if not hasattr(self, "monitor_count_value"):
+            return
+        entries = self.monitor.entries
+        total = len(entries)
+        auto = sum(1 for e in entries if e.auto_record)
+        live = sum(1 for e in entries if e.last_status == "live")
+
+        self._set_metric(self.monitor_count_value, self.monitor_count_sub, str(total), "active entries")
+        self._set_metric(self.monitor_auto_value, self.monitor_auto_sub, str(auto), "auto-record enabled")
+        self._set_metric(self.monitor_live_value, self.monitor_live_sub, str(live), "currently live")
+
+        if total:
+            self.monitor_summary_label.setText(
+                f"Watching {total} channel(s). Auto-record is enabled on {auto} of them."
+            )
+        else:
+            self.monitor_summary_label.setText("Add a channel URL to start passive live monitoring.")
+
+    def _refresh_history_summary(self):
+        if not hasattr(self, "history_count_value"):
+            return
+        total = len(self._history)
+        latest = self._history[-1] if self._history else None
+
+        self._set_metric(self.history_count_value, self.history_count_sub, str(total), "saved downloads")
+        latest_value = latest.date if latest else "No entries"
+        latest_sub = latest.title if latest else "Completed downloads appear here"
+        self._set_metric(self.history_latest_value, self.history_latest_sub, latest_value, latest_sub)
+
+        if total:
+            self.history_summary_label.setText(
+                "Double-click a row to open the saved folder in Explorer."
+            )
+        else:
+            self.history_summary_label.setText("Download history builds automatically after each completed job.")
+
     def _init_ui(self):
         central = QWidget()
+        central.setObjectName("chrome")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(16)
 
-        # ── Header + Tabs ─────────────────────────────────────────────
-        header = QHBoxLayout()
+        header_card = QFrame()
+        header_card.setObjectName("heroCard")
+        header_lay = QVBoxLayout(header_card)
+        header_lay.setContentsMargins(20, 18, 20, 18)
+        header_lay.setSpacing(16)
+
+        header_top = QHBoxLayout()
+        header_top.setSpacing(18)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
+        eyebrow = QLabel("Capture Suite")
+        eyebrow.setObjectName("eyebrow")
         title = QLabel("StreamKeep")
         title.setObjectName("title")
-        ver = QLabel(f"v{VERSION}")
-        ver.setObjectName("subtitle")
-        header.addWidget(title)
-        header.addWidget(ver)
-        header.addSpacing(24)
+        subtitle = QLabel(
+            "Premium stream and VOD capture with cleaner segmentation, monitoring, and download history."
+        )
+        subtitle.setObjectName("heroBody")
+        subtitle.setWordWrap(True)
+        title_col.addWidget(eyebrow)
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        header_top.addLayout(title_col, 1)
+
+        version_card, _, _ = self._make_metric_card("Version", f"v{VERSION}", "Local desktop build")
+        version_card.setMaximumWidth(170)
+        header_top.addWidget(version_card)
+        header_lay.addLayout(header_top)
+
+        tab_shell = QFrame()
+        tab_shell.setObjectName("toolbar")
+        tab_lay = QHBoxLayout(tab_shell)
+        tab_lay.setContentsMargins(12, 10, 12, 10)
+        tab_lay.setSpacing(10)
 
         self._tab_btns = []
         self._tab_names = ["Download", "Monitor", "History", "Settings"]
@@ -2239,42 +2576,54 @@ class StreamKeep(QMainWindow):
             btn.setObjectName("tabActive" if i == 0 else "tab")
             btn.setStyleSheet(TAB_STYLE)
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
-            header.addWidget(btn)
+            tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
+        tab_lay.addStretch(1)
+        header_lay.addWidget(tab_shell)
+        root.addWidget(header_card)
 
-        header.addStretch()
-        root.addLayout(header)
-
-        # ── Stacked Widget ────────────────────────────────────────────
         self._stack = QStackedWidget()
-        self._stack.addWidget(self._build_download_tab())
-        self._stack.addWidget(self._build_monitor_tab())
-        self._stack.addWidget(self._build_history_tab())
-        self._stack.addWidget(self._build_settings_tab())
+        self._stack.addWidget(self._wrap_scroll_page(self._build_download_tab()))
+        self._stack.addWidget(self._wrap_scroll_page(self._build_monitor_tab()))
+        self._stack.addWidget(self._wrap_scroll_page(self._build_history_tab()))
+        self._stack.addWidget(self._wrap_scroll_page(self._build_settings_tab()))
         root.addWidget(self._stack, 1)
 
-        # ── Bottom Status Bar ─────────────────────────────────────────
-        bottom = QHBoxLayout()
-        self.status_label = QLabel("Paste a URL and click Fetch")
-        self.status_label.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 12px;")
-        bottom.addWidget(self.status_label)
-        bottom.addStretch()
+        footer = QFrame()
+        footer.setObjectName("footerBar")
+        footer_lay = QHBoxLayout(footer)
+        footer_lay.setContentsMargins(16, 12, 16, 12)
+        footer_lay.setSpacing(12)
+
+        self.status_pill = QLabel("Standby")
+        footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setWordWrap(True)
+        footer_lay.addWidget(self.status_label, 1)
+
         self.overall_progress = QProgressBar()
-        self.overall_progress.setFixedWidth(200)
-        self.overall_progress.setFixedHeight(8)
+        self.overall_progress.setFixedWidth(220)
+        self.overall_progress.setFixedHeight(10)
         self.overall_progress.setVisible(False)
-        bottom.addWidget(self.overall_progress)
+        footer_lay.addWidget(self.overall_progress, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setObjectName("danger")
-        self.stop_btn.setFixedWidth(70)
+        self.stop_btn.setFixedWidth(88)
         self.stop_btn.setVisible(False)
         self.stop_btn.clicked.connect(self._on_stop)
-        bottom.addWidget(self.stop_btn)
+        footer_lay.addWidget(self.stop_btn)
+
         self.open_folder_btn = QPushButton("Open Folder")
+        self.open_folder_btn.setObjectName("secondary")
         self.open_folder_btn.setVisible(False)
         self.open_folder_btn.clicked.connect(self._on_open_folder)
-        bottom.addWidget(self.open_folder_btn)
-        root.addLayout(bottom)
+        footer_lay.addWidget(self.open_folder_btn)
+        root.addWidget(footer)
+
+        self._set_status("Paste a URL to inspect a stream or VOD.", "idle")
 
     def _switch_tab(self, idx):
         self._stack.setCurrentIndex(idx)
@@ -2287,61 +2636,140 @@ class StreamKeep(QMainWindow):
     def _build_download_tab(self):
         page = QWidget()
         root = QVBoxLayout(page)
-        root.setContentsMargins(0, 8, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(14)
 
-        # ── URL Input Card ────────────────────────────────────────────
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero_lay = QVBoxLayout(hero)
+        hero_lay.setContentsMargins(18, 18, 18, 18)
+        hero_lay.setSpacing(14)
+
+        hero_top = QHBoxLayout()
+        hero_top.setSpacing(14)
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(4)
+        hero_kicker = QLabel("Downloader")
+        hero_kicker.setObjectName("eyebrow")
+        self.download_hero_title = QLabel("Capture streams and VODs with cleaner control")
+        self.download_hero_title.setObjectName("heroTitle")
+        self.download_hero_title.setWordWrap(True)
+        self.download_hero_body = QLabel(
+            "Paste a source URL to inspect quality options, split recordings into segments, and keep output folders tidy."
+        )
+        self.download_hero_body.setObjectName("heroBody")
+        self.download_hero_body.setWordWrap(True)
+        hero_copy.addWidget(hero_kicker)
+        hero_copy.addWidget(self.download_hero_title)
+        hero_copy.addWidget(self.download_hero_body)
+        hero_top.addLayout(hero_copy, 1)
+
+        source_card, self.download_platform_value, self.download_platform_sub = self._make_metric_card(
+            "Source", "Auto detect", "Waiting for a supported URL"
+        )
+        source_card.setMaximumWidth(190)
+        hero_top.addWidget(source_card)
+        hero_lay.addLayout(hero_top)
+
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(12)
+        duration_card, self.download_duration_value, self.download_duration_sub = self._make_metric_card(
+            "Duration", "Waiting", "Metadata not loaded yet"
+        )
+        selection_card, self.download_selection_value, self.download_selection_sub = self._make_metric_card(
+            "Selection", "Not ready", "segments appear after fetch"
+        )
+        output_card, self.download_output_value, self.download_output_sub = self._make_metric_card(
+            "Output", _path_label(str(Path.home() / "Desktop" / "StreamKeep")), ""
+        )
+        metrics_row.addWidget(duration_card)
+        metrics_row.addWidget(selection_card)
+        metrics_row.addWidget(output_card, 1)
+        hero_lay.addLayout(metrics_row)
+        root.addWidget(hero)
+
         url_card = QFrame()
         url_card.setObjectName("card")
         url_lay = QVBoxLayout(url_card)
-        url_lay.setSpacing(8)
+        url_lay.setContentsMargins(18, 18, 18, 18)
+        url_lay.setSpacing(12)
 
+        url_header = QVBoxLayout()
+        url_header.setSpacing(4)
         sec1 = QLabel("Stream URL")
         sec1.setObjectName("sectionTitle")
-        url_lay.addWidget(sec1)
+        sec1_body = QLabel(
+            "Inspect a channel, VOD, or direct media URL to unlock quality choices and segment controls."
+        )
+        sec1_body.setObjectName("sectionBody")
+        sec1_body.setWordWrap(True)
+        url_header.addWidget(sec1)
+        url_header.addWidget(sec1_body)
+        url_lay.addLayout(url_header)
 
         url_row = QHBoxLayout()
+        url_row.setSpacing(10)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Paste URL — kick.com/user, twitch.tv/user, rumble.com/v..., or any video URL")
+        self.url_input.setPlaceholderText(
+            "Paste a URL: kick.com/user, twitch.tv/user, rumble.com/v..., or any video URL"
+        )
         self.url_input.returnPressed.connect(lambda: self._on_fetch())
         self.url_input.textChanged.connect(self._on_url_changed)
-        url_row.addWidget(self.url_input)
+        url_row.addWidget(self.url_input, 1)
 
         self.platform_badge = QLabel("")
-        self.platform_badge.setFixedHeight(32)
+        self.platform_badge.setFixedHeight(36)
+        self.platform_badge.setMinimumWidth(96)
         self.platform_badge.setVisible(False)
         self.platform_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         url_row.addWidget(self.platform_badge)
 
         self.fetch_btn = QPushButton("Fetch")
         self.fetch_btn.setObjectName("primary")
-        self.fetch_btn.setFixedWidth(90)
+        self.fetch_btn.setFixedWidth(100)
         self.fetch_btn.clicked.connect(self._on_fetch)
         url_row.addWidget(self.fetch_btn)
 
         self.clip_btn = QPushButton("Clipboard Watch")
+        self.clip_btn.setObjectName("toggleAccent")
         self.clip_btn.setCheckable(True)
-        self.clip_btn.setFixedWidth(130)
+        self.clip_btn.setFixedWidth(148)
         self.clip_btn.clicked.connect(self._on_toggle_clipboard)
         url_row.addWidget(self.clip_btn)
         url_lay.addLayout(url_row)
 
+        url_hint = QLabel("Press Enter to fetch. Clipboard watch auto-loads the next copied URL.")
+        url_hint.setObjectName("subtleText")
+        url_lay.addWidget(url_hint)
+
         self.info_label = QLabel("")
         self.info_label.setObjectName("streamInfo")
+        self.info_label.setWordWrap(True)
         self.info_label.setVisible(False)
         url_lay.addWidget(self.info_label)
 
-        # VOD picker table
-        self.vod_widget = QWidget()
+        self.vod_widget = QFrame()
+        self.vod_widget.setObjectName("subtleCard")
         vod_main_lay = QVBoxLayout(self.vod_widget)
-        vod_main_lay.setContentsMargins(0, 4, 0, 0)
-        vod_main_lay.setSpacing(6)
+        vod_main_lay.setContentsMargins(14, 14, 14, 14)
+        vod_main_lay.setSpacing(10)
 
         vod_header = QHBoxLayout()
+        vod_header_copy = QVBoxLayout()
+        vod_header_copy.setSpacing(2)
         vod_title = QLabel("Available VODs")
-        vod_title.setStyleSheet(f"color: {CAT['peach']}; font-weight: bold; font-size: 13px;")
-        vod_header.addWidget(vod_title)
-        vod_header.addStretch()
+        vod_title.setObjectName("sectionTitle")
+        vod_hint = QLabel("Select one or more VODs to load for inspection or download in a batch.")
+        vod_hint.setObjectName("sectionBody")
+        vod_hint.setWordWrap(True)
+        vod_header_copy.addWidget(vod_title)
+        vod_header_copy.addWidget(vod_hint)
+        vod_header.addLayout(vod_header_copy, 1)
+
+        self.vod_summary_label = QLabel("Inspect a channel to browse available VODs.")
+        self.vod_summary_label.setObjectName("tableHint")
+        vod_header.addWidget(self.vod_summary_label)
+
         self.vod_select_all_cb = QCheckBox("Select All")
         self.vod_select_all_cb.setChecked(False)
         self.vod_select_all_cb.stateChanged.connect(self._on_vod_select_all)
@@ -2357,18 +2785,20 @@ class StreamKeep(QMainWindow):
         self.vod_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self.vod_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.vod_table.setColumnWidth(0, 36)
-        self.vod_table.setColumnWidth(1, 70)
+        self.vod_table.setColumnWidth(1, 84)
         self.vod_table.setColumnWidth(3, 160)
-        self.vod_table.setColumnWidth(4, 90)
+        self.vod_table.setColumnWidth(4, 96)
         self.vod_table.verticalHeader().setVisible(False)
         self.vod_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.vod_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.vod_table.setMaximumHeight(180)
+        self.vod_table.setMaximumHeight(220)
+        self._style_table(self.vod_table, 42)
         vod_main_lay.addWidget(self.vod_table)
 
         vod_btn_row = QHBoxLayout()
-        vod_btn_row.addStretch()
+        vod_btn_row.addStretch(1)
         self.vod_load_btn = QPushButton("Load Selected")
+        self.vod_load_btn.setObjectName("secondary")
         self.vod_load_btn.clicked.connect(self._on_vod_load_single)
         vod_btn_row.addWidget(self.vod_load_btn)
         self.vod_dl_all_btn = QPushButton("Download All Checked")
@@ -2381,22 +2811,25 @@ class StreamKeep(QMainWindow):
         url_lay.addWidget(self.vod_widget)
         root.addWidget(url_card)
 
-        # ── Settings Row ──────────────────────────────────────────────
-        settings_card = QFrame()
-        settings_card.setObjectName("card")
-        settings_lay = QHBoxLayout(settings_card)
-        settings_lay.setSpacing(12)
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_lay = QGridLayout(controls_card)
+        controls_lay.setContentsMargins(18, 18, 18, 18)
+        controls_lay.setHorizontalSpacing(12)
+        controls_lay.setVerticalSpacing(12)
 
-        settings_lay.addWidget(QLabel("Quality:"))
+        quality_block, quality_lay = self._make_field_block(
+            "Quality", "Choose the best available rendition after metadata loads."
+        )
         self.quality_combo = QComboBox()
-        self.quality_combo.setFixedWidth(220)
         self.quality_combo.setEnabled(False)
-        settings_lay.addWidget(self.quality_combo)
+        quality_lay.addWidget(self.quality_combo)
+        controls_lay.addWidget(quality_block, 0, 0)
 
-        settings_lay.addSpacing(16)
-        settings_lay.addWidget(QLabel("Segment:"))
+        segment_block, segment_lay = self._make_field_block(
+            "Segment Length", "Split long recordings into predictable export chunks."
+        )
         self.segment_combo = QComboBox()
-        self.segment_combo.setFixedWidth(150)
         self._segment_options = [
             ("15 minutes", 900), ("30 minutes", 1800), ("1 hour", 3600),
             ("2 hours", 7200), ("4 hours", 14400), ("Full stream", 0),
@@ -2405,32 +2838,51 @@ class StreamKeep(QMainWindow):
             self.segment_combo.addItem(label)
         self.segment_combo.setCurrentIndex(2)
         self.segment_combo.currentIndexChanged.connect(self._on_segment_length_changed)
-        settings_lay.addWidget(self.segment_combo)
+        segment_lay.addWidget(self.segment_combo)
+        controls_lay.addWidget(segment_block, 0, 1)
 
-        settings_lay.addSpacing(16)
-        settings_lay.addWidget(QLabel("Output:"))
+        output_block, output_lay = self._make_field_block(
+            "Output Folder", "Downloads are saved exactly where you point the app."
+        )
+        output_row = QHBoxLayout()
+        output_row.setSpacing(8)
         self.output_input = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
-        self.output_input.setMinimumWidth(200)
-        settings_lay.addWidget(self.output_input, 1)
-
+        self.output_input.textChanged.connect(self._refresh_download_summary)
+        output_row.addWidget(self.output_input, 1)
         browse_btn = QPushButton("Browse")
+        browse_btn.setObjectName("secondary")
         browse_btn.clicked.connect(self._on_browse)
-        settings_lay.addWidget(browse_btn)
-        root.addWidget(settings_card)
+        output_row.addWidget(browse_btn)
+        output_lay.addLayout(output_row)
+        controls_lay.addWidget(output_block, 1, 0, 1, 2)
+        controls_lay.setColumnStretch(0, 1)
+        controls_lay.setColumnStretch(1, 1)
+        root.addWidget(controls_card)
 
-        # ── Splitter: Segments Table + Log ────────────────────────────
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
 
         table_frame = QFrame()
         table_frame.setObjectName("card")
         table_lay = QVBoxLayout(table_frame)
-        table_lay.setSpacing(6)
+        table_lay.setContentsMargins(18, 18, 18, 18)
+        table_lay.setSpacing(10)
 
         table_header = QHBoxLayout()
+        table_copy = QVBoxLayout()
+        table_copy.setSpacing(3)
         sec2 = QLabel("Segments")
         sec2.setObjectName("sectionTitle")
-        table_header.addWidget(sec2)
-        table_header.addStretch()
+        sec2_body = QLabel("Review the generated cuts before exporting them.")
+        sec2_body.setObjectName("sectionBody")
+        table_copy.addWidget(sec2)
+        table_copy.addWidget(sec2_body)
+        table_header.addLayout(table_copy, 1)
+
+        self.segment_summary_label = QLabel("Segments will appear after metadata is loaded.")
+        self.segment_summary_label.setObjectName("tableHint")
+        table_header.addWidget(self.segment_summary_label)
+
         self.select_all_cb = QCheckBox("Select All")
         self.select_all_cb.setChecked(True)
         self.select_all_cb.stateChanged.connect(self._on_select_all)
@@ -2446,38 +2898,58 @@ class StreamKeep(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(0, 36)
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(4, 90)
+        self.table.setColumnWidth(1, 140)
+        self.table.setColumnWidth(4, 96)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._style_table(self.table, 46)
         table_lay.addWidget(self.table)
         splitter.addWidget(table_frame)
 
         log_frame = QFrame()
         log_frame.setObjectName("card")
         log_lay = QVBoxLayout(log_frame)
-        log_lay.setSpacing(4)
-        sec3 = QLabel("Log")
+        log_lay.setContentsMargins(18, 18, 18, 18)
+        log_lay.setSpacing(10)
+
+        log_header = QHBoxLayout()
+        log_copy = QVBoxLayout()
+        log_copy.setSpacing(3)
+        sec3 = QLabel("Runtime Log")
         sec3.setObjectName("sectionTitle")
-        log_lay.addWidget(sec3)
+        sec3_body = QLabel("Live extractor output, progress details, and troubleshooting context.")
+        sec3_body.setObjectName("sectionBody")
+        log_copy.addWidget(sec3)
+        log_copy.addWidget(sec3_body)
+        log_header.addLayout(log_copy, 1)
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.setObjectName("ghost")
+        clear_log_btn.clicked.connect(lambda: self.log_text.clear())
+        log_header.addWidget(clear_log_btn)
+        log_lay.addLayout(log_header)
+
         self.log_text = QTextEdit()
         self.log_text.setObjectName("log")
         self.log_text.setReadOnly(True)
         log_lay.addWidget(self.log_text)
         splitter.addWidget(log_frame)
-        splitter.setSizes([400, 200])
+        splitter.setSizes([450, 220])
         root.addWidget(splitter, 1)
 
-        # Download button row
         dl_row = QHBoxLayout()
-        dl_row.addStretch()
+        dl_hint = QLabel("Download the selected segments after the source is ready.")
+        dl_hint.setObjectName("subtleText")
+        dl_row.addWidget(dl_hint)
+        dl_row.addStretch(1)
         self.download_btn = QPushButton("Download Selected")
         self.download_btn.setObjectName("primary")
         self.download_btn.setEnabled(False)
         self.download_btn.clicked.connect(self._on_download)
         dl_row.addWidget(self.download_btn)
         root.addLayout(dl_row)
+
+        self._refresh_download_summary()
 
         return page
 
@@ -2486,46 +2958,120 @@ class StreamKeep(QMainWindow):
     def _build_monitor_tab(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 8, 0, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
 
-        card = QFrame()
-        card.setObjectName("card")
-        card_lay = QVBoxLayout(card)
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero_lay = QVBoxLayout(hero)
+        hero_lay.setContentsMargins(18, 18, 18, 18)
+        hero_lay.setSpacing(14)
 
-        header = QHBoxLayout()
-        sec = QLabel("Channel Monitor")
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(4)
+        kicker = QLabel("Monitor")
+        kicker.setObjectName("eyebrow")
+        title = QLabel("Keep an eye on channels without babysitting them")
+        title.setObjectName("heroTitle")
+        title.setWordWrap(True)
+        body = QLabel("Track supported channels, watch live state changes, and automatically start recording when they go live.")
+        body.setObjectName("heroBody")
+        body.setWordWrap(True)
+        hero_copy.addWidget(kicker)
+        hero_copy.addWidget(title)
+        hero_copy.addWidget(body)
+        hero_lay.addLayout(hero_copy)
+
+        monitor_metrics = QHBoxLayout()
+        monitor_metrics.setSpacing(12)
+        count_card, self.monitor_count_value, self.monitor_count_sub = self._make_metric_card(
+            "Channels", "0", "active entries"
+        )
+        auto_card, self.monitor_auto_value, self.monitor_auto_sub = self._make_metric_card(
+            "Auto Record", "0", "auto-record enabled"
+        )
+        live_card, self.monitor_live_value, self.monitor_live_sub = self._make_metric_card(
+            "Live Now", "0", "currently live"
+        )
+        monitor_metrics.addWidget(count_card)
+        monitor_metrics.addWidget(auto_card)
+        monitor_metrics.addWidget(live_card)
+        hero_lay.addLayout(monitor_metrics)
+        lay.addWidget(hero)
+
+        manage_card = QFrame()
+        manage_card.setObjectName("card")
+        manage_lay = QVBoxLayout(manage_card)
+        manage_lay.setContentsMargins(18, 18, 18, 18)
+        manage_lay.setSpacing(12)
+
+        manage_header = QVBoxLayout()
+        manage_header.setSpacing(4)
+        sec = QLabel("Add Channel")
         sec.setObjectName("sectionTitle")
-        header.addWidget(sec)
-        header.addStretch()
-        header.addWidget(QLabel("Checks channels for live status and can auto-record"))
-        card_lay.addLayout(header)
+        sec_body = QLabel("Supported examples: kick.com/user or twitch.tv/user")
+        sec_body.setObjectName("sectionBody")
+        manage_header.addWidget(sec)
+        manage_header.addWidget(sec_body)
+        manage_lay.addLayout(manage_header)
 
-        # Add channel row
-        add_row = QHBoxLayout()
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(12)
+
+        url_block, url_block_lay = self._make_field_block(
+            "Channel URL", "Paste the channel link you want StreamKeep to poll."
+        )
         self.monitor_url_input = QLineEdit()
         self.monitor_url_input.setPlaceholderText("Channel URL (kick.com/user, twitch.tv/user)")
-        add_row.addWidget(self.monitor_url_input)
+        url_block_lay.addWidget(self.monitor_url_input)
+        controls_row.addWidget(url_block, 1)
+
+        interval_block, interval_block_lay = self._make_field_block(
+            "Check Every", "Polling interval"
+        )
         self.monitor_interval_spin = QSpinBox()
         self.monitor_interval_spin.setRange(30, 600)
         self.monitor_interval_spin.setValue(120)
         self.monitor_interval_spin.setSuffix("s")
-        self.monitor_interval_spin.setFixedWidth(80)
-        self.monitor_interval_spin.setStyleSheet(
-            f"QSpinBox {{ background: {CAT['surface0']}; color: {CAT['text']}; "
-            f"border: 1px solid {CAT['surface1']}; border-radius: 6px; padding: 4px; }}"
-        )
-        add_row.addWidget(self.monitor_interval_spin)
-        self.monitor_auto_cb = QCheckBox("Auto-Record")
-        add_row.addWidget(self.monitor_auto_cb)
-        add_btn = QPushButton("Add")
-        add_btn.setObjectName("primary")
-        add_btn.setFixedWidth(70)
-        add_btn.clicked.connect(self._on_monitor_add)
-        add_row.addWidget(add_btn)
-        card_lay.addLayout(add_row)
+        interval_block_lay.addWidget(self.monitor_interval_spin)
+        controls_row.addWidget(interval_block)
 
-        # Monitor table
+        auto_block, auto_block_lay = self._make_field_block(
+            "Automation", "Record automatically when live"
+        )
+        self.monitor_auto_cb = QCheckBox("Enable auto-record")
+        auto_block_lay.addWidget(self.monitor_auto_cb)
+        auto_block_lay.addStretch(1)
+        controls_row.addWidget(auto_block)
+
+        add_btn = QPushButton("Add Channel")
+        add_btn.setObjectName("primary")
+        add_btn.clicked.connect(self._on_monitor_add)
+        controls_row.addWidget(add_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        manage_lay.addLayout(controls_row)
+
+        self.monitor_summary_label = QLabel("Add a channel URL to start passive live monitoring.")
+        self.monitor_summary_label.setObjectName("subtleText")
+        manage_lay.addWidget(self.monitor_summary_label)
+        lay.addWidget(manage_card)
+
+        table_card = QFrame()
+        table_card.setObjectName("card")
+        table_lay = QVBoxLayout(table_card)
+        table_lay.setContentsMargins(18, 18, 18, 18)
+        table_lay.setSpacing(10)
+
+        table_header = QVBoxLayout()
+        table_header.setSpacing(4)
+        table_title = QLabel("Watch List")
+        table_title.setObjectName("sectionTitle")
+        table_hint = QLabel("Entries refresh automatically and can trigger auto-recording when a stream goes live.")
+        table_hint.setObjectName("sectionBody")
+        table_hint.setWordWrap(True)
+        table_header.addWidget(table_title)
+        table_header.addWidget(table_hint)
+        table_lay.addLayout(table_header)
+
         self.monitor_table = QTableWidget()
         self.monitor_table.setColumnCount(6)
         self.monitor_table.setHorizontalHeaderLabels(["Platform", "Channel", "Status", "Interval", "Auto-Record", ""])
@@ -2535,17 +3081,19 @@ class StreamKeep(QMainWindow):
         self.monitor_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.monitor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.monitor_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.monitor_table.setColumnWidth(0, 70)
-        self.monitor_table.setColumnWidth(2, 80)
-        self.monitor_table.setColumnWidth(3, 70)
-        self.monitor_table.setColumnWidth(4, 90)
-        self.monitor_table.setColumnWidth(5, 70)
+        self.monitor_table.setColumnWidth(0, 84)
+        self.monitor_table.setColumnWidth(2, 90)
+        self.monitor_table.setColumnWidth(3, 84)
+        self.monitor_table.setColumnWidth(4, 108)
+        self.monitor_table.setColumnWidth(5, 110)
         self.monitor_table.verticalHeader().setVisible(False)
         self.monitor_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.monitor_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        card_lay.addWidget(self.monitor_table)
+        self._style_table(self.monitor_table, 44)
+        table_lay.addWidget(self.monitor_table)
 
-        lay.addWidget(card, 1)
+        lay.addWidget(table_card, 1)
+        self._refresh_monitor_summary()
         return page
 
     # ── History Tab ───────────────────────────────────────────────────
@@ -2553,19 +3101,62 @@ class StreamKeep(QMainWindow):
     def _build_history_tab(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 8, 0, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
+
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero_lay = QVBoxLayout(hero)
+        hero_lay.setContentsMargins(18, 18, 18, 18)
+        hero_lay.setSpacing(14)
+
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(4)
+        kicker = QLabel("History")
+        kicker.setObjectName("eyebrow")
+        title = QLabel("Keep a clean record of what you captured")
+        title.setObjectName("heroTitle")
+        title.setWordWrap(True)
+        body = QLabel("Completed downloads are listed here so you can quickly revisit folders, compare qualities, and confirm recent jobs.")
+        body.setObjectName("heroBody")
+        body.setWordWrap(True)
+        hero_copy.addWidget(kicker)
+        hero_copy.addWidget(title)
+        hero_copy.addWidget(body)
+        hero_lay.addLayout(hero_copy)
+
+        history_metrics = QHBoxLayout()
+        history_metrics.setSpacing(12)
+        count_card, self.history_count_value, self.history_count_sub = self._make_metric_card(
+            "Downloads", "0", "saved downloads"
+        )
+        latest_card, self.history_latest_value, self.history_latest_sub = self._make_metric_card(
+            "Latest", "No entries", "Completed downloads appear here"
+        )
+        history_metrics.addWidget(count_card)
+        history_metrics.addWidget(latest_card, 1)
+        hero_lay.addLayout(history_metrics)
+        lay.addWidget(hero)
 
         card = QFrame()
         card.setObjectName("card")
         card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(18, 18, 18, 18)
+        card_lay.setSpacing(10)
 
         header = QHBoxLayout()
+        header_copy = QVBoxLayout()
+        header_copy.setSpacing(4)
         sec = QLabel("Download History")
         sec.setObjectName("sectionTitle")
-        header.addWidget(sec)
-        header.addStretch()
+        self.history_summary_label = QLabel("Download history builds automatically after each completed job.")
+        self.history_summary_label.setObjectName("sectionBody")
+        self.history_summary_label.setWordWrap(True)
+        header_copy.addWidget(sec)
+        header_copy.addWidget(self.history_summary_label)
+        header.addLayout(header_copy, 1)
         clear_btn = QPushButton("Clear History")
+        clear_btn.setObjectName("secondary")
         clear_btn.clicked.connect(self._on_clear_history)
         header.addWidget(clear_btn)
         card_lay.addLayout(header)
@@ -2579,17 +3170,20 @@ class StreamKeep(QMainWindow):
         self.history_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.history_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        self.history_table.setColumnWidth(0, 140)
-        self.history_table.setColumnWidth(1, 70)
-        self.history_table.setColumnWidth(3, 100)
-        self.history_table.setColumnWidth(4, 80)
+        self.history_table.setColumnWidth(0, 150)
+        self.history_table.setColumnWidth(1, 84)
+        self.history_table.setColumnWidth(3, 110)
+        self.history_table.setColumnWidth(4, 88)
         self.history_table.verticalHeader().setVisible(False)
         self.history_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.history_table.doubleClicked.connect(self._on_history_double_click)
+        self._style_table(self.history_table, 44)
         card_lay.addWidget(self.history_table)
 
         lay.addWidget(card, 1)
+        self._refresh_history_summary()
         return page
 
     # ── Settings Tab ──────────────────────────────────────────────────
@@ -2597,93 +3191,64 @@ class StreamKeep(QMainWindow):
     def _build_settings_tab(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 8, 0, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
+
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero_lay = QVBoxLayout(hero)
+        hero_lay.setContentsMargins(18, 18, 18, 18)
+        hero_lay.setSpacing(14)
+
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(4)
+        kicker = QLabel("Settings")
+        kicker.setObjectName("eyebrow")
+        title = QLabel("Tune storage, authenticated access, and tooling")
+        title.setObjectName("heroTitle")
+        title.setWordWrap(True)
+        body = QLabel("Set default output behavior, attach browser cookies for gated content, and verify the local toolchain that powers downloads.")
+        body.setObjectName("heroBody")
+        body.setWordWrap(True)
+        hero_copy.addWidget(kicker)
+        hero_copy.addWidget(title)
+        hero_copy.addWidget(body)
+        hero_lay.addLayout(hero_copy)
+
+        settings_meta = QLabel(
+            f"Config file: {CONFIG_FILE}\nSupported platforms: {', '.join(Extractor.all_names())}"
+        )
+        settings_meta.setObjectName("sectionBody")
+        settings_meta.setWordWrap(True)
+        hero_lay.addWidget(settings_meta)
+        lay.addWidget(hero)
 
         card = QFrame()
         card.setObjectName("card")
         card_lay = QVBoxLayout(card)
-        card_lay.setSpacing(16)
+        card_lay.setContentsMargins(18, 18, 18, 18)
+        card_lay.setSpacing(14)
 
-        sec = QLabel("Settings")
-        sec.setObjectName("sectionTitle")
-        card_lay.addWidget(sec)
+        sections_top = QHBoxLayout()
+        sections_top.setSpacing(12)
 
-        info = QLabel(
-            f"Config saved to: {CONFIG_FILE}\n"
-            f"Supported platforms: {', '.join(Extractor.all_names())}"
+        general_block, general_lay = self._make_field_block(
+            "Default Output", "New downloads will default to this folder."
         )
-        info.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
-        card_lay.addWidget(info)
-
-        # Default output
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Default output directory:"))
+        output_row = QHBoxLayout()
+        output_row.setSpacing(8)
         self.settings_output = QLineEdit(str(Path.home() / "Desktop" / "StreamKeep"))
-        row1.addWidget(self.settings_output, 1)
+        output_row.addWidget(self.settings_output, 1)
         browse = QPushButton("Browse")
+        browse.setObjectName("secondary")
         browse.clicked.connect(lambda: self._settings_browse(self.settings_output))
-        row1.addWidget(browse)
-        card_lay.addLayout(row1)
+        output_row.addWidget(browse)
+        general_lay.addLayout(output_row)
+        sections_top.addWidget(general_block, 1)
 
-        # Browser cookies section
-        cookies_sec = QLabel("Browser Cookies")
-        cookies_sec.setStyleSheet(f"color: {CAT['lavender']}; font-weight: bold; font-size: 13px;")
-        card_lay.addWidget(cookies_sec)
-        cookies_hint = QLabel(
-            "For age-restricted or auth-required content (YouTube, etc.). "
-            "Select a browser to use its cookies, or browse for a cookies.txt file."
+        tools_block, tools_lay = self._make_field_block(
+            "Local Toolchain", "StreamKeep relies on these binaries for robust downloads."
         )
-        cookies_hint.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
-        cookies_hint.setWordWrap(True)
-        card_lay.addWidget(cookies_hint)
-
-        # Browser combo + Scan
-        row_cookies = QHBoxLayout()
-        row_cookies.addWidget(QLabel("Browser:"))
-        self.cookies_combo = QComboBox()
-        self.cookies_combo.setFixedWidth(220)
-        self.cookies_combo.addItem("None")
-        row_cookies.addWidget(self.cookies_combo)
-        scan_btn = QPushButton("Scan for Browsers")
-        scan_btn.clicked.connect(self._on_scan_browsers)
-        row_cookies.addWidget(scan_btn)
-        row_cookies.addStretch()
-        card_lay.addLayout(row_cookies)
-
-        # Cookies file browse
-        row_cookiefile = QHBoxLayout()
-        row_cookiefile.addWidget(QLabel("Or cookies file:"))
-        self.cookies_file_input = QLineEdit()
-        self.cookies_file_input.setPlaceholderText("Path to cookies.txt (Netscape format)")
-        row_cookiefile.addWidget(self.cookies_file_input, 1)
-        browse_cookies = QPushButton("Browse")
-        browse_cookies.clicked.connect(self._on_browse_cookies_file)
-        row_cookiefile.addWidget(browse_cookies)
-        card_lay.addLayout(row_cookiefile)
-
-        # Scan results label
-        self.cookies_scan_label = QLabel("")
-        self.cookies_scan_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
-        self.cookies_scan_label.setWordWrap(True)
-        card_lay.addWidget(self.cookies_scan_label)
-
-        # Load saved settings
-        saved_browser = self._config.get("cookies_browser", "")
-        saved_file = self._config.get("cookies_file", "")
-        if saved_file:
-            self.cookies_file_input.setText(saved_file)
-            YtDlpExtractor.cookies_file = saved_file
-        # Auto-scan on load to populate the combo
-        self._scan_browsers_silent()
-        if saved_browser:
-            idx = self.cookies_combo.findText(saved_browser)
-            if idx >= 0:
-                self.cookies_combo.setCurrentIndex(idx)
-            YtDlpExtractor.cookies_browser = saved_browser
-
-        # ffmpeg / yt-dlp info
-        row2 = QHBoxLayout()
         try:
             r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5,
                                creationflags=_CREATE_NO_WINDOW)
@@ -2696,10 +3261,60 @@ class StreamKeep(QMainWindow):
             yt_ver = f"yt-dlp {r.stdout.strip()}" if r.returncode == 0 else "Not installed"
         except Exception:
             yt_ver = "Not installed"
-        tools_label = QLabel(f"ffmpeg: {ff_ver[:60]}  |  {yt_ver}")
-        tools_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
-        row2.addWidget(tools_label)
-        card_lay.addLayout(row2)
+        ff_card, _, _ = self._make_metric_card("ffmpeg", "Ready" if ff_ver != "Not found" else "Missing", ff_ver[:48])
+        yt_card, _, _ = self._make_metric_card("yt-dlp", "Ready" if yt_ver != "Not installed" else "Missing", yt_ver[:48])
+        tools_metrics = QHBoxLayout()
+        tools_metrics.setSpacing(10)
+        tools_metrics.addWidget(ff_card)
+        tools_metrics.addWidget(yt_card)
+        tools_lay.addLayout(tools_metrics)
+        sections_top.addWidget(tools_block, 1)
+        card_lay.addLayout(sections_top)
+
+        cookies_block, cookies_lay = self._make_field_block(
+            "Browser Cookies",
+            "Use browser cookies or a cookies.txt file for age-restricted or authenticated content."
+        )
+
+        row_cookies = QHBoxLayout()
+        row_cookies.setSpacing(8)
+        self.cookies_combo = QComboBox()
+        self.cookies_combo.addItem("None")
+        row_cookies.addWidget(self.cookies_combo, 1)
+        scan_btn = QPushButton("Scan for Browsers")
+        scan_btn.setObjectName("secondary")
+        scan_btn.clicked.connect(self._on_scan_browsers)
+        row_cookies.addWidget(scan_btn)
+        cookies_lay.addLayout(row_cookies)
+
+        row_cookiefile = QHBoxLayout()
+        row_cookiefile.setSpacing(8)
+        self.cookies_file_input = QLineEdit()
+        self.cookies_file_input.setPlaceholderText("Path to cookies.txt (Netscape format)")
+        row_cookiefile.addWidget(self.cookies_file_input, 1)
+        browse_cookies = QPushButton("Browse")
+        browse_cookies.setObjectName("secondary")
+        browse_cookies.clicked.connect(self._on_browse_cookies_file)
+        row_cookiefile.addWidget(browse_cookies)
+        cookies_lay.addLayout(row_cookiefile)
+
+        self.cookies_scan_label = QLabel("")
+        self.cookies_scan_label.setObjectName("subtleText")
+        self.cookies_scan_label.setWordWrap(True)
+        cookies_lay.addWidget(self.cookies_scan_label)
+        card_lay.addWidget(cookies_block)
+
+        saved_browser = self._config.get("cookies_browser", "")
+        saved_file = self._config.get("cookies_file", "")
+        if saved_file:
+            self.cookies_file_input.setText(saved_file)
+            YtDlpExtractor.cookies_file = saved_file
+        self._scan_browsers_silent()
+        if saved_browser:
+            idx = self.cookies_combo.findText(saved_browser)
+            if idx >= 0:
+                self.cookies_combo.setCurrentIndex(idx)
+            YtDlpExtractor.cookies_browser = saved_browser
 
         # Save button
         save_row = QHBoxLayout()
@@ -2710,7 +3325,6 @@ class StreamKeep(QMainWindow):
         save_row.addWidget(save_btn)
         card_lay.addLayout(save_row)
 
-        card_lay.addStretch()
         lay.addWidget(card, 1)
         return page
 
@@ -2762,8 +3376,10 @@ class StreamKeep(QMainWindow):
             self._log(f"[SCAN] Found {len(found)} browser cookie stores:")
             for d, y, p in found:
                 self._log(f"  {d} ({y}) -> {p}")
+            self._set_status(f"Found {len(found)} browser cookie store(s).", "success")
         else:
             self.cookies_scan_label.setText("No browser cookie stores found.")
+            self._set_status("No browser cookie stores were found on this machine.", "warning")
 
     def _on_browse_cookies_file(self):
         f, _ = QFileDialog.getOpenFileName(
@@ -2790,7 +3406,8 @@ class StreamKeep(QMainWindow):
         YtDlpExtractor.cookies_file = cookies_file
         self._config["cookies_file"] = cookies_file
         self._persist_config()
-        self.status_label.setText("Settings saved")
+        self._refresh_download_summary()
+        self._set_status("Settings saved and applied to future downloads.", "success")
 
     # ── Actions ───────────────────────────────────────────────────────
 
@@ -2805,7 +3422,7 @@ class StreamKeep(QMainWindow):
             self.platform_badge.setText(f" {badge['text']} ")
             self.platform_badge.setStyleSheet(
                 f"background-color: {badge['color']}; color: {CAT['crust']}; "
-                f"border-radius: 6px; font-weight: bold; font-size: 11px; padding: 2px 8px;"
+                f"border-radius: 999px; font-weight: bold; font-size: 11px; padding: 4px 12px;"
             )
             self.platform_badge.setVisible(True)
         else:
@@ -2816,24 +3433,21 @@ class StreamKeep(QMainWindow):
         if ext:
             self._update_badge(ext.NAME)
             ch = ext.extract_channel_id(text.strip())
-            if ch:
-                self.output_input.setText(str(Path.home() / "Desktop" / _safe_filename(ch)))
+            if ch and self._can_autofill_output():
+                self._apply_auto_output(str(Path.home() / "Desktop" / _safe_filename(ch)))
         else:
             self._update_badge(None)
+        self._refresh_download_summary()
 
     def _on_toggle_clipboard(self, checked):
         if checked:
             self.clipboard_monitor.start()
-            self.clip_btn.setStyleSheet(
-                f"background-color: {CAT['green']}; color: {CAT['crust']}; "
-                f"border: none; border-radius: 6px; font-weight: 600;"
-            )
-            self._log("[CLIPBOARD] Monitoring started — copy a URL to auto-load")
-            self.status_label.setText("Clipboard monitoring active")
+            self._log("[CLIPBOARD] Monitoring started - copy a URL to auto-load")
+            self._set_status("Clipboard monitoring active. Copy a supported URL to load it automatically.", "working")
         else:
             self.clipboard_monitor.stop()
-            self.clip_btn.setStyleSheet("")
             self._log("[CLIPBOARD] Monitoring stopped")
+            self._set_status("Clipboard monitoring stopped.", "idle")
 
     def _on_clipboard_url(self, url):
         self._log(f"[CLIPBOARD] Detected: {url}")
@@ -2846,15 +3460,23 @@ class StreamKeep(QMainWindow):
         if not url:
             return
         self.fetch_btn.setEnabled(False)
-        self.fetch_btn.setText("...")
+        self.fetch_btn.setText("Fetching")
         self.download_btn.setEnabled(False)
+        self.open_folder_btn.setVisible(False)
+        self.overall_progress.setVisible(False)
         self.quality_combo.clear()
         self.quality_combo.setEnabled(False)
         self.table.setRowCount(0)
+        self._segment_checks = []
+        self._segment_progress = []
         self.info_label.setVisible(False)
+        self.stream_info = None
         if not vod_source:
             self.vod_widget.setVisible(False)
-        self.status_label.setText("Fetching stream info...")
+            self._vod_checks = []
+            self._refresh_vod_summary()
+        self._refresh_download_summary()
+        self._set_status("Fetching stream info and available playback options...", "working")
 
         self._fetch_worker = FetchWorker(url, vod_source=vod_source, vod_platform=vod_platform)
         self._fetch_worker.log.connect(self._log)
@@ -2904,19 +3526,21 @@ class StreamKeep(QMainWindow):
                                             "Reddit", "Audius", "Podcast"):
             current_out = self.output_input.text().strip()
             parent = os.path.dirname(current_out)
-            if parent:
+            if parent and self._can_autofill_output():
                 new_out = os.path.join(parent, _safe_filename(info.title))
-                self.output_input.setText(new_out)
+                self._apply_auto_output(new_out)
 
         self._build_segments(info.total_secs)
         self.download_btn.setEnabled(True)
-        self.status_label.setText("Ready — select segments and click Download")
+        self._refresh_download_summary()
+        self._set_status("Source ready. Review the segments and start the download when you are happy.", "success")
 
     def _on_fetch_error(self, err):
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
         self._log(f"[ERROR] {err}")
-        self.status_label.setText(f"Error: {err}")
+        self._refresh_download_summary()
+        self._set_status(f"Fetch failed: {err}", "error")
 
     def _on_vods_found(self, vod_list, platform_name):
         self._vod_list = vod_list
@@ -2926,6 +3550,7 @@ class StreamKeep(QMainWindow):
 
         for i, v in enumerate(vod_list):
             cb = QCheckBox()
+            cb.stateChanged.connect(lambda _state, self=self: self._refresh_vod_summary())
             cb_widget = QWidget()
             cb_lay = QHBoxLayout(cb_widget)
             cb_lay.addWidget(cb)
@@ -2960,12 +3585,14 @@ class StreamKeep(QMainWindow):
         self.vod_widget.setVisible(True)
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
-        self.status_label.setText(f"Found {len(vod_list)} VOD(s) — check and Load or Download All")
+        self._refresh_vod_summary()
+        self._set_status(f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.", "success")
 
     def _on_vod_select_all(self, state):
         checked = state == Qt.CheckState.Checked.value
         for cb in self._vod_checks:
             cb.setChecked(checked)
+        self._refresh_vod_summary()
 
     def _on_vod_load_single(self):
         for i, cb in enumerate(self._vod_checks):
@@ -2975,11 +3602,13 @@ class StreamKeep(QMainWindow):
                 self._on_fetch(vod_source=vod.source, vod_platform=vod.platform)
                 return
         self._log("No VOD checked.")
+        self._set_status("Select at least one VOD before loading it.", "warning")
 
     def _on_vod_download_all(self):
         checked = [self._vod_list[i] for i, cb in enumerate(self._vod_checks) if cb.isChecked()]
         if not checked:
             self._log("No VODs checked.")
+            self._set_status("Select at least one VOD before starting a batch download.", "warning")
             return
 
         self._batch_vods = checked
@@ -2993,6 +3622,7 @@ class StreamKeep(QMainWindow):
         self.vod_dl_all_btn.setEnabled(False)
         self.vod_load_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
+        self._set_status(f"Batch download queued for {self._batch_total} VOD(s).", "working")
         self._batch_next()
 
     def _batch_next(self):
@@ -3001,7 +3631,10 @@ class StreamKeep(QMainWindow):
             return
         vod = self._batch_vods[self._batch_idx]
         self._log(f"\n--- VOD {self._batch_idx + 1}/{self._batch_total}: {vod.title} ---")
-        self.status_label.setText(f"VOD {self._batch_idx + 1}/{self._batch_total}: Fetching...")
+        self._set_status(
+            f"Preparing VOD {self._batch_idx + 1} of {self._batch_total}: {vod.title}",
+            "working",
+        )
 
         worker = FetchWorker(self.url_input.text().strip(), vod_source=vod.source, vod_platform=vod.platform)
         worker.log.connect(self._log)
@@ -3068,7 +3701,11 @@ class StreamKeep(QMainWindow):
         self.overall_progress.setVisible(True)
         self.overall_progress.setValue(0)
         self.overall_progress.setMaximum(len(segments))
-        self.status_label.setText(f"VOD {self._batch_idx + 1}/{self._batch_total}: Downloading...")
+        self._refresh_download_summary()
+        self._set_status(
+            f"Downloading VOD {self._batch_idx + 1} of {self._batch_total}.",
+            "working",
+        )
 
         worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
         worker.audio_url = audio_url
@@ -3082,6 +3719,7 @@ class StreamKeep(QMainWindow):
 
     def _batch_on_fetch_error(self, err):
         self._log(f"[ERROR] {err}")
+        self._set_status(f"Batch fetch error: {err}", "error")
         self._batch_idx += 1
         self._batch_next()
 
@@ -3095,7 +3733,7 @@ class StreamKeep(QMainWindow):
         self._log(f"\n{'=' * 50}")
         self._log(f"Batch complete! {self._batch_total} VOD(s) downloaded.")
         self._log(f"{'=' * 50}")
-        self.status_label.setText(f"Batch complete — {self._batch_total} VOD(s)")
+        self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.vod_dl_all_btn.setEnabled(True)
@@ -3144,6 +3782,9 @@ class StreamKeep(QMainWindow):
     def _build_segments(self, total_secs):
         if total_secs <= 0:
             self.table.setRowCount(0)
+            self._segment_checks = []
+            self._segment_progress = []
+            self._refresh_download_summary()
             return
         seg_secs = self._get_segment_secs()
 
@@ -3166,6 +3807,7 @@ class StreamKeep(QMainWindow):
             duration = end - start
             cb = QCheckBox()
             cb.setChecked(True)
+            cb.stateChanged.connect(lambda _state, self=self: self._refresh_download_summary())
             cb_w = QWidget()
             cb_l = QHBoxLayout(cb_w)
             cb_l.addWidget(cb)
@@ -3193,15 +3835,19 @@ class StreamKeep(QMainWindow):
             sz = QTableWidgetItem("\u2014")
             sz.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 4, sz)
+        self._refresh_download_summary()
 
     def _on_select_all(self, state):
         checked = state == Qt.CheckState.Checked.value
         for cb in self._segment_checks:
             cb.setChecked(checked)
+        self._refresh_download_summary()
 
     def _on_segment_length_changed(self, idx):
         if self.stream_info and self.stream_info.total_secs > 0:
             self._build_segments(self.stream_info.total_secs)
+        else:
+            self._refresh_download_summary()
 
     def _on_browse(self):
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.output_input.text())
@@ -3216,6 +3862,7 @@ class StreamKeep(QMainWindow):
         total_secs = self.stream_info.total_secs
         if total_secs <= 0:
             self._log("[ERROR] No duration info")
+            self._set_status("This source does not expose duration metadata yet.", "error")
             return
 
         q_data = self.quality_combo.currentData()
@@ -3229,6 +3876,7 @@ class StreamKeep(QMainWindow):
             fmt_type = "hls"
         else:
             self._log("[ERROR] No quality selected")
+            self._set_status("Pick a quality before starting the download.", "warning")
             return
 
         # Determine title-based filename for single-segment downloads
@@ -3252,6 +3900,7 @@ class StreamKeep(QMainWindow):
 
         if not segments:
             self._log("No segments selected.")
+            self._set_status("Select at least one segment before downloading.", "warning")
             return
 
         out_dir = self.output_input.text().strip()
@@ -3267,10 +3916,14 @@ class StreamKeep(QMainWindow):
         self.download_btn.setEnabled(False)
         self.fetch_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
+        self.open_folder_btn.setVisible(False)
         self.overall_progress.setVisible(True)
         self.overall_progress.setValue(0)
         self.overall_progress.setMaximum(len(segments))
-        self.status_label.setText(f"Downloading 0/{len(segments)}...")
+        self._set_status(
+            f"Downloading 0 of {len(segments)} segment(s) to {_path_label(out_dir)}.",
+            "working",
+        )
 
         self.download_worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
         self.download_worker.audio_url = audio_url
@@ -3286,34 +3939,50 @@ class StreamKeep(QMainWindow):
     def _on_dl_progress(self, idx, pct, status):
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setValue(pct)
+        if hasattr(self, "_total_segments") and self._total_segments:
+            self._set_status(
+                f"Downloading {self._completed_segments}/{self._total_segments}. Segment {idx + 1}: {status}",
+                "working",
+            )
 
     def _on_segment_done(self, idx, size_str):
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setValue(100)
             self._segment_progress[idx].setStyleSheet(
-                f"QProgressBar::chunk {{ background-color: {CAT['green']}; border-radius: 4px; }}"
+                f"QProgressBar::chunk {{ background-color: {CAT['green']}; border-radius: 6px; }}"
             )
-        self.table.setItem(idx, 4, QTableWidgetItem(size_str))
+        size_item = QTableWidgetItem(size_str)
+        size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(idx, 4, size_item)
         self._completed_segments += 1
         self.overall_progress.setValue(self._completed_segments)
-        self.status_label.setText(f"Downloading {self._completed_segments}/{self._total_segments}...")
+        self._set_status(
+            f"Downloaded {self._completed_segments} of {self._total_segments} segment(s).",
+            "working",
+        )
 
     def _on_dl_error(self, idx, err):
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setStyleSheet(
-                f"QProgressBar::chunk {{ background-color: {CAT['red']}; border-radius: 4px; }}"
+                f"QProgressBar::chunk {{ background-color: {CAT['red']}; border-radius: 6px; }}"
             )
-        self.table.setItem(idx, 4, QTableWidgetItem("FAILED"))
+        fail_item = QTableWidgetItem("FAILED")
+        fail_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(idx, 4, fail_item)
+        self._set_status(f"Segment {idx + 1} failed: {err}", "error")
 
     def _on_all_done(self):
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self.open_folder_btn.setVisible(True)
-        self.status_label.setText(f"Complete — {self._completed_segments} segments downloaded")
         self._log(f"\n{'=' * 50}")
         self._log("All downloads complete!")
         self._log(f"{'=' * 50}")
+        self._set_status(
+            f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
+            "success",
+        )
         out_dir = self.output_input.text().strip()
         q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
         self._save_metadata(out_dir, q_name)
@@ -3328,11 +3997,12 @@ class StreamKeep(QMainWindow):
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
+        self.overall_progress.setVisible(False)
         if hasattr(self, 'vod_dl_all_btn'):
             self.vod_dl_all_btn.setEnabled(True)
             self.vod_load_btn.setEnabled(True)
-        self.status_label.setText("Cancelled")
         self._log("[CANCELLED] Download stopped by user.")
+        self._set_status("Download cancelled. You can adjust the selection and try again.", "warning")
 
     def _on_open_folder(self):
         out_dir = self.output_input.text().strip()
@@ -3351,8 +4021,10 @@ class StreamKeep(QMainWindow):
             self.monitor_url_input.clear()
             self._log(f"[MONITOR] Added: {url} (every {interval}s, auto-record: {auto})")
             self._persist_config()
+            self._set_status("Channel added to the watch list.", "success")
         else:
             self._log(f"[MONITOR] Cannot add: unsupported or duplicate")
+            self._set_status("Channel could not be added. It may already exist or be unsupported.", "error")
 
     def _refresh_monitor_table(self):
         entries = self.monitor.entries
@@ -3389,17 +4061,20 @@ class StreamKeep(QMainWindow):
             self.monitor_table.setItem(i, 4, auto)
 
             rm_btn = QPushButton("Remove")
+            rm_btn.setObjectName("ghost")
             rm_btn.setFixedHeight(28)
             rm_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_remove(idx))
             self.monitor_table.setCellWidget(i, 5, rm_btn)
+        self._refresh_monitor_summary()
 
     def _on_monitor_remove(self, idx):
         self.monitor.remove_channel(idx)
         self._persist_config()
+        self._set_status("Channel removed from the watch list.", "success")
 
     def _on_channel_live(self, channel_id):
         """Called when a monitored channel goes live."""
-        self.status_label.setText(f"{channel_id} went LIVE!")
+        self._set_status(f"{channel_id} went live.", "warning")
         # Find the entry for auto-record
         for e in self.monitor.entries:
             if e.channel_id == channel_id and e.auto_record and not e.is_recording:
@@ -3428,6 +4103,8 @@ class StreamKeep(QMainWindow):
             if e.channel_id == channel_id:
                 e.is_recording = False
         self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
+        self._refresh_monitor_summary()
+        self._set_status(f"Auto-record finished for {channel_id}.", "success")
 
     # ── History Actions ───────────────────────────────────────────────
 
@@ -3443,17 +4120,18 @@ class StreamKeep(QMainWindow):
     def _refresh_history_table(self):
         self.history_table.setRowCount(len(self._history))
         for i, h in enumerate(reversed(self._history)):
-            row = len(self._history) - 1 - i
             for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path]):
                 item = QTableWidgetItem(val)
                 if col in (0, 1, 3, 4):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.history_table.setItem(i, col, item)
+        self._refresh_history_summary()
 
     def _on_clear_history(self):
         self._history.clear()
         self._refresh_history_table()
         self._persist_config()
+        self._set_status("Download history cleared.", "success")
 
     def _on_history_double_click(self, index):
         row = index.row()
