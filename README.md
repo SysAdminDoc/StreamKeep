@@ -2,6 +2,9 @@
 
 A desktop GUI tool for downloading Kick.com VODs and live DVR streams in configurable segments.
 
+<img width="1457" height="1014" alt="2026-04-08 23_45_10-KickVODRipper v0 1 0" src="https://github.com/user-attachments/assets/3b92c55c-9ae3-4025-8f44-3119b492fe8f" />
+
+
 Paste a Kick channel URL (e.g., `kick.com/fishtank`) or a direct m3u8 playlist URL — KickVODRipper resolves stream sources via the Kick API, lets you pick quality and segment length, and downloads everything with ffmpeg.
 
 ## Features
