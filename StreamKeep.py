@@ -1249,6 +1249,8 @@ class YtDlpExtractor(Extractor):
     URL_PATTERNS = [
         re.compile(r'https?://.+'),  # Catch-all — must be registered last
     ]
+    # Set by Settings tab — browser name for --cookies-from-browser (chrome, firefox, edge, brave, etc.)
+    cookies_browser = ""
 
     def _has_ytdlp(self):
         try:
@@ -1261,7 +1263,6 @@ class YtDlpExtractor(Extractor):
             return False
 
     def extract_channel_id(self, url):
-        # Best-effort: use domain + path
         try:
             parsed = urllib.parse.urlparse(url.strip())
             parts = parsed.path.strip("/").split("/")
@@ -1271,15 +1272,24 @@ class YtDlpExtractor(Extractor):
         except Exception:
             return "download"
 
+    def _build_cmd(self, url):
+        cmd = ["yt-dlp", "--dump-json", "--no-download"]
+        if self.cookies_browser:
+            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        cmd.append(url)
+        return cmd
+
     def resolve(self, url, log_fn=None):
         if not self._has_ytdlp():
             self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
             return None
 
         self._log(log_fn, f"Running yt-dlp extraction for: {url}")
+        if self.cookies_browser:
+            self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
         try:
             r = subprocess.run(
-                ["yt-dlp", "--dump-json", "--no-download", url],
+                self._build_cmd(url),
                 capture_output=True, text=True, timeout=60,
                 creationflags=_CREATE_NO_WINDOW
             )
@@ -2282,6 +2292,24 @@ class StreamKeep(QMainWindow):
         row1.addWidget(browse)
         card_lay.addLayout(row1)
 
+        # Browser cookies for yt-dlp (age-restricted / auth-required content)
+        row_cookies = QHBoxLayout()
+        row_cookies.addWidget(QLabel("Browser cookies (for age-restricted content):"))
+        self.cookies_combo = QComboBox()
+        self.cookies_combo.setFixedWidth(180)
+        self.cookies_combo.addItems(["None", "chrome", "firefox", "edge", "brave", "opera", "vivaldi", "safari"])
+        saved_browser = self._config.get("cookies_browser", "")
+        if saved_browser:
+            idx = self.cookies_combo.findText(saved_browser)
+            if idx >= 0:
+                self.cookies_combo.setCurrentIndex(idx)
+            YtDlpExtractor.cookies_browser = saved_browser
+        row_cookies.addWidget(self.cookies_combo)
+        cookies_hint = QLabel("Passes --cookies-from-browser to yt-dlp for YouTube age gates, etc.")
+        cookies_hint.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
+        row_cookies.addWidget(cookies_hint, 1)
+        card_lay.addLayout(row_cookies)
+
         # ffmpeg / yt-dlp info
         row2 = QHBoxLayout()
         try:
@@ -2321,6 +2349,14 @@ class StreamKeep(QMainWindow):
 
     def _on_save_settings(self):
         self.output_input.setText(self.settings_output.text())
+        # Apply cookies setting
+        browser = self.cookies_combo.currentText()
+        if browser == "None":
+            YtDlpExtractor.cookies_browser = ""
+            self._config["cookies_browser"] = ""
+        else:
+            YtDlpExtractor.cookies_browser = browser
+            self._config["cookies_browser"] = browser
         self._persist_config()
         self.status_label.setText("Settings saved")
 
