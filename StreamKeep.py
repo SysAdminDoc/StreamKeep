@@ -1728,6 +1728,7 @@ class YtDlpExtractor(Extractor):
         # First pass — identify best audio-only format ID for pairing
         best_audio_id = ""
         best_audio_abr = 0
+        audio_only_fmts = []  # Collect audio-only formats for direct audio download
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") != "none":
                 continue
@@ -1738,10 +1739,12 @@ class YtDlpExtractor(Extractor):
             if fid and abr > best_audio_abr:
                 best_audio_abr = abr
                 best_audio_id = fid
+            if fid:
+                audio_only_fmts.append(fmt)
 
-        # Second pass — build QualityInfo entries using format IDs.
-        # We use ytdlp_direct mode so yt-dlp handles URL refresh, DASH
-        # merge, and format selection — this avoids expiring-URL issues.
+        # Second pass — build video QualityInfo entries using format IDs.
+        # Uses ytdlp_direct mode so yt-dlp handles URL refresh, DASH merge,
+        # and format selection — avoids expiring-URL issues.
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") == "none":
                 continue
@@ -1762,7 +1765,7 @@ class YtDlpExtractor(Extractor):
 
             info.qualities.append(QualityInfo(
                 name=f"{note} ({ext})",
-                url=fmt.get("url", ""),  # kept for display only; download uses source+format
+                url=fmt.get("url", ""),  # kept for display only
                 resolution=f"{w}x{h}" if w and h else "?",
                 bandwidth=int((fmt.get("tbr", 0) or 0) * 1000),
                 format_type="ytdlp_direct",
@@ -1780,7 +1783,7 @@ class YtDlpExtractor(Extractor):
         info.qualities = [q for q in info.qualities if q.resolution != "0x0"]
         info.qualities.sort(key=lambda q: q.bandwidth, reverse=True)
 
-        # Deduplicate by resolution
+        # Deduplicate video formats by resolution
         seen = set()
         unique = []
         for q in info.qualities:
@@ -1790,9 +1793,43 @@ class YtDlpExtractor(Extractor):
                 unique.append(q)
         info.qualities = unique
 
+        # Third pass — append audio-only entries at the end of the list,
+        # sorted by bitrate desc. These let users grab just the audio
+        # without downloading video (YouTube-to-MP3 workflow).
+        audio_only_fmts.sort(key=lambda f: f.get("abr") or 0, reverse=True)
+        seen_audio = set()
+        for fmt in audio_only_fmts:
+            fid = fmt.get("format_id", "")
+            ext = fmt.get("ext", "?")
+            abr = fmt.get("abr") or 0
+            acodec = fmt.get("acodec", "?")
+            # Deduplicate by codec+bitrate bucket
+            key = f"{acodec}:{int(abr // 16) * 16}"
+            if key in seen_audio:
+                continue
+            seen_audio.add(key)
+            # Shorten codec name (e.g. "mp4a.40.2" -> "aac")
+            codec_short = acodec.split(".")[0] if "." in acodec else acodec
+            if "mp4a" in acodec:
+                codec_short = "aac"
+            elif "opus" in acodec:
+                codec_short = "opus"
+            info.qualities.append(QualityInfo(
+                name=f"Audio only ({codec_short}, {abr:.0f}k)",
+                url=fmt.get("url", ""),
+                resolution="audio",
+                bandwidth=int(abr * 1000),
+                format_type="ytdlp_direct",
+                ytdlp_source=url,
+                ytdlp_format=fid,
+            ))
+
         self._log(log_fn, f"yt-dlp: {info.title}, {len(info.qualities)} formats, {info.duration_str}")
         if best_audio_id:
             self._log(log_fn, f"  Audio merge enabled (best audio id={best_audio_id}, {best_audio_abr:.0f} kbps)")
+        audio_count = sum(1 for q in info.qualities if q.resolution == "audio")
+        if audio_count:
+            self._log(log_fn, f"  {audio_count} audio-only format(s) available")
         return info
 
 
@@ -2382,6 +2419,7 @@ class HistoryEntry:
     quality: str = ""
     size: str = ""
     path: str = ""
+    url: str = ""  # Original source URL for retry
 
 
 # ── Main Window ───────────────────────────────────────────────────────────
@@ -2482,6 +2520,7 @@ class StreamKeep(QMainWindow):
                     quality=str(h.get("quality", "")),
                     size=str(h.get("size", "")),
                     path=str(h.get("path", "")),
+                    url=str(h.get("url", "")),
                 )
                 self._history.append(entry)
             except Exception:
@@ -2496,7 +2535,8 @@ class StreamKeep(QMainWindow):
         cfg["output_dir"] = self.output_input.text().strip()
         cfg["segment_idx"] = self.segment_combo.currentIndex()
         cfg["history"] = [{"date": h.date, "platform": h.platform, "title": h.title,
-                           "quality": h.quality, "size": h.size, "path": h.path}
+                           "quality": h.quality, "size": h.size, "path": h.path,
+                           "url": h.url}
                           for h in self._history[-200:]]  # keep last 200
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
@@ -3424,7 +3464,9 @@ class StreamKeep(QMainWindow):
         hero_lay.addLayout(hero_copy)
 
         settings_meta = QLabel(
-            f"Config file: {CONFIG_FILE}\nSupported platforms: {', '.join(Extractor.all_names())}"
+            f"StreamKeep v{VERSION}\n"
+            f"Config file: {CONFIG_FILE}\n"
+            f"Supported platforms: {', '.join(Extractor.all_names())}"
         )
         settings_meta.setObjectName("sectionBody")
         settings_meta.setWordWrap(True)
@@ -3667,6 +3709,13 @@ class StreamKeep(QMainWindow):
         if "\n" in url or "\r" in url or len(url) > 2048:
             self._log(f"[CLIPBOARD] Rejected malformed URL")
             return
+        # Dedup: ignore if already in the input box (avoids re-fetching on focus switches)
+        if url == self.url_input.text().strip():
+            return
+        # Dedup: ignore if it's the same as the last clipboard URL we accepted
+        if url == getattr(self, "_last_clipboard_url", ""):
+            return
+        self._last_clipboard_url = url
         self._log(f"[CLIPBOARD] Detected: {url}")
         self.url_input.setText(url)
         self._switch_tab(0)  # Switch to Download tab
@@ -4435,11 +4484,11 @@ class StreamKeep(QMainWindow):
 
     # ── History Actions ───────────────────────────────────────────────
 
-    def _add_history(self, platform, title, quality, size, path):
+    def _add_history(self, platform, title, quality, size, path, url=""):
         entry = HistoryEntry(
             date=datetime.now().strftime("%Y-%m-%d %H:%M"),
             platform=platform, title=title[:60],
-            quality=quality, size=size, path=path
+            quality=quality, size=size, path=path, url=url,
         )
         self._history.append(entry)
         self._refresh_history_table()
@@ -4462,20 +4511,33 @@ class StreamKeep(QMainWindow):
 
     def _on_history_double_click(self, index):
         row = index.row()
-        if row < len(self._history):
-            h = list(reversed(self._history))[row]
-            if os.path.isdir(h.path):
-                QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
+        if row >= len(self._history):
+            return
+        h = list(reversed(self._history))[row]
+        # If the folder still exists, open it
+        if h.path and os.path.isdir(h.path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
+            return
+        # Otherwise offer to retry the download if we have the URL
+        if h.url:
+            self._log(f"[HISTORY] Folder missing — re-fetching {h.url}")
+            self._set_status(f"Re-fetching {h.title or h.url}...", "working")
+            self.url_input.setText(h.url)
+            self._switch_tab(0)
+            self._on_fetch()
+        else:
+            self._set_status("Path missing and no saved URL to retry.", "warning")
 
     # ── Metadata ──────────────────────────────────────────────────────
 
     def _save_metadata(self, out_dir, quality_name=""):
         if self.stream_info:
             MetadataSaver.save(out_dir, self.stream_info)
-        # Add to history
+        # Add to history (use the URL from the input box so we can retry later)
         platform = self.stream_info.platform if self.stream_info else "?"
         title = self.stream_info.title if self.stream_info else "?"
-        self._add_history(platform, title, quality_name, "", out_dir)
+        url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        self._add_history(platform, title, quality_name, "", out_dir, url=url)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
