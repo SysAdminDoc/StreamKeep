@@ -924,8 +924,9 @@ class TwitchExtractor(Extractor):
         re.compile(r'(?:https?://)?(?:www\.)?twitch\.tv/([a-zA-Z0-9_]+)/?$'),
     ]
     CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
-    # Set by Settings tab — download chat replay alongside Twitch VODs
-    download_chat = False
+    # Set by Settings tab — download chat replay alongside Twitch VODs.
+    # Named _enabled to avoid shadowing the download_chat() method below.
+    download_chat_enabled = False
 
     def _gql(self, query, log_fn=None):
         return _curl_post_json(
@@ -3557,9 +3558,9 @@ class StreamKeep(QMainWindow):
         if hasattr(self, "nfo_check"):
             self.nfo_check.setChecked(self._write_nfo)
         # Twitch chat download
-        TwitchExtractor.download_chat = bool(cfg.get("download_twitch_chat", False))
+        TwitchExtractor.download_chat_enabled = bool(cfg.get("download_twitch_chat", False))
         if hasattr(self, "chat_check"):
-            self.chat_check.setChecked(TwitchExtractor.download_chat)
+            self.chat_check.setChecked(TwitchExtractor.download_chat_enabled)
         # Post-processing presets
         PostProcessor.extract_audio = bool(cfg.get("pp_extract_audio", False))
         PostProcessor.normalize_loudness = bool(cfg.get("pp_normalize_loudness", False))
@@ -3632,7 +3633,7 @@ class StreamKeep(QMainWindow):
         cfg["check_duplicates"] = self._check_duplicates
         cfg["download_queue"] = list(self._download_queue)
         cfg["write_nfo"] = self._write_nfo
-        cfg["download_twitch_chat"] = TwitchExtractor.download_chat
+        cfg["download_twitch_chat"] = TwitchExtractor.download_chat_enabled
         cfg["pp_extract_audio"] = PostProcessor.extract_audio
         cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
         cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
@@ -5166,7 +5167,7 @@ class StreamKeep(QMainWindow):
         self.nfo_check.setChecked(self._write_nfo)
         lib_lay.addWidget(self.nfo_check)
         self.chat_check = QCheckBox("Download Twitch VOD chat replay (JSON + plain text)")
-        self.chat_check.setChecked(TwitchExtractor.download_chat)
+        self.chat_check.setChecked(TwitchExtractor.download_chat_enabled)
         lib_lay.addWidget(self.chat_check)
         card_lay.addWidget(lib_block)
 
@@ -5382,7 +5383,7 @@ class StreamKeep(QMainWindow):
         self._check_duplicates = self.dup_check.isChecked()
         # Apply library/NFO + chat
         self._write_nfo = self.nfo_check.isChecked()
-        TwitchExtractor.download_chat = self.chat_check.isChecked()
+        TwitchExtractor.download_chat_enabled = self.chat_check.isChecked()
         # Apply post-processing presets
         PostProcessor.extract_audio = self.pp_audio_check.isChecked()
         PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()
@@ -6601,7 +6602,7 @@ class StreamKeep(QMainWindow):
                 count = len(self.stream_info.chapters)
                 self._log(f"[CHAPTERS] Exported {count} chapter(s) to {file_base}.chapters.txt/.json")
             # Twitch chat replay
-            if (TwitchExtractor.download_chat
+            if (TwitchExtractor.download_chat_enabled
                     and self.stream_info.platform == "Twitch"
                     and self.stream_info.url):
                 m = re.search(r'/vod/(\d+)\.m3u8', self.stream_info.url)
