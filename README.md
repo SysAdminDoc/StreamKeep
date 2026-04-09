@@ -11,18 +11,26 @@ A multi-platform desktop GUI tool for downloading VODs and live streams with nat
 | **Kick** | Yes | Yes | Native API (`/api/v2/channels`) |
 | **Twitch** | Yes | Yes | Native GraphQL + Usher m3u8 |
 | **Rumble** | - | Yes | Native Embed API (HLS + MP4) |
+| **SoundCloud** | - | - | Native API v2 (progressive + HLS) |
+| **Reddit** | - | - | Native JSON API (DASH + fallback MP4) |
+| **Audius** | - | - | Native Discovery API (direct stream) |
+| **Podcast RSS** | Yes (episodes) | - | RSS feed parser (enclosure URLs) |
+| **Direct URLs** | - | - | Content-Type sniffing (mp4, mp3, m3u8, etc.) |
 | **YouTube, Facebook, 1000+ sites** | - | Varies | yt-dlp fallback |
 
 ## Features
 
 ### Download
-- **Multi-platform** — native extractors for Kick, Twitch, Rumble + yt-dlp fallback for everything else
+- **Multi-platform** — native extractors for Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, Podcast RSS + yt-dlp fallback
 - **Auto-detect** — paste any URL, StreamKeep identifies the platform and resolves the stream
 - **Platform badge** — colored label shows which extractor matched your URL
 - **VOD browser** — list all VODs for a channel, check the ones you want, batch download
 - **Quality picker** — choose from all available qualities (1080p, 720p, 480p, etc.)
 - **Configurable segments** — split downloads into 15min, 30min, 1hr, 2hr, 4hr chunks, or full stream
-- **HLS + MP4** — supports both HLS streams and direct MP4 downloads
+- **HLS + MP4 + audio** — supports HLS streams, direct MP4, and audio downloads (mp3, m4a, etc.)
+- **Direct URL detection** — paste any raw media URL (mp4, mp3, m3u8) and it auto-detects via Content-Type
+- **Podcast RSS** — paste an RSS feed URL to list and download all episodes
+- **Clipboard Watch** — toggle clipboard monitoring to auto-load URLs as you copy them
 - **Resume-friendly** — skips already-downloaded segments on re-run
 - **Speed/ETA tracking** — real-time download speed, ETA, and file size in progress bars
 - **Metadata saving** — writes `metadata.json` + thumbnail alongside every download
@@ -57,7 +65,12 @@ python StreamKeep.py
    - `kick.com/fishtank` — lists all Kick VODs
    - `twitch.tv/xqc` — lists Twitch VODs or records live
    - `rumble.com/v...` — downloads Rumble video
-   - Any video URL — falls back to yt-dlp
+   - `soundcloud.com/artist/track` — downloads SoundCloud audio
+   - `reddit.com/r/.../comments/...` — downloads Reddit video
+   - `audius.co/artist/track` — downloads Audius audio
+   - RSS feed URL — lists podcast episodes
+   - Any `.mp4`, `.mp3`, `.m3u8` URL — direct download
+   - Any other video URL — falls back to yt-dlp
 2. Click **Fetch**
 3. Select quality and segment length
 4. Click **Download Selected** or **Download All Checked** for batch
@@ -76,7 +89,8 @@ StreamKeep uses a plugin-style extractor system with `__init_subclass__` auto-re
 ```
 URL Input
   -> Extractor.detect(url)  — matches URL against registered patterns
-    -> Native Extractor (Kick, Twitch, Rumble)
+    -> Native Extractor (Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, RSS)
+    -> Direct URL Detector (HEAD + Content-Type sniffing)
     -> YtDlpExtractor fallback (everything else)
   -> StreamInfo (qualities, duration, metadata)
   -> DownloadWorker (ffmpeg -c copy, segmented)
