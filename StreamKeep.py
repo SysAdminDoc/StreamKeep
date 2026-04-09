@@ -59,6 +59,34 @@ CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
+# ── Crash Logging ─────────────────────────────────────────────────────────
+
+CRASH_LOG = CONFIG_DIR / "crash.log"
+
+def _setup_crash_logging():
+    """Install global exception handler that logs to file + shows MessageBox."""
+    def handler(exc_type, exc_value, exc_tb):
+        import traceback
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            with open(CRASH_LOG, "a", encoding="utf-8") as f:
+                f.write(f"\n{'=' * 60}\n")
+                f.write(f"StreamKeep v{VERSION} crash at {datetime.now().isoformat()}\n")
+                f.write(tb_str)
+        except Exception:
+            pass
+        # Show MessageBox if QApplication exists
+        app = QApplication.instance()
+        if app:
+            QMessageBox.critical(
+                None, "StreamKeep — Crash",
+                f"An unexpected error occurred:\n\n{exc_value}\n\nDetails logged to:\n{CRASH_LOG}"
+            )
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+    sys.excepthook = handler
+
+
 # ── Config Persistence ────────────────────────────────────────────────────
 
 def _load_config():
@@ -2504,11 +2532,12 @@ class StreamKeep(QMainWindow):
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
+    _setup_crash_logging()
+
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5,
                        creationflags=_CREATE_NO_WINDOW)
     except FileNotFoundError:
-        from PyQt6.QtWidgets import QMessageBox
         app = QApplication(sys.argv)
         QMessageBox.critical(None, "StreamKeep", "ffmpeg not found in PATH.\nInstall ffmpeg and try again.")
         sys.exit(1)
