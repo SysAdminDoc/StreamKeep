@@ -47,16 +47,21 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
-    QSpinBox, QMessageBox, QGridLayout, QScrollArea, QSystemTrayIcon
+    QSpinBox, QMessageBox, QGridLayout, QScrollArea, QSystemTrayIcon,
+    QCompleter
 )
+from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.1.0"
+VERSION = "4.2.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+LOG_FILE = CONFIG_DIR / "streamkeep.log"
+LOG_FILE_MAX_BYTES = 2_000_000  # rotate at ~2MB
+LOG_FILE_BACKUP = CONFIG_DIR / "streamkeep.log.1"
 
 
 # ── Crash Logging ─────────────────────────────────────────────────────────
@@ -101,6 +106,25 @@ def _save_config(cfg):
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    except Exception:
+        pass
+
+
+def _write_log_line(msg):
+    """Append a timestamped line to the rotating log file. Ignored on error.
+    Rotates streamkeep.log -> streamkeep.log.1 when size exceeds the cap."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        if LOG_FILE.exists() and LOG_FILE.stat().st_size > LOG_FILE_MAX_BYTES:
+            try:
+                if LOG_FILE_BACKUP.exists():
+                    LOG_FILE_BACKUP.unlink()
+                LOG_FILE.rename(LOG_FILE_BACKUP)
+            except Exception:
+                pass
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
     except Exception:
         pass
 
@@ -427,6 +451,7 @@ class StreamInfo:
     is_master: bool = False
     segment_count: int = 0
     thumbnail_url: str = ""
+    chapters: list = field(default_factory=list)  # list of {title, start, end}
 
 @dataclass
 class VODInfo:
@@ -1902,6 +1927,21 @@ class YtDlpExtractor(Extractor):
             is_live=data.get("is_live", False),
         )
 
+        # Parse chapters if present (YouTube, etc.)
+        raw_chapters = data.get("chapters") or []
+        if isinstance(raw_chapters, list):
+            for ch in raw_chapters:
+                if not isinstance(ch, dict):
+                    continue
+                try:
+                    info.chapters.append({
+                        "title": str(ch.get("title") or "Chapter"),
+                        "start": float(ch.get("start_time") or 0),
+                        "end": float(ch.get("end_time") or 0),
+                    })
+                except (TypeError, ValueError):
+                    continue
+
         # First pass — identify best audio-only format ID for pairing
         best_audio_id = ""
         best_audio_abr = 0
@@ -2414,6 +2454,41 @@ class MetadataSaver:
                 pass
 
     @staticmethod
+    def write_chapters(output_dir, stream_info, file_base=""):
+        """Write {file_base}.chapters.txt and .chapters.json files if the
+        stream has chapter metadata. Text format is human-readable
+        'HH:MM:SS Chapter title' lines. JSON is the raw chapter list."""
+        if not stream_info or not output_dir:
+            return False
+        if not os.path.isdir(output_dir):
+            return False
+        chapters = getattr(stream_info, "chapters", None) or []
+        if not chapters:
+            return False
+        base = file_base or "chapters"
+        # Text
+        try:
+            txt_path = os.path.join(output_dir, f"{base}.chapters.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                for ch in chapters:
+                    secs = int(ch.get("start", 0) or 0)
+                    hh = secs // 3600
+                    mm = (secs % 3600) // 60
+                    ss = secs % 60
+                    ts = f"{hh:02d}:{mm:02d}:{ss:02d}"
+                    f.write(f"{ts} {ch.get('title', 'Chapter')}\n")
+        except Exception:
+            pass
+        # JSON
+        try:
+            json_path = os.path.join(output_dir, f"{base}.chapters.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump({"chapters": chapters}, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+        return True
+
+    @staticmethod
     def _xml_escape(s):
         if not s:
             return ""
@@ -2903,6 +2978,7 @@ class StreamKeep(QMainWindow):
         self._check_duplicates = True
         self._download_queue = []  # list of dicts: url, title, platform, status
         self._write_nfo = False
+        self._recent_urls = []  # most-recent-first list of distinct URLs
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
@@ -2998,6 +3074,12 @@ class StreamKeep(QMainWindow):
             q for q in cfg.get("download_queue", [])
             if isinstance(q, dict) and q.get("url")
         ]
+        # Restore recent URLs
+        recents = cfg.get("recent_urls", [])
+        if isinstance(recents, list):
+            self._recent_urls = [str(u) for u in recents if u][:30]
+            if hasattr(self, "_recent_url_model"):
+                self._recent_url_model.setStringList(self._recent_urls)
         for h in cfg.get("history", []):
             if not isinstance(h, dict):
                 continue
@@ -3037,6 +3119,7 @@ class StreamKeep(QMainWindow):
         cfg["pp_extract_audio"] = PostProcessor.extract_audio
         cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
         cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
+        cfg["recent_urls"] = list(self._recent_urls)
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
 
@@ -3346,12 +3429,49 @@ class StreamKeep(QMainWindow):
 
         self._set_metric(self.history_count_value, self.history_count_sub, str(total), "saved downloads")
         latest_value = latest.date if latest else "No entries"
-        latest_sub = latest.title if latest else "Completed downloads appear here"
+        latest_sub = (latest.title if latest else "Completed downloads appear here")[:40]
         self._set_metric(self.history_latest_value, self.history_latest_sub, latest_value, latest_sub)
+
+        # Compute top platform and top channel from history
+        if hasattr(self, "history_platform_value"):
+            if total:
+                from collections import Counter
+                plat_counts = Counter(h.platform for h in self._history if h.platform)
+                top_plat, top_plat_n = (plat_counts.most_common(1) or [("—", 0)])[0]
+                plat_share = f"{top_plat_n} / {total} downloads" if top_plat_n else "no data"
+                self._set_metric(self.history_platform_value, self.history_platform_sub,
+                                 top_plat or "—", plat_share)
+                # Top channel: parse channel from URL path (last segment of domain+path)
+                ch_counts = Counter()
+                for h in self._history:
+                    if not h.url:
+                        continue
+                    try:
+                        parsed = urllib.parse.urlparse(h.url)
+                        parts = [p for p in parsed.path.strip("/").split("/") if p]
+                        # kick.com/foo or twitch.tv/foo -> "foo"
+                        if parts:
+                            key = f"{parsed.netloc}/{parts[0]}"
+                            ch_counts[key] += 1
+                    except Exception:
+                        pass
+                if ch_counts:
+                    top_ch, top_ch_n = ch_counts.most_common(1)[0]
+                    self._set_metric(self.history_channel_value, self.history_channel_sub,
+                                     top_ch[:24], f"{top_ch_n} download(s)")
+                else:
+                    self._set_metric(self.history_channel_value, self.history_channel_sub,
+                                     "—", "no channel data")
+            else:
+                self._set_metric(self.history_platform_value, self.history_platform_sub,
+                                 "—", "appears most in history")
+                self._set_metric(self.history_channel_value, self.history_channel_sub,
+                                 "—", "most downloaded")
 
         if total:
             self.history_summary_label.setText(
-                "Double-click a row to open the saved folder in Explorer."
+                "Double-click a row to open the saved folder in Explorer. "
+                "Use the search box to filter by title, platform, path, or URL."
             )
         else:
             self.history_summary_label.setText("Download history builds automatically after each completed job.")
@@ -3545,6 +3665,13 @@ class StreamKeep(QMainWindow):
         )
         self.url_input.returnPressed.connect(lambda: self._on_fetch())
         self.url_input.textChanged.connect(self._on_url_changed)
+        # Recent URLs autocomplete dropdown
+        self._recent_url_model = QStringListModel(self._recent_urls)
+        self._recent_url_completer = QCompleter(self._recent_url_model, self)
+        self._recent_url_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._recent_url_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._recent_url_completer.setMaxVisibleItems(10)
+        self.url_input.setCompleter(self._recent_url_completer)
         url_row.addWidget(self.url_input, 1)
 
         self.platform_badge = QLabel("")
@@ -4031,8 +4158,16 @@ class StreamKeep(QMainWindow):
         latest_card, self.history_latest_value, self.history_latest_sub = self._make_metric_card(
             "Latest", "No entries", "Completed downloads appear here"
         )
+        platform_card, self.history_platform_value, self.history_platform_sub = self._make_metric_card(
+            "Top Platform", "—", "appears most in history"
+        )
+        channel_card, self.history_channel_value, self.history_channel_sub = self._make_metric_card(
+            "Top Channel", "—", "most downloaded"
+        )
         history_metrics.addWidget(count_card)
         history_metrics.addWidget(latest_card, 1)
+        history_metrics.addWidget(platform_card)
+        history_metrics.addWidget(channel_card, 1)
         hero_lay.addLayout(history_metrics)
         lay.addWidget(hero)
 
@@ -4487,6 +4622,7 @@ class StreamKeep(QMainWindow):
         self.log_text.append(msg)
         sb = self.log_text.verticalScrollBar()
         sb.setValue(sb.maximum())
+        _write_log_line(msg)
 
     def _update_badge(self, platform_name=None):
         if platform_name and platform_name in PLATFORM_BADGES:
@@ -4543,6 +4679,19 @@ class StreamKeep(QMainWindow):
         self._switch_tab(0)  # Switch to Download tab
         self._on_fetch()
 
+    def _remember_url(self, url):
+        """Add URL to the top of the recent URLs list (most-recent-first)."""
+        if not url:
+            return
+        # Dedup: move to front if already present
+        if url in self._recent_urls:
+            self._recent_urls.remove(url)
+        self._recent_urls.insert(0, url)
+        # Keep the last 30
+        self._recent_urls = self._recent_urls[:30]
+        if hasattr(self, "_recent_url_model"):
+            self._recent_url_model.setStringList(self._recent_urls)
+
     def _find_duplicate(self, url, title=""):
         """Check history for a matching URL (exact) or title (fuzzy).
         Returns matching HistoryEntry or None."""
@@ -4563,6 +4712,9 @@ class StreamKeep(QMainWindow):
         url = self.url_input.text().strip()
         if not url:
             return
+        # Track recent URLs for the autocomplete dropdown
+        if not vod_source:
+            self._remember_url(url)
         # Check for URL-based duplicate before hitting the network
         if not vod_source:
             dup = self._find_duplicate(url)
@@ -5594,11 +5746,15 @@ class StreamKeep(QMainWindow):
     def _save_metadata(self, out_dir, quality_name=""):
         if self.stream_info:
             MetadataSaver.save(out_dir, self.stream_info)
+            file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
             # NFO metadata for Kodi/Jellyfin/Plex libraries
             if self._write_nfo:
-                file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
                 MetadataSaver.write_nfo(out_dir, self.stream_info, file_base=file_base)
                 self._log(f"[NFO] Wrote {file_base or 'movie'}.nfo for media library")
+            # Chapter export (YouTube + any yt-dlp source with chapters)
+            if MetadataSaver.write_chapters(out_dir, self.stream_info, file_base=file_base):
+                count = len(self.stream_info.chapters)
+                self._log(f"[CHAPTERS] Exported {count} chapter(s) to {file_base}.chapters.txt/.json")
             # Twitch chat replay
             if (TwitchExtractor.download_chat
                     and self.stream_info.platform == "Twitch"
