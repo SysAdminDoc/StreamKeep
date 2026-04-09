@@ -46,14 +46,35 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
-    QCheckBox, QFrame, QSplitter, QAbstractItemView
+    QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
+    QSpinBox, QMessageBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamForge"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+# ── Config Persistence ────────────────────────────────────────────────────
+
+def _load_config():
+    try:
+        if CONFIG_FILE.exists():
+            return json.loads(CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_config(cfg):
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    except Exception:
+        pass
 
 
 # ── Catppuccin Mocha ──────────────────────────────────────────────────────
@@ -1111,8 +1132,8 @@ class FetchWorker(QThread):
 
 
 class DownloadWorker(QThread):
-    """Downloads segments using ffmpeg."""
-    progress = pyqtSignal(int, int, str)
+    """Downloads segments using ffmpeg with speed/ETA tracking."""
+    progress = pyqtSignal(int, int, str)   # seg_idx, percent, status (includes speed/ETA)
     segment_done = pyqtSignal(int, str)
     log = pyqtSignal(str)
     error = pyqtSignal(int, str)
@@ -1137,8 +1158,7 @@ class DownloadWorker(QThread):
                 self.log.emit("Download cancelled.")
                 return
 
-            ext = ".mp4" if self.format_type != "mp4" else ".mp4"
-            outfile = os.path.join(self.output_dir, f"{label}{ext}")
+            outfile = os.path.join(self.output_dir, f"{label}.mp4")
             if os.path.exists(outfile):
                 size = os.path.getsize(outfile)
                 if size > 1024:
@@ -1150,9 +1170,12 @@ class DownloadWorker(QThread):
             self.progress.emit(seg_idx, 0, "Starting...")
 
             if self.format_type == "mp4":
-                cmd = self._build_direct_cmd(outfile)
+                cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
+                       "-i", self.playlist_url, "-c", "copy", "-y", outfile]
             else:
-                cmd = self._build_hls_cmd(start, duration, outfile)
+                cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
+                       "-ss", str(start), "-i", self.playlist_url,
+                       "-t", str(duration), "-c", "copy", "-y", outfile]
 
             try:
                 self._proc = subprocess.Popen(
@@ -1170,7 +1193,19 @@ class DownloadWorker(QThread):
                         h, m, s = int(time_match.group(1)), int(time_match.group(2)), int(time_match.group(3))
                         elapsed = h * 3600 + m * 60 + s
                         pct = min(99, int((elapsed / max(duration, 1)) * 100))
-                        self.progress.emit(seg_idx, pct, f"{elapsed}s / {duration}s")
+                        # Parse speed and size
+                        speed_m = re.search(r'speed=\s*([\d.]+)x', line)
+                        size_m = re.search(r'size=\s*(\d+\w+)', line)
+                        extra = ""
+                        if speed_m:
+                            spd = float(speed_m.group(1))
+                            extra += f" | {spd:.1f}x"
+                            if spd > 0 and duration > 0:
+                                remaining = (duration - elapsed) / spd
+                                extra += f" | ETA {_fmt_duration(remaining)}"
+                        if size_m:
+                            extra += f" | {size_m.group(1)}"
+                        self.progress.emit(seg_idx, pct, f"{elapsed}s / {duration}s{extra}")
 
                 self._proc.wait()
                 if self._cancel:
@@ -1195,19 +1230,143 @@ class DownloadWorker(QThread):
         if not self._cancel:
             self.all_done.emit()
 
-    def _build_hls_cmd(self, start, duration, outfile):
-        return [
-            "ffmpeg", "-hide_banner", "-loglevel", "info",
-            "-ss", str(start), "-i", self.playlist_url,
-            "-t", str(duration), "-c", "copy", "-y", outfile
+
+# ── Metadata Saver ────────────────────────────────────────────────────────
+
+class MetadataSaver:
+    @staticmethod
+    def save(output_dir, stream_info, vod_info=None):
+        """Save metadata.json alongside downloads."""
+        meta = {
+            "platform": stream_info.platform,
+            "title": stream_info.title or (vod_info.title if vod_info else ""),
+            "url": stream_info.url,
+            "duration": stream_info.duration_str,
+            "total_secs": stream_info.total_secs,
+            "start_time": stream_info.start_time,
+            "is_live": stream_info.is_live,
+            "qualities": [{"name": q.name, "resolution": q.resolution,
+                           "bandwidth": q.bandwidth, "format": q.format_type}
+                          for q in stream_info.qualities],
+            "downloaded_at": datetime.now().isoformat(),
+        }
+        if vod_info:
+            meta["vod_date"] = vod_info.date
+            meta["vod_channel"] = vod_info.channel
+            meta["vod_viewers"] = vod_info.viewers
+        try:
+            p = os.path.join(output_dir, "metadata.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+        # Download thumbnail if available
+        if stream_info.thumbnail_url:
+            try:
+                thumb_path = os.path.join(output_dir, "thumbnail.jpg")
+                subprocess.run(
+                    ["curl", "-s", "-L", "-o", thumb_path, stream_info.thumbnail_url],
+                    timeout=15, creationflags=_CREATE_NO_WINDOW
+                )
+            except Exception:
+                pass
+
+
+# ── Channel Monitor ───────────────────────────────────────────────────────
+
+@dataclass
+class MonitorEntry:
+    url: str = ""
+    platform: str = ""
+    channel_id: str = ""
+    interval_secs: int = 120
+    auto_record: bool = False
+    last_check: float = 0
+    last_status: str = "unknown"  # live, offline, error
+    is_recording: bool = False
+
+class ChannelMonitor(QObject):
+    """Polls channels for live status via round-robin."""
+    status_changed = pyqtSignal()
+    channel_went_live = pyqtSignal(str)  # channel_id
+    log = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.entries = []
+        self._poll_idx = 0
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._poll_tick)
+        self._timer.start(15_000)  # check one channel every 15s
+
+    def add_channel(self, url, interval=120, auto_record=False):
+        ext = Extractor.detect(url)
+        if not ext or not ext.supports_live_check():
+            return False
+        ch_id = ext.extract_channel_id(url) or url
+        # Don't add duplicates
+        for e in self.entries:
+            if e.channel_id == ch_id:
+                return False
+        self.entries.append(MonitorEntry(
+            url=url, platform=ext.NAME, channel_id=ch_id,
+            interval_secs=interval, auto_record=auto_record
+        ))
+        self.status_changed.emit()
+        return True
+
+    def remove_channel(self, idx):
+        if 0 <= idx < len(self.entries):
+            self.entries.pop(idx)
+            self.status_changed.emit()
+
+    def _poll_tick(self):
+        if not self.entries:
+            return
+        entry = self.entries[self._poll_idx % len(self.entries)]
+        self._poll_idx += 1
+        now = time.time()
+        if now - entry.last_check < entry.interval_secs:
+            return
+        entry.last_check = now
+        ext = Extractor.detect(entry.url)
+        if not ext:
+            entry.last_status = "error"
+            self.status_changed.emit()
+            return
+        try:
+            is_live = ext.check_live(entry.url)
+            prev = entry.last_status
+            entry.last_status = "live" if is_live else "offline"
+            if is_live and prev != "live":
+                self.channel_went_live.emit(entry.channel_id)
+                self.log.emit(f"[LIVE] {entry.platform}/{entry.channel_id} went live!")
+            self.status_changed.emit()
+        except Exception:
+            entry.last_status = "error"
+            self.status_changed.emit()
+
+    def save_to_config(self, cfg):
+        cfg["monitor_channels"] = [
+            {"url": e.url, "interval": e.interval_secs, "auto_record": e.auto_record}
+            for e in self.entries
         ]
 
-    def _build_direct_cmd(self, outfile):
-        return [
-            "ffmpeg", "-hide_banner", "-loglevel", "info",
-            "-i", self.playlist_url,
-            "-c", "copy", "-y", outfile
-        ]
+    def load_from_config(self, cfg):
+        for ch in cfg.get("monitor_channels", []):
+            self.add_channel(ch["url"], ch.get("interval", 120), ch.get("auto_record", False))
+
+
+# ── Download History ───────────────────────────────────────────────────────
+
+@dataclass
+class HistoryEntry:
+    date: str = ""
+    platform: str = ""
+    title: str = ""
+    quality: str = ""
+    size: str = ""
+    path: str = ""
 
 
 # ── Main Window ───────────────────────────────────────────────────────────
@@ -1219,29 +1378,88 @@ PLATFORM_BADGES = {
     "yt-dlp":  {"color": CAT["overlay1"],"text": "yt-dlp"},
 }
 
+TAB_STYLE = f"""
+QPushButton#tab {{
+    background-color: transparent;
+    color: {CAT['overlay1']};
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 20px;
+    font-weight: 600;
+    font-size: 13px;
+    border-radius: 0px;
+}}
+QPushButton#tab:hover {{
+    color: {CAT['text']};
+    background-color: {CAT['surface0']};
+}}
+QPushButton#tabActive {{
+    background-color: transparent;
+    color: {CAT['green']};
+    border: none;
+    border-bottom: 2px solid {CAT['green']};
+    padding: 10px 20px;
+    font-weight: 600;
+    font-size: 13px;
+    border-radius: 0px;
+}}
+"""
+
 
 class StreamForge(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"StreamForge v{VERSION}")
-        self.setMinimumSize(860, 720)
-        self.resize(940, 800)
+        self.setMinimumSize(900, 750)
+        self.resize(980, 830)
         self.stream_info = None
         self.download_worker = None
         self._vod_list = []
         self._vod_checks = []
         self._segment_checks = []
         self._segment_progress = []
+        self._history = []
+        self._config = _load_config()
+        self.monitor = ChannelMonitor()
+        self.monitor.status_changed.connect(self._refresh_monitor_table)
+        self.monitor.channel_went_live.connect(self._on_channel_live)
+        self.monitor.log.connect(self._log)
+        self.monitor.load_from_config(self._config)
         self._init_ui()
+        self._apply_config()
+
+    def _apply_config(self):
+        cfg = self._config
+        if cfg.get("output_dir"):
+            self.output_input.setText(cfg["output_dir"])
+        if cfg.get("segment_idx") is not None:
+            self.segment_combo.setCurrentIndex(cfg["segment_idx"])
+        for h in cfg.get("history", []):
+            self._history.append(HistoryEntry(**h))
+        self._refresh_history_table()
+
+    def _persist_config(self):
+        cfg = self._config
+        cfg["output_dir"] = self.output_input.text().strip()
+        cfg["segment_idx"] = self.segment_combo.currentIndex()
+        cfg["history"] = [{"date": h.date, "platform": h.platform, "title": h.title,
+                           "quality": h.quality, "size": h.size, "path": h.path}
+                          for h in self._history[-200:]]  # keep last 200
+        self.monitor.save_to_config(cfg)
+        _save_config(cfg)
+
+    def closeEvent(self, event):
+        self._persist_config()
+        super().closeEvent(event)
 
     def _init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(12)
+        root.setSpacing(8)
 
-        # ── Header ────────────────────────────────────────────────────
+        # ── Header + Tabs ─────────────────────────────────────────────
         header = QHBoxLayout()
         title = QLabel("StreamForge")
         title.setObjectName("title")
@@ -1249,11 +1467,65 @@ class StreamForge(QMainWindow):
         ver.setObjectName("subtitle")
         header.addWidget(title)
         header.addWidget(ver)
+        header.addSpacing(24)
+
+        self._tab_btns = []
+        self._tab_names = ["Download", "Monitor", "History", "Settings"]
+        for i, name in enumerate(self._tab_names):
+            btn = QPushButton(name)
+            btn.setObjectName("tabActive" if i == 0 else "tab")
+            btn.setStyleSheet(TAB_STYLE)
+            btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
+            header.addWidget(btn)
+            self._tab_btns.append(btn)
+
         header.addStretch()
-        platforms_label = QLabel(f"Platforms: {', '.join(Extractor.all_names())}")
-        platforms_label.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
-        header.addWidget(platforms_label)
         root.addLayout(header)
+
+        # ── Stacked Widget ────────────────────────────────────────────
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._build_download_tab())
+        self._stack.addWidget(self._build_monitor_tab())
+        self._stack.addWidget(self._build_history_tab())
+        self._stack.addWidget(self._build_settings_tab())
+        root.addWidget(self._stack, 1)
+
+        # ── Bottom Status Bar ─────────────────────────────────────────
+        bottom = QHBoxLayout()
+        self.status_label = QLabel("Paste a URL and click Fetch")
+        self.status_label.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 12px;")
+        bottom.addWidget(self.status_label)
+        bottom.addStretch()
+        self.overall_progress = QProgressBar()
+        self.overall_progress.setFixedWidth(200)
+        self.overall_progress.setFixedHeight(8)
+        self.overall_progress.setVisible(False)
+        bottom.addWidget(self.overall_progress)
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setObjectName("danger")
+        self.stop_btn.setFixedWidth(70)
+        self.stop_btn.setVisible(False)
+        self.stop_btn.clicked.connect(self._on_stop)
+        bottom.addWidget(self.stop_btn)
+        self.open_folder_btn = QPushButton("Open Folder")
+        self.open_folder_btn.setVisible(False)
+        self.open_folder_btn.clicked.connect(self._on_open_folder)
+        bottom.addWidget(self.open_folder_btn)
+        root.addLayout(bottom)
+
+    def _switch_tab(self, idx):
+        self._stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self._tab_btns):
+            btn.setObjectName("tabActive" if i == idx else "tab")
+            btn.setStyleSheet(TAB_STYLE)
+
+    # ── Download Tab ──────────────────────────────────────────────────
+
+    def _build_download_tab(self):
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 8, 0, 0)
+        root.setSpacing(12)
 
         # ── URL Input Card ────────────────────────────────────────────
         url_card = QFrame()
@@ -1428,37 +1700,204 @@ class StreamForge(QMainWindow):
         splitter.setSizes([400, 200])
         root.addWidget(splitter, 1)
 
-        # ── Bottom Bar ────────────────────────────────────────────────
-        bottom = QHBoxLayout()
-        self.status_label = QLabel("Paste a URL and click Fetch")
-        self.status_label.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 12px;")
-        bottom.addWidget(self.status_label)
-        bottom.addStretch()
-
-        self.overall_progress = QProgressBar()
-        self.overall_progress.setFixedWidth(200)
-        self.overall_progress.setFixedHeight(8)
-        self.overall_progress.setVisible(False)
-        bottom.addWidget(self.overall_progress)
-
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setObjectName("danger")
-        self.stop_btn.setFixedWidth(70)
-        self.stop_btn.setVisible(False)
-        self.stop_btn.clicked.connect(self._on_stop)
-        bottom.addWidget(self.stop_btn)
-
+        # Download button row
+        dl_row = QHBoxLayout()
+        dl_row.addStretch()
         self.download_btn = QPushButton("Download Selected")
         self.download_btn.setObjectName("primary")
         self.download_btn.setEnabled(False)
         self.download_btn.clicked.connect(self._on_download)
-        bottom.addWidget(self.download_btn)
+        dl_row.addWidget(self.download_btn)
+        root.addLayout(dl_row)
 
-        self.open_folder_btn = QPushButton("Open Folder")
-        self.open_folder_btn.setVisible(False)
-        self.open_folder_btn.clicked.connect(self._on_open_folder)
-        bottom.addWidget(self.open_folder_btn)
-        root.addLayout(bottom)
+        return page
+
+    # ── Monitor Tab ───────────────────────────────────────────────────
+
+    def _build_monitor_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(12)
+
+        card = QFrame()
+        card.setObjectName("card")
+        card_lay = QVBoxLayout(card)
+
+        header = QHBoxLayout()
+        sec = QLabel("Channel Monitor")
+        sec.setObjectName("sectionTitle")
+        header.addWidget(sec)
+        header.addStretch()
+        header.addWidget(QLabel("Checks channels for live status and can auto-record"))
+        card_lay.addLayout(header)
+
+        # Add channel row
+        add_row = QHBoxLayout()
+        self.monitor_url_input = QLineEdit()
+        self.monitor_url_input.setPlaceholderText("Channel URL (kick.com/user, twitch.tv/user)")
+        add_row.addWidget(self.monitor_url_input)
+        self.monitor_interval_spin = QSpinBox()
+        self.monitor_interval_spin.setRange(30, 600)
+        self.monitor_interval_spin.setValue(120)
+        self.monitor_interval_spin.setSuffix("s")
+        self.monitor_interval_spin.setFixedWidth(80)
+        self.monitor_interval_spin.setStyleSheet(
+            f"QSpinBox {{ background: {CAT['surface0']}; color: {CAT['text']}; "
+            f"border: 1px solid {CAT['surface1']}; border-radius: 6px; padding: 4px; }}"
+        )
+        add_row.addWidget(self.monitor_interval_spin)
+        self.monitor_auto_cb = QCheckBox("Auto-Record")
+        add_row.addWidget(self.monitor_auto_cb)
+        add_btn = QPushButton("Add")
+        add_btn.setObjectName("primary")
+        add_btn.setFixedWidth(70)
+        add_btn.clicked.connect(self._on_monitor_add)
+        add_row.addWidget(add_btn)
+        card_lay.addLayout(add_row)
+
+        # Monitor table
+        self.monitor_table = QTableWidget()
+        self.monitor_table.setColumnCount(6)
+        self.monitor_table.setHorizontalHeaderLabels(["Platform", "Channel", "Status", "Interval", "Auto-Record", ""])
+        self.monitor_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.monitor_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.monitor_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.monitor_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.monitor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.monitor_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.monitor_table.setColumnWidth(0, 70)
+        self.monitor_table.setColumnWidth(2, 80)
+        self.monitor_table.setColumnWidth(3, 70)
+        self.monitor_table.setColumnWidth(4, 90)
+        self.monitor_table.setColumnWidth(5, 70)
+        self.monitor_table.verticalHeader().setVisible(False)
+        self.monitor_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.monitor_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        card_lay.addWidget(self.monitor_table)
+
+        lay.addWidget(card, 1)
+        return page
+
+    # ── History Tab ───────────────────────────────────────────────────
+
+    def _build_history_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(12)
+
+        card = QFrame()
+        card.setObjectName("card")
+        card_lay = QVBoxLayout(card)
+
+        header = QHBoxLayout()
+        sec = QLabel("Download History")
+        sec.setObjectName("sectionTitle")
+        header.addWidget(sec)
+        header.addStretch()
+        clear_btn = QPushButton("Clear History")
+        clear_btn.clicked.connect(self._on_clear_history)
+        header.addWidget(clear_btn)
+        card_lay.addLayout(header)
+
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(6)
+        self.history_table.setHorizontalHeaderLabels(["Date", "Platform", "Title", "Quality", "Size", "Path"])
+        self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.history_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.history_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.history_table.setColumnWidth(0, 140)
+        self.history_table.setColumnWidth(1, 70)
+        self.history_table.setColumnWidth(3, 100)
+        self.history_table.setColumnWidth(4, 80)
+        self.history_table.verticalHeader().setVisible(False)
+        self.history_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.history_table.doubleClicked.connect(self._on_history_double_click)
+        card_lay.addWidget(self.history_table)
+
+        lay.addWidget(card, 1)
+        return page
+
+    # ── Settings Tab ──────────────────────────────────────────────────
+
+    def _build_settings_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(12)
+
+        card = QFrame()
+        card.setObjectName("card")
+        card_lay = QVBoxLayout(card)
+        card_lay.setSpacing(16)
+
+        sec = QLabel("Settings")
+        sec.setObjectName("sectionTitle")
+        card_lay.addWidget(sec)
+
+        info = QLabel(
+            f"Config saved to: {CONFIG_FILE}\n"
+            f"Supported platforms: {', '.join(Extractor.all_names())}"
+        )
+        info.setStyleSheet(f"color: {CAT['overlay1']}; font-size: 11px;")
+        card_lay.addWidget(info)
+
+        # Default output
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Default output directory:"))
+        self.settings_output = QLineEdit(str(Path.home() / "Desktop" / "StreamForge"))
+        row1.addWidget(self.settings_output, 1)
+        browse = QPushButton("Browse")
+        browse.clicked.connect(lambda: self._settings_browse(self.settings_output))
+        row1.addWidget(browse)
+        card_lay.addLayout(row1)
+
+        # ffmpeg / yt-dlp info
+        row2 = QHBoxLayout()
+        try:
+            r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5,
+                               creationflags=_CREATE_NO_WINDOW)
+            ff_ver = r.stdout.split("\n")[0] if r.returncode == 0 else "Not found"
+        except Exception:
+            ff_ver = "Not found"
+        try:
+            r = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=5,
+                               creationflags=_CREATE_NO_WINDOW)
+            yt_ver = f"yt-dlp {r.stdout.strip()}" if r.returncode == 0 else "Not installed"
+        except Exception:
+            yt_ver = "Not installed"
+        tools_label = QLabel(f"ffmpeg: {ff_ver[:60]}  |  {yt_ver}")
+        tools_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        row2.addWidget(tools_label)
+        card_lay.addLayout(row2)
+
+        # Save button
+        save_row = QHBoxLayout()
+        save_row.addStretch()
+        save_btn = QPushButton("Save Settings")
+        save_btn.setObjectName("primary")
+        save_btn.clicked.connect(self._on_save_settings)
+        save_row.addWidget(save_btn)
+        card_lay.addLayout(save_row)
+
+        card_lay.addStretch()
+        lay.addWidget(card, 1)
+        return page
+
+    def _settings_browse(self, line_edit):
+        d = QFileDialog.getExistingDirectory(self, "Select Folder", line_edit.text())
+        if d:
+            line_edit.setText(d)
+
+    def _on_save_settings(self):
+        self.output_input.setText(self.settings_output.text())
+        self._persist_config()
+        self.status_label.setText("Settings saved")
 
     # ── Actions ───────────────────────────────────────────────────────
 
@@ -1729,6 +2168,9 @@ class StreamForge(QMainWindow):
         self.vod_load_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self.open_folder_btn.setVisible(True)
+        out_dir = self.output_input.text().strip()
+        self._save_metadata(out_dir, "batch")
+        self._persist_config()
 
     # ── Segment Management ────────────────────────────────────────────
 
@@ -1900,6 +2342,10 @@ class StreamForge(QMainWindow):
         self._log(f"\n{'=' * 50}")
         self._log("All downloads complete!")
         self._log(f"{'=' * 50}")
+        out_dir = self.output_input.text().strip()
+        q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
+        self._save_metadata(out_dir, q_name)
+        self._persist_config()
 
     def _on_stop(self):
         if hasattr(self, '_batch_vods'):
@@ -1920,6 +2366,139 @@ class StreamForge(QMainWindow):
         out_dir = self.output_input.text().strip()
         if os.path.isdir(out_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
+
+    # ── Monitor Actions ───────────────────────────────────────────────
+
+    def _on_monitor_add(self):
+        url = self.monitor_url_input.text().strip()
+        if not url:
+            return
+        interval = self.monitor_interval_spin.value()
+        auto = self.monitor_auto_cb.isChecked()
+        if self.monitor.add_channel(url, interval, auto):
+            self.monitor_url_input.clear()
+            self._log(f"[MONITOR] Added: {url} (every {interval}s, auto-record: {auto})")
+            self._persist_config()
+        else:
+            self._log(f"[MONITOR] Cannot add: unsupported or duplicate")
+
+    def _refresh_monitor_table(self):
+        entries = self.monitor.entries
+        self.monitor_table.setRowCount(len(entries))
+        for i, e in enumerate(entries):
+            badge = PLATFORM_BADGES.get(e.platform, {})
+            plat = QTableWidgetItem(e.platform)
+            plat.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if badge.get("color"):
+                plat.setForeground(QColor(badge["color"]))
+            self.monitor_table.setItem(i, 0, plat)
+
+            ch = QTableWidgetItem(e.channel_id)
+            self.monitor_table.setItem(i, 1, ch)
+
+            status = QTableWidgetItem(e.last_status.upper())
+            status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if e.last_status == "live":
+                status.setForeground(QColor(CAT["green"]))
+            elif e.last_status == "error":
+                status.setForeground(QColor(CAT["red"]))
+            else:
+                status.setForeground(QColor(CAT["overlay1"]))
+            self.monitor_table.setItem(i, 2, status)
+
+            intv = QTableWidgetItem(f"{e.interval_secs}s")
+            intv.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.monitor_table.setItem(i, 3, intv)
+
+            auto = QTableWidgetItem("Yes" if e.auto_record else "No")
+            auto.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if e.auto_record:
+                auto.setForeground(QColor(CAT["green"]))
+            self.monitor_table.setItem(i, 4, auto)
+
+            rm_btn = QPushButton("Remove")
+            rm_btn.setFixedHeight(28)
+            rm_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_remove(idx))
+            self.monitor_table.setCellWidget(i, 5, rm_btn)
+
+    def _on_monitor_remove(self, idx):
+        self.monitor.remove_channel(idx)
+        self._persist_config()
+
+    def _on_channel_live(self, channel_id):
+        """Called when a monitored channel goes live."""
+        self.status_label.setText(f"{channel_id} went LIVE!")
+        # Find the entry for auto-record
+        for e in self.monitor.entries:
+            if e.channel_id == channel_id and e.auto_record and not e.is_recording:
+                self._log(f"[AUTO-RECORD] Starting recording for {e.platform}/{channel_id}")
+                e.is_recording = True
+                # Resolve and start recording in background
+                ext = Extractor.detect(e.url)
+                if ext:
+                    info = ext.resolve(e.url, log_fn=self._log)
+                    if info and info.qualities:
+                        q = info.qualities[0]
+                        out_dir = os.path.join(
+                            self.output_input.text().strip(),
+                            f"auto_{channel_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        )
+                        os.makedirs(out_dir, exist_ok=True)
+                        segments = [(0, "live_recording", 0, 0)]
+                        worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
+                        worker.log.connect(self._log)
+                        worker.all_done.connect(lambda: self._auto_record_done(channel_id))
+                        self.download_worker = worker
+                        worker.start()
+
+    def _auto_record_done(self, channel_id):
+        for e in self.monitor.entries:
+            if e.channel_id == channel_id:
+                e.is_recording = False
+        self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
+
+    # ── History Actions ───────────────────────────────────────────────
+
+    def _add_history(self, platform, title, quality, size, path):
+        entry = HistoryEntry(
+            date=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            platform=platform, title=title[:60],
+            quality=quality, size=size, path=path
+        )
+        self._history.append(entry)
+        self._refresh_history_table()
+
+    def _refresh_history_table(self):
+        self.history_table.setRowCount(len(self._history))
+        for i, h in enumerate(reversed(self._history)):
+            row = len(self._history) - 1 - i
+            for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path]):
+                item = QTableWidgetItem(val)
+                if col in (0, 1, 3, 4):
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.history_table.setItem(i, col, item)
+
+    def _on_clear_history(self):
+        self._history.clear()
+        self._refresh_history_table()
+        self._persist_config()
+
+    def _on_history_double_click(self, index):
+        row = index.row()
+        if row < len(self._history):
+            h = list(reversed(self._history))[row]
+            if os.path.isdir(h.path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
+
+    # ── Metadata ──────────────────────────────────────────────────────
+
+    def _save_metadata(self, out_dir, quality_name=""):
+        if self.stream_info:
+            MetadataSaver.save(out_dir, self.stream_info)
+        # Add to history
+        platform = self.stream_info.platform if self.stream_info else "?"
+        title = self.stream_info.title if self.stream_info else "?"
+        self._add_history(platform, title, quality_name, "", out_dir)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
