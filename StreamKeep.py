@@ -535,8 +535,21 @@ def _fmt_size(b):
     return f"{b:.1f} TB"
 
 def _safe_filename(s, max_len=60):
-    """Sanitize a string for use as a filename."""
-    return re.sub(r'[<>:"/\\|?*]', '', s)[:max_len].strip()
+    """Sanitize a string for use as a filename. Strips invalid chars,
+    control chars, trailing dots/spaces (invalid on Windows), and truncates."""
+    if not s:
+        return ""
+    # Remove reserved chars and control chars
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', s)
+    # Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Remove trailing dots/spaces (invalid on Windows)
+    cleaned = cleaned.rstrip(". ")
+    # Reject Windows reserved names
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+    if cleaned.upper() in reserved:
+        cleaned = f"_{cleaned}"
+    return cleaned[:max_len].strip() or "download"
 
 
 def _scan_browser_cookies():
@@ -626,11 +639,18 @@ class Extractor:
     @classmethod
     def detect(cls, url):
         """Return an instance of the matching extractor, or None."""
+        if not url or not isinstance(url, str):
+            return None
         url = url.strip()
+        if not url:
+            return None
         for ext_cls in cls._registry:
             for pattern in ext_cls.URL_PATTERNS:
-                if pattern.match(url):
-                    return ext_cls()
+                try:
+                    if pattern.match(url):
+                        return ext_cls()
+                except Exception:
+                    continue
         return None
 
     @classmethod
@@ -716,21 +736,25 @@ class KickExtractor(Extractor):
 
         vods = []
         for v in data:
-            source = v.get("source", "")
+            if not isinstance(v, dict):
+                continue
+            source = v.get("source") or ""
             if not source:
                 continue
-            dur_ms = v.get("duration", 0)
-            dur_str = ""
-            if dur_ms:
-                dur_str = _fmt_duration(dur_ms / 1000)
+            dur_ms = v.get("duration") or 0
+            try:
+                dur_str = _fmt_duration(dur_ms / 1000) if dur_ms else ""
+            except (TypeError, ValueError):
+                dur_str = ""
+                dur_ms = 0
             vods.append(VODInfo(
-                title=v.get("session_title", "Untitled"),
-                date=v.get("created_at", ""),
-                source=source,
-                is_live=v.get("is_live", False),
-                viewers=v.get("viewer_count", 0),
+                title=str(v.get("session_title") or "Untitled"),
+                date=str(v.get("created_at") or ""),
+                source=str(source),
+                is_live=bool(v.get("is_live", False)),
+                viewers=int(v.get("viewer_count") or 0),
                 duration=dur_str,
-                duration_ms=dur_ms,
+                duration_ms=int(dur_ms),
                 platform="Kick",
                 channel=slug,
             ))
@@ -1484,14 +1508,22 @@ class YtDlpExtractor(Extractor):
                 return None
 
             tmp_base = os.path.join(tempfile.gettempdir(), "streamkeep_cookies")
-            if os.path.exists(tmp_base):
-                shutil.rmtree(tmp_base, ignore_errors=True)
-            tmp_profile = os.path.join(tmp_base, "Default")
-            tmp_network = os.path.join(tmp_profile, "Network")
-            os.makedirs(tmp_network, exist_ok=True)
+            try:
+                if os.path.exists(tmp_base):
+                    shutil.rmtree(tmp_base, ignore_errors=True)
+                tmp_profile = os.path.join(tmp_base, "Default")
+                tmp_network = os.path.join(tmp_profile, "Network")
+                os.makedirs(tmp_network, exist_ok=True)
+            except OSError as e:
+                self._log(log_fn, f"  Cannot create temp profile dir: {e}")
+                return None
 
             # Copy Local State (not locked — contains decryption key)
-            shutil.copy2(local_state_path, os.path.join(tmp_base, "Local State"))
+            try:
+                shutil.copy2(local_state_path, os.path.join(tmp_base, "Local State"))
+            except OSError as e:
+                self._log(log_fn, f"  Cannot copy Local State: {e}")
+                return None
 
             if "Network" in cookie_db_path:
                 dst_cookies = os.path.join(tmp_network, "Cookies")
@@ -1958,16 +1990,29 @@ class DownloadWorker(QThread):
                         os.remove(outfile)
                     return
 
-                if self._proc.returncode == 0 and os.path.exists(outfile):
+                if self._proc.returncode == 0 and os.path.exists(outfile) and os.path.getsize(outfile) > 0:
                     size = os.path.getsize(outfile)
                     self.progress.emit(seg_idx, 100, "Complete")
                     self.segment_done.emit(seg_idx, _fmt_size(size))
                     self.log.emit(f"[DONE] {label} — {_fmt_size(size)}")
                 else:
+                    # Clean up empty/corrupt output file
+                    if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                        try:
+                            os.remove(outfile)
+                        except OSError:
+                            pass
                     err = "\n".join(output_lines[-5:])
                     self.error.emit(seg_idx, f"ffmpeg exit {self._proc.returncode}")
                     self.log.emit(f"[FAIL] {label}\n{err}")
 
+            except FileNotFoundError:
+                self.error.emit(seg_idx, "ffmpeg not found in PATH")
+                self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
+                return
+            except PermissionError as e:
+                self.error.emit(seg_idx, f"Permission denied: {e}")
+                self.log.emit(f"[ERROR] {label}: {e}")
             except Exception as e:
                 self.error.emit(seg_idx, str(e))
                 self.log.emit(f"[ERROR] {label}: {e}")
@@ -1982,17 +2027,21 @@ class MetadataSaver:
     @staticmethod
     def save(output_dir, stream_info, vod_info=None):
         """Save metadata.json alongside downloads."""
+        if stream_info is None or not output_dir:
+            return
+        if not os.path.isdir(output_dir):
+            return
         meta = {
-            "platform": stream_info.platform,
-            "title": stream_info.title or (vod_info.title if vod_info else ""),
-            "url": stream_info.url,
-            "duration": stream_info.duration_str,
-            "total_secs": stream_info.total_secs,
-            "start_time": stream_info.start_time,
-            "is_live": stream_info.is_live,
+            "platform": getattr(stream_info, "platform", "") or "",
+            "title": getattr(stream_info, "title", "") or (getattr(vod_info, "title", "") if vod_info else ""),
+            "url": getattr(stream_info, "url", "") or "",
+            "duration": getattr(stream_info, "duration_str", "") or "",
+            "total_secs": getattr(stream_info, "total_secs", 0) or 0,
+            "start_time": getattr(stream_info, "start_time", "") or "",
+            "is_live": bool(getattr(stream_info, "is_live", False)),
             "qualities": [{"name": q.name, "resolution": q.resolution,
                            "bandwidth": q.bandwidth, "format": q.format_type}
-                          for q in stream_info.qualities],
+                          for q in (stream_info.qualities or [])],
             "downloaded_at": datetime.now().isoformat(),
         }
         if vod_info:
@@ -2066,10 +2115,15 @@ class ChannelMonitor(QObject):
             self.status_changed.emit()
 
     def _poll_tick(self):
-        if not self.entries:
+        # Snapshot entries to avoid index errors if remove_channel is called during poll
+        entries_snapshot = list(self.entries)
+        if not entries_snapshot:
             return
-        entry = self.entries[self._poll_idx % len(self.entries)]
+        entry = entries_snapshot[self._poll_idx % len(entries_snapshot)]
         self._poll_idx += 1
+        # Verify entry is still in the live list (may have been removed)
+        if entry not in self.entries:
+            return
         now = time.time()
         if now - entry.last_check < entry.interval_secs:
             return
@@ -2087,8 +2141,9 @@ class ChannelMonitor(QObject):
                 self.channel_went_live.emit(entry.channel_id)
                 self.log.emit(f"[LIVE] {entry.platform}/{entry.channel_id} went live!")
             self.status_changed.emit()
-        except Exception:
+        except Exception as ex:
             entry.last_status = "error"
+            self.log.emit(f"[MONITOR ERROR] {entry.channel_id}: {ex}")
             self.status_changed.emit()
 
     def save_to_config(self, cfg):
@@ -2292,10 +2347,24 @@ class StreamKeep(QMainWindow):
         if cfg.get("output_dir"):
             self.output_input.setText(cfg["output_dir"])
             self.settings_output.setText(cfg["output_dir"])
-        if cfg.get("segment_idx") is not None:
-            self.segment_combo.setCurrentIndex(cfg["segment_idx"])
+        seg_idx = cfg.get("segment_idx")
+        if isinstance(seg_idx, int) and 0 <= seg_idx < self.segment_combo.count():
+            self.segment_combo.setCurrentIndex(seg_idx)
         for h in cfg.get("history", []):
-            self._history.append(HistoryEntry(**h))
+            if not isinstance(h, dict):
+                continue
+            try:
+                entry = HistoryEntry(
+                    date=str(h.get("date", "")),
+                    platform=str(h.get("platform", "")),
+                    title=str(h.get("title", "")),
+                    quality=str(h.get("quality", "")),
+                    size=str(h.get("size", "")),
+                    path=str(h.get("path", "")),
+                )
+                self._history.append(entry)
+            except Exception:
+                continue
         self._refresh_history_table()
         self._refresh_download_summary()
         self._refresh_monitor_summary()
@@ -2312,6 +2381,24 @@ class StreamKeep(QMainWindow):
         _save_config(cfg)
 
     def closeEvent(self, event):
+        # Stop active download worker cleanly
+        dw = getattr(self, "download_worker", None)
+        if dw is not None and dw.isRunning():
+            try:
+                dw.cancel()
+                dw.wait(3000)
+            except Exception:
+                pass
+        # Stop monitor timer
+        try:
+            self.monitor._timer.stop()
+        except Exception:
+            pass
+        # Stop clipboard monitor
+        try:
+            self.clipboard_monitor.stop()
+        except Exception:
+            pass
         self._persist_config()
         super().closeEvent(event)
 
@@ -3450,6 +3537,15 @@ class StreamKeep(QMainWindow):
             self._set_status("Clipboard monitoring stopped.", "idle")
 
     def _on_clipboard_url(self, url):
+        # Don't interrupt an active download
+        existing = getattr(self, "download_worker", None)
+        if existing is not None and existing.isRunning():
+            self._log(f"[CLIPBOARD] Ignored {url[:60]}... (download in progress)")
+            return
+        # Basic URL sanity — reject newlines/control chars
+        if "\n" in url or "\r" in url or len(url) > 2048:
+            self._log(f"[CLIPBOARD] Rejected malformed URL")
+            return
         self._log(f"[CLIPBOARD] Detected: {url}")
         self.url_input.setText(url)
         self._switch_tab(0)  # Switch to Download tab
@@ -3478,6 +3574,19 @@ class StreamKeep(QMainWindow):
         self._refresh_download_summary()
         self._set_status("Fetching stream info and available playback options...", "working")
 
+        # Disconnect any existing fetch worker to prevent stale signals
+        prev_worker = getattr(self, "_fetch_worker", None)
+        if prev_worker is not None:
+            try:
+                prev_worker.log.disconnect()
+                prev_worker.finished.disconnect()
+                prev_worker.vods_found.disconnect()
+                prev_worker.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if prev_worker.isRunning():
+                prev_worker.requestInterruption()
+
         self._fetch_worker = FetchWorker(url, vod_source=vod_source, vod_platform=vod_platform)
         self._fetch_worker.log.connect(self._log)
         self._fetch_worker.finished.connect(self._on_fetch_done)
@@ -3486,6 +3595,9 @@ class StreamKeep(QMainWindow):
         self._fetch_worker.start()
 
     def _on_fetch_done(self, info):
+        if info is None:
+            self._on_fetch_error("Extractor returned no stream info")
+            return
         self.stream_info = info
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
@@ -3495,16 +3607,20 @@ class StreamKeep(QMainWindow):
         self.quality_combo.blockSignals(True)
         self.quality_combo.clear()
         selected_idx = 0
-        for i, q in enumerate(info.qualities):
+        qualities = info.qualities or []
+        for i, q in enumerate(qualities):
             bw_mbps = q.bandwidth / 1_000_000 if q.bandwidth else 0
             ft_tag = f" [{q.format_type.upper()}]" if q.format_type != "hls" else ""
             label = f"{q.name} ({q.resolution}, {bw_mbps:.1f} Mbps){ft_tag}"
             self.quality_combo.addItem(label, q)
             if "1080" in q.name or "source" in q.name.lower():
                 selected_idx = i
-        self.quality_combo.setCurrentIndex(selected_idx)
-        self.quality_combo.setEnabled(len(info.qualities) > 0)
+        if qualities:
+            self.quality_combo.setCurrentIndex(selected_idx)
+        self.quality_combo.setEnabled(len(qualities) > 0)
         self.quality_combo.blockSignals(False)
+        if not qualities:
+            self._log("[WARN] No playable qualities found for this URL.")
 
         # Stream info
         parts = [f"Platform: {info.platform}", f"Duration: {info.duration_str}"]
@@ -3989,11 +4105,16 @@ class StreamKeep(QMainWindow):
         self._persist_config()
 
     def _on_stop(self):
-        if hasattr(self, '_batch_vods'):
+        # Halt any in-progress batch by marking it done
+        if hasattr(self, '_batch_vods') and hasattr(self, '_batch_total'):
             self._batch_idx = self._batch_total
-        if self.download_worker:
-            self.download_worker.cancel()
-            self.download_worker.wait(5000)
+        if self.download_worker is not None:
+            try:
+                self.download_worker.cancel()
+                self.download_worker.wait(5000)
+            except Exception:
+                pass
+            self.download_worker = None
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
@@ -4075,28 +4196,58 @@ class StreamKeep(QMainWindow):
     def _on_channel_live(self, channel_id):
         """Called when a monitored channel goes live."""
         self._set_status(f"{channel_id} went live.", "warning")
-        # Find the entry for auto-record
+
+        # Guard against overlapping recording (signal can fire twice in quick succession)
+        target = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id and e.auto_record and not e.is_recording:
-                self._log(f"[AUTO-RECORD] Starting recording for {e.platform}/{channel_id}")
-                e.is_recording = True
-                # Resolve and start recording in background
-                ext = Extractor.detect(e.url)
-                if ext:
-                    info = ext.resolve(e.url, log_fn=self._log)
-                    if info and info.qualities:
-                        q = info.qualities[0]
-                        out_dir = os.path.join(
-                            self.output_input.text().strip(),
-                            f"auto_{channel_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                        )
-                        os.makedirs(out_dir, exist_ok=True)
-                        segments = [(0, "live_recording", 0, 0)]
-                        worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
-                        worker.log.connect(self._log)
-                        worker.all_done.connect(lambda: self._auto_record_done(channel_id))
-                        self.download_worker = worker
-                        worker.start()
+                target = e
+                e.is_recording = True  # claim the slot atomically before resolve
+                break
+        if target is None:
+            return
+
+        # Don't start a new download while one is already running
+        existing = getattr(self, "download_worker", None)
+        if existing is not None and existing.isRunning():
+            self._log(f"[AUTO-RECORD] Skipped {channel_id}: download already in progress")
+            target.is_recording = False
+            return
+
+        self._log(f"[AUTO-RECORD] Starting recording for {target.platform}/{channel_id}")
+        try:
+            ext = Extractor.detect(target.url)
+            if not ext:
+                self._log(f"[AUTO-RECORD] No extractor for {target.url}")
+                target.is_recording = False
+                return
+            info = ext.resolve(target.url, log_fn=self._log)
+            if not info or not info.qualities:
+                self._log(f"[AUTO-RECORD] Failed to resolve {target.url}")
+                target.is_recording = False
+                return
+            q = info.qualities[0]
+            try:
+                base_out = self.output_input.text().strip() or str(Path.home() / "Desktop" / "StreamKeep")
+                out_dir = os.path.join(
+                    base_out,
+                    f"auto_{_safe_filename(channel_id)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                )
+                os.makedirs(out_dir, exist_ok=True)
+            except OSError as e:
+                self._log(f"[AUTO-RECORD] Cannot create output folder: {e}")
+                target.is_recording = False
+                return
+            segments = [(0, "live_recording", 0, 0)]
+            worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
+            worker.audio_url = q.audio_url
+            worker.log.connect(self._log)
+            worker.all_done.connect(lambda: self._auto_record_done(channel_id))
+            self.download_worker = worker
+            worker.start()
+        except Exception as ex:
+            self._log(f"[AUTO-RECORD] Error: {ex}")
+            target.is_recording = False
 
     def _auto_record_done(self, channel_id):
         for e in self.monitor.entries:
