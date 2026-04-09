@@ -48,13 +48,13 @@ from PyQt6.QtWidgets import (
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
     QSpinBox, QMessageBox, QGridLayout, QScrollArea, QSystemTrayIcon,
-    QCompleter
+    QCompleter, QInputDialog
 )
 from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.3.0"
+VERSION = "4.4.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -2113,6 +2113,24 @@ class _PlaylistExpandWorker(QThread):
             self.error.emit(str(e))
 
 
+class _PageScrapeWorker(QThread):
+    """Fetch a webpage and extract media/video links from its HTML."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            links = _scrape_media_links(self.url, log_fn=self.log.emit)
+            self.finished.emit(links)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class FetchWorker(QThread):
     """Resolves URLs using the extractor system."""
     finished = pyqtSignal(object)        # StreamInfo
@@ -2935,6 +2953,86 @@ class ChannelMonitor(QObject):
 
 # ── Direct URL Detection ──────────────────────────────────────────────────
 
+def _scrape_media_links(page_url, log_fn=None, max_links=100):
+    """Fetch a webpage and extract URLs that look like media or embeddable
+    streams. Returns a de-duplicated list of (url, hint) tuples.
+
+    This is intentionally conservative: we look for explicit media files
+    (mp4/mp3/m3u8), common streaming hosts, and anything already matching
+    a registered Extractor pattern. It does NOT execute JavaScript, so
+    sites that lazy-load players via JS won't be detected — use yt-dlp's
+    playlist expansion for those."""
+    headers = {
+        "User-Agent": CURL_UA,
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    body = _curl(page_url, headers=headers, timeout=20) or ""
+    if not body:
+        return []
+    found = []
+    seen = set()
+
+    def add(url, hint):
+        if not url or url in seen:
+            return
+        if len(found) >= max_links:
+            return
+        seen.add(url)
+        found.append((url, hint))
+
+    # 1) Direct media file URLs (mp4/mp3/m3u8/mpd/webm/etc) — unquoted
+    media_re = re.compile(
+        r'https?://[^\s"\'<>]+\.(?:mp4|webm|mkv|mov|mp3|m4a|ogg|flac|wav|m3u8|mpd|ts)'
+        r'(?:\?[^\s"\'<>]*)?',
+        re.IGNORECASE,
+    )
+    for m in media_re.finditer(body):
+        add(m.group(0), "direct media")
+
+    # 2) Platform URLs that a registered extractor would handle.
+    #    Look for common video hosts in href="" or src="" attributes.
+    host_re = re.compile(
+        r'https?://(?:www\.)?'
+        r'(?:youtube\.com/(?:watch|shorts|embed)/[^\s"\'<>]+'
+        r'|youtu\.be/[^\s"\'<>]+'
+        r'|twitch\.tv/(?:videos/)?[a-zA-Z0-9_]+'
+        r'|kick\.com/[a-zA-Z0-9_-]+(?:/videos/\d+)?'
+        r'|rumble\.com/v[a-z0-9]+[^\s"\'<>]*'
+        r'|soundcloud\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+'
+        r'|reddit\.com/r/\w+/comments/\w+[^\s"\'<>]*'
+        r'|vimeo\.com/\d+'
+        r'|dailymotion\.com/video/[a-zA-Z0-9]+'
+        r'|bitchute\.com/video/[a-zA-Z0-9]+'
+        r'|odysee\.com/@[^\s"\'<>]+'
+        r')',
+        re.IGNORECASE,
+    )
+    for m in host_re.finditer(body):
+        url = m.group(0)
+        # Strip trailing punctuation the regex might have grabbed
+        url = url.rstrip('.,;)')
+        add(url, "platform link")
+
+    # 3) iframe src=... with video URLs
+    iframe_re = re.compile(
+        r'<iframe[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE
+    )
+    for m in iframe_re.finditer(body):
+        src = m.group(1)
+        if src.startswith("//"):
+            src = "https:" + src
+        if not src.startswith("http"):
+            continue
+        # Filter iframes that are obviously not video
+        if any(x in src.lower() for x in ("youtube", "vimeo", "twitch", "kick", "rumble",
+                                          "dailymotion", "bitchute", "odysee")):
+            add(src, "iframe embed")
+
+    if log_fn:
+        log_fn(f"[SCRAPE] Found {len(found)} candidate link(s) in {page_url}")
+    return found
+
+
 def _detect_direct_media(url, log_fn=None):
     """Sniff a URL via HEAD request. Returns StreamInfo if it's a direct media file, else None."""
     MEDIA_TYPES = {
@@ -3118,6 +3216,12 @@ class StreamKeep(QMainWindow):
         self._download_queue = []  # list of dicts: url, title, platform, status
         self._write_nfo = False
         self._recent_urls = []  # most-recent-first list of distinct URLs
+        self._bandwidth_rule = {
+            "enabled": False,
+            "start_hour": 9,
+            "end_hour": 17,
+            "limit": "500K",
+        }
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
@@ -3129,6 +3233,65 @@ class StreamKeep(QMainWindow):
         self._init_ui()
         self._apply_config()
         self._init_tray_icon()
+        # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
+        self._scheduler_timer = QTimer(self)
+        self._scheduler_timer.timeout.connect(self._scheduler_tick)
+        self._scheduler_timer.start(30_000)
+        self._scheduler_tick()  # Apply bandwidth rule immediately on startup
+
+    def _scheduler_tick(self):
+        """Periodic check: start any queue items whose scheduled time has
+        arrived, and update rate_limit based on bandwidth scheduler rules."""
+        self._apply_bandwidth_schedule()
+        # Check for ready scheduled items
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        has_ready = any(
+            q.get("status") == "queued" and self._queue_item_ready(q)
+            for q in self._download_queue
+        )
+        if has_ready:
+            self._advance_queue()
+
+    def _queue_item_ready(self, q):
+        """Return True if the queue item is ready to download now."""
+        start_at = q.get("start_at", "")
+        if not start_at:
+            return True
+        try:
+            ts = datetime.fromisoformat(start_at)
+            return ts <= datetime.now()
+        except Exception:
+            return True
+
+    def _apply_bandwidth_schedule(self):
+        """Apply the active bandwidth rule based on current time-of-day."""
+        rule = self._bandwidth_rule
+        if not rule or not rule.get("enabled"):
+            return
+        try:
+            start_h = int(rule.get("start_hour", 9))
+            end_h = int(rule.get("end_hour", 17))
+            limit = str(rule.get("limit", "") or "")
+            now = datetime.now()
+            hour = now.hour
+            # Handle wrap-around (e.g. 22..6 = overnight)
+            if start_h <= end_h:
+                active = start_h <= hour < end_h
+            else:
+                active = hour >= start_h or hour < end_h
+            if active:
+                if YtDlpExtractor.rate_limit != limit:
+                    YtDlpExtractor.rate_limit = limit
+                    self._log(f"[BANDWIDTH] Active window ({start_h:02d}-{end_h:02d}): limit = {limit or 'unlimited'}")
+            else:
+                baseline = self._config.get("rate_limit", "") or ""
+                if YtDlpExtractor.rate_limit != baseline:
+                    YtDlpExtractor.rate_limit = baseline
+                    self._log(f"[BANDWIDTH] Outside window: baseline = {baseline or 'unlimited'}")
+        except Exception as e:
+            self._log(f"[BANDWIDTH] Rule error: {e}")
 
     # ── Drag and Drop ─────────────────────────────────────────────────
 
@@ -3223,6 +3386,20 @@ class StreamKeep(QMainWindow):
             self._recent_urls = [str(u) for u in recents if u][:30]
             if hasattr(self, "_recent_url_model"):
                 self._recent_url_model.setStringList(self._recent_urls)
+        # Bandwidth schedule rule
+        bw = cfg.get("bandwidth_rule")
+        if isinstance(bw, dict):
+            self._bandwidth_rule.update({
+                "enabled": bool(bw.get("enabled", False)),
+                "start_hour": int(bw.get("start_hour", 9) or 9),
+                "end_hour": int(bw.get("end_hour", 17) or 17),
+                "limit": str(bw.get("limit", "500K") or ""),
+            })
+        if hasattr(self, "bw_enable_check"):
+            self.bw_enable_check.setChecked(self._bandwidth_rule["enabled"])
+            self.bw_start_spin.setValue(self._bandwidth_rule["start_hour"])
+            self.bw_end_spin.setValue(self._bandwidth_rule["end_hour"])
+            self.bw_limit_input.setText(self._bandwidth_rule["limit"])
         for h in cfg.get("history", []):
             if not isinstance(h, dict):
                 continue
@@ -3265,6 +3442,7 @@ class StreamKeep(QMainWindow):
         cfg["pp_contact_sheet"] = PostProcessor.contact_sheet
         cfg["pp_split_by_chapter"] = PostProcessor.split_by_chapter
         cfg["recent_urls"] = list(self._recent_urls)
+        cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
 
@@ -3839,6 +4017,13 @@ class StreamKeep(QMainWindow):
         self.expand_btn.clicked.connect(self._on_expand_playlist)
         url_row.addWidget(self.expand_btn)
 
+        self.scan_btn = QPushButton("Scan Page")
+        self.scan_btn.setObjectName("secondary")
+        self.scan_btn.setFixedWidth(110)
+        self.scan_btn.setToolTip("Fetch the URL as HTML and extract all video/media links it references")
+        self.scan_btn.clicked.connect(self._on_scan_page)
+        url_row.addWidget(self.scan_btn)
+
         self.clip_btn = QPushButton("Clipboard Watch")
         self.clip_btn.setObjectName("toggleAccent")
         self.clip_btn.setCheckable(True)
@@ -4057,6 +4242,11 @@ class StreamKeep(QMainWindow):
         self.queue_btn.setToolTip("Add the current URL to the download queue instead of downloading now")
         self.queue_btn.clicked.connect(self._on_queue_url)
         dl_row.addWidget(self.queue_btn)
+        self.schedule_btn = QPushButton("Schedule...")
+        self.schedule_btn.setObjectName("secondary")
+        self.schedule_btn.setToolTip("Queue the URL and start it at a future time")
+        self.schedule_btn.clicked.connect(self._on_schedule_url)
+        dl_row.addWidget(self.schedule_btn)
         self.download_btn = QPushButton("Download Selected")
         self.download_btn.setObjectName("primary")
         self.download_btn.setEnabled(False)
@@ -4081,21 +4271,24 @@ class StreamKeep(QMainWindow):
         queue_header.addWidget(clear_queue_btn)
         qcard_lay.addLayout(queue_header)
         self.queue_table = QTableWidget()
-        self.queue_table.setColumnCount(5)
-        self.queue_table.setHorizontalHeaderLabels(["Status", "Platform", "Title", "Added", ""])
+        self.queue_table.setColumnCount(6)
+        self.queue_table.setHorizontalHeaderLabels(
+            ["Status", "Platform", "Title", "Added / Scheduled", "", ""])
         self.queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.queue_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.queue_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.queue_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.queue_table.setColumnWidth(0, 84)
+        self.queue_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.queue_table.setColumnWidth(0, 96)
         self.queue_table.setColumnWidth(1, 90)
-        self.queue_table.setColumnWidth(3, 140)
-        self.queue_table.setColumnWidth(4, 90)
+        self.queue_table.setColumnWidth(3, 160)
+        self.queue_table.setColumnWidth(4, 66)   # move up/down
+        self.queue_table.setColumnWidth(5, 84)   # remove
         self.queue_table.verticalHeader().setVisible(False)
         self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.queue_table.setMaximumHeight(150)
+        self.queue_table.setMaximumHeight(180)
         self._style_table(self.queue_table, 36)
         qcard_lay.addWidget(self.queue_table)
         root.addWidget(queue_card)
@@ -4150,6 +4343,51 @@ class StreamKeep(QMainWindow):
         self._log(f"[PLAYLIST] {err}")
         self._set_status(f"Playlist probe failed: {err}", "error")
 
+    def _on_scan_page(self):
+        """Scrape a webpage for video/media links and queue them."""
+        url = self.url_input.text().strip()
+        if not url:
+            self._set_status("Paste a webpage URL first.", "warning")
+            return
+        if not url.startswith("http"):
+            self._set_status("Scan Page expects a full http(s) URL.", "warning")
+            return
+        self.scan_btn.setEnabled(False)
+        self._set_status("Scanning page for media links...", "working")
+        self._log(f"[SCRAPE] Scanning {url}")
+        worker = _PageScrapeWorker(url)
+        worker.finished.connect(self._on_scan_done)
+        worker.error.connect(self._on_scan_error)
+        worker.log.connect(self._log)
+        self._scan_worker = worker
+        worker.start()
+
+    def _on_scan_done(self, links):
+        self.scan_btn.setEnabled(True)
+        if not links:
+            self._set_status(
+                "No media links found. Try Fetch or Expand Playlist instead.",
+                "warning",
+            )
+            return
+        added = 0
+        for url, hint in links:
+            if self._queue_add(url, title=url[:80], platform=hint):
+                added += 1
+        self._log(f"[SCRAPE] Queued {added} new link(s) of {len(links)} found")
+        self._set_status(
+            f"Found {len(links)} link(s). Queued {added} new ({len(links) - added} already in queue).",
+            "success",
+        )
+        worker = getattr(self, "download_worker", None)
+        if worker is None or not worker.isRunning():
+            self._advance_queue()
+
+    def _on_scan_error(self, err):
+        self.scan_btn.setEnabled(True)
+        self._log(f"[SCRAPE] {err}")
+        self._set_status(f"Scan failed: {err}", "error")
+
     def _on_queue_url(self):
         """Add the current URL input to the persistent queue."""
         url = self.url_input.text().strip()
@@ -4164,6 +4402,37 @@ class StreamKeep(QMainWindow):
         added = self._queue_add(url, title=title, platform=platform)
         if added:
             self._set_status(f"Queued: {title or url[:60]}", "success")
+        else:
+            self._set_status("URL already in the queue.", "warning")
+
+    def _on_schedule_url(self):
+        """Queue the current URL with a deferred start time."""
+        url = self.url_input.text().strip()
+        if not url:
+            self._set_status("Paste a URL first.", "warning")
+            return
+        # Ask for an offset in minutes — simple numeric input
+        offset_min, ok = QInputDialog.getInt(
+            self,
+            "Schedule Download",
+            "Start in how many minutes? (use 60 for 1 hour, 1440 for 1 day)",
+            value=60, min=1, max=60 * 24 * 30,
+        )
+        if not ok:
+            return
+        start_at = (datetime.now() + timedelta(minutes=offset_min)).replace(microsecond=0)
+        title = ""
+        platform = ""
+        if self.stream_info:
+            title = self.stream_info.title or ""
+            platform = self.stream_info.platform or ""
+        added = self._queue_add(url, title=title, platform=platform,
+                                start_at=start_at.isoformat())
+        if added:
+            self._set_status(
+                f"Scheduled for {start_at.strftime('%Y-%m-%d %H:%M')}: {title or url[:60]}",
+                "success",
+            )
         else:
             self._set_status("URL already in the queue.", "warning")
 
@@ -4582,6 +4851,35 @@ class StreamKeep(QMainWindow):
         proxy_row.addWidget(self.proxy_input, 1)
         network_lay.addLayout(proxy_row)
 
+        # Bandwidth schedule — apply a different rate limit during a time window
+        self.bw_enable_check = QCheckBox(
+            "Enable bandwidth schedule (overrides Rate limit within the window)"
+        )
+        self.bw_enable_check.setChecked(self._bandwidth_rule["enabled"])
+        network_lay.addWidget(self.bw_enable_check)
+        bw_row = QHBoxLayout()
+        bw_row.setSpacing(8)
+        bw_row.addWidget(QLabel("Window:"))
+        self.bw_start_spin = QSpinBox()
+        self.bw_start_spin.setRange(0, 23)
+        self.bw_start_spin.setSuffix(":00")
+        self.bw_start_spin.setValue(self._bandwidth_rule["start_hour"])
+        bw_row.addWidget(self.bw_start_spin)
+        bw_row.addWidget(QLabel("to"))
+        self.bw_end_spin = QSpinBox()
+        self.bw_end_spin.setRange(0, 23)
+        self.bw_end_spin.setSuffix(":00")
+        self.bw_end_spin.setValue(self._bandwidth_rule["end_hour"])
+        bw_row.addWidget(self.bw_end_spin)
+        bw_row.addSpacing(12)
+        bw_row.addWidget(QLabel("Limit:"))
+        self.bw_limit_input = QLineEdit(self._bandwidth_rule["limit"])
+        self.bw_limit_input.setPlaceholderText("500K")
+        self.bw_limit_input.setFixedWidth(100)
+        bw_row.addWidget(self.bw_limit_input)
+        bw_row.addStretch(1)
+        network_lay.addLayout(bw_row)
+
         # Load saved network settings
         saved_rate = self._config.get("rate_limit", "")
         saved_proxy = self._config.get("proxy", "")
@@ -4865,6 +5163,14 @@ class StreamKeep(QMainWindow):
         self._config["proxy"] = proxy
         global NATIVE_PROXY
         NATIVE_PROXY = proxy
+        # Apply bandwidth schedule rule
+        self._bandwidth_rule = {
+            "enabled": self.bw_enable_check.isChecked(),
+            "start_hour": self.bw_start_spin.value(),
+            "end_hour": self.bw_end_spin.value(),
+            "limit": self.bw_limit_input.text().strip(),
+        }
+        self._apply_bandwidth_schedule()
         # Apply YouTube extras
         YtDlpExtractor.download_subs = self.subs_check.isChecked()
         self._config["download_subs"] = YtDlpExtractor.download_subs
@@ -5859,8 +6165,10 @@ class StreamKeep(QMainWindow):
 
     # ── Download Queue ────────────────────────────────────────────────
 
-    def _queue_add(self, url, title="", platform="", note=""):
-        """Append a URL to the persistent download queue."""
+    def _queue_add(self, url, title="", platform="", note="", start_at=""):
+        """Append a URL to the persistent download queue.
+        If start_at (ISO timestamp) is set, the item will only be picked
+        up by _advance_queue after that time."""
         if not url:
             return False
         if any(q.get("url") == url and q.get("status") == "queued"
@@ -5873,6 +6181,7 @@ class StreamKeep(QMainWindow):
             "status": "queued",
             "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "note": note,
+            "start_at": start_at,
         })
         self._persist_config()
         if hasattr(self, "queue_table"):
@@ -5889,16 +6198,27 @@ class StreamKeep(QMainWindow):
         return None
 
     def _advance_queue(self):
-        """Start the next queued item if nothing is downloading."""
+        """Start the next queued item if nothing is downloading.
+        Scheduled items (start_at in the future) are skipped."""
         worker = getattr(self, "download_worker", None)
         if worker is not None and worker.isRunning():
             return
-        # Pop the next queued item
+        now = datetime.now()
+        # Pop the next non-scheduled queued item
         next_item = None
         for i, q in enumerate(self._download_queue):
-            if q.get("status") == "queued":
-                next_item = self._download_queue.pop(i)
-                break
+            if q.get("status") != "queued":
+                continue
+            start_at = q.get("start_at", "")
+            if start_at:
+                try:
+                    ts = datetime.fromisoformat(start_at)
+                    if ts > now:
+                        continue  # still scheduled, skip
+                except Exception:
+                    pass
+            next_item = self._download_queue.pop(i)
+            break
         if not next_item:
             return
         self._log(f"[QUEUE] Auto-starting: {next_item.get('title', '')[:60]}")
@@ -5913,20 +6233,74 @@ class StreamKeep(QMainWindow):
         if not hasattr(self, "queue_table"):
             return
         self.queue_table.setRowCount(len(self._download_queue))
+        now = datetime.now()
         for i, q in enumerate(self._download_queue):
+            # Compute effective status: "scheduled" if start_at is in the future
             status = q.get("status", "queued")
-            status_item = QTableWidgetItem(status.upper())
+            start_at = q.get("start_at", "")
+            is_scheduled = False
+            if start_at and status == "queued":
+                try:
+                    ts = datetime.fromisoformat(start_at)
+                    if ts > now:
+                        is_scheduled = True
+                except Exception:
+                    pass
+            display_status = "SCHEDULED" if is_scheduled else status.upper()
+            status_item = QTableWidgetItem(display_status)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if status == "queued":
+            if is_scheduled:
+                status_item.setForeground(QColor(CAT["peach"]))
+            elif status == "queued":
                 status_item.setForeground(QColor(CAT["yellow"]))
             self.queue_table.setItem(i, 0, status_item)
             self.queue_table.setItem(i, 1, QTableWidgetItem(q.get("platform", "?")))
             self.queue_table.setItem(i, 2, QTableWidgetItem(q.get("title", "")[:80]))
-            self.queue_table.setItem(i, 3, QTableWidgetItem(q.get("added", "")))
+            # Added / Scheduled column
+            added = q.get("added", "")
+            if is_scheduled:
+                added = f"@ {start_at[:16].replace('T', ' ')}"
+            self.queue_table.setItem(i, 3, QTableWidgetItem(added))
+            # Move up/down buttons (single cell with two stacked buttons)
+            move_widget = QWidget()
+            move_lay = QHBoxLayout(move_widget)
+            move_lay.setContentsMargins(2, 2, 2, 2)
+            move_lay.setSpacing(2)
+            up_btn = QPushButton("↑")
+            up_btn.setObjectName("ghost")
+            up_btn.setFixedWidth(28)
+            up_btn.setToolTip("Move up")
+            up_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, -1))
+            down_btn = QPushButton("↓")
+            down_btn.setObjectName("ghost")
+            down_btn.setFixedWidth(28)
+            down_btn.setToolTip("Move down")
+            down_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, 1))
+            if i == 0:
+                up_btn.setEnabled(False)
+            if i == len(self._download_queue) - 1:
+                down_btn.setEnabled(False)
+            move_lay.addWidget(up_btn)
+            move_lay.addWidget(down_btn)
+            self.queue_table.setCellWidget(i, 4, move_widget)
+            # Remove button
             rm_btn = QPushButton("Remove")
             rm_btn.setObjectName("secondary")
             rm_btn.clicked.connect(lambda _c=False, row=i: self._queue_remove(row))
-            self.queue_table.setCellWidget(i, 4, rm_btn)
+            self.queue_table.setCellWidget(i, 5, rm_btn)
+
+    def _queue_move(self, idx, direction):
+        """Move a queue item up (-1) or down (+1)."""
+        if idx < 0 or idx >= len(self._download_queue):
+            return
+        target = idx + direction
+        if target < 0 or target >= len(self._download_queue):
+            return
+        self._download_queue[idx], self._download_queue[target] = (
+            self._download_queue[target], self._download_queue[idx]
+        )
+        self._persist_config()
+        self._refresh_queue_table()
 
     def _on_new_vods_found(self, channel_id, vods):
         """New VODs from a subscribed channel — queue their source URLs
