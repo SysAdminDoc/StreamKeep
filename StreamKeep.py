@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.6.0"
+VERSION = "4.7.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -2981,6 +2981,32 @@ class MetadataSaver:
 
 # ── Post-Processing Engine ────────────────────────────────────────────────
 
+# Video / audio format + codec tables used by the converter post-processor.
+# Keys are the user-facing labels stored in config; values are the ffmpeg
+# codec argument. "copy" means stream copy (no re-encode).
+VIDEO_CONTAINERS = ["mp4", "mkv", "webm", "mov", "avi", "ts", "flv"]
+VIDEO_CODECS = {
+    "copy":  "copy",
+    "h264":  "libx264",
+    "h265":  "libx265",
+    "vp9":   "libvpx-vp9",
+    "av1":   "libaom-av1",
+    "mpeg4": "mpeg4",
+}
+AUDIO_CONTAINERS = ["mp3", "m4a", "ogg", "opus", "flac", "wav", "aac"]
+AUDIO_CODECS = {
+    "copy":   "copy",
+    "mp3":    "libmp3lame",
+    "aac":    "aac",
+    "opus":   "libopus",
+    "vorbis": "libvorbis",
+    "flac":   "flac",
+    "pcm":    "pcm_s16le",
+}
+VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".ts", ".flv", ".m4v"}
+AUDIO_EXTS = {".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac"}
+
+
 class PostProcessor:
     """Runs ffmpeg post-processing presets on completed downloads."""
 
@@ -2990,29 +3016,51 @@ class PostProcessor:
     contact_sheet = False       # Generate 3x3 thumbnail grid
     split_by_chapter = False    # Split into per-chapter files
 
+    # Converter — re-mux/transcode to a user-chosen container + codec
+    convert_video = False
+    convert_video_format = "mp4"
+    convert_video_codec = "h264"
+    convert_audio = False
+    convert_audio_format = "mp3"
+    convert_audio_codec = "mp3"
+    convert_audio_bitrate = "192k"
+    convert_delete_source = False
+
     @classmethod
     def has_any_preset(cls):
         return (cls.extract_audio or cls.normalize_loudness
                 or cls.reencode_h265 or cls.contact_sheet
-                or cls.split_by_chapter)
+                or cls.split_by_chapter
+                or cls.convert_video or cls.convert_audio)
 
     @classmethod
     def process_directory(cls, out_dir, log_fn=None, chapters=None):
-        """Scan out_dir for .mp4 files and run configured presets on each.
+        """Scan out_dir for media files and run configured presets on each.
         `chapters` is an optional list of {title,start,end} for split-by-chapter."""
         if not cls.has_any_preset() or not out_dir or not os.path.isdir(out_dir):
             return
         try:
-            mp4s = [
-                os.path.join(out_dir, f)
-                for f in os.listdir(out_dir)
-                if f.lower().endswith(".mp4") and os.path.isfile(os.path.join(out_dir, f))
-                and not f.lower().endswith(".h265.mp4")
-                and not f.lower().endswith(".loudnorm.mp4")
-            ]
+            entries = [f for f in os.listdir(out_dir)
+                       if os.path.isfile(os.path.join(out_dir, f))]
         except OSError:
             return
-        for src in mp4s:
+
+        def _is_derived(name):
+            n = name.lower()
+            # Skip files we produced ourselves so a re-run doesn't chain-convert
+            return (n.endswith(".h265.mp4") or n.endswith(".loudnorm.mp4")
+                    or ".converted." in n)
+
+        video_files = [
+            os.path.join(out_dir, f) for f in entries
+            if os.path.splitext(f)[1].lower() in VIDEO_EXTS and not _is_derived(f)
+        ]
+        audio_files = [
+            os.path.join(out_dir, f) for f in entries
+            if os.path.splitext(f)[1].lower() in AUDIO_EXTS and not _is_derived(f)
+        ]
+
+        for src in video_files:
             if cls.extract_audio:
                 cls._run_audio_extract(src, log_fn)
             if cls.normalize_loudness:
@@ -3023,6 +3071,12 @@ class PostProcessor:
                 cls._run_contact_sheet(src, log_fn)
             if cls.split_by_chapter and chapters:
                 cls._run_split_by_chapter(src, chapters, log_fn)
+            if cls.convert_video:
+                cls._run_video_convert(src, log_fn)
+
+        for src in audio_files:
+            if cls.convert_audio:
+                cls._run_audio_convert(src, log_fn)
 
     @staticmethod
     def _ffmpeg_run(cmd, log_fn, label):
@@ -3081,6 +3135,103 @@ class PostProcessor:
                "-i", src, "-c:v", "libx265", "-crf", "23", "-preset", "medium",
                "-c:a", "copy", dst]
         cls._ffmpeg_run(cmd, log_fn, "H.265 re-encode")
+
+    @classmethod
+    def _run_video_convert(cls, src, log_fn):
+        """Convert a video file to the user-selected container + codec.
+        Uses stream copy when codec is 'copy' (fast remux)."""
+        fmt = (cls.convert_video_format or "mp4").lower()
+        if fmt not in VIDEO_CONTAINERS:
+            fmt = "mp4"
+        codec_key = (cls.convert_video_codec or "h264").lower()
+        ff_codec = VIDEO_CODECS.get(codec_key, "libx264")
+
+        base = os.path.splitext(src)[0]
+        dst = f"{base}.converted.{fmt}"
+        # If dst collides with the source (same ext + same stem), adjust
+        if os.path.abspath(dst) == os.path.abspath(src):
+            dst = f"{base}.converted2.{fmt}"
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Convert video -> {fmt}/{codec_key}: {os.path.basename(dst)}")
+
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src]
+        if ff_codec == "copy":
+            cmd.extend(["-c", "copy"])
+        else:
+            cmd.extend(["-c:v", ff_codec])
+            if ff_codec in ("libx264", "libx265"):
+                cmd.extend(["-crf", "23", "-preset", "medium"])
+            elif ff_codec == "libvpx-vp9":
+                cmd.extend(["-crf", "32", "-b:v", "0"])
+            elif ff_codec == "libaom-av1":
+                cmd.extend(["-crf", "30", "-b:v", "0", "-cpu-used", "4"])
+            elif ff_codec == "mpeg4":
+                cmd.extend(["-q:v", "5"])
+            # Audio: copy when possible, else transcode to AAC for mp4/mov,
+            # libvorbis for webm/ogg, libopus for opus container.
+            if fmt in ("webm",):
+                cmd.extend(["-c:a", "libvorbis"])
+            else:
+                cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        # WebM can't mux H.264/H.265 — force VP9 if the user picked a bad combo
+        if fmt == "webm" and ff_codec in ("libx264", "libx265", "mpeg4", "copy"):
+            if log_fn:
+                log_fn(f"[POST] webm container requires VP9/AV1 — switching codec")
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src,
+                   "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0",
+                   "-c:a", "libvorbis"]
+        cmd.append(dst)
+
+        ok = cls._ffmpeg_run(cmd, log_fn, f"video convert -> {fmt}/{codec_key}")
+        if ok and cls.convert_delete_source:
+            try:
+                os.remove(src)
+                if log_fn:
+                    log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
+            except OSError as e:
+                if log_fn:
+                    log_fn(f"[POST] Delete source failed: {e}")
+
+    @classmethod
+    def _run_audio_convert(cls, src, log_fn):
+        """Convert an audio file to the user-selected container + codec."""
+        fmt = (cls.convert_audio_format or "mp3").lower()
+        if fmt not in AUDIO_CONTAINERS:
+            fmt = "mp3"
+        codec_key = (cls.convert_audio_codec or "mp3").lower()
+        ff_codec = AUDIO_CODECS.get(codec_key, "libmp3lame")
+
+        base = os.path.splitext(src)[0]
+        dst = f"{base}.converted.{fmt}"
+        if os.path.abspath(dst) == os.path.abspath(src):
+            dst = f"{base}.converted2.{fmt}"
+        if os.path.exists(dst):
+            return
+        if log_fn:
+            log_fn(f"[POST] Convert audio -> {fmt}/{codec_key}: {os.path.basename(dst)}")
+
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               "-i", src, "-vn"]
+        if ff_codec == "copy":
+            cmd.extend(["-c:a", "copy"])
+        else:
+            cmd.extend(["-c:a", ff_codec])
+            # Lossless codecs ignore bitrate
+            if ff_codec not in ("flac", "pcm_s16le") and cls.convert_audio_bitrate:
+                cmd.extend(["-b:a", cls.convert_audio_bitrate])
+        cmd.append(dst)
+
+        ok = cls._ffmpeg_run(cmd, log_fn, f"audio convert -> {fmt}/{codec_key}")
+        if ok and cls.convert_delete_source:
+            try:
+                os.remove(src)
+                if log_fn:
+                    log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
+            except OSError as e:
+                if log_fn:
+                    log_fn(f"[POST] Delete source failed: {e}")
 
     @classmethod
     def _run_contact_sheet(cls, src, log_fn):
@@ -3899,12 +4050,43 @@ class StreamKeep(QMainWindow):
         PostProcessor.reencode_h265 = bool(cfg.get("pp_reencode_h265", False))
         PostProcessor.contact_sheet = bool(cfg.get("pp_contact_sheet", False))
         PostProcessor.split_by_chapter = bool(cfg.get("pp_split_by_chapter", False))
+        # Converter
+        PostProcessor.convert_video = bool(cfg.get("pp_convert_video", False))
+        PostProcessor.convert_video_format = cfg.get("pp_convert_video_format") or "mp4"
+        PostProcessor.convert_video_codec = cfg.get("pp_convert_video_codec") or "h264"
+        PostProcessor.convert_audio = bool(cfg.get("pp_convert_audio", False))
+        PostProcessor.convert_audio_format = cfg.get("pp_convert_audio_format") or "mp3"
+        PostProcessor.convert_audio_codec = cfg.get("pp_convert_audio_codec") or "mp3"
+        PostProcessor.convert_audio_bitrate = cfg.get("pp_convert_audio_bitrate") or "192k"
+        PostProcessor.convert_delete_source = bool(cfg.get("pp_convert_delete_source", False))
         if hasattr(self, "pp_audio_check"):
             self.pp_audio_check.setChecked(PostProcessor.extract_audio)
             self.pp_loud_check.setChecked(PostProcessor.normalize_loudness)
             self.pp_h265_check.setChecked(PostProcessor.reencode_h265)
             self.pp_contact_check.setChecked(PostProcessor.contact_sheet)
             self.pp_split_check.setChecked(PostProcessor.split_by_chapter)
+        if hasattr(self, "pp_convert_video_check"):
+            self.pp_convert_video_check.setChecked(PostProcessor.convert_video)
+            if PostProcessor.convert_video_format in VIDEO_CONTAINERS:
+                self.pp_convert_video_format.setCurrentIndex(
+                    VIDEO_CONTAINERS.index(PostProcessor.convert_video_format))
+            vc_keys = list(VIDEO_CODECS.keys())
+            if PostProcessor.convert_video_codec in vc_keys:
+                self.pp_convert_video_codec.setCurrentIndex(
+                    vc_keys.index(PostProcessor.convert_video_codec))
+            self.pp_convert_audio_check.setChecked(PostProcessor.convert_audio)
+            if PostProcessor.convert_audio_format in AUDIO_CONTAINERS:
+                self.pp_convert_audio_format.setCurrentIndex(
+                    AUDIO_CONTAINERS.index(PostProcessor.convert_audio_format))
+            ac_keys = list(AUDIO_CODECS.keys())
+            if PostProcessor.convert_audio_codec in ac_keys:
+                self.pp_convert_audio_codec.setCurrentIndex(
+                    ac_keys.index(PostProcessor.convert_audio_codec))
+            br_items = ["96k", "128k", "192k", "256k", "320k"]
+            if PostProcessor.convert_audio_bitrate in br_items:
+                self.pp_convert_audio_bitrate.setCurrentIndex(
+                    br_items.index(PostProcessor.convert_audio_bitrate))
+            self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
         # Restore queue
         self._download_queue = [
             q for q in cfg.get("download_queue", [])
@@ -3972,6 +4154,14 @@ class StreamKeep(QMainWindow):
         cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
         cfg["pp_contact_sheet"] = PostProcessor.contact_sheet
         cfg["pp_split_by_chapter"] = PostProcessor.split_by_chapter
+        cfg["pp_convert_video"] = PostProcessor.convert_video
+        cfg["pp_convert_video_format"] = PostProcessor.convert_video_format
+        cfg["pp_convert_video_codec"] = PostProcessor.convert_video_codec
+        cfg["pp_convert_audio"] = PostProcessor.convert_audio
+        cfg["pp_convert_audio_format"] = PostProcessor.convert_audio_format
+        cfg["pp_convert_audio_codec"] = PostProcessor.convert_audio_codec
+        cfg["pp_convert_audio_bitrate"] = PostProcessor.convert_audio_bitrate
+        cfg["pp_convert_delete_source"] = PostProcessor.convert_delete_source
         cfg["recent_urls"] = list(self._recent_urls)
         cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
         self.monitor.save_to_config(cfg)
@@ -5545,6 +5735,94 @@ class StreamKeep(QMainWindow):
         self.pp_split_check = QCheckBox("Split by chapters into per-chapter files (for videos with chapters)")
         self.pp_split_check.setChecked(PostProcessor.split_by_chapter)
         pp_lay.addWidget(self.pp_split_check)
+
+        # Video converter row
+        self.pp_convert_video_check = QCheckBox("Convert video to:")
+        self.pp_convert_video_check.setChecked(PostProcessor.convert_video)
+        self.pp_convert_video_format = QComboBox()
+        self.pp_convert_video_format.addItems(VIDEO_CONTAINERS)
+        idx = VIDEO_CONTAINERS.index(PostProcessor.convert_video_format) \
+            if PostProcessor.convert_video_format in VIDEO_CONTAINERS else 0
+        self.pp_convert_video_format.setCurrentIndex(idx)
+        self.pp_convert_video_format.setFixedWidth(80)
+        self.pp_convert_video_codec = QComboBox()
+        self.pp_convert_video_codec.addItems(list(VIDEO_CODECS.keys()))
+        vc_keys = list(VIDEO_CODECS.keys())
+        idx = vc_keys.index(PostProcessor.convert_video_codec) \
+            if PostProcessor.convert_video_codec in vc_keys else 1
+        self.pp_convert_video_codec.setCurrentIndex(idx)
+        self.pp_convert_video_codec.setFixedWidth(90)
+        self.pp_convert_video_codec.setToolTip(
+            "copy = fast remux (no re-encode)\n"
+            "h264/h265 = x264/x265 at CRF 23\n"
+            "vp9/av1 = modern codecs, slower\n"
+            "mpeg4 = legacy fallback"
+        )
+        vconv_row = QHBoxLayout()
+        vconv_row.setSpacing(6)
+        vconv_row.addWidget(self.pp_convert_video_check)
+        vconv_row.addSpacing(4)
+        vconv_row.addWidget(QLabel("Container:"))
+        vconv_row.addWidget(self.pp_convert_video_format)
+        vconv_row.addSpacing(8)
+        vconv_row.addWidget(QLabel("Codec:"))
+        vconv_row.addWidget(self.pp_convert_video_codec)
+        vconv_row.addStretch(1)
+        pp_lay.addLayout(vconv_row)
+
+        # Audio converter row
+        self.pp_convert_audio_check = QCheckBox("Convert audio to:")
+        self.pp_convert_audio_check.setChecked(PostProcessor.convert_audio)
+        self.pp_convert_audio_format = QComboBox()
+        self.pp_convert_audio_format.addItems(AUDIO_CONTAINERS)
+        idx = AUDIO_CONTAINERS.index(PostProcessor.convert_audio_format) \
+            if PostProcessor.convert_audio_format in AUDIO_CONTAINERS else 0
+        self.pp_convert_audio_format.setCurrentIndex(idx)
+        self.pp_convert_audio_format.setFixedWidth(80)
+        self.pp_convert_audio_codec = QComboBox()
+        self.pp_convert_audio_codec.addItems(list(AUDIO_CODECS.keys()))
+        ac_keys = list(AUDIO_CODECS.keys())
+        idx = ac_keys.index(PostProcessor.convert_audio_codec) \
+            if PostProcessor.convert_audio_codec in ac_keys else 1
+        self.pp_convert_audio_codec.setCurrentIndex(idx)
+        self.pp_convert_audio_codec.setFixedWidth(90)
+        self.pp_convert_audio_codec.setToolTip(
+            "copy = remux only\n"
+            "mp3 = libmp3lame (universal)\n"
+            "aac = AAC-LC (Apple-friendly)\n"
+            "opus = low-bitrate champion\n"
+            "vorbis = open-source lossy\n"
+            "flac/pcm = lossless"
+        )
+        self.pp_convert_audio_bitrate = QComboBox()
+        self.pp_convert_audio_bitrate.addItems(["96k", "128k", "192k", "256k", "320k"])
+        br_items = ["96k", "128k", "192k", "256k", "320k"]
+        idx = br_items.index(PostProcessor.convert_audio_bitrate) \
+            if PostProcessor.convert_audio_bitrate in br_items else 2
+        self.pp_convert_audio_bitrate.setCurrentIndex(idx)
+        self.pp_convert_audio_bitrate.setFixedWidth(80)
+        self.pp_convert_audio_bitrate.setToolTip("Bitrate (ignored for flac/pcm)")
+        aconv_row = QHBoxLayout()
+        aconv_row.setSpacing(6)
+        aconv_row.addWidget(self.pp_convert_audio_check)
+        aconv_row.addSpacing(4)
+        aconv_row.addWidget(QLabel("Container:"))
+        aconv_row.addWidget(self.pp_convert_audio_format)
+        aconv_row.addSpacing(8)
+        aconv_row.addWidget(QLabel("Codec:"))
+        aconv_row.addWidget(self.pp_convert_audio_codec)
+        aconv_row.addSpacing(8)
+        aconv_row.addWidget(QLabel("Bitrate:"))
+        aconv_row.addWidget(self.pp_convert_audio_bitrate)
+        aconv_row.addStretch(1)
+        pp_lay.addLayout(aconv_row)
+
+        self.pp_convert_delete_check = QCheckBox(
+            "Delete original source file after successful conversion"
+        )
+        self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
+        pp_lay.addWidget(self.pp_convert_delete_check)
+
         card_lay.addWidget(pp_block)
 
         # Save / Import / Export row
@@ -5746,6 +6024,15 @@ class StreamKeep(QMainWindow):
         PostProcessor.reencode_h265 = self.pp_h265_check.isChecked()
         PostProcessor.contact_sheet = self.pp_contact_check.isChecked()
         PostProcessor.split_by_chapter = self.pp_split_check.isChecked()
+        # Converter settings
+        PostProcessor.convert_video = self.pp_convert_video_check.isChecked()
+        PostProcessor.convert_video_format = self.pp_convert_video_format.currentText()
+        PostProcessor.convert_video_codec = self.pp_convert_video_codec.currentText()
+        PostProcessor.convert_audio = self.pp_convert_audio_check.isChecked()
+        PostProcessor.convert_audio_format = self.pp_convert_audio_format.currentText()
+        PostProcessor.convert_audio_codec = self.pp_convert_audio_codec.currentText()
+        PostProcessor.convert_audio_bitrate = self.pp_convert_audio_bitrate.currentText()
+        PostProcessor.convert_delete_source = self.pp_convert_delete_check.isChecked()
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
