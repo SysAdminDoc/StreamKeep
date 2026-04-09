@@ -326,6 +326,7 @@ class QualityInfo:
     resolution: str = ""
     bandwidth: int = 0
     format_type: str = "hls"  # hls, mp4, dash, ytdlp
+    audio_url: str = ""  # If set, video is video-only and needs audio merge
 
 @dataclass
 class StreamInfo:
@@ -1607,7 +1608,21 @@ class YtDlpExtractor(Extractor):
             is_live=data.get("is_live", False),
         )
 
-        # Parse formats into qualities
+        # First pass — identify the best audio-only format
+        best_audio_url = ""
+        best_audio_abr = 0
+        for fmt in data.get("formats", []):
+            if fmt.get("vcodec") != "none":
+                continue
+            if fmt.get("acodec") == "none":
+                continue
+            abr = fmt.get("abr", 0) or 0
+            fmt_url = fmt.get("url", "")
+            if fmt_url and abr > best_audio_abr:
+                best_audio_abr = abr
+                best_audio_url = fmt_url
+
+        # Second pass — parse video formats, pair video-only with best audio
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") == "none":
                 continue
@@ -1627,12 +1642,19 @@ class YtDlpExtractor(Extractor):
             else:
                 ft = "ytdlp"
 
+            # Detect video-only format and pair with best audio for merge
+            audio_url = ""
+            if fmt.get("acodec") == "none" and best_audio_url:
+                audio_url = best_audio_url
+                note = f"{note} +audio"
+
             info.qualities.append(QualityInfo(
                 name=f"{note} ({ext})",
                 url=fmt_url,
                 resolution=f"{w}x{h}" if w and h else "?",
                 bandwidth=int((fmt.get("tbr", 0) or 0) * 1000),
                 format_type=ft,
+                audio_url=audio_url,
             ))
 
         # Duration
@@ -1641,7 +1663,7 @@ class YtDlpExtractor(Extractor):
             info.total_secs = float(dur)
             info.duration_str = _fmt_duration(info.total_secs)
 
-        # Filter out audio-only (no height) and sort by bandwidth desc
+        # Filter out invalid resolutions and sort by bandwidth desc
         info.qualities = [q for q in info.qualities if q.resolution != "0x0"]
         info.qualities.sort(key=lambda q: q.bandwidth, reverse=True)
 
@@ -1656,6 +1678,8 @@ class YtDlpExtractor(Extractor):
         info.qualities = unique
 
         self._log(log_fn, f"yt-dlp: {info.title}, {len(info.qualities)} formats, {info.duration_str}")
+        if best_audio_url:
+            self._log(log_fn, f"  Audio merge enabled (best audio: {best_audio_abr:.0f} kbps)")
         return info
 
 
@@ -1767,6 +1791,7 @@ class DownloadWorker(QThread):
         self.segments = segments
         self.output_dir = output_dir
         self.format_type = format_type
+        self.audio_url = ""  # Set externally for video+audio merge
         self._cancel = False
 
     def cancel(self):
@@ -1791,7 +1816,22 @@ class DownloadWorker(QThread):
             self.log.emit(f"[DL] {label} — start: {start}s, duration: {duration}s")
             self.progress.emit(seg_idx, 0, "Starting...")
 
-            if self.format_type == "mp4":
+            # Build ffmpeg command with optional audio merge
+            if self.audio_url:
+                # Video + audio merge: two inputs, map both, copy codecs
+                if self.format_type == "mp4":
+                    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
+                           "-i", self.playlist_url, "-i", self.audio_url,
+                           "-map", "0:v:0", "-map", "1:a:0",
+                           "-c", "copy", "-y", outfile]
+                else:
+                    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
+                           "-ss", str(start), "-i", self.playlist_url,
+                           "-ss", str(start), "-i", self.audio_url,
+                           "-t", str(duration),
+                           "-map", "0:v:0", "-map", "1:a:0",
+                           "-c", "copy", "-y", outfile]
+            elif self.format_type == "mp4":
                 cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info",
                        "-i", self.playlist_url, "-c", "copy", "-y", outfile]
             else:
@@ -2965,14 +3005,18 @@ class StreamKeep(QMainWindow):
         # Pick quality (prefer 1080p/source)
         playlist_url = None
         fmt_type = "hls"
+        audio_url = ""
+        selected_q = None
         for q in info.qualities:
             if "1080" in q.name or "source" in q.name.lower():
-                playlist_url = q.url
-                fmt_type = q.format_type
+                selected_q = q
                 break
-        if not playlist_url and info.qualities:
-            playlist_url = info.qualities[0].url
-            fmt_type = info.qualities[0].format_type
+        if not selected_q and info.qualities:
+            selected_q = info.qualities[0]
+        if selected_q:
+            playlist_url = selected_q.url
+            fmt_type = selected_q.format_type
+            audio_url = selected_q.audio_url
 
         if not playlist_url:
             self._log(f"[ERROR] No playback URL for {vod.title}")
@@ -3011,6 +3055,7 @@ class StreamKeep(QMainWindow):
         self.status_label.setText(f"VOD {self._batch_idx + 1}/{self._batch_total}: Downloading...")
 
         worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
+        worker.audio_url = audio_url
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)
@@ -3132,9 +3177,11 @@ class StreamKeep(QMainWindow):
             return
 
         q_data = self.quality_combo.currentData()
+        audio_url = ""
         if q_data:
             playlist_url = q_data.url
             fmt_type = q_data.format_type
+            audio_url = q_data.audio_url
         elif self.stream_info.url:
             playlist_url = self.stream_info.url
             fmt_type = "hls"
@@ -3177,6 +3224,9 @@ class StreamKeep(QMainWindow):
         self.status_label.setText(f"Downloading 0/{len(segments)}...")
 
         self.download_worker = DownloadWorker(playlist_url, segments, out_dir, format_type=fmt_type)
+        self.download_worker.audio_url = audio_url
+        if audio_url:
+            self._log(f"Audio merge: enabled (video-only format detected)")
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
