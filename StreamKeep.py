@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -1432,6 +1432,10 @@ class YtDlpExtractor(Extractor):
     cookies_browser = ""
     # Set by Settings tab — path to Netscape cookies.txt file for --cookies
     cookies_file = ""
+    # Set by Settings tab — bandwidth limit like "500K" or "2M" (yt-dlp --limit-rate)
+    rate_limit = ""
+    # Set by Settings tab — proxy URL like "socks5://127.0.0.1:1080"
+    proxy = ""
 
     def _has_ytdlp(self):
         try:
@@ -1459,6 +1463,8 @@ class YtDlpExtractor(Extractor):
             cmd.extend(["--cookies", self.cookies_file])
         elif self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        if self.proxy:
+            cmd.extend(["--proxy", self.proxy])
         cmd.append(url)
         return cmd
 
@@ -1945,6 +1951,8 @@ class DownloadWorker(QThread):
         self.ytdlp_source = ""  # Page URL for ytdlp_direct mode
         self.ytdlp_format = ""  # Format spec for ytdlp_direct mode
         self.cookies_browser = ""  # Passed through for yt-dlp cookie auth
+        self.rate_limit = ""  # e.g. "500K" or "2M" (yt-dlp --limit-rate)
+        self.proxy = ""  # e.g. "socks5://127.0.0.1:1080"
         self.max_retries = 2  # Retry failed segments up to N times
         self._cancel = False
 
@@ -1965,6 +1973,10 @@ class DownloadWorker(QThread):
                "--no-playlist"]
         if self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        if self.rate_limit:
+            cmd.extend(["--limit-rate", self.rate_limit])
+        if self.proxy:
+            cmd.extend(["--proxy", self.proxy])
         cmd.append(self.ytdlp_source)
 
         try:
@@ -3071,6 +3083,7 @@ class StreamKeep(QMainWindow):
         )
         self.quality_combo = QComboBox()
         self.quality_combo.setEnabled(False)
+        self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
         quality_lay.addWidget(self.quality_combo)
         controls_lay.addWidget(quality_block, 0, 0)
 
@@ -3409,6 +3422,15 @@ class StreamKeep(QMainWindow):
         header.addWidget(clear_btn)
         card_lay.addLayout(header)
 
+        # Search filter row
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        self.history_search = QLineEdit()
+        self.history_search.setPlaceholderText("Search by title, platform, or path...")
+        self.history_search.textChanged.connect(self._on_history_search)
+        search_row.addWidget(self.history_search, 1)
+        card_lay.addLayout(search_row)
+
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(6)
         self.history_table.setHorizontalHeaderLabels(["Date", "Platform", "Title", "Quality", "Size", "Path"])
@@ -3566,6 +3588,43 @@ class StreamKeep(QMainWindow):
                 self.cookies_combo.setCurrentIndex(idx)
             YtDlpExtractor.cookies_browser = saved_browser
 
+        # Network settings — rate limit and proxy
+        network_block, network_lay = self._make_field_block(
+            "Network",
+            "Optional bandwidth throttling and proxy for geo-blocked content."
+        )
+        rate_row = QHBoxLayout()
+        rate_row.setSpacing(8)
+        rate_label = QLabel("Rate limit:")
+        rate_label.setFixedWidth(100)
+        rate_row.addWidget(rate_label)
+        self.rate_limit_input = QLineEdit()
+        self.rate_limit_input.setPlaceholderText("e.g. 500K or 2M (leave blank for unlimited)")
+        rate_row.addWidget(self.rate_limit_input, 1)
+        network_lay.addLayout(rate_row)
+
+        proxy_row = QHBoxLayout()
+        proxy_row.setSpacing(8)
+        proxy_label = QLabel("Proxy URL:")
+        proxy_label.setFixedWidth(100)
+        proxy_row.addWidget(proxy_label)
+        self.proxy_input = QLineEdit()
+        self.proxy_input.setPlaceholderText("e.g. socks5://127.0.0.1:1080 or http://proxy:8080")
+        proxy_row.addWidget(self.proxy_input, 1)
+        network_lay.addLayout(proxy_row)
+
+        # Load saved network settings
+        saved_rate = self._config.get("rate_limit", "")
+        saved_proxy = self._config.get("proxy", "")
+        if saved_rate:
+            self.rate_limit_input.setText(saved_rate)
+            YtDlpExtractor.rate_limit = saved_rate
+        if saved_proxy:
+            self.proxy_input.setText(saved_proxy)
+            YtDlpExtractor.proxy = saved_proxy
+
+        card_lay.addWidget(network_block)
+
         # Save button
         save_row = QHBoxLayout()
         save_row.addStretch()
@@ -3655,6 +3714,14 @@ class StreamKeep(QMainWindow):
         cookies_file = self.cookies_file_input.text().strip()
         YtDlpExtractor.cookies_file = cookies_file
         self._config["cookies_file"] = cookies_file
+        # Apply rate limit
+        rate_limit = self.rate_limit_input.text().strip()
+        YtDlpExtractor.rate_limit = rate_limit
+        self._config["rate_limit"] = rate_limit
+        # Apply proxy
+        proxy = self.proxy_input.text().strip()
+        YtDlpExtractor.proxy = proxy
+        self._config["proxy"] = proxy
         self._persist_config()
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
@@ -4006,6 +4073,8 @@ class StreamKeep(QMainWindow):
         worker.ytdlp_source = ytdlp_source
         worker.ytdlp_format = ytdlp_format
         worker.cookies_browser = YtDlpExtractor.cookies_browser
+        worker.rate_limit = YtDlpExtractor.rate_limit
+        worker.proxy = YtDlpExtractor.proxy
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)
@@ -4141,10 +4210,24 @@ class StreamKeep(QMainWindow):
             self.table.setCellWidget(i, 3, pbar)
             self._segment_progress.append(pbar)
 
-            sz = QTableWidgetItem("\u2014")
+            # Estimated size: bandwidth (bits/sec) × duration / 8 = bytes
+            est = self._estimate_size_bytes(duration)
+            sz_text = f"~{_fmt_size(est)}" if est > 0 else "\u2014"
+            sz = QTableWidgetItem(sz_text)
             sz.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            sz.setForeground(QColor(CAT["muted"]))
             self.table.setItem(i, 4, sz)
         self._refresh_download_summary()
+
+    def _estimate_size_bytes(self, duration_secs):
+        """Return estimated file size in bytes using the selected quality's bandwidth."""
+        if duration_secs <= 0:
+            return 0
+        q = self.quality_combo.currentData() if hasattr(self, "quality_combo") else None
+        if not q or not getattr(q, "bandwidth", 0):
+            return 0
+        # bandwidth is bits/sec; convert to bytes
+        return int(q.bandwidth * duration_secs / 8)
 
     def _on_select_all(self, state):
         checked = state == Qt.CheckState.Checked.value
@@ -4157,6 +4240,33 @@ class StreamKeep(QMainWindow):
             self._build_segments(self.stream_info.total_secs)
         else:
             self._refresh_download_summary()
+
+    def _on_quality_changed(self, idx):
+        """Rebuild size estimates in the segment table when quality changes."""
+        if not self.stream_info or not hasattr(self, "_segment_progress"):
+            return
+        total_secs = self.stream_info.total_secs
+        if total_secs <= 0:
+            return
+        seg_secs = self._get_segment_secs()
+        if seg_secs == 0 or total_secs <= seg_secs:
+            durations = [total_secs]
+        else:
+            durations = []
+            pos = 0
+            while pos < total_secs:
+                end = min(pos + seg_secs, total_secs)
+                durations.append(end - pos)
+                pos = end
+        for i, d in enumerate(durations):
+            if i >= self.table.rowCount():
+                break
+            est = self._estimate_size_bytes(d)
+            sz_text = f"~{_fmt_size(est)}" if est > 0 else "\u2014"
+            sz = QTableWidgetItem(sz_text)
+            sz.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            sz.setForeground(QColor(CAT["muted"]))
+            self.table.setItem(i, 4, sz)
 
     def _on_browse(self):
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.output_input.text())
@@ -4247,6 +4357,8 @@ class StreamKeep(QMainWindow):
         self.download_worker.ytdlp_source = ytdlp_source
         self.download_worker.ytdlp_format = ytdlp_format
         self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
+        self.download_worker.rate_limit = YtDlpExtractor.rate_limit
+        self.download_worker.proxy = YtDlpExtractor.proxy
         if audio_url:
             self._log(f"Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
@@ -4494,14 +4606,30 @@ class StreamKeep(QMainWindow):
         self._refresh_history_table()
 
     def _refresh_history_table(self):
-        self.history_table.setRowCount(len(self._history))
-        for i, h in enumerate(reversed(self._history)):
+        query = ""
+        if hasattr(self, "history_search"):
+            query = self.history_search.text().strip().lower()
+        ordered = list(reversed(self._history))
+        if query:
+            ordered = [
+                h for h in ordered
+                if query in (h.title or "").lower()
+                or query in (h.platform or "").lower()
+                or query in (h.path or "").lower()
+                or query in (h.url or "").lower()
+            ]
+        self._history_view = ordered  # used by double-click handler
+        self.history_table.setRowCount(len(ordered))
+        for i, h in enumerate(ordered):
             for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path]):
                 item = QTableWidgetItem(val)
                 if col in (0, 1, 3, 4):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.history_table.setItem(i, col, item)
         self._refresh_history_summary()
+
+    def _on_history_search(self, _text):
+        self._refresh_history_table()
 
     def _on_clear_history(self):
         self._history.clear()
@@ -4511,9 +4639,10 @@ class StreamKeep(QMainWindow):
 
     def _on_history_double_click(self, index):
         row = index.row()
-        if row >= len(self._history):
+        view = getattr(self, "_history_view", list(reversed(self._history)))
+        if row >= len(view):
             return
-        h = list(reversed(self._history))[row]
+        h = view[row]
         # If the folder still exists, open it
         if h.path and os.path.isdir(h.path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
