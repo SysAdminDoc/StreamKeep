@@ -2886,6 +2886,8 @@ class StreamKeep(QMainWindow):
 
         # Stream info
         parts = [f"Platform: {info.platform}", f"Duration: {info.duration_str}"]
+        if info.title:
+            parts.insert(1, f"Title: {info.title[:60]}")
         if info.start_time:
             try:
                 dt = datetime.fromisoformat(info.start_time.replace("Z", "+00:00"))
@@ -2896,6 +2898,15 @@ class StreamKeep(QMainWindow):
             parts.append(f"Segments: {info.segment_count}")
         self.info_label.setText("  |  ".join(parts))
         self.info_label.setVisible(True)
+
+        # Update output folder to use the title for non-channel content (yt-dlp, Direct, etc.)
+        if info.title and info.platform in ("yt-dlp", "Direct", "Rumble", "SoundCloud",
+                                            "Reddit", "Audius", "Podcast"):
+            current_out = self.output_input.text().strip()
+            parent = os.path.dirname(current_out)
+            if parent:
+                new_out = os.path.join(parent, _safe_filename(info.title))
+                self.output_input.setText(new_out)
 
         self._build_segments(info.total_secs)
         self.download_btn.setEnabled(True)
@@ -3027,14 +3038,19 @@ class StreamKeep(QMainWindow):
         total_secs = info.total_secs
         seg_secs = self._get_segment_secs()
 
-        if fmt_type == "mp4" or seg_secs == 0 or total_secs <= 0:
-            segments = [(0, "full_stream", 0, int(total_secs) if total_secs > 0 else 0)]
+        # Title-based filenames
+        title_safe = _safe_filename(info.title) if info.title else _safe_filename(vod.title)
+        if not title_safe:
+            title_safe = f"{info.platform}_download"
+
+        if fmt_type == "mp4" or seg_secs == 0 or total_secs <= 0 or total_secs <= seg_secs:
+            segments = [(0, title_safe, 0, int(total_secs) if total_secs > 0 else 0)]
         else:
             segments = []
             pos, idx = 0, 0
             while pos < total_secs:
                 end = min(pos + seg_secs, total_secs)
-                segments.append((idx, f"part_{idx + 1}", pos, int(end - pos)))
+                segments.append((idx, f"{title_safe}_part{idx + 1:02d}", pos, int(end - pos)))
                 pos = end
                 idx += 1
 
@@ -3096,12 +3112,43 @@ class StreamKeep(QMainWindow):
         idx = self.segment_combo.currentIndex()
         return self._segment_options[idx][1]
 
+    def _is_audio_only(self):
+        """Detect if the current stream is audio-only based on its qualities."""
+        if not self.stream_info:
+            return False
+        return all(q.resolution in ("audio", "?", "") for q in self.stream_info.qualities)
+
+    def _content_label(self, idx, total_segments, seg_secs, total_secs):
+        """Generate a content-aware segment label."""
+        is_audio = self._is_audio_only()
+        kind = "Audio" if is_audio else "Video"
+
+        if total_segments == 1:
+            # Single segment — use the content type
+            if total_secs < 60:
+                return f"{kind} ({int(total_secs)}s)"
+            elif total_secs < 3600:
+                return f"{kind} ({int(total_secs // 60)}m)"
+            else:
+                return f"{kind} ({_fmt_duration(total_secs)})"
+
+        # Multi-segment naming based on segment length
+        if seg_secs >= 3600:
+            return f"Hour {idx + 1}"
+        elif seg_secs >= 60:
+            mins = seg_secs // 60
+            return f"Part {idx + 1} ({mins}m)"
+        else:
+            return f"Part {idx + 1}"
+
     def _build_segments(self, total_secs):
         if total_secs <= 0:
             self.table.setRowCount(0)
             return
         seg_secs = self._get_segment_secs()
-        if seg_secs == 0:
+
+        # Auto-collapse: if content is shorter than segment length, use one segment
+        if seg_secs == 0 or total_secs <= seg_secs:
             segments = [(0, total_secs)]
         else:
             segments = []
@@ -3127,12 +3174,7 @@ class StreamKeep(QMainWindow):
             self.table.setCellWidget(i, 0, cb_w)
             self._segment_checks.append(cb)
 
-            if seg_secs == 0:
-                label = "Full Stream"
-            elif seg_secs < 3600:
-                label = f"Part {i + 1}"
-            else:
-                label = f"Hour {i + 1}"
+            label = self._content_label(i, len(segments), seg_secs, total_secs)
             item = QTableWidgetItem(label)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 1, item)
@@ -3189,17 +3231,24 @@ class StreamKeep(QMainWindow):
             self._log("[ERROR] No quality selected")
             return
 
+        # Determine title-based filename for single-segment downloads
+        title_safe = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
+        if not title_safe:
+            title_safe = f"{self.stream_info.platform}_download"
+
         seg_secs = self._get_segment_secs()
+        single_segment = (fmt_type == "mp4" or seg_secs == 0 or total_secs <= seg_secs)
         segments = []
         for i, cb in enumerate(self._segment_checks):
             if cb.isChecked():
-                if fmt_type == "mp4" or seg_secs == 0:
-                    segments.append((0, "full_stream", 0, int(total_secs)))
+                if single_segment:
+                    segments.append((0, title_safe, 0, int(total_secs)))
                     break
                 else:
                     start = i * seg_secs
                     end = min((i + 1) * seg_secs, total_secs)
-                    segments.append((i, f"part_{i + 1}", start, int(end - start)))
+                    label = f"{title_safe}_part{i + 1:02d}"
+                    segments.append((i, label, start, int(end - start)))
 
         if not segments:
             self._log("No segments selected.")
