@@ -30,14 +30,26 @@ def get_native_proxy():
     return NATIVE_PROXY
 
 
-def curl(url, headers=None, timeout=30):
-    """Run curl and return stdout or None."""
+def _build_curl_cmd(url, headers=None, method=None, body=None):
+    """Assemble a curl command with proxy + headers + optional POST body.
+    Shared by curl/curl_json/curl_post_json so the proxy/header logic
+    lives in exactly one place."""
     cmd = ["curl", "-s", "-L"]
     if NATIVE_PROXY:
         cmd.extend(["-x", NATIVE_PROXY])
+    if method and method.upper() != "GET":
+        cmd.extend(["-X", method.upper()])
+    if body is not None:
+        cmd.extend(["-H", "Content-Type: application/json", "-d", body])
     for k, v in (headers or {}).items():
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
+    return cmd
+
+
+def curl(url, headers=None, timeout=30):
+    """Run curl and return stdout or None."""
+    cmd = _build_curl_cmd(url, headers)
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
@@ -61,16 +73,7 @@ def curl_json(url, headers=None, timeout=30):
 
 def curl_post_json(url, data, headers=None, timeout=30):
     """POST JSON and parse response."""
-    cmd = [
-        "curl", "-s", "-L", "-X", "POST",
-        "-H", "Content-Type: application/json",
-        "-d", json.dumps(data),
-    ]
-    if NATIVE_PROXY:
-        cmd.extend(["-x", NATIVE_PROXY])
-    for k, v in (headers or {}).items():
-        cmd.extend(["-H", f"{k}: {v}"])
-    cmd.append(url)
+    cmd = _build_curl_cmd(url, headers, method="POST", body=json.dumps(data))
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
