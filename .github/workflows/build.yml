@@ -21,7 +21,9 @@ jobs:
 
       - name: Build exe
         run: |
-          pyinstaller --onefile --windowed --name StreamKeep --icon NONE StreamKeep.py
+          pyinstaller --onefile --windowed --name StreamKeep --icon NONE `
+            --collect-submodules streamkeep `
+            StreamKeep.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -32,7 +34,7 @@ jobs:
       - name: Upload to release
         if: github.event_name == 'workflow_dispatch'
         run: |
-          $tag = "v" + (python -c "import re; print(re.search(r'VERSION = \"(.+?)\"', open('StreamKeep.py').read()).group(1))")
+          $tag = "v" + (python -c "import re; print(re.search(r'VERSION = \"(.+?)\"', open('streamkeep/__init__.py').read()).group(1))")
           gh release create $tag dist/StreamKeep.exe --title "StreamKeep $tag" --generate-notes 2>$null
           if ($LASTEXITCODE -ne 0) { gh release upload $tag dist/StreamKeep.exe --clobber }
         env:
@@ -52,7 +54,9 @@ jobs:
 
       - name: Build app
         run: |
-          pyinstaller --onefile --windowed --name StreamKeep StreamKeep.py
+          pyinstaller --onefile --windowed --name StreamKeep \
+            --collect-submodules streamkeep \
+            StreamKeep.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -79,7 +83,9 @@ jobs:
 
       - name: Build binary
         run: |
-          pyinstaller --onefile --name StreamKeep StreamKeep.py
+          pyinstaller --onefile --name StreamKeep \
+            --collect-submodules streamkeep \
+            StreamKeep.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
