@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.8.0"
+VERSION = "4.9.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -3159,10 +3159,13 @@ class PostProcessor:
     convert_video = False
     convert_video_format = "mp4"
     convert_video_codec = "h264"
+    convert_video_scale = "original"   # "original", "2160p", "1440p", "1080p", "720p", "480p", "360p"
+    convert_video_fps = "original"     # "original", "60", "30", "24"
     convert_audio = False
     convert_audio_format = "mp3"
     convert_audio_codec = "mp3"
     convert_audio_bitrate = "192k"
+    convert_audio_samplerate = "original"  # "original", "48000", "44100", "22050"
     convert_delete_source = False
 
     @classmethod
@@ -3307,12 +3310,38 @@ class PostProcessor:
             log_fn(f"[POST] Convert video -> {fmt}/{codec_key} ({ff_encoder}): "
                    f"{os.path.basename(dst)}")
 
+        # Scale and fps both require a re-encode — upgrade from copy if the
+        # user picked one.
+        scale_targets = {
+            "2160p": 2160, "1440p": 1440, "1080p": 1080,
+            "720p": 720, "480p": 480, "360p": 360,
+        }
+        scale_h = scale_targets.get(cls.convert_video_scale or "")
+        fps_cap = None
+        try:
+            fv = cls.convert_video_fps or "original"
+            if fv != "original":
+                fps_cap = int(fv)
+        except (TypeError, ValueError):
+            fps_cap = None
+        needs_encode = scale_h is not None or fps_cap is not None
+        if ff_encoder == "copy" and needs_encode:
+            if log_fn:
+                log_fn("[POST] Scale/fps set — upgrading from copy to h264")
+            ff_encoder = "libx264"
+            codec_key = "h264"
+
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src]
         if ff_encoder == "copy":
             cmd.extend(["-c", "copy"])
         else:
             cmd.extend(["-c:v", ff_encoder])
             cmd.extend(_video_codec_extra_args(ff_encoder))
+            # Scale filter — `-2` preserves aspect ratio and enforces even width
+            if scale_h is not None:
+                cmd.extend(["-vf", f"scale=-2:{scale_h}"])
+            if fps_cap is not None:
+                cmd.extend(["-r", str(fps_cap)])
             # Audio stream: vorbis/opus for webm/ogg, aac otherwise
             if fmt == "webm":
                 cmd.extend(["-c:a", "libvorbis"])
@@ -3350,6 +3379,20 @@ class PostProcessor:
         if log_fn:
             log_fn(f"[POST] Convert audio -> {fmt}/{codec_key}: {os.path.basename(dst)}")
 
+        # Sample rate override needs a re-encode — upgrade from copy
+        sample_rate = None
+        sr = cls.convert_audio_samplerate or "original"
+        if sr != "original":
+            try:
+                sample_rate = int(sr)
+            except (TypeError, ValueError):
+                sample_rate = None
+        if ff_codec == "copy" and sample_rate is not None:
+            if log_fn:
+                log_fn("[POST] Sample rate set — upgrading from copy to target codec")
+            codec_key = "mp3" if fmt == "mp3" else "aac"
+            ff_codec = AUDIO_CODECS[codec_key]
+
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                "-i", src, "-vn"]
         if ff_codec == "copy":
@@ -3359,6 +3402,8 @@ class PostProcessor:
             # Lossless codecs ignore bitrate
             if ff_codec not in ("flac", "pcm_s16le") and cls.convert_audio_bitrate:
                 cmd.extend(["-b:a", cls.convert_audio_bitrate])
+            if sample_rate is not None:
+                cmd.extend(["-ar", str(sample_rate)])
         cmd.append(dst)
 
         ok = cls._ffmpeg_run(cmd, log_fn, f"audio convert -> {fmt}/{codec_key}")
@@ -4192,10 +4237,13 @@ class StreamKeep(QMainWindow):
         PostProcessor.convert_video = bool(cfg.get("pp_convert_video", False))
         PostProcessor.convert_video_format = cfg.get("pp_convert_video_format") or "mp4"
         PostProcessor.convert_video_codec = cfg.get("pp_convert_video_codec") or "h264"
+        PostProcessor.convert_video_scale = cfg.get("pp_convert_video_scale") or "original"
+        PostProcessor.convert_video_fps = cfg.get("pp_convert_video_fps") or "original"
         PostProcessor.convert_audio = bool(cfg.get("pp_convert_audio", False))
         PostProcessor.convert_audio_format = cfg.get("pp_convert_audio_format") or "mp3"
         PostProcessor.convert_audio_codec = cfg.get("pp_convert_audio_codec") or "mp3"
         PostProcessor.convert_audio_bitrate = cfg.get("pp_convert_audio_bitrate") or "192k"
+        PostProcessor.convert_audio_samplerate = cfg.get("pp_convert_audio_samplerate") or "original"
         PostProcessor.convert_delete_source = bool(cfg.get("pp_convert_delete_source", False))
         if hasattr(self, "pp_audio_check"):
             self.pp_audio_check.setChecked(PostProcessor.extract_audio)
@@ -4212,6 +4260,14 @@ class StreamKeep(QMainWindow):
             if PostProcessor.convert_video_codec in vc_keys:
                 self.pp_convert_video_codec.setCurrentIndex(
                     vc_keys.index(PostProcessor.convert_video_codec))
+            scale_items = ["original", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
+            if PostProcessor.convert_video_scale in scale_items:
+                self.pp_convert_video_scale.setCurrentIndex(
+                    scale_items.index(PostProcessor.convert_video_scale))
+            fps_items = ["original", "60", "30", "24"]
+            if PostProcessor.convert_video_fps in fps_items:
+                self.pp_convert_video_fps.setCurrentIndex(
+                    fps_items.index(PostProcessor.convert_video_fps))
             self.pp_convert_audio_check.setChecked(PostProcessor.convert_audio)
             if PostProcessor.convert_audio_format in AUDIO_CONTAINERS:
                 self.pp_convert_audio_format.setCurrentIndex(
@@ -4224,6 +4280,10 @@ class StreamKeep(QMainWindow):
             if PostProcessor.convert_audio_bitrate in br_items:
                 self.pp_convert_audio_bitrate.setCurrentIndex(
                     br_items.index(PostProcessor.convert_audio_bitrate))
+            sr_items = ["original", "48000", "44100", "22050"]
+            if PostProcessor.convert_audio_samplerate in sr_items:
+                self.pp_convert_audio_samplerate.setCurrentIndex(
+                    sr_items.index(PostProcessor.convert_audio_samplerate))
             self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
         # Restore queue
         self._download_queue = [
@@ -4295,10 +4355,13 @@ class StreamKeep(QMainWindow):
         cfg["pp_convert_video"] = PostProcessor.convert_video
         cfg["pp_convert_video_format"] = PostProcessor.convert_video_format
         cfg["pp_convert_video_codec"] = PostProcessor.convert_video_codec
+        cfg["pp_convert_video_scale"] = PostProcessor.convert_video_scale
+        cfg["pp_convert_video_fps"] = PostProcessor.convert_video_fps
         cfg["pp_convert_audio"] = PostProcessor.convert_audio
         cfg["pp_convert_audio_format"] = PostProcessor.convert_audio_format
         cfg["pp_convert_audio_codec"] = PostProcessor.convert_audio_codec
         cfg["pp_convert_audio_bitrate"] = PostProcessor.convert_audio_bitrate
+        cfg["pp_convert_audio_samplerate"] = PostProcessor.convert_audio_samplerate
         cfg["pp_convert_delete_source"] = PostProcessor.convert_delete_source
         cfg["recent_urls"] = list(self._recent_urls)
         cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
@@ -5904,6 +5967,30 @@ class StreamKeep(QMainWindow):
             "(VT) = Apple VideoToolbox\n"
             + hw_note
         )
+        # Scale target
+        scale_items = ["original", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
+        self.pp_convert_video_scale = QComboBox()
+        self.pp_convert_video_scale.addItems(scale_items)
+        idx = scale_items.index(PostProcessor.convert_video_scale) \
+            if PostProcessor.convert_video_scale in scale_items else 0
+        self.pp_convert_video_scale.setCurrentIndex(idx)
+        self.pp_convert_video_scale.setFixedWidth(90)
+        self.pp_convert_video_scale.setToolTip(
+            "Downscale target height. Aspect ratio is preserved.\n"
+            "Forces a re-encode when not 'original' (copy codec ignored)."
+        )
+        # FPS cap
+        fps_items = ["original", "60", "30", "24"]
+        self.pp_convert_video_fps = QComboBox()
+        self.pp_convert_video_fps.addItems(fps_items)
+        idx = fps_items.index(PostProcessor.convert_video_fps) \
+            if PostProcessor.convert_video_fps in fps_items else 0
+        self.pp_convert_video_fps.setCurrentIndex(idx)
+        self.pp_convert_video_fps.setFixedWidth(80)
+        self.pp_convert_video_fps.setToolTip(
+            "Frame rate cap. Forces a re-encode when not 'original'."
+        )
+
         vconv_row = QHBoxLayout()
         vconv_row.setSpacing(6)
         vconv_row.addWidget(self.pp_convert_video_check)
@@ -5913,6 +6000,12 @@ class StreamKeep(QMainWindow):
         vconv_row.addSpacing(8)
         vconv_row.addWidget(QLabel("Codec:"))
         vconv_row.addWidget(self.pp_convert_video_codec)
+        vconv_row.addSpacing(8)
+        vconv_row.addWidget(QLabel("Scale:"))
+        vconv_row.addWidget(self.pp_convert_video_scale)
+        vconv_row.addSpacing(8)
+        vconv_row.addWidget(QLabel("FPS:"))
+        vconv_row.addWidget(self.pp_convert_video_fps)
         vconv_row.addStretch(1)
         pp_lay.addLayout(vconv_row)
 
@@ -5948,6 +6041,18 @@ class StreamKeep(QMainWindow):
         self.pp_convert_audio_bitrate.setCurrentIndex(idx)
         self.pp_convert_audio_bitrate.setFixedWidth(80)
         self.pp_convert_audio_bitrate.setToolTip("Bitrate (ignored for flac/pcm)")
+        # Sample rate
+        sr_items = ["original", "48000", "44100", "22050"]
+        self.pp_convert_audio_samplerate = QComboBox()
+        self.pp_convert_audio_samplerate.addItems(sr_items)
+        idx = sr_items.index(PostProcessor.convert_audio_samplerate) \
+            if PostProcessor.convert_audio_samplerate in sr_items else 0
+        self.pp_convert_audio_samplerate.setCurrentIndex(idx)
+        self.pp_convert_audio_samplerate.setFixedWidth(90)
+        self.pp_convert_audio_samplerate.setToolTip(
+            "Sample rate (Hz). Forces a re-encode when not 'original'."
+        )
+
         aconv_row = QHBoxLayout()
         aconv_row.setSpacing(6)
         aconv_row.addWidget(self.pp_convert_audio_check)
@@ -5960,6 +6065,9 @@ class StreamKeep(QMainWindow):
         aconv_row.addSpacing(8)
         aconv_row.addWidget(QLabel("Bitrate:"))
         aconv_row.addWidget(self.pp_convert_audio_bitrate)
+        aconv_row.addSpacing(8)
+        aconv_row.addWidget(QLabel("Rate:"))
+        aconv_row.addWidget(self.pp_convert_audio_samplerate)
         aconv_row.addStretch(1)
         pp_lay.addLayout(aconv_row)
 
@@ -6174,10 +6282,13 @@ class StreamKeep(QMainWindow):
         PostProcessor.convert_video = self.pp_convert_video_check.isChecked()
         PostProcessor.convert_video_format = self.pp_convert_video_format.currentText()
         PostProcessor.convert_video_codec = self.pp_convert_video_codec.currentText()
+        PostProcessor.convert_video_scale = self.pp_convert_video_scale.currentText()
+        PostProcessor.convert_video_fps = self.pp_convert_video_fps.currentText()
         PostProcessor.convert_audio = self.pp_convert_audio_check.isChecked()
         PostProcessor.convert_audio_format = self.pp_convert_audio_format.currentText()
         PostProcessor.convert_audio_codec = self.pp_convert_audio_codec.currentText()
         PostProcessor.convert_audio_bitrate = self.pp_convert_audio_bitrate.currentText()
+        PostProcessor.convert_audio_samplerate = self.pp_convert_audio_samplerate.currentText()
         PostProcessor.convert_delete_source = self.pp_convert_delete_check.isChecked()
         self._persist_config()
         self._refresh_download_summary()
