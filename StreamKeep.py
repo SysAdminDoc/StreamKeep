@@ -54,7 +54,7 @@ from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
-VERSION = "4.9.0"
+VERSION = "4.10.0"
 CURL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
@@ -3484,6 +3484,102 @@ class PostProcessor:
             cls._ffmpeg_run(cmd, log_fn, f"chapter {i+1}")
 
 
+class ConvertWorker(QThread):
+    """Runs the video/audio converter on an arbitrary list of files in a
+    background thread. Emits per-file progress so the GUI stays responsive
+    when the user kicks off a batch conversion on an existing folder."""
+    progress = pyqtSignal(int, int, str)  # index, total, current filename
+    file_done = pyqtSignal(str, bool)     # path, success
+    log = pyqtSignal(str)
+    all_done = pyqtSignal(int, int)       # success_count, fail_count
+
+    def __init__(self, files, do_video, do_audio):
+        super().__init__()
+        self.files = list(files)
+        self.do_video = do_video
+        self.do_audio = do_audio
+        self._cancel = False
+        # Snapshot the converter settings at construction time so the user
+        # can change Settings mid-run without affecting an in-flight batch
+        self._video_format = PostProcessor.convert_video_format
+        self._video_codec = PostProcessor.convert_video_codec
+        self._video_scale = PostProcessor.convert_video_scale
+        self._video_fps = PostProcessor.convert_video_fps
+        self._audio_format = PostProcessor.convert_audio_format
+        self._audio_codec = PostProcessor.convert_audio_codec
+        self._audio_bitrate = PostProcessor.convert_audio_bitrate
+        self._audio_samplerate = PostProcessor.convert_audio_samplerate
+        self._delete_source = PostProcessor.convert_delete_source
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        total = len(self.files)
+        successes = 0
+        failures = 0
+        # Temporarily pin PostProcessor to our snapshot; restore after
+        orig = {
+            "convert_video_format": PostProcessor.convert_video_format,
+            "convert_video_codec": PostProcessor.convert_video_codec,
+            "convert_video_scale": PostProcessor.convert_video_scale,
+            "convert_video_fps": PostProcessor.convert_video_fps,
+            "convert_audio_format": PostProcessor.convert_audio_format,
+            "convert_audio_codec": PostProcessor.convert_audio_codec,
+            "convert_audio_bitrate": PostProcessor.convert_audio_bitrate,
+            "convert_audio_samplerate": PostProcessor.convert_audio_samplerate,
+            "convert_delete_source": PostProcessor.convert_delete_source,
+        }
+        PostProcessor.convert_video_format = self._video_format
+        PostProcessor.convert_video_codec = self._video_codec
+        PostProcessor.convert_video_scale = self._video_scale
+        PostProcessor.convert_video_fps = self._video_fps
+        PostProcessor.convert_audio_format = self._audio_format
+        PostProcessor.convert_audio_codec = self._audio_codec
+        PostProcessor.convert_audio_bitrate = self._audio_bitrate
+        PostProcessor.convert_audio_samplerate = self._audio_samplerate
+        PostProcessor.convert_delete_source = self._delete_source
+
+        try:
+            for i, path in enumerate(self.files):
+                if self._cancel:
+                    self.log.emit("Conversion cancelled.")
+                    break
+                name = os.path.basename(path)
+                self.progress.emit(i, total, name)
+                ext = os.path.splitext(path)[1].lower()
+                # Capture this file's success by checking whether the
+                # expected output file exists after the call
+                expected_ext = None
+                if ext in VIDEO_EXTS and self.do_video:
+                    expected_ext = (self._video_format or "mp4").lower()
+                    PostProcessor._run_video_convert(path, lambda m: self.log.emit(m))
+                elif ext in AUDIO_EXTS and self.do_audio:
+                    expected_ext = (self._audio_format or "mp3").lower()
+                    PostProcessor._run_audio_convert(path, lambda m: self.log.emit(m))
+                else:
+                    self.log.emit(f"[CONVERT] Skipped (unsupported ext): {name}")
+                    continue
+
+                base = os.path.splitext(path)[0]
+                candidate1 = f"{base}.converted.{expected_ext}"
+                candidate2 = f"{base}.converted2.{expected_ext}"
+                ok = ((os.path.exists(candidate1) and os.path.getsize(candidate1) > 0)
+                      or (os.path.exists(candidate2) and os.path.getsize(candidate2) > 0))
+                if ok:
+                    successes += 1
+                else:
+                    failures += 1
+                self.file_done.emit(path, ok)
+        finally:
+            for k, v in orig.items():
+                setattr(PostProcessor, k, v)
+
+        if not self._cancel:
+            self.progress.emit(total, total, "")
+        self.all_done.emit(successes, failures)
+
+
 # ── Channel Monitor ───────────────────────────────────────────────────────
 
 @dataclass
@@ -6077,6 +6173,35 @@ class StreamKeep(QMainWindow):
         self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
         pp_lay.addWidget(self.pp_convert_delete_check)
 
+        # Standalone manual converter — runs the current settings against
+        # an arbitrary file or folder the user picks.
+        manual_row = QHBoxLayout()
+        manual_row.setSpacing(8)
+        self.convert_files_btn = QPushButton("Convert Files...")
+        self.convert_files_btn.setObjectName("secondary")
+        self.convert_files_btn.setToolTip(
+            "Pick individual media files and convert them with the current settings.\n"
+            "Saves your settings first."
+        )
+        self.convert_files_btn.clicked.connect(self._on_convert_files_clicked)
+        manual_row.addWidget(self.convert_files_btn)
+
+        self.convert_folder_btn = QPushButton("Convert Folder...")
+        self.convert_folder_btn.setObjectName("secondary")
+        self.convert_folder_btn.setToolTip(
+            "Pick a folder; every video/audio file in it gets converted."
+        )
+        self.convert_folder_btn.clicked.connect(self._on_convert_folder_clicked)
+        manual_row.addWidget(self.convert_folder_btn)
+
+        self.convert_cancel_btn = QPushButton("Cancel")
+        self.convert_cancel_btn.setObjectName("secondary")
+        self.convert_cancel_btn.setVisible(False)
+        self.convert_cancel_btn.clicked.connect(self._on_convert_cancel)
+        manual_row.addWidget(self.convert_cancel_btn)
+        manual_row.addStretch(1)
+        pp_lay.addLayout(manual_row)
+
         card_lay.addWidget(pp_block)
 
         # Save / Import / Export row
@@ -6100,6 +6225,105 @@ class StreamKeep(QMainWindow):
 
         lay.addWidget(card, 1)
         return page
+
+    def _on_convert_files_clicked(self):
+        """Open a multi-select file picker and kick off the converter."""
+        if getattr(self, "_convert_worker", None) is not None and self._convert_worker.isRunning():
+            self._set_status("A conversion is already running.", "warning")
+            return
+        # Apply current settings first so the worker picks them up
+        self._on_save_settings()
+        exts = sorted(VIDEO_EXTS | AUDIO_EXTS)
+        filter_str = "Media files (" + " ".join(f"*{e}" for e in exts) + ");;All files (*)"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select files to convert", str(_default_output_dir()), filter_str
+        )
+        if not paths:
+            return
+        self._start_convert_worker(list(paths))
+
+    def _on_convert_folder_clicked(self):
+        """Recursively collect media files from a chosen folder and convert."""
+        if getattr(self, "_convert_worker", None) is not None and self._convert_worker.isRunning():
+            self._set_status("A conversion is already running.", "warning")
+            return
+        self._on_save_settings()
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select folder to convert", str(_default_output_dir())
+        )
+        if not folder:
+            return
+        files = []
+        try:
+            for root, _dirs, fnames in os.walk(folder):
+                for f in fnames:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in VIDEO_EXTS or ext in AUDIO_EXTS:
+                        # Skip files we produced ourselves
+                        low = f.lower()
+                        if ".converted." in low:
+                            continue
+                        files.append(os.path.join(root, f))
+        except OSError as e:
+            self._set_status(f"Folder scan failed: {e}", "error")
+            return
+        if not files:
+            self._set_status("No media files found in that folder.", "warning")
+            return
+        self._log(f"[CONVERT] Found {len(files)} file(s) in {folder}")
+        self._start_convert_worker(files)
+
+    def _start_convert_worker(self, files):
+        """Launch a ConvertWorker for the given list and wire up signals."""
+        do_video = self.pp_convert_video_check.isChecked()
+        do_audio = self.pp_convert_audio_check.isChecked()
+        if not (do_video or do_audio):
+            self._set_status(
+                "Enable 'Convert video' or 'Convert audio' in Post-Processing first.",
+                "warning"
+            )
+            return
+        self._convert_worker = ConvertWorker(files, do_video, do_audio)
+        self._convert_worker.progress.connect(self._on_convert_progress)
+        self._convert_worker.log.connect(self._log)
+        self._convert_worker.file_done.connect(self._on_convert_file_done)
+        self._convert_worker.all_done.connect(self._on_convert_all_done)
+        self.convert_files_btn.setEnabled(False)
+        self.convert_folder_btn.setEnabled(False)
+        self.convert_cancel_btn.setVisible(True)
+        self._log(f"[CONVERT] Starting batch conversion ({len(files)} file(s))")
+        self._set_status(f"Converting 0/{len(files)}...", "working")
+        self._convert_worker.start()
+
+    def _on_convert_progress(self, idx, total, name):
+        if total:
+            status = f"Converting {idx + 1}/{total}: {name}" if name else f"Converted {total}/{total}"
+            self._set_status(status, "working" if idx < total else "success")
+
+    def _on_convert_file_done(self, path, ok):
+        marker = "[OK]" if ok else "[FAIL]"
+        self._log(f"[CONVERT] {marker} {os.path.basename(path)}")
+
+    def _on_convert_all_done(self, successes, failures):
+        self.convert_files_btn.setEnabled(True)
+        self.convert_folder_btn.setEnabled(True)
+        self.convert_cancel_btn.setVisible(False)
+        total = successes + failures
+        if failures == 0:
+            self._set_status(f"Conversion complete: {successes}/{total} succeeded.", "success")
+        else:
+            self._set_status(
+                f"Conversion finished: {successes} ok, {failures} failed. See log.",
+                "warning"
+            )
+        self._notify("StreamKeep", f"Converted {successes}/{total} file(s)")
+
+    def _on_convert_cancel(self):
+        w = getattr(self, "_convert_worker", None)
+        if w is not None and w.isRunning():
+            w.cancel()
+            self._log("[CONVERT] Cancel requested — finishing current file first")
+            self._set_status("Cancelling conversion...", "warning")
 
     def _on_export_config(self):
         """Write current config to a user-chosen JSON file."""
