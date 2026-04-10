@@ -6,28 +6,28 @@ Phase 3 will carve it into per-tab widgets. For now the split wins us a
 predictable file layout and keeps the runtime unchanged.
 """
 
+import json
 import os
 import re
 import subprocess
-import sys
-import time
-from datetime import datetime, timedelta, timezone
+import urllib.parse
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
-    QSpinBox, QMessageBox, QGridLayout, QScrollArea, QSystemTrayIcon,
+    QSpinBox, QGridLayout, QScrollArea, QSystemTrayIcon,
     QCompleter, QInputDialog
 )
 from PyQt6.QtCore import QStringListModel
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl, QObject
+from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
 
 # Package re-exports under legacy underscore-prefixed names so the existing
-# method bodies don't need to change.
+# method bodies below don't need modification.
 from streamkeep import VERSION
 from streamkeep.paths import _CREATE_NO_WINDOW, CONFIG_FILE
 from streamkeep.config import (
@@ -35,7 +35,7 @@ from streamkeep.config import (
     save_config as _save_config,
     write_log_line as _write_log_line,
 )
-from streamkeep.theme import CAT, STYLESHEET
+from streamkeep.theme import CAT
 from streamkeep.models import HistoryEntry
 from streamkeep.utils import (
     fmt_size as _fmt_size,
@@ -65,7 +65,6 @@ from streamkeep.postprocess import (
     PostProcessor,
     ConvertWorker,
     VIDEO_CONTAINERS,
-    VIDEO_CODECS,
     AUDIO_CONTAINERS,
     AUDIO_CODECS,
     VIDEO_EXTS,
