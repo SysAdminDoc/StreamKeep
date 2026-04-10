@@ -1,0 +1,358 @@
+"""Download worker — ffmpeg-based segmented downloader with parallel
+HTTP Range fallback and yt-dlp direct download mode."""
+
+import os
+import re
+import subprocess
+import time
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from ..http import parallel_http_download
+from ..paths import _CREATE_NO_WINDOW
+from ..utils import fmt_duration, fmt_size
+
+
+class DownloadWorker(QThread):
+    """Downloads segments using ffmpeg with speed/ETA tracking."""
+
+    progress = pyqtSignal(int, int, str)   # seg_idx, percent, status
+    segment_done = pyqtSignal(int, str)
+    log = pyqtSignal(str)
+    error = pyqtSignal(int, str)
+    all_done = pyqtSignal()
+
+    def __init__(self, playlist_url, segments, output_dir, format_type="hls"):
+        super().__init__()
+        self.playlist_url = playlist_url
+        self.segments = segments
+        self.output_dir = output_dir
+        self.format_type = format_type
+        self.audio_url = ""
+        self.ytdlp_source = ""
+        self.ytdlp_format = ""
+        self.cookies_browser = ""
+        self.rate_limit = ""
+        self.proxy = ""
+        self.download_subs = False
+        self.sponsorblock = False
+        self.max_retries = 2
+        self.parallel_connections = 4
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+        if hasattr(self, '_proc') and self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+
+    def _download_with_ytdlp(self, seg_idx, label, outfile):
+        """Download via yt-dlp directly. Handles URL refresh, DASH merge,
+        and format selection. Returns True on success."""
+        cmd = [
+            "yt-dlp",
+            "-f", self.ytdlp_format,
+            "--no-part",
+            "--newline",
+            "--progress",
+            "-o", outfile,
+            "--no-playlist",
+        ]
+        if self.cookies_browser:
+            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        if self.rate_limit:
+            cmd.extend(["--limit-rate", self.rate_limit])
+        if self.proxy:
+            cmd.extend(["--proxy", self.proxy])
+        if self.download_subs:
+            cmd.extend([
+                "--write-subs", "--write-auto-subs",
+                "--sub-langs", "en.*,en", "--embed-subs",
+            ])
+        if self.sponsorblock:
+            cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
+        cmd.append(self.ytdlp_source)
+
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW,
+            )
+            output_lines = []
+            for line in self._proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                output_lines.append(line)
+                pct_match = re.search(r'(\d+\.\d+)%\s+of\s+(~?[\d.]+\w+)', line)
+                if pct_match:
+                    pct = int(float(pct_match.group(1)))
+                    size_str = pct_match.group(2)
+                    speed_match = re.search(r'at\s+([\d.]+\w+/s)', line)
+                    eta_match = re.search(r'ETA\s+([\d:]+)', line)
+                    extra = ""
+                    if speed_match:
+                        extra += f" | {speed_match.group(1)}"
+                    if eta_match:
+                        extra += f" | ETA {eta_match.group(1)}"
+                    self.progress.emit(seg_idx, min(99, pct), f"{size_str}{extra}")
+                elif "[Merger]" in line or "Merging" in line:
+                    self.progress.emit(seg_idx, 99, "Merging video+audio")
+
+            self._proc.wait()
+            if self._cancel:
+                if os.path.exists(outfile):
+                    try:
+                        os.remove(outfile)
+                    except OSError:
+                        pass
+                return False
+
+            if (self._proc.returncode == 0 and os.path.exists(outfile)
+                    and os.path.getsize(outfile) > 0):
+                size = os.path.getsize(outfile)
+                self.progress.emit(seg_idx, 100, "Complete")
+                self.segment_done.emit(seg_idx, fmt_size(size))
+                self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
+                return True
+
+            if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                try:
+                    os.remove(outfile)
+                except OSError:
+                    pass
+            err_tail = "\n".join(output_lines[-5:])
+            self.log.emit(f"[FAIL] {label}\n{err_tail}")
+            return False
+
+        except FileNotFoundError:
+            self.log.emit(f"[ERROR] {label}: yt-dlp not in PATH")
+            return False
+        except Exception as e:
+            self.log.emit(f"[ERROR] {label}: {e}")
+            return False
+
+    def run(self):
+        for seg_idx, label, start, duration in self.segments:
+            if self._cancel:
+                self.log.emit("Download cancelled.")
+                return
+
+            outfile = os.path.join(self.output_dir, f"{label}.mp4")
+            is_live_capture = duration <= 0
+            if os.path.exists(outfile):
+                size = os.path.getsize(outfile)
+                if size > 1024:
+                    self.log.emit(f"[SKIP] {label} ({fmt_size(size)})")
+                    self.segment_done.emit(seg_idx, fmt_size(size))
+                    continue
+
+            duration_label = "live" if is_live_capture else f"{duration}s"
+            self.log.emit(f"[DL] {label} - start: {start}s, duration: {duration_label}")
+            self.progress.emit(seg_idx, 0, "Starting...")
+
+            # yt-dlp direct download mode
+            if self.format_type == "ytdlp_direct" and self.ytdlp_source and self.ytdlp_format:
+                success = self._download_with_ytdlp(seg_idx, label, outfile)
+                if self._cancel:
+                    return
+                if not success:
+                    self.error.emit(seg_idx, "yt-dlp download failed")
+                continue
+
+            # Multi-connection parallel download for direct MP4 URLs
+            if (self.format_type == "mp4" and not self.audio_url
+                    and self.parallel_connections > 1):
+                worker_ref = self
+
+                def _cb(done, total, speed):
+                    pct = min(99, int((done / max(total, 1)) * 100))
+                    spd = f"{fmt_size(speed)}/s" if speed > 0 else ""
+                    eta = ""
+                    if speed > 0 and total > done:
+                        eta = f" | ETA {fmt_duration((total - done) / speed)}"
+                    status = f"{fmt_size(done)} / {fmt_size(total)} | {spd}{eta}"
+                    worker_ref.progress.emit(seg_idx, pct, status)
+
+                def _cancel():
+                    return worker_ref._cancel
+
+                try:
+                    parallel_ok = parallel_http_download(
+                        self.playlist_url, outfile,
+                        connections=self.parallel_connections,
+                        progress_cb=_cb, cancel_check=_cancel,
+                        log_fn=lambda m: self.log.emit(m),
+                    )
+                except Exception as e:
+                    self.log.emit(f"[PARALLEL ERR] {label}: {e}")
+                    parallel_ok = False
+
+                if self._cancel:
+                    if os.path.exists(outfile):
+                        try:
+                            os.remove(outfile)
+                        except OSError:
+                            pass
+                    return
+
+                if (parallel_ok and os.path.exists(outfile)
+                        and os.path.getsize(outfile) > 0):
+                    size = os.path.getsize(outfile)
+                    self.progress.emit(seg_idx, 100, "Complete")
+                    self.segment_done.emit(seg_idx, fmt_size(size))
+                    self.log.emit(
+                        f"[DONE] {label} - {fmt_size(size)} "
+                        f"(parallel x{self.parallel_connections})"
+                    )
+                    continue
+                else:
+                    self.log.emit(f"[INFO] {label}: falling back to ffmpeg")
+
+            # Build ffmpeg command with optional audio merge
+            if self.audio_url:
+                if self.format_type == "mp4":
+                    cmd = [
+                        "ffmpeg", "-hide_banner", "-loglevel", "info",
+                        "-i", self.playlist_url, "-i", self.audio_url,
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        "-c", "copy", "-y", outfile,
+                    ]
+                else:
+                    cmd = [
+                        "ffmpeg", "-hide_banner", "-loglevel", "info",
+                        "-ss", str(start), "-i", self.playlist_url,
+                        "-ss", str(start), "-i", self.audio_url,
+                        "-map", "0:v:0", "-map", "1:a:0",
+                        "-c", "copy",
+                    ]
+                    if not is_live_capture:
+                        cmd.extend(["-t", str(duration)])
+                    cmd.extend(["-y", outfile])
+            elif self.format_type == "mp4":
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "-i", self.playlist_url, "-c", "copy", "-y", outfile,
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
+                ]
+                if not is_live_capture:
+                    cmd.extend(["-t", str(duration)])
+                cmd.extend(["-y", outfile])
+
+            # Retry loop for transient ffmpeg failures
+            attempts = self.max_retries + 1
+            last_error = ""
+            segment_done_flag = False
+            for attempt in range(attempts):
+                if self._cancel:
+                    return
+                if attempt > 0:
+                    backoff = 2 ** attempt
+                    self.log.emit(
+                        f"[RETRY {attempt}/{self.max_retries}] {label} "
+                        f"(waiting {backoff}s)"
+                    )
+                    for _ in range(backoff * 2):
+                        if self._cancel:
+                            return
+                        time.sleep(0.5)
+                try:
+                    self._proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW,
+                    )
+                    output_lines = []
+                    for line in self._proc.stderr:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        output_lines.append(line)
+                        time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
+                        if time_match:
+                            h, m, s = (
+                                int(time_match.group(1)),
+                                int(time_match.group(2)),
+                                int(time_match.group(3)),
+                            )
+                            elapsed = h * 3600 + m * 60 + s
+                            pct = (
+                                0 if is_live_capture
+                                else min(99, int((elapsed / max(duration, 1)) * 100))
+                            )
+                            speed_m = re.search(r'speed=\s*([\d.]+)x', line)
+                            size_m = re.search(r'size=\s*(\d+\w+)', line)
+                            extra = ""
+                            if speed_m:
+                                spd = float(speed_m.group(1))
+                                extra += f" | {spd:.1f}x"
+                                if spd > 0 and duration > 0:
+                                    remaining = (duration - elapsed) / spd
+                                    extra += f" | ETA {fmt_duration(remaining)}"
+                            if size_m:
+                                extra += f" | {size_m.group(1)}"
+                            status = (
+                                f"{elapsed}s captured{extra}" if is_live_capture
+                                else f"{elapsed}s / {duration}s{extra}"
+                            )
+                            self.progress.emit(seg_idx, pct, status)
+
+                    self._proc.wait()
+                    if self._cancel:
+                        if is_live_capture and os.path.exists(outfile):
+                            size = os.path.getsize(outfile)
+                            if size > 1024:
+                                self.segment_done.emit(seg_idx, fmt_size(size))
+                                self.log.emit(
+                                    f"[STOP] Kept partial live capture {label} - "
+                                    f"{fmt_size(size)}"
+                                )
+                        elif os.path.exists(outfile):
+                            try:
+                                os.remove(outfile)
+                            except OSError:
+                                pass
+                        return
+
+                    if (self._proc.returncode == 0 and os.path.exists(outfile)
+                            and os.path.getsize(outfile) > 0):
+                        size = os.path.getsize(outfile)
+                        self.progress.emit(seg_idx, 100, "Complete")
+                        self.segment_done.emit(seg_idx, fmt_size(size))
+                        self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
+                        segment_done_flag = True
+                        break
+                    else:
+                        if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                            try:
+                                os.remove(outfile)
+                            except OSError:
+                                pass
+                        last_error = "\n".join(output_lines[-5:]) or f"ffmpeg exit {self._proc.returncode}"
+                        self.log.emit(f"[FAIL attempt {attempt + 1}/{attempts}] {label}")
+                        if is_live_capture:
+                            break
+
+                except FileNotFoundError:
+                    self.error.emit(seg_idx, "ffmpeg not found in PATH")
+                    self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
+                    return
+                except PermissionError as e:
+                    self.error.emit(seg_idx, f"Permission denied: {e}")
+                    self.log.emit(f"[ERROR] {label}: {e}")
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
+
+            if not segment_done_flag and not self._cancel and not is_live_capture:
+                self.error.emit(
+                    seg_idx,
+                    f"Failed after {attempts} attempt(s): {last_error[:120]}",
+                )
+                self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
+
+        if not self._cancel:
+            self.all_done.emit()
