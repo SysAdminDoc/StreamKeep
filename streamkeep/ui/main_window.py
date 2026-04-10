@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QComboBox, QFileDialog,
     QCheckBox, QFrame, QSplitter, QAbstractItemView, QStackedWidget,
-    QSpinBox, QGridLayout, QScrollArea, QSystemTrayIcon,
-    QCompleter, QInputDialog
+    QSpinBox, QGridLayout, QSystemTrayIcon,
+    QCompleter, QInputDialog,
 )
 from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QTimer, QUrl
@@ -80,56 +80,20 @@ NATIVE_PROXY = ""
 
 # ── Main Window ───────────────────────────────────────────────────────────
 
-PLATFORM_BADGES = {
-    "Kick":       {"color": CAT["green"],   "text": "Kick"},
-    "Twitch":     {"color": CAT["mauve"],   "text": "Twitch"},
-    "Rumble":     {"color": CAT["green"],   "text": "Rumble"},
-    "SoundCloud": {"color": CAT["peach"],   "text": "SoundCloud"},
-    "Reddit":     {"color": CAT["peach"],   "text": "Reddit"},
-    "Audius":     {"color": CAT["mauve"],   "text": "Audius"},
-    "Podcast":    {"color": CAT["yellow"],  "text": "Podcast"},
-    "Direct":     {"color": CAT["blue"],    "text": "Direct"},
-    "yt-dlp":     {"color": CAT["overlay1"],"text": "yt-dlp"},
-}
-
-TAB_STYLE = f"""
-QPushButton#tab {{
-    background-color: {CAT['panelSoft']};
-    color: {CAT['muted']};
-    border: 1px solid {CAT['stroke']};
-    padding: 10px 18px;
-    font-weight: 600;
-    font-size: 13px;
-    border-radius: 999px;
-}}
-QPushButton#tab:hover {{
-    color: {CAT['text']};
-    border-color: {CAT['accent']};
-    background-color: {CAT['panel']};
-}}
-QPushButton#tabActive {{
-    background-color: {CAT['accent']};
-    color: {CAT['crust']};
-    border: 1px solid {CAT['accent']};
-    padding: 10px 18px;
-    font-weight: 600;
-    font-size: 13px;
-    border-radius: 999px;
-}}
-"""
-
-
-def _path_label(path_text, fallback="Choose folder"):
-    path_text = (path_text or "").strip()
-    if not path_text:
-        return fallback
-    try:
-        p = Path(path_text)
-        if p.name:
-            return p.name
-    except Exception:
-        pass
-    return path_text
+# Platform badges, tab CSS, and widget builders live in streamkeep.ui.widgets.
+# Imported here under legacy underscored names so the method bodies below
+# (which still use `self._make_field_block(...)` etc. in 50+ places) keep
+# working until a future pass switches each call site.
+from .widgets import (
+    PLATFORM_BADGES,
+    TAB_STYLE,
+    path_label as _path_label,
+    make_metric_card,
+    make_field_block,
+    wrap_scroll_page,
+    style_table,
+    set_metric,
+)
 
 
 class StreamKeep(QMainWindow):
@@ -558,74 +522,22 @@ class StreamKeep(QMainWindow):
         self._persist_config()
         super().closeEvent(event)
 
-    def _make_metric_card(self, label_text, value_text="--", sub_text=""):
-        card = QFrame()
-        card.setObjectName("metricCard")
-        card.setMinimumHeight(92)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(4)
+    # Widget builders are thin forwarders to streamkeep.ui.widgets so the
+    # 50+ `self._make_*` call sites below don't need to be rewritten.
+    def _make_metric_card(self, *a, **kw):
+        return make_metric_card(*a, **kw)
 
-        label = QLabel(label_text)
-        label.setObjectName("metricLabel")
-        value = QLabel(value_text)
-        value.setObjectName("metricValue")
-        value.setWordWrap(True)
-        sub = QLabel(sub_text)
-        sub.setObjectName("metricSubvalue")
-        sub.setWordWrap(True)
-        sub.setVisible(bool(sub_text))
+    def _make_field_block(self, *a, **kw):
+        return make_field_block(*a, **kw)
 
-        lay.addWidget(label)
-        lay.addWidget(value)
-        lay.addWidget(sub)
-        lay.addStretch(1)
-        return card, value, sub
+    def _wrap_scroll_page(self, *a, **kw):
+        return wrap_scroll_page(*a, **kw)
 
-    def _make_field_block(self, title, hint=""):
-        card = QFrame()
-        card.setObjectName("subtleCard")
-        card.setMinimumHeight(108)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+    def _style_table(self, *a, **kw):
+        return style_table(*a, **kw)
 
-        label = QLabel(title)
-        label.setObjectName("fieldLabel")
-        lay.addWidget(label)
-
-        if hint:
-            hint_label = QLabel(hint)
-            hint_label.setObjectName("fieldHint")
-            hint_label.setWordWrap(True)
-            lay.addWidget(hint_label)
-
-        return card, lay
-
-    def _wrap_scroll_page(self, page):
-        page.setObjectName("chrome")
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.viewport().setObjectName("chrome")
-        scroll.setWidget(page)
-        return scroll
-
-    def _style_table(self, table, row_height=46):
-        table.setAlternatingRowColors(True)
-        table.setShowGrid(False)
-        table.setWordWrap(False)
-        table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        table.verticalHeader().setDefaultSectionSize(row_height)
-        table.horizontalHeader().setHighlightSections(False)
-
-    def _set_metric(self, value_label, sub_label, value, sub=""):
-        value_label.setText(value)
-        sub_label.setText(sub)
-        sub_label.setVisible(bool(sub))
+    def _set_metric(self, *a, **kw):
+        return set_metric(*a, **kw)
 
     def _can_autofill_output(self):
         current = self.output_input.text().strip() if hasattr(self, "output_input") else ""
