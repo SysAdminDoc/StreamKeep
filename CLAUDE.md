@@ -1,28 +1,60 @@
 # StreamKeep - Project Notes
 
 ## Tech Stack
-- Python 3.10+ with PyQt6 GUI (single-file app)
+- Python 3.10+ with PyQt6 GUI (modular package)
 - ffmpeg for HLS/MP4 download (stream copy, no re-encode)
 - curl for API/playlist fetching
 - yt-dlp as optional fallback extractor
 
+## Package Layout (v4.11.0 — modularized)
+
+```
+StreamKeep.py                    59 lines  — launcher only
+streamkeep/
+  __init__.py                           — VERSION, CURL_UA
+  bootstrap.py                          — dependency auto-install
+  crash_log.py                          — global exception handler
+  paths.py                              — CONFIG_DIR, _CREATE_NO_WINDOW
+  config.py                             — load/save config.json
+  theme.py                              — CAT palette + QSS stylesheet
+  models.py                             — QualityInfo/StreamInfo/VODInfo/HistoryEntry/MonitorEntry
+  utils.py                              — fmt_*, safe_filename, default_output_dir, template rendering, cookie scan
+  http.py                               — curl wrappers + parallel Range download (NATIVE_PROXY)
+  hls.py                                — m3u8 master + duration parsing
+  scrape.py                             — direct URL detection + regex + Playwright page scrape
+  metadata.py                           — metadata.json + NFO + chapters writer
+  monitor.py                            — ChannelMonitor (round-robin QTimer)
+  clipboard.py                          — ClipboardMonitor (800ms URL poll)
+  extractors/
+    base.py                             — Extractor base + auto-registry
+    kick.py / twitch.py / rumble.py / soundcloud.py / reddit.py / audius.py / podcast.py / ytdlp.py
+  workers/
+    fetch.py        FetchWorker         — URL resolve via extractor system
+    download.py     DownloadWorker      — ffmpeg + parallel HTTP Range + yt-dlp
+    playlist.py     PlaylistExpandWorker — yt-dlp --flat-playlist probe
+    page_scrape.py  PageScrapeWorker    — headless + regex media scrape
+  postprocess/
+    codecs.py                           — VIDEO/AUDIO_CODECS + HW encoder probe
+    processor.py    PostProcessor       — all presets + converter
+    convert_worker.py ConvertWorker     — standalone batch converter
+  ui/
+    main_window.py                      — StreamKeep QMainWindow (3751 lines — Phase 2 god object)
+```
+
 ## Architecture
-- **Extractor system**: `Extractor` base class with `__init_subclass__` auto-registry
-  - `KickExtractor` — Kick API v2 (`/api/v2/channels/{slug}/videos`)
-  - `TwitchExtractor` — GraphQL at `gql.twitch.tv/gql` + `usher.ttvnw.net` for m3u8
-  - `RumbleExtractor` — Embed API (`/embedJS/u3/`) for HLS + MP4
-  - `SoundCloudExtractor` — API v2 resolve + progressive/HLS transcodings
-  - `RedditExtractor` — JSON API (`{url}.json`) + DASH/fallback MP4
-  - `AudiusExtractor` — Public discovery API at `discoveryprovider.audius.co`
-  - `PodcastRSSExtractor` — RSS/XML parser for podcast episode listing
-  - `YtDlpExtractor` — Catch-all fallback, shells to `yt-dlp --dump-json`
-- **Direct URL detection**: Content-Type sniffing via HEAD request for raw media URLs
-- **Clipboard monitor**: `ClipboardMonitor(QObject)` polls clipboard every 800ms for new URLs
-- **Data classes**: `StreamInfo`, `QualityInfo`, `VODInfo` (dataclasses)
-- **Utility functions**: `_curl()`, `_curl_json()`, `_curl_post_json()`, `_parse_hls_master()`, `_parse_hls_duration()`
-- **Workers**: `FetchWorker` (QThread) resolves URLs via extractors, `DownloadWorker` (QThread) runs ffmpeg
-- **GUI**: `StreamKeep(QMainWindow)` with VOD table, segment table, quality/segment combos, batch download
+- **Extractor system**: `Extractor` base class with `__init_subclass__` auto-registry (streamkeep/extractors/)
+  - KickExtractor, TwitchExtractor, RumbleExtractor, SoundCloudExtractor, RedditExtractor, AudiusExtractor, PodcastRSSExtractor, YtDlpExtractor
+  - YtDlpExtractor registers last as catch-all fallback
+- **Direct URL detection**: streamkeep/scrape.py uses HEAD Content-Type sniffing
+- **Data classes**: streamkeep/models.py
+- **HTTP helpers**: streamkeep/http.py — `_build_curl_cmd()` factored out of curl/curl_json/curl_post_json for single-source proxy routing
+- **Workers**: streamkeep/workers/ — FetchWorker, DownloadWorker, PlaylistExpandWorker, PageScrapeWorker
+- **Post-processing**: streamkeep/postprocess/ — PostProcessor + ConvertWorker with HW encoder probe (NVENC/QSV/AMF/VT)
+- **GUI**: streamkeep/ui/main_window.py — StreamKeep QMainWindow with 4-tab QStackedWidget (Download/Monitor/History/Settings)
 - Catppuccin Mocha dark theme via global QSS
+- Phase 1 (leaf modules, extractors, workers, postprocess, metadata, monitor, clipboard): commits bb2f1e1 → b906446
+- Phase 2 (UI class split to streamkeep/ui/main_window.py): commit 2c03d1e
+- Phase 3 (HTTP dedup + pyflakes sweep — caught 4 missing json/urllib imports): this commit
 
 ## Key API Details
 - **Kick**: `/api/v2/channels/{slug}/videos` returns VOD list with `source` field = DVR master.m3u8
@@ -45,6 +77,7 @@ No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 - **Config persistence**: JSON at `%APPDATA%\StreamKeep\config.json` — saves output dir, segment pref, history, monitor channels
 
 ## Version History
+- v4.11.0 — Full modularization. `StreamKeep.py` went from 7784 lines to 59 (a launcher). All code now lives in the `streamkeep/` package split across 30+ files organized by concern. Phase 1 extracted leaf modules, extractors, workers, post-processing, metadata, monitor, clipboard; Phase 2 moved the `StreamKeep` QMainWindow into `streamkeep/ui/main_window.py`; Phase 3 deduplicated curl command building via `_build_curl_cmd()` and ran pyflakes which found 4 latent bugs (`json`/`urllib.parse` missing from the split UI module). No functional changes — the refactor is a pure structural move verified by full-app instantiation tests at every phase boundary.
 - v4.10.0 — Standalone manual converter. `ConvertWorker(QThread)` runs the video/audio converter on arbitrary files/folders off the UI thread. Settings → Post-Processing gets two new buttons: **Convert Files...** (multi-select file picker) and **Convert Folder...** (recursive walk). Snapshots converter settings at launch so mid-run edits don't corrupt an in-flight batch. Progress reported per-file via status bar + log, with success/fail tally at the end and a tray notification. Cancel button finishes the current file then stops. Skips `.converted.*` files so repeated runs don't chain.
 - v4.9.0 — Converter resize/FPS/sample-rate controls. Video converter gains Scale (original/2160p/1440p/1080p/720p/480p/360p, `-vf scale=-2:N`) and FPS (original/60/30/24, `-r N`) combos. Audio converter gains Sample rate (original/48000/44100/22050, `-ar N`). Setting any of these auto-upgrades the codec from 'copy' to the default encoder since re-encode is required. Config keys: `pp_convert_video_scale`, `pp_convert_video_fps`, `pp_convert_audio_samplerate`. Verified 1920x1080@60fps → 1280x720@30fps transcode via ffprobe.
 - v4.8.0 — GPU hardware encoder support for the video converter. Adds NVENC (NVIDIA), QSV (Intel Quick Sync), AMF (AMD), and VideoToolbox (Apple) variants of h264/h265/av1. `_detect_ffmpeg_encoders()` parses `ffmpeg -encoders` output (cached), and `_available_video_codec_keys()` runs a parallel 1-frame probe of each HW encoder (via ThreadPoolExecutor, <2s total) to verify the GPU driver is actually present — compile-time presence alone is insufficient. Settings combo hides unusable encoders. Codec-arg dispatch moved into `_video_codec_extra_args()` so `_run_video_convert()` stays clean. WebM incompatibility guard rewritten to allow AV1 encoders.
