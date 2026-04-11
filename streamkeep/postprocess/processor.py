@@ -234,13 +234,23 @@ class PostProcessor:
 
         ok = cls._ffmpeg_run(cmd, log_fn, f"video convert -> {fmt}/{codec_key}")
         if ok and cls.convert_delete_source:
-            try:
-                os.remove(src)
+            # Verify the converted file actually exists and is non-empty
+            # before deleting the source — ffmpeg can return 0 in rare
+            # edge cases (interrupted mux) with a zero-byte output.
+            if os.path.exists(dst) and os.path.getsize(dst) > 0:
+                try:
+                    os.remove(src)
+                    if log_fn:
+                        log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
+                except OSError as e:
+                    if log_fn:
+                        log_fn(f"[POST] Delete source failed: {e}")
+            else:
                 if log_fn:
-                    log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
-            except OSError as e:
-                if log_fn:
-                    log_fn(f"[POST] Delete source failed: {e}")
+                    log_fn(
+                        f"[POST] Output missing/empty — source preserved: "
+                        f"{os.path.basename(src)}"
+                    )
 
     @classmethod
     def _run_audio_convert(cls, src, log_fn):
@@ -289,13 +299,20 @@ class PostProcessor:
 
         ok = cls._ffmpeg_run(cmd, log_fn, f"audio convert -> {fmt}/{codec_key}")
         if ok and cls.convert_delete_source:
-            try:
-                os.remove(src)
+            if os.path.exists(dst) and os.path.getsize(dst) > 0:
+                try:
+                    os.remove(src)
+                    if log_fn:
+                        log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
+                except OSError as e:
+                    if log_fn:
+                        log_fn(f"[POST] Delete source failed: {e}")
+            else:
                 if log_fn:
-                    log_fn(f"[POST] Deleted source: {os.path.basename(src)}")
-            except OSError as e:
-                if log_fn:
-                    log_fn(f"[POST] Delete source failed: {e}")
+                    log_fn(
+                        f"[POST] Output missing/empty — source preserved: "
+                        f"{os.path.basename(src)}"
+                    )
 
     @classmethod
     def _run_contact_sheet(cls, src, log_fn):
