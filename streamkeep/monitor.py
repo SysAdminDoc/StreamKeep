@@ -15,6 +15,7 @@ from PyQt6.QtCore import (
 )
 
 from .extractors import Extractor
+from .http import http_interruptible
 from .models import MonitorEntry
 
 
@@ -40,45 +41,46 @@ class _PollTask(QRunnable):
         entry = self.entry
         status = entry.last_status
         try:
-            ext = Extractor.detect(entry.url)
-            if not ext:
-                self.signals.finished.emit(entry.channel_id, "error")
-                return
-            if ext.supports_live_check():
-                try:
-                    is_live = ext.check_live(entry.url)
-                except Exception as ex:
-                    self.signals.log.emit(
-                        f"[MONITOR ERROR] {entry.channel_id}: {ex}"
-                    )
+            with http_interruptible(lambda: getattr(entry, "_cancel_requested", False)):
+                ext = Extractor.detect(entry.url)
+                if not ext:
                     self.signals.finished.emit(entry.channel_id, "error")
                     return
-                prev = entry.last_status
-                status = "live" if is_live else "offline"
-                if is_live and prev != "live":
-                    self.signals.went_live.emit(entry.channel_id)
-                    self.signals.log.emit(
-                        f"[LIVE] {entry.platform}/{entry.channel_id} went live!"
-                    )
-            if self.check_vods and ext.supports_vod_listing():
-                try:
-                    vods = ext.list_vods(
-                        entry.url, log_fn=self.signals.log.emit
-                    )
-                    new_vods = [
-                        v for v in vods
-                        if v.source and v.source not in entry.archive_ids
-                    ]
-                    if new_vods:
+                if ext.supports_live_check():
+                    try:
+                        is_live = ext.check_live(entry.url)
+                    except Exception as ex:
                         self.signals.log.emit(
-                            f"[SUBSCRIBE] {entry.channel_id}: "
-                            f"{len(new_vods)} new VOD(s) found"
+                            f"[MONITOR ERROR] {entry.channel_id}: {ex}"
                         )
-                        self.signals.new_vods.emit(entry.channel_id, new_vods)
-                except Exception as sub_ex:
-                    self.signals.log.emit(
-                        f"[SUBSCRIBE ERROR] {entry.channel_id}: {sub_ex}"
-                    )
+                        self.signals.finished.emit(entry.channel_id, "error")
+                        return
+                    prev = entry.last_status
+                    status = "live" if is_live else "offline"
+                    if is_live and prev != "live" and not getattr(entry, "_cancel_requested", False):
+                        self.signals.went_live.emit(entry.channel_id)
+                        self.signals.log.emit(
+                            f"[LIVE] {entry.platform}/{entry.channel_id} went live!"
+                        )
+                if self.check_vods and ext.supports_vod_listing() and not getattr(entry, "_cancel_requested", False):
+                    try:
+                        vods = ext.list_vods(
+                            entry.url, log_fn=self.signals.log.emit
+                        )
+                        new_vods = [
+                            v for v in vods
+                            if v.source and v.source not in entry.archive_ids
+                        ]
+                        if new_vods and not getattr(entry, "_cancel_requested", False):
+                            self.signals.log.emit(
+                                f"[SUBSCRIBE] {entry.channel_id}: "
+                                f"{len(new_vods)} new VOD(s) found"
+                            )
+                            self.signals.new_vods.emit(entry.channel_id, new_vods)
+                    except Exception as sub_ex:
+                        self.signals.log.emit(
+                            f"[SUBSCRIBE ERROR] {entry.channel_id}: {sub_ex}"
+                        )
         except Exception as ex:
             self.signals.log.emit(
                 f"[MONITOR ERROR] {entry.channel_id}: {ex}"
@@ -140,6 +142,7 @@ class ChannelMonitor(QObject):
         with self._entries_lock:
             if 0 <= idx < len(self.entries):
                 removed = self.entries.pop(idx)
+                removed._cancel_requested = True
                 self._in_flight.discard(removed.channel_id)
         self.status_changed.emit()
 
@@ -158,6 +161,7 @@ class ChannelMonitor(QObject):
                 return
             if entry.channel_id in self._in_flight:
                 return
+            entry._cancel_requested = False
             now = time.time()
             if now - entry.last_check < entry.interval_secs:
                 return
@@ -173,6 +177,7 @@ class ChannelMonitor(QObject):
             for e in self.entries:
                 if e.channel_id == channel_id:
                     e.last_status = status
+                    e._cancel_requested = False
                     break
             self._in_flight.discard(channel_id)
         self.status_changed.emit()
@@ -183,16 +188,19 @@ class ChannelMonitor(QObject):
 
     @pyqtSlot(str, list)
     def _on_new_vods(self, channel_id, new_vods):
+        emit = False
         with self._entries_lock:
             for e in self.entries:
-                if e.channel_id == channel_id:
+                if e.channel_id == channel_id and not e._cancel_requested:
                     for v in new_vods:
                         if v.source and v.source not in e.archive_ids:
                             e.archive_ids.append(v.source)
                     if len(e.archive_ids) > 500:
                         e.archive_ids = e.archive_ids[-500:]
+                    emit = True
                     break
-        self.new_vods_found.emit(channel_id, new_vods)
+        if emit:
+            self.new_vods_found.emit(channel_id, new_vods)
 
     def seed_archive(self, channel_id, vod_sources):
         """Populate the archive list for a channel (e.g. on first subscribe

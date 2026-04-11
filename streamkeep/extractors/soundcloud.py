@@ -72,6 +72,7 @@ class SoundCloudExtractor(Extractor):
             platform="SoundCloud",
             url=url,
             title=data.get("title", ""),
+            channel=self.extract_channel_id(url) or "",
             total_secs=data.get("duration", 0) / 1000,
         )
         info.duration_str = fmt_duration(info.total_secs)

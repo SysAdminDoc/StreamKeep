@@ -6,6 +6,7 @@ Phase 3 will carve it into per-tab widgets. For now the split wins us a
 predictable file layout and keeps the runtime unchanged.
 """
 
+import copy
 import json
 import os
 import re
@@ -54,10 +55,12 @@ from streamkeep.extractors import (
 from streamkeep.workers import (
     FetchWorker,
     DownloadWorker,
+    FinalizeWorker,
     PlaylistExpandWorker as _PlaylistExpandWorker,
     PageScrapeWorker as _PageScrapeWorker,
+    SeedArchiveWorker,
+    AutoRecordResolveWorker,
 )
-from streamkeep.metadata import MetadataSaver
 from streamkeep.postprocess import (
     PostProcessor,
     ConvertWorker,
@@ -122,6 +125,31 @@ class StreamKeep(QMainWindow):
         self._write_nfo = False
         self._parallel_connections = 4  # Multi-connection splits per direct MP4
         self._recent_urls = []  # most-recent-first list of distinct URLs
+        self._last_fetch_request = {
+            "url": "",
+            "vod_source": "",
+            "vod_platform": "",
+            "vod_title": "",
+            "vod_channel": "",
+        }
+        self._active_output_dir = ""
+        self._active_quality_name = ""
+        self._active_history_url = ""
+        self._active_stream_info = None
+        self._download_had_errors = False
+        self._queue_active_item = None
+        self._queue_autostart = False
+        self._pending_auto_records = []
+        self._batch_active = False
+        self._monitor_seed_workers = {}
+        self._auto_record_resolve_worker = None
+        self._active_auto_record_channel = ""
+        self._finalize_tasks = []
+        self._finalize_worker = None
+        self._finalize_active_title = ""
+        self._finalize_active_label = ""
+        self._finalize_active_step = 0
+        self._finalize_active_total = 0
         self._bandwidth_rule = {
             "enabled": False,
             "start_hour": 9,
@@ -137,6 +165,9 @@ class StreamKeep(QMainWindow):
         self.clipboard_monitor = ClipboardMonitor()
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
+        self._config_save_timer = QTimer(self)
+        self._config_save_timer.setSingleShot(True)
+        self._config_save_timer.timeout.connect(self._persist_config)
         self._apply_config()
         self._init_tray_icon()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
@@ -336,10 +367,12 @@ class StreamKeep(QMainWindow):
                     sr_items.index(PostProcessor.convert_audio_samplerate))
             self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
         # Restore queue
-        self._download_queue = [
-            q for q in cfg.get("download_queue", [])
-            if isinstance(q, dict) and q.get("url")
-        ]
+        queue_items = []
+        for q in cfg.get("download_queue", []):
+            normalized = self._normalize_queue_item(q)
+            if normalized is not None:
+                queue_items.append(normalized)
+        self._download_queue = queue_items
         # Restore recent URLs
         recents = cfg.get("recent_urls", [])
         if isinstance(recents, list):
@@ -368,6 +401,7 @@ class StreamKeep(QMainWindow):
                     date=str(h.get("date", "")),
                     platform=str(h.get("platform", "")),
                     title=str(h.get("title", "")),
+                    channel=str(h.get("channel", "")),
                     quality=str(h.get("quality", "")),
                     size=str(h.get("size", "")),
                     path=str(h.get("path", "")),
@@ -386,9 +420,10 @@ class StreamKeep(QMainWindow):
         cfg["output_dir"] = self.output_input.text().strip()
         cfg["segment_idx"] = self.segment_combo.currentIndex()
         cfg["history"] = [{"date": h.date, "platform": h.platform, "title": h.title,
+                           "channel": h.channel,
                            "quality": h.quality, "size": h.size, "path": h.path,
                            "url": h.url}
-                          for h in self._history[-200:]]  # keep last 200
+                         for h in self._history[-200:]]  # keep last 200
         cfg["folder_template"] = self._folder_template
         cfg["file_template"] = self._file_template
         cfg["webhook_url"] = self._webhook_url
@@ -417,6 +452,13 @@ class StreamKeep(QMainWindow):
         cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
         self.monitor.save_to_config(cfg)
         _save_config(cfg)
+
+    def _schedule_persist_config(self, delay_ms=500):
+        timer = getattr(self, "_config_save_timer", None)
+        if timer is None:
+            self._persist_config()
+            return
+        timer.start(max(0, int(delay_ms)))
 
     def _init_tray_icon(self):
         """Create a system tray icon for completion notifications.
@@ -512,6 +554,59 @@ class StreamKeep(QMainWindow):
                     dw.wait(1000)
             except Exception:
                 pass
+        fw = getattr(self, "_fetch_worker", None)
+        if fw is not None and fw.isRunning():
+            try:
+                fw.requestInterruption()
+                fw.wait(1500)
+            except Exception:
+                pass
+        bfw = getattr(self, "_batch_fetch_worker", None)
+        if bfw is not None and bfw.isRunning():
+            try:
+                bfw.requestInterruption()
+                bfw.wait(1500)
+            except Exception:
+                pass
+        arw = getattr(self, "_auto_record_resolve_worker", None)
+        if arw is not None and arw.isRunning():
+            try:
+                arw.requestInterruption()
+                arw.wait(1500)
+            except Exception:
+                pass
+        for key, worker in list(getattr(self, "_monitor_seed_workers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.requestInterruption()
+                    worker.wait(1500)
+            except Exception:
+                pass
+            self._monitor_seed_workers.pop(key, None)
+        fwk = getattr(self, "_finalize_worker", None)
+        if fwk is not None and fwk.isRunning():
+            try:
+                fwk.cancel()
+                if not fwk.wait(1500):
+                    fwk.terminate()
+                    fwk.wait(500)
+            except Exception:
+                pass
+        ew = getattr(self, "_expand_worker", None)
+        if ew is not None and ew.isRunning():
+            try:
+                ew.requestInterruption()
+                ew.wait(1500)
+            except Exception:
+                pass
+        sw = getattr(self, "_scan_worker", None)
+        if sw is not None and sw.isRunning():
+            try:
+                sw.requestInterruption()
+                sw.wait(1500)
+            except Exception:
+                pass
+        self._finalize_tasks = []
         # Stop convert worker if running (standalone file/folder batch)
         cw = getattr(self, "_convert_worker", None)
         if cw is not None and cw.isRunning():
@@ -525,6 +620,14 @@ class StreamKeep(QMainWindow):
         # Stop monitor timer
         try:
             self.monitor._timer.stop()
+        except Exception:
+            pass
+        try:
+            self._scheduler_timer.stop()
+        except Exception:
+            pass
+        try:
+            self._config_save_timer.stop()
         except Exception:
             pass
         # Stop clipboard monitor
@@ -574,6 +677,7 @@ class StreamKeep(QMainWindow):
         tones = {
             "idle": ("Standby", CAT["panelSoft"], CAT["subtext1"], CAT["stroke"]),
             "working": ("Working", CAT["accent"], CAT["crust"], CAT["accent"]),
+            "processing": ("Finalizing", CAT["accentSoft"], CAT["crust"], CAT["accent"]),
             "success": ("Ready", CAT["accentSoft"], CAT["crust"], CAT["accentSoft"]),
             "warning": ("Alert", CAT["gold"], CAT["crust"], CAT["gold"]),
             "error": ("Error", CAT["red"], CAT["crust"], CAT["red"]),
@@ -637,6 +741,28 @@ class StreamKeep(QMainWindow):
 
         output_path = self.output_input.text().strip() if hasattr(self, "output_input") else ""
         output_sub = output_path if len(output_path) <= 50 else f"...{output_path[-47:]}"
+        finalize_active = bool(self._finalize_worker is not None and self._finalize_worker.isRunning())
+        finalize_queued = len(self._finalize_tasks)
+        finalize_total = finalize_queued + (1 if finalize_active else 0)
+        if finalize_active:
+            if self._finalize_active_total:
+                finalize_value = f"{self._finalize_active_step}/{self._finalize_active_total}"
+            else:
+                finalize_value = "Starting"
+            finalize_parts = []
+            if self._finalize_active_title:
+                finalize_parts.append(self._finalize_active_title[:42])
+            if self._finalize_active_label:
+                finalize_parts.append(self._finalize_active_label)
+            finalize_sub = " | ".join(finalize_parts) or "Preparing background cleanup"
+            if finalize_queued:
+                finalize_sub = f"{finalize_sub} | {finalize_queued} queued"
+        elif finalize_queued:
+            finalize_value = f"{finalize_queued} queued"
+            finalize_sub = "Waiting for the current background cleanup"
+        else:
+            finalize_value = "Idle"
+            finalize_sub = "Metadata and post-processing will queue here"
 
         self._set_metric(self.download_platform_value, self.download_platform_sub, platform_value, platform_sub)
         self._set_metric(self.download_duration_value, self.download_duration_sub, duration_value, duration_sub)
@@ -647,8 +773,17 @@ class StreamKeep(QMainWindow):
             _path_label(output_path),
             output_sub or "Choose a destination folder",
         )
+        if hasattr(self, "download_finalize_value"):
+            self._set_metric(
+                self.download_finalize_value,
+                self.download_finalize_sub,
+                finalize_value,
+                finalize_sub,
+            )
         self.download_output_value.setToolTip(output_path)
         self.download_output_sub.setToolTip(output_path)
+        if hasattr(self, "download_finalize_sub"):
+            self.download_finalize_sub.setToolTip(finalize_sub)
 
         if hasattr(self, "segment_summary_label"):
             if total_segments:
@@ -705,20 +840,13 @@ class StreamKeep(QMainWindow):
                 plat_share = f"{top_plat_n} / {total} downloads" if top_plat_n else "no data"
                 self._set_metric(self.history_platform_value, self.history_platform_sub,
                                  top_plat or "—", plat_share)
-                # Top channel: parse channel from URL path (last segment of domain+path)
+                # Top channel: prefer stored creator/channel metadata, then fall back
+                # to a conservative URL-derived guess for older history rows.
                 ch_counts = Counter()
                 for h in self._history:
-                    if not h.url:
-                        continue
-                    try:
-                        parsed = urllib.parse.urlparse(h.url)
-                        parts = [p for p in parsed.path.strip("/").split("/") if p]
-                        # kick.com/foo or twitch.tv/foo -> "foo"
-                        if parts:
-                            key = f"{parsed.netloc}/{parts[0]}"
-                            ch_counts[key] += 1
-                    except Exception:
-                        pass
+                    key = self._history_channel_label(h)
+                    if key:
+                        ch_counts[key] += 1
                 if ch_counts:
                     top_ch, top_ch_n = ch_counts.most_common(1)[0]
                     self._set_metric(self.history_channel_value, self.history_channel_sub,
@@ -943,14 +1071,28 @@ class StreamKeep(QMainWindow):
         if not url:
             self._set_status("Paste a URL first.", "warning")
             return
+        req = getattr(self, "_last_fetch_request", {})
+        vod_source = str(req.get("vod_source", "") or "")
+        vod_platform = str(req.get("vod_platform", "") or "")
+        vod_title = str(req.get("vod_title", "") or "")
+        vod_channel = str(req.get("vod_channel", "") or "")
         title = ""
         platform = ""
         if self.stream_info:
             title = self.stream_info.title or ""
             platform = self.stream_info.platform or ""
-        added = self._queue_add(url, title=title, platform=platform)
+        queue_url = vod_source or url
+        added = self._queue_add(
+            queue_url,
+            title=title,
+            platform=platform,
+            vod_source=vod_source,
+            vod_platform=vod_platform,
+            vod_title=vod_title or title,
+            vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+        )
         if added:
-            self._set_status(f"Queued: {title or url[:60]}", "success")
+            self._set_status(f"Queued: {title or queue_url[:60]}", "success")
         else:
             self._set_status("URL already in the queue.", "warning")
 
@@ -960,6 +1102,11 @@ class StreamKeep(QMainWindow):
         if not url:
             self._set_status("Paste a URL first.", "warning")
             return
+        req = getattr(self, "_last_fetch_request", {})
+        vod_source = str(req.get("vod_source", "") or "")
+        vod_platform = str(req.get("vod_platform", "") or "")
+        vod_title = str(req.get("vod_title", "") or "")
+        vod_channel = str(req.get("vod_channel", "") or "")
         # Ask for an offset in minutes — simple numeric input
         offset_min, ok = QInputDialog.getInt(
             self,
@@ -975,18 +1122,28 @@ class StreamKeep(QMainWindow):
         if self.stream_info:
             title = self.stream_info.title or ""
             platform = self.stream_info.platform or ""
-        added = self._queue_add(url, title=title, platform=platform,
-                                start_at=start_at.isoformat())
+        queue_url = vod_source or url
+        added = self._queue_add(
+            queue_url,
+            title=title,
+            platform=platform,
+            start_at=start_at.isoformat(),
+            vod_source=vod_source,
+            vod_platform=vod_platform,
+            vod_title=vod_title or title,
+            vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+        )
         if added:
             self._set_status(
-                f"Scheduled for {start_at.strftime('%Y-%m-%d %H:%M')}: {title or url[:60]}",
+                f"Scheduled for {start_at.strftime('%Y-%m-%d %H:%M')}: {title or queue_url[:60]}",
                 "success",
             )
         else:
             self._set_status("URL already in the queue.", "warning")
 
     def _on_clear_queue(self):
-        self._download_queue = [q for q in self._download_queue if q.get("status") != "queued"]
+        active = self._queue_active_item
+        self._download_queue = [q for q in self._download_queue if q is active]
         self._persist_config()
         self._refresh_queue_table()
         self._set_status("Queue cleared.", "success")
@@ -1373,6 +1530,7 @@ class StreamKeep(QMainWindow):
         """Add URL to the top of the recent URLs list (most-recent-first)."""
         if not url:
             return
+        previous = list(self._recent_urls)
         # Dedup: move to front if already present
         if url in self._recent_urls:
             self._recent_urls.remove(url)
@@ -1381,8 +1539,53 @@ class StreamKeep(QMainWindow):
         self._recent_urls = self._recent_urls[:30]
         if hasattr(self, "_recent_url_model"):
             self._recent_url_model.setStringList(self._recent_urls)
+        if self._recent_urls != previous:
+            self._schedule_persist_config()
 
-    def _find_duplicate(self, url, title=""):
+    def _infer_history_channel(self, url="", platform="", channel=""):
+        channel = (channel or "").strip()
+        if channel and not channel.lower().startswith("vod_"):
+            return channel
+        if not url:
+            return ""
+        try:
+            ext = Extractor.detect(url)
+            if ext is not None:
+                detected = (ext.extract_channel_id(url) or "").strip()
+                if (
+                    detected
+                    and not detected.lower().startswith("vod_")
+                    and not detected.isdigit()
+                    and getattr(ext, "NAME", "") in {"Kick", "Twitch", "SoundCloud", "Audius", "Podcast"}
+                ):
+                    return detected
+            parsed = urllib.parse.urlparse(url)
+            parts = [p for p in parsed.path.strip("/").split("/") if p]
+            blocked = {
+                "videos", "video", "embed", "watch", "shorts",
+                "playlist", "live", "vod", "v",
+            }
+            for part in parts:
+                if part.lower() not in blocked and not part.isdigit():
+                    return part
+        except Exception:
+            return ""
+        return ""
+
+    def _history_channel_label(self, entry):
+        channel = self._infer_history_channel(
+            url=getattr(entry, "url", ""),
+            platform=getattr(entry, "platform", ""),
+            channel=getattr(entry, "channel", ""),
+        )
+        if not channel:
+            return ""
+        platform = (getattr(entry, "platform", "") or "").strip()
+        if platform:
+            return f"{platform}/{channel}"
+        return channel
+
+    def _find_duplicate(self, url, title="", platform=""):
         """Check history for a matching URL (exact) or title (fuzzy).
         Returns matching HistoryEntry or None."""
         if not self._check_duplicates:
@@ -1394,14 +1597,270 @@ class StreamKeep(QMainWindow):
         if title:
             norm = title.strip().lower()
             for h in self._history:
+                if (platform and h.platform
+                        and h.platform.strip().lower() != platform.strip().lower()):
+                    continue
                 if h.title and h.title.strip().lower() == norm and h.path:
                     return h
         return None
 
-    def _on_fetch(self, vod_source=None, vod_platform=None):
+    def _set_download_context(self, out_dir="", quality_name="", history_url="", info=None):
+        self._active_output_dir = out_dir
+        self._active_quality_name = quality_name
+        self._active_history_url = history_url
+        self._active_stream_info = info or self.stream_info
+
+    def _output_contains_media(self, out_dir):
+        if not out_dir or not os.path.isdir(out_dir):
+            return False
+        media_exts = {ext.lower() for ext in (VIDEO_EXTS | AUDIO_EXTS)}
+        try:
+            for entry in os.scandir(out_dir):
+                if entry.is_file() and Path(entry.name).suffix.lower() in media_exts:
+                    return True
+        except OSError:
+            return False
+        return False
+
+    def _output_size_label(self, out_dir):
+        if not out_dir or not os.path.isdir(out_dir):
+            return ""
+        total = 0
+        try:
+            for root, _dirs, files in os.walk(out_dir):
+                for name in files:
+                    path = os.path.join(root, name)
+                    try:
+                        total += os.path.getsize(path)
+                    except OSError:
+                        continue
+        except OSError:
+            return ""
+        return _fmt_size(total) if total > 0 else ""
+
+    def _postprocess_snapshot(self):
+        keys = [
+            "extract_audio",
+            "normalize_loudness",
+            "reencode_h265",
+            "contact_sheet",
+            "split_by_chapter",
+            "convert_video",
+            "convert_video_format",
+            "convert_video_codec",
+            "convert_video_scale",
+            "convert_video_fps",
+            "convert_audio",
+            "convert_audio_format",
+            "convert_audio_codec",
+            "convert_audio_bitrate",
+            "convert_audio_samplerate",
+            "convert_delete_source",
+        ]
+        return {k: getattr(PostProcessor, k) for k in keys}
+
+    def _foreground_busy(self):
+        if getattr(self, "_batch_active", False):
+            return True
+        for name in (
+            "download_worker",
+            "_fetch_worker",
+            "_batch_fetch_worker",
+            "_auto_record_resolve_worker",
+            "_expand_worker",
+            "_scan_worker",
+        ):
+            worker = getattr(self, name, None)
+            if worker is not None and worker.isRunning():
+                return True
+        return False
+
+    def _queue_status_changed(self):
+        self._persist_config()
+        if hasattr(self, "queue_table"):
+            self._refresh_queue_table()
+
+    def _set_queue_item_status(self, item, status, note=""):
+        if item is None:
+            return
+        item["status"] = status
+        item["note"] = note
+        self._queue_status_changed()
+
+    def _release_queue_item(self, status=None, note=""):
+        item = self._queue_active_item
+        self._queue_active_item = None
+        self._queue_autostart = False
+        if item is None:
+            return
+        if status == "done":
+            try:
+                self._download_queue.remove(item)
+            except ValueError:
+                pass
+            self._queue_status_changed()
+            return
+        if status:
+            self._set_queue_item_status(item, status, note)
+
+    def _resolve_history_url(self):
+        if self._active_history_url:
+            return self._active_history_url
+        req = getattr(self, "_last_fetch_request", {})
+        vod_source = req.get("vod_source", "")
+        if vod_source:
+            return vod_source
+        if self._queue_active_item is not None:
+            return self._queue_active_item.get("url", "")
+        if hasattr(self, "url_input"):
+            return self.url_input.text().strip()
+        return ""
+
+    def _start_next_background_job(self):
+        resolver = getattr(self, "_auto_record_resolve_worker", None)
+        if resolver is not None and resolver.isRunning():
+            return
+        if self._drain_pending_auto_records():
+            return
+        self._advance_queue()
+
+    def _start_finalize_worker(self):
+        worker = getattr(self, "_finalize_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        if not self._finalize_tasks:
+            self._finalize_active_title = ""
+            self._finalize_active_label = ""
+            self._finalize_active_step = 0
+            self._finalize_active_total = 0
+            self._refresh_download_summary()
+            return
+        task = self._finalize_tasks.pop(0)
+        self._finalize_active_title = task.get("title", "")
+        self._finalize_active_label = "Preparing background cleanup"
+        self._finalize_active_step = 0
+        self._finalize_active_total = 0
+        worker = FinalizeWorker(task)
+        worker.log.connect(self._log)
+        worker.progress.connect(self._on_finalize_progress)
+        worker.done.connect(self._on_finalize_done)
+        self._finalize_worker = worker
+        worker.start()
+        self._refresh_download_summary()
+        if not self._foreground_busy():
+            extra = f" {len(self._finalize_tasks)} more queued." if self._finalize_tasks else ""
+            self._set_status(
+                f"Finalizing {task.get('title', 'download')[:60]} in the background.{extra}",
+                "processing",
+            )
+
+    def _enqueue_finalize_task(self, task):
+        self._finalize_tasks.append(task)
+        if len(self._finalize_tasks) > 1 or (
+                self._finalize_worker is not None and self._finalize_worker.isRunning()):
+            self._log(f"[FINALIZE] Queued background finalization for {task.get('title', 'download')[:60]}")
+        self._refresh_download_summary()
+        self._start_finalize_worker()
+
+    def _on_finalize_progress(self, label, step_no, total_steps):
+        self._finalize_active_label = label or ""
+        self._finalize_active_step = max(0, int(step_no or 0))
+        self._finalize_active_total = max(self._finalize_active_step, int(total_steps or 0))
+        self._refresh_download_summary()
+        if not self._foreground_busy():
+            count = ""
+            if self._finalize_active_total:
+                count = f" ({self._finalize_active_step}/{self._finalize_active_total})"
+            extra = f" {len(self._finalize_tasks)} more queued." if self._finalize_tasks else ""
+            title = self._finalize_active_title[:60] or "download"
+            step_text = f"{self._finalize_active_label}{count}" if self._finalize_active_label else f"step{count}"
+            self._set_status(f"Finalizing {title}: {step_text}.{extra}", "processing")
+
+    def _on_finalize_done(self, result):
+        worker = getattr(self, "_finalize_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._finalize_worker = None
+        self._finalize_active_title = ""
+        self._finalize_active_label = ""
+        self._finalize_active_step = 0
+        self._finalize_active_total = 0
+        finished_title = result.get("title", "download")
+        if not result.get("cancelled"):
+            self._add_history(
+                result.get("platform", "?"),
+                result.get("title", "?"),
+                result.get("quality_name", ""),
+                result.get("size_label", self._output_size_label(result.get("out_dir", ""))),
+                result.get("out_dir", ""),
+                channel=result.get("channel", ""),
+                url=result.get("history_url", ""),
+            )
+        remaining = len(self._finalize_tasks)
+        self._refresh_download_summary()
+        if not self._foreground_busy():
+            if result.get("cancelled"):
+                self._set_status("Background finalization was cancelled.", "warning")
+            elif remaining:
+                self._set_status(
+                    f"Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.",
+                    "processing",
+                )
+            else:
+                self._set_status(
+                    f"Background finalization complete for {finished_title[:60]}.",
+                    "success",
+                )
+        self._start_finalize_worker()
+
+    def _cancel_batch_fetch_worker(self):
+        worker = getattr(self, "_batch_fetch_worker", None)
+        if worker is None:
+            return
+        try:
+            worker.requestInterruption()
+        except Exception:
+            pass
+        if worker.isRunning():
+            try:
+                worker.wait(1500)
+            except Exception:
+                pass
+        self._batch_fetch_worker = None
+
+    def _start_monitor_seed_worker(self, url, channel_id):
+        existing = self._monitor_seed_workers.get(channel_id)
+        if existing is not None and existing.isRunning():
+            return
+        worker = SeedArchiveWorker(url, channel_id)
+        worker.log.connect(self._log)
+        worker.finished.connect(self._on_monitor_seed_done)
+        worker.error.connect(self._on_monitor_seed_error)
+        self._monitor_seed_workers[channel_id] = worker
+        worker.start()
+
+    def _clear_monitor_seed_worker(self, channel_id):
+        worker = self._monitor_seed_workers.pop(channel_id, None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+
+    def _on_fetch(self, vod_source=None, vod_platform=None, vod_title=None, vod_channel=None):
         url = self.url_input.text().strip()
         if not url:
             return
+        self._last_fetch_request = {
+            "url": url,
+            "vod_source": vod_source or "",
+            "vod_platform": vod_platform or "",
+            "vod_title": vod_title or "",
+            "vod_channel": vod_channel or "",
+        }
         # Track recent URLs for the autocomplete dropdown
         if not vod_source:
             self._remember_url(url)
@@ -1446,7 +1905,13 @@ class StreamKeep(QMainWindow):
             if prev_worker.isRunning():
                 prev_worker.requestInterruption()
 
-        self._fetch_worker = FetchWorker(url, vod_source=vod_source, vod_platform=vod_platform)
+        self._fetch_worker = FetchWorker(
+            url,
+            vod_source=vod_source,
+            vod_platform=vod_platform,
+            vod_title=vod_title,
+            vod_channel=vod_channel,
+        )
         self._fetch_worker.log.connect(self._log)
         self._fetch_worker.finished.connect(self._on_fetch_done)
         self._fetch_worker.vods_found.connect(self._on_vods_found)
@@ -1510,7 +1975,7 @@ class StreamKeep(QMainWindow):
         self._refresh_download_summary()
 
         # Title-based duplicate check after resolve (more accurate than URL match)
-        dup = self._find_duplicate("", info.title)
+        dup = self._find_duplicate("", info.title, platform=info.platform)
         if dup:
             self._log(f"[DUPLICATE] Title match: already downloaded {dup.date} to {dup.path}")
             self._set_status(
@@ -1522,14 +1987,46 @@ class StreamKeep(QMainWindow):
         else:
             self._set_status("Source ready. Review the segments and start the download when you are happy.", "success")
 
+        if self._queue_autostart and self._queue_active_item is not None:
+            self._set_queue_item_status(self._queue_active_item, "downloading")
+            if not self._on_download():
+                self._release_queue_item("failed", "Could not start the queued download")
+                self._start_next_background_job()
+
     def _on_fetch_error(self, err):
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
         self._log(f"[ERROR] {err}")
         self._refresh_download_summary()
         self._set_status(f"Fetch failed: {err}", "error")
+        if self._queue_active_item is not None:
+            self._release_queue_item("failed", err[:120])
+            self._start_next_background_job()
 
     def _on_vods_found(self, vod_list, platform_name):
+        if self._queue_autostart and self._queue_active_item is not None:
+            added = 0
+            for vod in vod_list:
+                if self._queue_add(
+                        vod.source,
+                        title=vod.title,
+                        platform=vod.platform or platform_name,
+                        vod_source=vod.source,
+                        vod_platform=vod.platform or platform_name,
+                        vod_title=vod.title,
+                        vod_channel=vod.channel):
+                    added += 1
+            source_label = self._queue_active_item.get("title") or self._queue_active_item.get("url", "")
+            self._release_queue_item("done")
+            self._log(f"[QUEUE] Expanded {source_label[:60]} into {added} queued VOD(s)")
+            tone = "success" if added else "warning"
+            self._set_status(
+                f"Expanded queued source into {added} VOD(s).",
+                tone,
+            )
+            self._start_next_background_job()
+            return
+
         self._vod_list = vod_list
         self._vod_checks = []
         self.vod_table.setRowCount(len(vod_list))
@@ -1586,7 +2083,12 @@ class StreamKeep(QMainWindow):
             if cb.isChecked():
                 vod = self._vod_list[i]
                 self._log(f"\nLoading VOD: {vod.title} ({vod.date})")
-                self._on_fetch(vod_source=vod.source, vod_platform=vod.platform)
+                self._on_fetch(
+                    vod_source=vod.source,
+                    vod_platform=vod.platform,
+                    vod_title=vod.title,
+                    vod_channel=vod.channel,
+                )
                 return
         self._log("No VOD checked.")
         self._set_status("Select at least one VOD before loading it.", "warning")
@@ -1598,9 +2100,12 @@ class StreamKeep(QMainWindow):
             self._set_status("Select at least one VOD before starting a batch download.", "warning")
             return
 
+        self._cancel_batch_fetch_worker()
         self._batch_vods = checked
         self._batch_idx = 0
         self._batch_total = len(checked)
+        self._batch_failed_count = 0
+        self._batch_active = True
         self._log(f"\n{'=' * 50}")
         self._log(f"Batch downloading {self._batch_total} VOD(s)")
         self._log(f"{'=' * 50}")
@@ -1613,6 +2118,8 @@ class StreamKeep(QMainWindow):
         self._batch_next()
 
     def _batch_next(self):
+        if not self._batch_active:
+            return
         if self._batch_idx >= self._batch_total:
             self._batch_done()
             return
@@ -1623,7 +2130,13 @@ class StreamKeep(QMainWindow):
             "working",
         )
 
-        worker = FetchWorker(self.url_input.text().strip(), vod_source=vod.source, vod_platform=vod.platform)
+        worker = FetchWorker(
+            self.url_input.text().strip(),
+            vod_source=vod.source,
+            vod_platform=vod.platform,
+            vod_title=vod.title,
+            vod_channel=vod.channel,
+        )
         worker.log.connect(self._log)
         worker.finished.connect(self._batch_on_fetched)
         worker.error.connect(self._batch_on_fetch_error)
@@ -1631,6 +2144,9 @@ class StreamKeep(QMainWindow):
         worker.start()
 
     def _batch_on_fetched(self, info):
+        self._batch_fetch_worker = None
+        if not self._batch_active or self._batch_idx >= self._batch_total:
+            return
         vod = self._batch_vods[self._batch_idx]
 
         # Pick quality (prefer 1080p/source)
@@ -1692,6 +2208,7 @@ class StreamKeep(QMainWindow):
 
         self._total_segments = len(segments)
         self._completed_segments = 0
+        self._download_had_errors = False
         self.overall_progress.setVisible(True)
         self.overall_progress.setValue(0)
         self.overall_progress.setMaximum(len(segments))
@@ -1699,6 +2216,12 @@ class StreamKeep(QMainWindow):
         self._set_status(
             f"Downloading VOD {self._batch_idx + 1} of {self._batch_total}.",
             "working",
+        )
+        self._set_download_context(
+            out_dir=out_dir,
+            quality_name=selected_q.name if selected_q else "batch",
+            history_url=vod.source or self.url_input.text().strip(),
+            info=info,
         )
 
         worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
@@ -1720,33 +2243,64 @@ class StreamKeep(QMainWindow):
         worker.start()
 
     def _batch_on_fetch_error(self, err):
+        self._batch_fetch_worker = None
+        if not self._batch_active or self._batch_idx >= self._batch_total:
+            return
         self._log(f"[ERROR] {err}")
         self._set_status(f"Batch fetch error: {err}", "error")
+        if hasattr(self, "_batch_failed_count"):
+            self._batch_failed_count += 1
         self._batch_idx += 1
         self._batch_next()
 
     def _batch_vod_done(self):
+        if not self._batch_active or self._batch_idx >= self._batch_total:
+            return
         vod = self._batch_vods[self._batch_idx]
-        self._log(f"[DONE] {vod.title}")
+        if self._download_had_errors:
+            self._log(f"[WARN] {vod.title} finished with errors")
+            if hasattr(self, "_batch_failed_count"):
+                self._batch_failed_count += 1
+        else:
+            self._log(f"[DONE] {vod.title}")
+            self._save_metadata(
+                self._active_output_dir,
+                self._active_quality_name or "batch",
+                history_url=self._active_history_url or vod.source,
+                info=self._active_stream_info or self.stream_info,
+            )
         self._batch_idx += 1
         self._batch_next()
 
     def _batch_done(self):
+        self._batch_active = False
+        self._batch_fetch_worker = None
+        failed = getattr(self, "_batch_failed_count", 0)
+        done = self._batch_total - failed
         self._log(f"\n{'=' * 50}")
-        self._log(f"Batch complete! {self._batch_total} VOD(s) downloaded.")
+        if failed:
+            self._log(
+                f"Batch finished with {failed} failed VOD(s). Completed {done} of {self._batch_total}."
+            )
+        else:
+            self._log(f"Batch complete! {self._batch_total} VOD(s) downloaded.")
         self._log(f"{'=' * 50}")
-        self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
-        self._notify("StreamKeep — Batch complete", f"Downloaded {self._batch_total} VOD(s)")
-        self._send_webhook("batch complete", f"{self._batch_total} VODs",
-                           f"Batch download finished")
+        if failed:
+            self._set_status(
+                f"Batch finished with {failed} failed VOD(s). Completed {done} of {self._batch_total}.",
+                "warning",
+            )
+        else:
+            self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
+            self._notify("StreamKeep — Batch complete", f"Downloaded {self._batch_total} VOD(s)")
+            self._send_webhook("batch complete", f"{self._batch_total} VODs",
+                               f"Batch download finished")
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.vod_dl_all_btn.setEnabled(True)
         self.vod_load_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self.open_folder_btn.setVisible(True)
-        out_dir = self.output_input.text().strip()
-        self._save_metadata(out_dir, "batch")
         self._persist_config()
 
     # ── Segment Management ────────────────────────────────────────────
@@ -1916,7 +2470,7 @@ class StreamKeep(QMainWindow):
 
     def _on_download(self):
         if not self.stream_info:
-            return
+            return False
         total_secs = self.stream_info.total_secs
         is_live_capture = bool(self.stream_info.is_live or total_secs <= 0)
 
@@ -1936,7 +2490,7 @@ class StreamKeep(QMainWindow):
         else:
             self._log("[ERROR] No quality selected")
             self._set_status("Pick a quality before starting the download.", "warning")
-            return
+            return False
 
         # Render filename + folder from templates (templates can produce
         # nested paths like "{channel}/{date} - {title}")
@@ -1966,7 +2520,7 @@ class StreamKeep(QMainWindow):
         if not segments:
             self._log("No segments selected.")
             self._set_status("Select at least one segment before downloading.", "warning")
-            return
+            return False
 
         # For non-channel content, user's output box is the base; folder template
         # adds a subfolder. For channel content the template already has
@@ -1985,6 +2539,7 @@ class StreamKeep(QMainWindow):
 
         self._total_segments = len(segments)
         self._completed_segments = 0
+        self._download_had_errors = False
         self.download_btn.setEnabled(False)
         self.fetch_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
@@ -2003,6 +2558,12 @@ class StreamKeep(QMainWindow):
                 "working",
             )
 
+        self._set_download_context(
+            out_dir=out_dir,
+            quality_name=self.quality_combo.currentText(),
+            history_url=self._resolve_history_url(),
+            info=self.stream_info,
+        )
         self.download_worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         self.download_worker.audio_url = audio_url
         self.download_worker.ytdlp_source = ytdlp_source
@@ -2023,6 +2584,7 @@ class StreamKeep(QMainWindow):
         self.download_worker.log.connect(self._log)
         self.download_worker.all_done.connect(self._on_all_done)
         self.download_worker.start()
+        return True
 
     def _on_dl_progress(self, idx, pct, status):
         if idx < len(self._segment_progress):
@@ -2055,6 +2617,7 @@ class StreamKeep(QMainWindow):
         )
 
     def _on_dl_error(self, idx, err):
+        self._download_had_errors = True
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setStyleSheet(
                 f"QProgressBar::chunk {{ background-color: {CAT['red']}; border-radius: 6px; }}"
@@ -2069,38 +2632,66 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self.open_folder_btn.setVisible(True)
+        active_info = self._active_stream_info or self.stream_info
+        out_dir = self._active_output_dir or self.output_input.text().strip()
+        q_name = self._active_quality_name or (
+            self.quality_combo.currentText() if self.quality_combo.count() else ""
+        )
+        title = active_info.title if active_info and active_info.title else "Download"
+
         self._log(f"\n{'=' * 50}")
-        self._log("All downloads complete!")
-        self._log(f"{'=' * 50}")
-        title = self.stream_info.title if self.stream_info and self.stream_info.title else "Download"
-        if self.stream_info and (self.stream_info.is_live or self.stream_info.total_secs <= 0):
-            self._set_status("Live capture finished and was saved to the selected folder.", "success")
-            self._notify("StreamKeep — Capture finished", title[:80])
-            self._send_webhook("capture finished", title,
-                               f"Segments: {self._completed_segments}")
-        else:
+        if self._download_had_errors:
+            self._log("Download finished with one or more failed segments.")
+            self._log(f"{'=' * 50}")
             self._set_status(
-                f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
-                "success",
+                "Download finished with one or more failed segments. Review the log before retrying.",
+                "warning",
             )
-            self._notify("StreamKeep — Download complete", title[:80])
-            self._send_webhook("download complete", title,
-                               f"Segments: {self._completed_segments}")
-        out_dir = self.output_input.text().strip()
-        q_name = self.quality_combo.currentText() if self.quality_combo.count() else ""
-        self._save_metadata(out_dir, q_name)
+            if self._queue_active_item is not None:
+                note = f"{self._completed_segments}/{self._total_segments} segments completed"
+                self._release_queue_item("failed", note)
+        else:
+            self._log("All downloads complete!")
+            self._log(f"{'=' * 50}")
+            if active_info and (active_info.is_live or active_info.total_secs <= 0):
+                self._set_status("Live capture finished and was saved to the selected folder.", "success")
+                self._notify("StreamKeep — Capture finished", title[:80])
+                self._send_webhook("capture finished", title,
+                                   f"Segments: {self._completed_segments}")
+            else:
+                self._set_status(
+                    f"Download complete. Saved {self._completed_segments} segment(s) to the selected folder.",
+                    "success",
+                )
+                self._notify("StreamKeep — Download complete", title[:80])
+                self._send_webhook("download complete", title,
+                                   f"Segments: {self._completed_segments}")
+            self._save_metadata(
+                out_dir,
+                q_name,
+                history_url=self._active_history_url,
+                info=active_info,
+            )
+            if self._queue_active_item is not None:
+                self._release_queue_item("done")
         self._persist_config()
-        # Auto-advance the queue if there's a pending item
-        self._advance_queue()
+        self._start_next_background_job()
 
     def _on_stop(self):
         worker = self.download_worker
+        resume_background_jobs = bool(
+            self._queue_active_item is not None
+            or self._active_auto_record_channel
+            or self._pending_auto_records
+        )
         live_capture = bool(
             worker and any(len(seg) >= 4 and seg[3] <= 0 for seg in getattr(worker, "segments", []))
         )
         # Halt any in-progress batch by marking it done
         if hasattr(self, '_batch_vods') and hasattr(self, '_batch_total'):
+            self._batch_active = False
             self._batch_idx = self._batch_total
+            self._cancel_batch_fetch_worker()
         if self.download_worker is not None:
             try:
                 self.download_worker.cancel()
@@ -2128,16 +2719,31 @@ class StreamKeep(QMainWindow):
             self.vod_load_btn.setEnabled(True)
         for entry in self.monitor.entries:
             entry.is_recording = False
+        self._active_auto_record_channel = ""
         self._refresh_monitor_summary()
         self._log("[CANCELLED] Download stopped by user.")
+        if self._queue_active_item is not None:
+            self._release_queue_item("cancelled", "Stopped by user")
         if live_capture:
-            self.open_folder_btn.setVisible(True)
-            self._set_status("Recording stopped. Any captured portion was kept on disk.", "warning")
+            has_media = self._output_contains_media(self._active_output_dir)
+            self.open_folder_btn.setVisible(has_media)
+            if has_media and self._active_output_dir and self._active_stream_info:
+                self._save_metadata(
+                    self._active_output_dir,
+                    self._active_quality_name,
+                    history_url=self._active_history_url,
+                    info=self._active_stream_info,
+                )
+                self._set_status("Recording stopped. Any captured portion was kept on disk.", "warning")
+            else:
+                self._set_status("Recording stopped before any media was saved.", "warning")
         else:
             self._set_status("Download cancelled. You can adjust the selection and try again.", "warning")
+        if resume_background_jobs:
+            self._start_next_background_job()
 
     def _on_open_folder(self):
-        out_dir = self.output_input.text().strip()
+        out_dir = self._active_output_dir or self.output_input.text().strip()
         if os.path.isdir(out_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
@@ -2151,30 +2757,41 @@ class StreamKeep(QMainWindow):
         auto = self.monitor_auto_cb.isChecked()
         subscribe = self.monitor_subscribe_cb.isChecked()
         if self.monitor.add_channel(url, interval, auto, subscribe):
+            ext = Extractor.detect(url)
+            channel_id = ext.extract_channel_id(url) if ext else url
             self.monitor_url_input.clear()
             self._log(
                 f"[MONITOR] Added: {url} (every {interval}s, "
                 f"auto-record: {auto}, subscribe: {subscribe})"
             )
             # Seed the archive with current VODs so we don't download the backlog
-            if subscribe:
-                ext = Extractor.detect(url)
-                if ext and ext.supports_vod_listing():
-                    try:
-                        existing = ext.list_vods(url, log_fn=self._log)
-                        ch_id = ext.extract_channel_id(url) or url
-                        self.monitor.seed_archive(ch_id, [v.source for v in existing if v.source])
-                        self._log(
-                            f"[SUBSCRIBE] Seeded archive with {len(existing)} existing VOD(s). "
-                            f"Only new VODs will be queued from now on."
-                        )
-                    except Exception as e:
-                        self._log(f"[SUBSCRIBE] Seed failed: {e}")
+            if subscribe and ext and ext.supports_vod_listing():
+                self._log(f"[SUBSCRIBE] Seeding archive for {channel_id} in the background...")
+                self._start_monitor_seed_worker(url, channel_id)
             self._persist_config()
-            self._set_status("Channel added to the watch list.", "success")
+            if subscribe and ext and ext.supports_vod_listing():
+                self._set_status("Channel added. Existing VODs are being seeded in the background.", "success")
+            else:
+                self._set_status("Channel added to the watch list.", "success")
         else:
             self._log(f"[MONITOR] Cannot add: unsupported or duplicate")
             self._set_status("Channel could not be added. It may already exist or be unsupported.", "error")
+
+    def _on_monitor_seed_done(self, channel_id, sources):
+        self._clear_monitor_seed_worker(channel_id)
+        if not any(e.channel_id == channel_id for e in self.monitor.entries):
+            return
+        self.monitor.seed_archive(channel_id, sources)
+        self._persist_config()
+        self._log(
+            f"[SUBSCRIBE] Seeded archive with {len(sources)} existing VOD(s). "
+            f"Only new VODs will be queued from now on."
+        )
+
+    def _on_monitor_seed_error(self, channel_id, err):
+        self._clear_monitor_seed_worker(channel_id)
+        if any(e.channel_id == channel_id for e in self.monitor.entries):
+            self._log(f"[SUBSCRIBE] Seed failed for {channel_id}: {err}")
 
     def _refresh_monitor_table(self):
         entries = self.monitor.entries
@@ -2210,41 +2827,90 @@ class StreamKeep(QMainWindow):
                 auto.setForeground(QColor(CAT["green"]))
             self.monitor_table.setItem(i, 4, auto)
 
-            rm_btn = QPushButton("Remove")
+            rm_btn = QPushButton("Stop + Remove" if e.is_recording else "Remove")
             rm_btn.setObjectName("ghost")
             rm_btn.setFixedHeight(28)
+            if e.is_recording:
+                rm_btn.setToolTip("Stops the active auto-recording first, then removes this channel.")
             rm_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_remove(idx))
             self.monitor_table.setCellWidget(i, 5, rm_btn)
         self._refresh_monitor_summary()
 
     def _on_monitor_remove(self, idx):
+        channel_id = None
+        is_recording = False
+        if 0 <= idx < len(self.monitor.entries):
+            channel_id = self.monitor.entries[idx].channel_id
+            is_recording = bool(self.monitor.entries[idx].is_recording)
+        if channel_id:
+            self._pending_auto_records = [cid for cid in self._pending_auto_records if cid != channel_id]
+            seed_worker = self._monitor_seed_workers.pop(channel_id, None)
+            if seed_worker is not None and seed_worker.isRunning():
+                try:
+                    seed_worker.requestInterruption()
+                    seed_worker.wait(500)
+                except Exception:
+                    pass
+            resolve_worker = getattr(self, "_auto_record_resolve_worker", None)
+            if resolve_worker is not None and resolve_worker.isRunning():
+                try:
+                    if getattr(resolve_worker, "channel_id", "") == channel_id:
+                        resolve_worker.requestInterruption()
+                        resolve_worker.wait(500)
+                        self._auto_record_resolve_worker = None
+                except Exception:
+                    pass
+            if (
+                is_recording
+                and self._active_auto_record_channel == channel_id
+                and self.download_worker is not None
+                and self.download_worker.isRunning()
+            ):
+                self._log(f"[AUTO-RECORD] Stopping active recording before removing {channel_id}")
+                self._on_stop()
         self.monitor.remove_channel(idx)
         self._persist_config()
         self._set_status("Channel removed from the watch list.", "success")
 
-    def _on_channel_live(self, channel_id):
-        """Called when a monitored channel goes live."""
-        self._set_status(f"{channel_id} went live.", "warning")
+    def _queue_auto_record_retry(self, channel_id):
+        if channel_id not in self._pending_auto_records:
+            self._pending_auto_records.append(channel_id)
+        self._refresh_monitor_summary()
 
-        # Guard against overlapping recording (signal can fire twice in quick succession)
+    def _drain_pending_auto_records(self):
+        resolver = getattr(self, "_auto_record_resolve_worker", None)
+        if resolver is not None and resolver.isRunning():
+            return True
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            return False
+        while self._pending_auto_records:
+            channel_id = self._pending_auto_records.pop(0)
+            if self._try_start_auto_record(channel_id):
+                self._refresh_monitor_summary()
+                return True
+        self._refresh_monitor_summary()
+        return False
+
+    def _auto_record_error(self, channel_id, err):
+        self._download_had_errors = True
+        self._log(f"[AUTO-RECORD] {channel_id}: {err}")
+
+    def _try_start_auto_record(self, channel_id):
         target = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id and e.auto_record and not e.is_recording:
                 target = e
-                e.is_recording = True  # claim the slot atomically before resolve
                 break
         if target is None:
-            return
+            return False
 
-        # Don't start a new download while one is already running.
         existing = getattr(self, "download_worker", None)
         if existing is not None and existing.isRunning():
-            self._log(f"[AUTO-RECORD] Skipped {channel_id}: download already in progress")
-            target.is_recording = False
-            return
-        # If the slot holds a finished QThread, wait+clear it so the
-        # new worker assignment below doesn't drop signals on a still-
-        # alive old reference.
+            return False
+        resolver = getattr(self, "_auto_record_resolve_worker", None)
+        if resolver is not None and resolver.isRunning():
+            return False
         if existing is not None:
             try:
                 existing.wait(500)
@@ -2252,43 +2918,104 @@ class StreamKeep(QMainWindow):
                 pass
             self.download_worker = None
 
-        self._log(f"[AUTO-RECORD] Starting recording for {target.platform}/{channel_id}")
-        try:
-            ext = Extractor.detect(target.url)
-            if not ext:
-                self._log(f"[AUTO-RECORD] No extractor for {target.url}")
-                target.is_recording = False
-                return
-            info = ext.resolve(target.url, log_fn=self._log)
-            if not info or not info.qualities:
-                self._log(f"[AUTO-RECORD] Failed to resolve {target.url}")
-                target.is_recording = False
-                return
-            q = info.qualities[0]
+        target.is_recording = True
+        self._refresh_monitor_summary()
+        self._log(f"[AUTO-RECORD] Preparing recording for {target.platform}/{channel_id}")
+        base_out = self.output_input.text().strip() or str(_default_output_dir())
+        worker = AutoRecordResolveWorker(channel_id, target.url, base_out)
+        worker.log.connect(self._log)
+        worker.resolved.connect(self._on_auto_record_resolved)
+        worker.error.connect(self._on_auto_record_resolve_error)
+        self._auto_record_resolve_worker = worker
+        worker.start()
+        return True
+
+    def _on_auto_record_resolved(self, channel_id, info, q, out_dir):
+        worker = getattr(self, "_auto_record_resolve_worker", None)
+        if worker is not None and not worker.isRunning():
             try:
-                base_out = self.output_input.text().strip() or str(_default_output_dir())
-                out_dir = os.path.join(
-                    base_out,
-                    f"auto_{_safe_filename(channel_id)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                )
-                os.makedirs(out_dir, exist_ok=True)
-            except OSError as e:
-                self._log(f"[AUTO-RECORD] Cannot create output folder: {e}")
-                target.is_recording = False
-                return
-            segments = [(0, "live_recording", 0, 0)]
-            worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
-            worker.audio_url = q.audio_url
-            worker.parallel_connections = self._parallel_connections
-            worker.log.connect(self._log)
-            worker.all_done.connect(lambda: self._auto_record_done(channel_id))
-            self.download_worker = worker
-            worker.start()
-        except Exception as ex:
-            self._log(f"[AUTO-RECORD] Error: {ex}")
+                worker.wait(200)
+            except Exception:
+                pass
+        self._auto_record_resolve_worker = None
+
+        target = None
+        for e in self.monitor.entries:
+            if e.channel_id == channel_id and e.auto_record and e.is_recording:
+                target = e
+                break
+        if target is None:
+            self._start_next_background_job()
+            return
+
+        existing = getattr(self, "download_worker", None)
+        if existing is not None and existing.isRunning():
             target.is_recording = False
+            self._queue_auto_record_retry(channel_id)
+            self._start_next_background_job()
+            return
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as e:
+            self._log(f"[AUTO-RECORD] Cannot create output folder: {e}")
+            target.is_recording = False
+            self._refresh_monitor_summary()
+            self._start_next_background_job()
+            return
+
+        segments = [(0, "live_recording", 0, 0)]
+        self._download_had_errors = False
+        self._set_download_context(
+            out_dir=out_dir,
+            quality_name=q.name or "Live Capture",
+            history_url=target.url,
+            info=info,
+        )
+        worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
+        worker.audio_url = q.audio_url
+        worker.parallel_connections = self._parallel_connections
+        self._active_auto_record_channel = channel_id
+        worker.log.connect(self._log)
+        worker.error.connect(lambda _idx, err, ch=channel_id: self._auto_record_error(ch, err))
+        worker.all_done.connect(lambda: self._auto_record_done(channel_id))
+        self.download_worker = worker
+        worker.start()
+        self._set_status(f"Auto-record started for {channel_id}.", "working")
+
+    def _on_auto_record_resolve_error(self, channel_id, err):
+        worker = getattr(self, "_auto_record_resolve_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._auto_record_resolve_worker = None
+        for e in self.monitor.entries:
+            if e.channel_id == channel_id:
+                e.is_recording = False
+        self._refresh_monitor_summary()
+        self._log(f"[AUTO-RECORD] Error: {err}")
+        self._set_status(f"Auto-record could not start for {channel_id}: {err}", "warning")
+        self._start_next_background_job()
+
+    def _on_channel_live(self, channel_id):
+        """Called when a monitored channel goes live."""
+        self._set_status(f"{channel_id} went live.", "warning")
+        if self._try_start_auto_record(channel_id):
+            return
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            self._queue_auto_record_retry(channel_id)
+            self._log(
+                f"[AUTO-RECORD] Waiting for the current download to finish before retrying {channel_id}"
+            )
+            self._set_status(
+                f"{channel_id} is live. Auto-record will retry when the current job finishes.",
+                "warning",
+            )
 
     def _auto_record_done(self, channel_id):
+        self._active_auto_record_channel = ""
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
@@ -2304,28 +3031,97 @@ class StreamKeep(QMainWindow):
             self.download_worker = None
         self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
         self._refresh_monitor_summary()
-        self._set_status(f"Auto-record finished for {channel_id}.", "success")
+        if self._download_had_errors:
+            self._set_status(f"Auto-record for {channel_id} ended with errors. Check the log.", "warning")
+        elif not self._output_contains_media(self._active_output_dir):
+            self._set_status(f"Auto-record for {channel_id} finished without saving media.", "warning")
+        else:
+            self._save_metadata(
+                self._active_output_dir,
+                self._active_quality_name or "Live Capture",
+                history_url=self._active_history_url,
+                info=self._active_stream_info,
+            )
+            self._set_status(f"Auto-record finished for {channel_id}.", "success")
+        self._start_next_background_job()
 
     # ── Download Queue ────────────────────────────────────────────────
 
-    def _queue_add(self, url, title="", platform="", note="", start_at=""):
+    def _normalize_queue_item(self, item):
+        if not isinstance(item, dict):
+            return None
+        url = str(item.get("url", "") or "").strip()
+        if not url:
+            return None
+        title = str(item.get("title", "") or "")
+        platform = str(item.get("platform", "") or "?")
+        vod_source = str(item.get("vod_source", "") or "").strip()
+        vod_platform = str(item.get("vod_platform", "") or "").strip()
+        vod_title = str(item.get("vod_title", "") or "").strip()
+        vod_channel = str(item.get("vod_channel", "") or "").strip()
+        if not vod_source and url.isdigit() and platform.lower() == "twitch":
+            # Older queue entries stored Twitch VOD IDs as plain URLs, which
+            # breaks auto-start because extractor detection expects an actual URL.
+            vod_source = url
+        if vod_source and not vod_platform:
+            vod_platform = platform
+        if not vod_title:
+            vod_title = title
+        normalized = {
+            "url": url,
+            "title": title or vod_title or url,
+            "platform": platform,
+            "status": str(item.get("status", "queued") or "queued"),
+            "added": str(item.get("added", "") or ""),
+            "note": str(item.get("note", "") or ""),
+            "start_at": str(item.get("start_at", "") or ""),
+            "vod_source": vod_source,
+            "vod_platform": vod_platform,
+            "vod_title": vod_title,
+            "vod_channel": vod_channel,
+        }
+        vod_date = str(item.get("vod_date", "") or "")
+        if vod_date:
+            normalized["vod_date"] = vod_date
+        return normalized
+
+    def _queue_add(
+        self,
+        url,
+        title="",
+        platform="",
+        note="",
+        start_at="",
+        vod_source="",
+        vod_platform="",
+        vod_title="",
+        vod_channel="",
+    ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
         up by _advance_queue after that time."""
         if not url:
             return False
-        if any(q.get("url") == url and q.get("status") == "queued"
-               for q in self._download_queue):
+        item_key = str(vod_source or url)
+        if any(
+            (q.get("vod_source") or q.get("url")) == item_key
+            and q.get("status") not in ("failed", "cancelled")
+            for q in self._download_queue
+        ):
             return False
-        self._download_queue.append({
+        self._download_queue.append(self._normalize_queue_item({
             "url": url,
-            "title": title or url,
+            "title": title or vod_title or url,
             "platform": platform or "?",
             "status": "queued",
             "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "note": note,
             "start_at": start_at,
-        })
+            "vod_source": vod_source,
+            "vod_platform": vod_platform,
+            "vod_title": vod_title or title,
+            "vod_channel": vod_channel,
+        }))
         self._persist_config()
         if hasattr(self, "queue_table"):
             self._refresh_queue_table()
@@ -2333,6 +3129,10 @@ class StreamKeep(QMainWindow):
 
     def _queue_remove(self, idx):
         if 0 <= idx < len(self._download_queue):
+            item = self._download_queue[idx]
+            if item is self._queue_active_item or item.get("status") in ("fetching", "downloading"):
+                self._set_status("The active queue job cannot be removed while it is running.", "warning")
+                return None
             removed = self._download_queue.pop(idx)
             self._persist_config()
             if hasattr(self, "queue_table"):
@@ -2346,10 +3146,17 @@ class StreamKeep(QMainWindow):
         worker = getattr(self, "download_worker", None)
         if worker is not None and worker.isRunning():
             return
+        resolve_worker = getattr(self, "_auto_record_resolve_worker", None)
+        if resolve_worker is not None and resolve_worker.isRunning():
+            return
+        fetch_worker = getattr(self, "_fetch_worker", None)
+        if fetch_worker is not None and fetch_worker.isRunning():
+            return
+        if self._queue_active_item is not None:
+            return
         now = datetime.now()
-        # Pop the next non-scheduled queued item
         next_item = None
-        for i, q in enumerate(self._download_queue):
+        for q in self._download_queue:
             if q.get("status") != "queued":
                 continue
             start_at = q.get("start_at", "")
@@ -2360,17 +3167,22 @@ class StreamKeep(QMainWindow):
                         continue  # still scheduled, skip
                 except Exception:
                     pass
-            next_item = self._download_queue.pop(i)
+            next_item = q
             break
         if not next_item:
             return
+        self._queue_active_item = next_item
+        self._queue_autostart = True
+        self._set_queue_item_status(next_item, "fetching")
         self._log(f"[QUEUE] Auto-starting: {next_item.get('title', '')[:60]}")
-        self._persist_config()
-        if hasattr(self, "queue_table"):
-            self._refresh_queue_table()
         self.url_input.setText(next_item["url"])
         self._switch_tab(0)
-        self._on_fetch()
+        self._on_fetch(
+            vod_source=next_item.get("vod_source") or None,
+            vod_platform=next_item.get("vod_platform") or None,
+            vod_title=next_item.get("vod_title") or next_item.get("title") or None,
+            vod_channel=next_item.get("vod_channel") or None,
+        )
 
     def _refresh_queue_table(self):
         if not hasattr(self, "queue_table"):
@@ -2380,6 +3192,7 @@ class StreamKeep(QMainWindow):
         for i, q in enumerate(self._download_queue):
             # Compute effective status: "scheduled" if start_at is in the future
             status = q.get("status", "queued")
+            locked = q is self._queue_active_item or status in ("fetching", "downloading")
             start_at = q.get("start_at", "")
             is_scheduled = False
             if start_at and status == "queued":
@@ -2394,8 +3207,12 @@ class StreamKeep(QMainWindow):
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if is_scheduled:
                 status_item.setForeground(QColor(CAT["peach"]))
+            elif status in ("fetching", "downloading"):
+                status_item.setForeground(QColor(CAT["blue"]))
             elif status == "queued":
                 status_item.setForeground(QColor(CAT["yellow"]))
+            elif status in ("failed", "cancelled"):
+                status_item.setForeground(QColor(CAT["red"]))
             self.queue_table.setItem(i, 0, status_item)
             self.queue_table.setItem(i, 1, QTableWidgetItem(q.get("platform", "?")))
             self.queue_table.setItem(i, 2, QTableWidgetItem(q.get("title", "")[:80]))
@@ -2419,10 +3236,14 @@ class StreamKeep(QMainWindow):
             down_btn.setFixedWidth(28)
             down_btn.setToolTip("Move down")
             down_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, 1))
-            if i == 0:
+            if i == 0 or locked:
                 up_btn.setEnabled(False)
-            if i == len(self._download_queue) - 1:
+            if i == len(self._download_queue) - 1 or locked:
                 down_btn.setEnabled(False)
+            if locked:
+                tip = "Active jobs stay pinned until the current fetch/download finishes."
+                up_btn.setToolTip(tip)
+                down_btn.setToolTip(tip)
             move_lay.addWidget(up_btn)
             move_lay.addWidget(down_btn)
             self.queue_table.setCellWidget(i, 4, move_widget)
@@ -2430,6 +3251,9 @@ class StreamKeep(QMainWindow):
             rm_btn = QPushButton("Remove")
             rm_btn.setObjectName("secondary")
             rm_btn.clicked.connect(lambda _c=False, row=i: self._queue_remove(row))
+            if locked:
+                rm_btn.setEnabled(False)
+                rm_btn.setToolTip("Stop the current job before removing it from the queue.")
             self.queue_table.setCellWidget(i, 5, rm_btn)
 
     def _queue_move(self, idx, direction):
@@ -2438,6 +3262,17 @@ class StreamKeep(QMainWindow):
             return
         target = idx + direction
         if target < 0 or target >= len(self._download_queue):
+            return
+        item = self._download_queue[idx]
+        other = self._download_queue[target]
+        locked_statuses = {"fetching", "downloading"}
+        if (
+            item is self._queue_active_item
+            or other is self._queue_active_item
+            or item.get("status") in locked_statuses
+            or other.get("status") in locked_statuses
+        ):
+            self._set_status("The active queue job cannot be reordered while it is running.", "warning")
             return
         self._download_queue[idx], self._download_queue[target] = (
             self._download_queue[target], self._download_queue[idx]
@@ -2448,37 +3283,42 @@ class StreamKeep(QMainWindow):
     def _on_new_vods_found(self, channel_id, vods):
         """New VODs from a subscribed channel — queue their source URLs
         so they get downloaded in the background."""
+        added = 0
         for v in vods:
             # Skip if already in history (prevents re-downloading on seed)
-            if self._find_duplicate("", v.title):
+            if self._find_duplicate("", v.title, platform=v.platform):
                 continue
-            entry = {
-                "url": v.source,
-                "title": v.title,
-                "platform": v.platform,
-                "status": "queued",
-                "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "vod_date": v.date,
-            }
-            if not any(q.get("url") == v.source for q in self._download_queue):
-                self._download_queue.append(entry)
+            if self._queue_add(
+                v.source,
+                title=v.title,
+                platform=v.platform,
+                vod_source=v.source,
+                vod_platform=v.platform,
+                vod_title=v.title,
+                vod_channel=v.channel,
+            ):
+                if self._download_queue:
+                    self._download_queue[-1]["vod_date"] = v.date
+                added += 1
                 self._log(f"[SUBSCRIBE] Queued: {v.title[:60]}")
-        self._persist_config()
-        self._refresh_queue_table() if hasattr(self, "queue_table") else None
+        if added and hasattr(self, "queue_table"):
+            self._refresh_queue_table()
         # Kick off the queue if nothing is downloading
         if getattr(self.download_worker, "isRunning", lambda: False)() is False:
             self._advance_queue()
 
     # ── History Actions ───────────────────────────────────────────────
 
-    def _add_history(self, platform, title, quality, size, path, url=""):
+    def _add_history(self, platform, title, quality, size, path, url="", channel=""):
         entry = HistoryEntry(
             date=datetime.now().strftime("%Y-%m-%d %H:%M"),
             platform=platform, title=title[:60],
+            channel=self._infer_history_channel(url=url, platform=platform, channel=channel),
             quality=quality, size=size, path=path, url=url,
         )
         self._history.append(entry)
         self._refresh_history_table()
+        self._schedule_persist_config()
 
     def _refresh_history_table(self):
         query = ""
@@ -2490,6 +3330,7 @@ class StreamKeep(QMainWindow):
                 h for h in ordered
                 if query in (h.title or "").lower()
                 or query in (h.platform or "").lower()
+                or query in (self._history_channel_label(h) or "").lower()
                 or query in (h.path or "").lower()
                 or query in (h.url or "").lower()
             ]
@@ -2534,44 +3375,34 @@ class StreamKeep(QMainWindow):
 
     # ── Metadata ──────────────────────────────────────────────────────
 
-    def _save_metadata(self, out_dir, quality_name=""):
-        if self.stream_info:
-            MetadataSaver.save(out_dir, self.stream_info)
-            file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else ""
-            # NFO metadata for Kodi/Jellyfin/Plex libraries
-            if self._write_nfo:
-                MetadataSaver.write_nfo(out_dir, self.stream_info, file_base=file_base)
-                self._log(f"[NFO] Wrote {file_base or 'movie'}.nfo for media library")
-            # Chapter export (YouTube + any yt-dlp source with chapters)
-            if MetadataSaver.write_chapters(out_dir, self.stream_info, file_base=file_base):
-                count = len(self.stream_info.chapters)
-                self._log(f"[CHAPTERS] Exported {count} chapter(s) to {file_base}.chapters.txt/.json")
-            # Twitch chat replay
-            if (TwitchExtractor.download_chat_enabled
-                    and self.stream_info.platform == "Twitch"
-                    and self.stream_info.url):
-                m = re.search(r'/vod/(\d+)\.m3u8', self.stream_info.url)
-                if m:
-                    vod_id = m.group(1)
-                    file_base = _safe_filename(self.stream_info.title) if self.stream_info.title else "chat"
-                    chat_base = os.path.join(out_dir, file_base)
-                    self._log(f"[CHAT] Fetching chat replay for VOD {vod_id}...")
-                    count, err = TwitchExtractor().download_chat(
-                        vod_id, chat_base, log_fn=self._log
-                    )
-                    if err:
-                        self._log(f"[CHAT] Failed: {err}")
-                    else:
-                        self._log(f"[CHAT] Saved {count} comments to {file_base}.chat.json/.txt")
-            # Post-processing presets (audio extract, loudnorm, H.265, contact sheet, split)
-            if PostProcessor.has_any_preset():
-                PostProcessor.process_directory(
-                    out_dir,
-                    log_fn=self._log,
-                    chapters=self.stream_info.chapters or None,
-                )
-        # Add to history (use the URL from the input box so we can retry later)
-        platform = self.stream_info.platform if self.stream_info else "?"
-        title = self.stream_info.title if self.stream_info else "?"
-        url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
-        self._add_history(platform, title, quality_name, "", out_dir, url=url)
+    def _save_metadata(self, out_dir, quality_name="", history_url="", info=None):
+        info = info or self.stream_info
+        url = history_url or self._resolve_history_url()
+        info_copy = copy.deepcopy(info) if info else None
+        fallback_title = ""
+        if out_dir:
+            fallback_title = os.path.basename(out_dir.rstrip("\\/"))
+        display_title = (
+            (info_copy.title if info_copy else "")
+            or fallback_title
+            or "Download"
+        )
+        file_base = _safe_filename(info_copy.title) if info_copy and info_copy.title else ""
+        task = {
+            "out_dir": out_dir,
+            "quality_name": quality_name,
+            "history_url": url,
+            "info": info_copy,
+            "file_base": file_base,
+            "write_nfo": bool(self._write_nfo and info_copy),
+            "download_chat": bool(TwitchExtractor.download_chat_enabled and info_copy),
+            "postprocess_snapshot": self._postprocess_snapshot() if info_copy else {},
+            "platform": (info_copy.platform if info_copy and info_copy.platform else "?"),
+            "channel": self._infer_history_channel(
+                url=url,
+                platform=(info_copy.platform if info_copy and info_copy.platform else "?"),
+                channel=(info_copy.channel if info_copy else ""),
+            ),
+            "title": display_title,
+        }
+        self._enqueue_finalize_task(task)
