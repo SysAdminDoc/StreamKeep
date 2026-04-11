@@ -4,44 +4,89 @@ Free-form JSON dict for now. A typed dataclass wrapper lands in Phase 3b.
 """
 
 import json
+import os
+import threading
 from datetime import datetime
 
 from .paths import CONFIG_DIR, CONFIG_FILE, LOG_FILE, LOG_FILE_BACKUP, LOG_FILE_MAX_BYTES
+
+# Serializes config writes and log rotation across threads (QTimer polling,
+# clipboard monitor, download workers) so two writers can't corrupt the file.
+_SAVE_LOCK = threading.Lock()
+_LOG_LOCK = threading.Lock()
 
 
 def load_config():
     """Load the config JSON. Returns {} on any error."""
     try:
         if CONFIG_FILE.exists():
-            return json.loads(CONFIG_FILE.read_text())
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
 
 
 def save_config(cfg):
-    """Persist the config dict. Silent on error."""
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
-    except Exception:
-        pass
+    """Persist the config dict atomically. Silent on error.
+
+    Writes to `config.json.tmp` then renames into place so a mid-write
+    crash leaves the previous config intact. Also rotates a last-known-good
+    sibling `config.json.bak` before each successful replace.
+    """
+    with _SAVE_LOCK:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = CONFIG_FILE.with_suffix(".json.tmp")
+            payload = json.dumps(cfg, indent=2, ensure_ascii=False)
+            # Write + fsync so a power loss doesn't leave a zero-byte tmp.
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+                try:
+                    f.flush()
+                    os.fsync(f.fileno())
+                except (OSError, AttributeError):
+                    pass
+            # Keep a one-deep backup before the atomic replace.
+            if CONFIG_FILE.exists():
+                try:
+                    bak = CONFIG_FILE.with_suffix(".json.bak")
+                    if bak.exists():
+                        bak.unlink()
+                    CONFIG_FILE.replace(bak)
+                except OSError:
+                    pass
+            os.replace(tmp, CONFIG_FILE)
+        except Exception:
+            # Best-effort cleanup of stale tmp on failure.
+            try:
+                tmp = CONFIG_FILE.with_suffix(".json.tmp")
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
 
 def write_log_line(msg):
     """Append a timestamped line to the rotating log file.
     Rotates streamkeep.log -> streamkeep.log.1 when it exceeds the cap."""
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        if LOG_FILE.exists() and LOG_FILE.stat().st_size > LOG_FILE_MAX_BYTES:
+    with _LOG_LOCK:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             try:
-                if LOG_FILE_BACKUP.exists():
-                    LOG_FILE_BACKUP.unlink()
-                LOG_FILE.rename(LOG_FILE_BACKUP)
-            except Exception:
+                if LOG_FILE.exists() and LOG_FILE.stat().st_size > LOG_FILE_MAX_BYTES:
+                    if LOG_FILE_BACKUP.exists():
+                        try:
+                            LOG_FILE_BACKUP.unlink()
+                        except OSError:
+                            pass
+                    try:
+                        LOG_FILE.rename(LOG_FILE_BACKUP)
+                    except (FileNotFoundError, OSError):
+                        pass
+            except OSError:
                 pass
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] {msg}\n")
-    except Exception:
-        pass
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {msg}\n")
+        except Exception:
+            pass

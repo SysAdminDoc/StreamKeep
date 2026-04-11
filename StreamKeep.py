@@ -34,22 +34,29 @@ from streamkeep.ui.main_window import StreamKeep
 def main():
     setup_crash_logging()
 
-    try:
-        subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-    except FileNotFoundError:
-        app = QApplication(sys.argv)
-        QMessageBox.critical(
-            None, "StreamKeep",
-            "ffmpeg not found in PATH.\nInstall ffmpeg and try again.",
-        )
-        sys.exit(1)
-
+    # QApplication must exist before any QWidget (e.g. a QMessageBox in the
+    # ffmpeg error path). Create it first so every failure branch is safe.
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
+
+    ffmpeg_ok = False
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-version"], capture_output=True, timeout=5,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        ffmpeg_ok = r.returncode == 0
+    except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+        ffmpeg_ok = False
+    if not ffmpeg_ok:
+        QMessageBox.critical(
+            None, "StreamKeep",
+            "ffmpeg not found (or failed to run) in PATH.\n"
+            "Install ffmpeg and try again.",
+        )
+        sys.exit(1)
+
     win = StreamKeep()
     win.show()
     sys.exit(app.exec())

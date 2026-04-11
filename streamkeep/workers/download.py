@@ -75,7 +75,8 @@ class DownloadWorker(QThread):
         try:
             self._proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW,
+                text=True, bufsize=1, encoding="utf-8", errors="replace",
+                creationflags=_CREATE_NO_WINDOW,
             )
             output_lines = []
             for line in self._proc.stdout:
@@ -165,11 +166,14 @@ class DownloadWorker(QThread):
                 worker_ref = self
 
                 def _cb(done, total, speed):
-                    pct = min(99, int((done / max(total, 1)) * 100))
+                    pct = min(99, int((done / total) * 100)) if total > 0 else 0
                     spd = f"{fmt_size(speed)}/s" if speed > 0 else ""
                     eta = ""
                     if speed > 0 and total > done:
-                        eta = f" | ETA {fmt_duration((total - done) / speed)}"
+                        try:
+                            eta = f" | ETA {fmt_duration((total - done) / speed)}"
+                        except (ValueError, ZeroDivisionError, OverflowError):
+                            eta = ""
                     status = f"{fmt_size(done)} / {fmt_size(total)} | {spd}{eta}"
                     worker_ref.progress.emit(seg_idx, pct, status)
 
@@ -260,9 +264,15 @@ class DownloadWorker(QThread):
                             return
                         time.sleep(0.5)
                 try:
+                    # stdout is discarded — ffmpeg writes all progress to
+                    # stderr. If stdout were piped without being drained,
+                    # a ffmpeg mode that emits data to stdout (e.g. -f null
+                    # mux reports) would deadlock on the pipe buffer.
                     self._proc = subprocess.Popen(
-                        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                        text=True, bufsize=1, creationflags=_CREATE_NO_WINDOW,
+                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                        text=True, bufsize=1, encoding="utf-8",
+                        errors="replace",
+                        creationflags=_CREATE_NO_WINDOW,
                     )
                     output_lines = []
                     for line in self._proc.stderr:
@@ -272,11 +282,12 @@ class DownloadWorker(QThread):
                         output_lines.append(line)
                         time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
                         if time_match:
-                            h, m, s = (
-                                int(time_match.group(1)),
-                                int(time_match.group(2)),
-                                int(time_match.group(3)),
-                            )
+                            try:
+                                h = int(time_match.group(1))
+                                m = int(time_match.group(2))
+                                s = int(time_match.group(3))
+                            except (ValueError, IndexError):
+                                continue
                             elapsed = h * 3600 + m * 60 + s
                             pct = (
                                 0 if is_live_capture

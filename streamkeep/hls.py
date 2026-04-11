@@ -1,6 +1,7 @@
 """HLS m3u8 parsing."""
 
 import re
+from urllib.parse import urljoin
 
 from .models import QualityInfo
 
@@ -9,6 +10,13 @@ def parse_hls_master(body, base_url):
     """Parse an HLS master playlist into a list of QualityInfo."""
     qualities = []
     res, bw = "?", 0
+    # urljoin expects a resource URL, not a directory. If base_url looks
+    # like a directory (no trailing file), append a / so relative variants
+    # resolve under it instead of replacing the last segment.
+    if base_url and not base_url.endswith("/") and "/" in base_url.split("://", 1)[-1]:
+        tail = base_url.rsplit("/", 1)[-1]
+        if "." not in tail:
+            base_url = base_url + "/"
     for line in body.splitlines():
         if line.startswith("#EXT-X-STREAM-INF"):
             attrs = line.split(":", 1)[1]
@@ -19,8 +27,10 @@ def parse_hls_master(body, base_url):
         elif not line.startswith("#") and line.strip():
             q_url = line.strip()
             if not q_url.startswith("http"):
-                q_url = f"{base_url}/{q_url}"
-            name = line.strip().split("/")[0]
+                q_url = urljoin(base_url, q_url)
+            # Human-facing name: last path component, fall back to resolution.
+            tail = q_url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+            name = tail or res or "stream"
             qualities.append(QualityInfo(
                 name=name, url=q_url, resolution=res,
                 bandwidth=bw, format_type="hls",
