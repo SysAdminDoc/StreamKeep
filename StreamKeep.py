@@ -16,6 +16,14 @@ This file is a thin launcher. All code lives in the `streamkeep/` package:
 - streamkeep.scrape          — direct URL detection + page scrape
 """
 
+import multiprocessing
+# MUST be called before any code that could spawn a child process in a
+# frozen exe. Without this, a PyInstaller build that ever touches
+# `multiprocessing` will re-execute the entire program in each child,
+# which — combined with any subprocess([sys.executable, ...]) call —
+# becomes an uncontrollable process explosion.
+multiprocessing.freeze_support()
+
 from streamkeep.bootstrap import bootstrap
 bootstrap()
 

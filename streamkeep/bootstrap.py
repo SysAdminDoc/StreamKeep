@@ -2,16 +2,40 @@
 
 Kept as a standalone module so `__main__.py` can call `bootstrap()`
 before importing anything that depends on PyQt6.
+
+CRITICAL: `sys.executable` in a PyInstaller-frozen exe is the exe
+itself, NOT python. If we called
+    subprocess.check_call([sys.executable, "-m", "pip", "install", ...])
+from inside StreamKeep.exe, the bootloader would ignore `-m pip` and
+just re-run `main()` — which calls `bootstrap()` again — which spawns
+another StreamKeep.exe — forever. That's exactly the fork bomb we hit
+in v4.12.0 on the shipped exe. `bootstrap()` MUST be a no-op in frozen
+mode; dependencies are expected to be bundled at build time.
 """
 
 import sys
 import subprocess
 
 
+def _is_frozen():
+    return getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+
+
 def bootstrap():
-    """Auto-install dependencies on first run."""
+    """Auto-install dependencies on first run (source-checkout only)."""
+    # In a PyInstaller/Nuitka/cx_Freeze exe, all deps are baked in. Any
+    # ImportError at this point is a build-time bug and must NOT trigger
+    # a pip install — see the module docstring for the history here.
+    if _is_frozen():
+        return
+
     required = {"PyQt6": "PyQt6"}
-    optional = {"yt_dlp": "yt-dlp", "deno": "deno", "playwright": "playwright"}
+    # yt_dlp is genuinely optional (used as an external CLI via subprocess
+    # elsewhere, not as a Python import). playwright is an optional page
+    # scraper. `deno` was a bogus entry — the user-space tool is a native
+    # binary, not a pip package — and attempting to install it was one of
+    # the fork-bomb triggers.
+    optional = {"yt_dlp": "yt-dlp", "playwright": "playwright"}
     import importlib
 
     for mod, pkg in required.items():
