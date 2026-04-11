@@ -1,11 +1,91 @@
-"""Channel monitor — round-robin live detection + VOD subscriptions."""
+"""Channel monitor — round-robin live detection + VOD subscriptions.
 
+The poll tick dispatches each check to a background QRunnable so the
+Qt event loop is never blocked by a network call. Each entry can also
+only have one outstanding check at a time (guarded by `_in_flight`)
+so a slow response on one timer fire can't stack up duplicate requests
+on the next tick.
+"""
+
+import threading
 import time
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, pyqtSlot,
+)
 
 from .extractors import Extractor
 from .models import MonitorEntry
+
+
+class _PollSignals(QObject):
+    """Signals emitted by a poll QRunnable back to the Qt thread."""
+
+    went_live = pyqtSignal(str)              # channel_id
+    new_vods = pyqtSignal(str, list)         # channel_id, list[VODInfo]
+    log = pyqtSignal(str)
+    finished = pyqtSignal(str, str)          # channel_id, status
+
+
+class _PollTask(QRunnable):
+    """Runs one channel check on a worker thread."""
+
+    def __init__(self, entry, signals, check_vods):
+        super().__init__()
+        self.entry = entry
+        self.signals = signals
+        self.check_vods = check_vods
+
+    def run(self):
+        entry = self.entry
+        status = entry.last_status
+        try:
+            ext = Extractor.detect(entry.url)
+            if not ext:
+                self.signals.finished.emit(entry.channel_id, "error")
+                return
+            if ext.supports_live_check():
+                try:
+                    is_live = ext.check_live(entry.url)
+                except Exception as ex:
+                    self.signals.log.emit(
+                        f"[MONITOR ERROR] {entry.channel_id}: {ex}"
+                    )
+                    self.signals.finished.emit(entry.channel_id, "error")
+                    return
+                prev = entry.last_status
+                status = "live" if is_live else "offline"
+                if is_live and prev != "live":
+                    self.signals.went_live.emit(entry.channel_id)
+                    self.signals.log.emit(
+                        f"[LIVE] {entry.platform}/{entry.channel_id} went live!"
+                    )
+            if self.check_vods and ext.supports_vod_listing():
+                try:
+                    vods = ext.list_vods(
+                        entry.url, log_fn=self.signals.log.emit
+                    )
+                    new_vods = [
+                        v for v in vods
+                        if v.source and v.source not in entry.archive_ids
+                    ]
+                    if new_vods:
+                        self.signals.log.emit(
+                            f"[SUBSCRIBE] {entry.channel_id}: "
+                            f"{len(new_vods)} new VOD(s) found"
+                        )
+                        self.signals.new_vods.emit(entry.channel_id, new_vods)
+                except Exception as sub_ex:
+                    self.signals.log.emit(
+                        f"[SUBSCRIBE ERROR] {entry.channel_id}: {sub_ex}"
+                    )
+        except Exception as ex:
+            self.signals.log.emit(
+                f"[MONITOR ERROR] {entry.channel_id}: {ex}"
+            )
+            status = "error"
+        finally:
+            self.signals.finished.emit(entry.channel_id, status)
 
 
 class ChannelMonitor(QObject):
@@ -20,6 +100,16 @@ class ChannelMonitor(QObject):
         super().__init__()
         self.entries = []
         self._poll_idx = 0
+        # Dedicated thread pool so we don't share with Qt's default one.
+        self._pool = QThreadPool()
+        self._pool.setMaxThreadCount(2)
+        self._in_flight = set()
+        self._entries_lock = threading.RLock()
+        self._signals = _PollSignals()
+        self._signals.went_live.connect(self._on_went_live)
+        self._signals.new_vods.connect(self._on_new_vods)
+        self._signals.log.connect(self.log.emit)
+        self._signals.finished.connect(self._on_poll_finished)
         self._timer = QTimer()
         self._timer.timeout.connect(self._poll_tick)
         self._timer.start(15_000)  # check one channel every 15s
@@ -34,86 +124,86 @@ class ChannelMonitor(QObject):
         ):
             return False
         ch_id = ext.extract_channel_id(url) or url
-        for e in self.entries:
-            if e.channel_id == ch_id:
-                return False
-        self.entries.append(MonitorEntry(
-            url=url, platform=ext.NAME, channel_id=ch_id,
-            interval_secs=interval, auto_record=auto_record,
-            subscribe_vods=subscribe_vods,
-        ))
+        with self._entries_lock:
+            for e in self.entries:
+                if e.channel_id == ch_id:
+                    return False
+            self.entries.append(MonitorEntry(
+                url=url, platform=ext.NAME, channel_id=ch_id,
+                interval_secs=interval, auto_record=auto_record,
+                subscribe_vods=subscribe_vods,
+            ))
         self.status_changed.emit()
         return True
 
     def remove_channel(self, idx):
-        if 0 <= idx < len(self.entries):
-            self.entries.pop(idx)
-            self.status_changed.emit()
+        with self._entries_lock:
+            if 0 <= idx < len(self.entries):
+                removed = self.entries.pop(idx)
+                self._in_flight.discard(removed.channel_id)
+        self.status_changed.emit()
 
     def _poll_tick(self):
         # Snapshot entries so remove_channel during poll doesn't break indexing
-        entries_snapshot = list(self.entries)
+        with self._entries_lock:
+            entries_snapshot = list(self.entries)
         if not entries_snapshot:
             return
         entry = entries_snapshot[self._poll_idx % len(entries_snapshot)]
         self._poll_idx += 1
-        if entry not in self.entries:
-            return
-        now = time.time()
-        if now - entry.last_check < entry.interval_secs:
-            return
-        entry.last_check = now
-        ext = Extractor.detect(entry.url)
-        if not ext:
-            entry.last_status = "error"
-            self.status_changed.emit()
-            return
-        try:
-            if ext.supports_live_check():
-                is_live = ext.check_live(entry.url)
-                prev = entry.last_status
-                entry.last_status = "live" if is_live else "offline"
-                if is_live and prev != "live":
-                    self.channel_went_live.emit(entry.channel_id)
-                    self.log.emit(
-                        f"[LIVE] {entry.platform}/{entry.channel_id} went live!"
-                    )
-            if entry.subscribe_vods and ext.supports_vod_listing():
-                try:
-                    vods = ext.list_vods(entry.url, log_fn=self.log.emit)
-                    new_vods = []
-                    for v in vods:
-                        if v.source and v.source not in entry.archive_ids:
-                            new_vods.append(v)
-                    if new_vods:
-                        for v in new_vods:
-                            entry.archive_ids.append(v.source)
-                        if len(entry.archive_ids) > 500:
-                            entry.archive_ids = entry.archive_ids[-500:]
-                        self.log.emit(
-                            f"[SUBSCRIBE] {entry.channel_id}: "
-                            f"{len(new_vods)} new VOD(s) found"
-                        )
-                        self.new_vods_found.emit(entry.channel_id, new_vods)
-                except Exception as sub_ex:
-                    self.log.emit(
-                        f"[SUBSCRIBE ERROR] {entry.channel_id}: {sub_ex}"
-                    )
-            self.status_changed.emit()
-        except Exception as ex:
-            entry.last_status = "error"
-            self.log.emit(f"[MONITOR ERROR] {entry.channel_id}: {ex}")
-            self.status_changed.emit()
+        # Skip if entry was removed between snapshot and dispatch, or if a
+        # previous slow poll for the same channel is still running.
+        with self._entries_lock:
+            if entry not in self.entries:
+                return
+            if entry.channel_id in self._in_flight:
+                return
+            now = time.time()
+            if now - entry.last_check < entry.interval_secs:
+                return
+            entry.last_check = now
+            self._in_flight.add(entry.channel_id)
+        check_vods = entry.subscribe_vods
+        task = _PollTask(entry, self._signals, check_vods)
+        self._pool.start(task)
+
+    @pyqtSlot(str, str)
+    def _on_poll_finished(self, channel_id, status):
+        with self._entries_lock:
+            for e in self.entries:
+                if e.channel_id == channel_id:
+                    e.last_status = status
+                    break
+            self._in_flight.discard(channel_id)
+        self.status_changed.emit()
+
+    @pyqtSlot(str)
+    def _on_went_live(self, channel_id):
+        self.channel_went_live.emit(channel_id)
+
+    @pyqtSlot(str, list)
+    def _on_new_vods(self, channel_id, new_vods):
+        with self._entries_lock:
+            for e in self.entries:
+                if e.channel_id == channel_id:
+                    for v in new_vods:
+                        if v.source and v.source not in e.archive_ids:
+                            e.archive_ids.append(v.source)
+                    if len(e.archive_ids) > 500:
+                        e.archive_ids = e.archive_ids[-500:]
+                    break
+        self.new_vods_found.emit(channel_id, new_vods)
 
     def seed_archive(self, channel_id, vod_sources):
         """Populate the archive list for a channel (e.g. on first subscribe
         so we don't download the entire backlog)."""
-        for e in self.entries:
-            if e.channel_id == channel_id:
-                for vs in vod_sources:
-                    if vs and vs not in e.archive_ids:
-                        e.archive_ids.append(vs)
-                break
+        with self._entries_lock:
+            for e in self.entries:
+                if e.channel_id == channel_id:
+                    for vs in vod_sources:
+                        if vs and vs not in e.archive_ids:
+                            e.archive_ids.append(vs)
+                    break
 
     def save_to_config(self, cfg):
         cfg["monitor_channels"] = [
