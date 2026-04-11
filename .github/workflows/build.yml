@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install PyQt6 yt-dlp pyinstaller
+        run: pip install PyQt6 yt-dlp pyinstaller pillow
 
       - name: Build exe
         run: |
@@ -34,10 +34,19 @@ jobs:
 
       - name: Upload to release
         if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
         run: |
-          $tag = "v" + (python -c "import re; print(re.search(r'VERSION = \"(.+?)\"', open('streamkeep/__init__.py').read()).group(1))")
-          gh release create $tag dist/StreamKeep.exe --title "StreamKeep $tag" --generate-notes 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release upload $tag dist/StreamKeep.exe --clobber }
+          # Extract VERSION from streamkeep/__init__.py without going through
+          # `python -c` — embedded regex metachars get mangled by PowerShell
+          # command-parser escaping, so use Select-String directly.
+          $match = Select-String -Path 'streamkeep/__init__.py' -Pattern 'VERSION\s*=\s*"([^"]+)"'
+          $ver = $match.Matches[0].Groups[1].Value
+          $tag = "v$ver"
+          Write-Host "Publishing release $tag"
+          gh release create $tag dist/StreamKeep.exe --title "StreamKeep $tag" --generate-notes
+          if ($LASTEXITCODE -ne 0) {
+            gh release upload $tag dist/StreamKeep.exe --clobber
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -51,7 +60,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install PyQt6 yt-dlp pyinstaller
+        run: pip install PyQt6 yt-dlp pyinstaller pillow
 
       - name: Build app
         run: |
@@ -81,7 +90,7 @@ jobs:
           sudo apt-get install -y libegl1
 
       - name: Install dependencies
-        run: pip install PyQt6 yt-dlp pyinstaller
+        run: pip install PyQt6 yt-dlp pyinstaller pillow
 
       - name: Build binary
         run: |
