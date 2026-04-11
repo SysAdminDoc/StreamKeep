@@ -82,7 +82,12 @@ class PodcastRSSExtractor(Extractor):
 
     def resolve(self, url, log_fn=None):
         if any(url.endswith(ext) for ext in (".mp3", ".m4a", ".ogg", ".wav", ".aac")):
-            info = StreamInfo(platform="Podcast", url=url, title=url.split("/")[-1])
+            info = StreamInfo(
+                platform="Podcast",
+                url=url,
+                title=url.split("/")[-1],
+                channel=self.extract_channel_id(url) or "",
+            )
             info.qualities.append(QualityInfo(
                 name="audio", url=url, resolution="audio", format_type="mp4",
             ))

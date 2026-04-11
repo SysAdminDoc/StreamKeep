@@ -64,9 +64,13 @@ def build_download_tab(win):
     output_card, win.download_output_value, win.download_output_sub = make_metric_card(
         "Output", path_label(str(_default_output_dir())), ""
     )
+    finalize_card, win.download_finalize_value, win.download_finalize_sub = make_metric_card(
+        "Finalize", "Idle", "Metadata and post-processing will queue here"
+    )
     metrics_row.addWidget(duration_card)
     metrics_row.addWidget(selection_card)
     metrics_row.addWidget(output_card, 1)
+    metrics_row.addWidget(finalize_card)
     hero_lay.addLayout(metrics_row)
     root.addWidget(hero)
 

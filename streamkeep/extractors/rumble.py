@@ -42,6 +42,32 @@ class RumbleExtractor(Extractor):
                 return m.group(1)
         return None
 
+    def _extract_channel_from_data(self, data):
+        if not isinstance(data, dict):
+            return ""
+        direct_keys = (
+            "channel", "channel_name", "channel_slug", "author",
+            "author_name", "creator", "creator_name", "username",
+            "user_name", "owner", "publisher", "publisher_name",
+        )
+        for key in direct_keys:
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for subkey in ("slug", "username", "name", "title"):
+                    subval = value.get(subkey)
+                    if isinstance(subval, str) and subval.strip():
+                        return subval.strip()
+        for key in ("author", "channel", "user", "owner", "publisher"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                for subkey in ("slug", "username", "name", "title"):
+                    subval = value.get(subkey)
+                    if isinstance(subval, str) and subval.strip():
+                        return subval.strip()
+        return ""
+
     def resolve(self, url, log_fn=None):
         embed_id = self._get_embed_id(url, log_fn)
         if not embed_id:
@@ -61,6 +87,7 @@ class RumbleExtractor(Extractor):
             platform="Rumble",
             url=url,
             title=data.get("title", ""),
+            channel=self._extract_channel_from_data(data),
             is_live=data.get("duration", 0) == 0,
         )
 

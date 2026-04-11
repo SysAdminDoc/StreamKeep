@@ -51,6 +51,7 @@ class HistoryEntry:
     date: str = ""
     platform: str = ""
     title: str = ""
+    channel: str = ""
     quality: str = ""
     size: str = ""
     path: str = ""
@@ -69,3 +70,4 @@ class MonitorEntry:
     last_status: str = "unknown"          # live, offline, error
     is_recording: bool = False
     archive_ids: list = field(default_factory=list)  # already-seen VOD source IDs
+    _cancel_requested: bool = field(default=False, repr=False, compare=False)

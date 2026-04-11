@@ -5,6 +5,8 @@ module-level `NATIVE_PROXY` — the Settings tab updates it via
 `set_native_proxy()` so every new request picks up the change.
 """
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -19,6 +21,17 @@ from .utils import fmt_size
 # curl calls (Kick API, Twitch GraphQL, Rumble embed, etc.) honor the same
 # proxy. Use `set_native_proxy()` / `get_native_proxy()` from other modules.
 NATIVE_PROXY = ""
+_INTERRUPT_STATE = threading.local()
+
+
+@dataclass
+class CommandResult:
+    returncode: int = -1
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False
+    interrupted: bool = False
+    error: str = ""
 
 
 def set_native_proxy(url):
@@ -30,11 +43,95 @@ def get_native_proxy():
     return NATIVE_PROXY
 
 
-def _build_curl_cmd(url, headers=None, method=None, body=None):
+@contextmanager
+def http_interruptible(checker):
+    previous = getattr(_INTERRUPT_STATE, "checker", None)
+    _INTERRUPT_STATE.checker = checker
+    try:
+        yield
+    finally:
+        if previous is None:
+            try:
+                delattr(_INTERRUPT_STATE, "checker")
+            except AttributeError:
+                pass
+        else:
+            _INTERRUPT_STATE.checker = previous
+
+
+def http_interrupted():
+    checker = getattr(_INTERRUPT_STATE, "checker", None)
+    if checker is None:
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        return False
+
+
+def _terminate_process(proc):
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+    except Exception:
+        return
+    try:
+        proc.wait(timeout=1.5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def run_capture_interruptible(cmd, timeout=30):
+    timeout = max(float(timeout or 0), 0.1)
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    except FileNotFoundError as e:
+        return CommandResult(returncode=127, stderr=str(e), error=str(e))
+    except Exception as e:
+        return CommandResult(returncode=-1, stderr=str(e), error=str(e))
+
+    deadline = time.monotonic() + timeout
+    while True:
+        if http_interrupted():
+            _terminate_process(proc)
+            return CommandResult(interrupted=True)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _terminate_process(proc)
+            return CommandResult(timed_out=True)
+        try:
+            stdout, stderr = proc.communicate(timeout=min(0.2, max(remaining, 0.05)))
+            return CommandResult(
+                returncode=proc.returncode or 0,
+                stdout=stdout or "",
+                stderr=stderr or "",
+            )
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
     """Assemble a curl command with proxy + headers + optional POST body.
     Shared by curl/curl_json/curl_post_json so the proxy/header logic
     lives in exactly one place."""
-    cmd = ["curl", "-s", "-L"]
+    max_time = max(1, int(timeout or 30))
+    connect_timeout = max(1, min(10, max_time))
+    cmd = [
+        "curl", "-s", "-L",
+        "--connect-timeout", str(connect_timeout),
+        "--max-time", str(max_time),
+    ]
     if NATIVE_PROXY:
         cmd.extend(["-x", NATIVE_PROXY])
     if method and method.upper() != "GET":
@@ -49,15 +146,9 @@ def _build_curl_cmd(url, headers=None, method=None, body=None):
 
 def curl(url, headers=None, timeout=30):
     """Run curl and return stdout or None."""
-    cmd = _build_curl_cmd(url, headers)
-    try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        return r.stdout if r.returncode == 0 else None
-    except Exception:
-        return None
+    cmd = _build_curl_cmd(url, headers, timeout=timeout)
+    result = run_capture_interruptible(cmd, timeout=timeout + 2)
+    return result.stdout if result.returncode == 0 else None
 
 
 def curl_json(url, headers=None, timeout=30):
@@ -73,14 +164,17 @@ def curl_json(url, headers=None, timeout=30):
 
 def curl_post_json(url, data, headers=None, timeout=30):
     """POST JSON and parse response."""
-    cmd = _build_curl_cmd(url, headers, method="POST", body=json.dumps(data))
+    cmd = _build_curl_cmd(
+        url,
+        headers,
+        method="POST",
+        body=json.dumps(data),
+        timeout=timeout,
+    )
     try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        if r.returncode == 0:
-            return json.loads(r.stdout)
+        result = run_capture_interruptible(cmd, timeout=timeout + 2)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
     except Exception:
         pass
     return None
@@ -89,20 +183,21 @@ def curl_post_json(url, data, headers=None, timeout=30):
 def http_head(url, timeout=20):
     """HEAD request returning (status, content_length, accepts_ranges).
     Follows redirects and parses the final response block."""
-    cmd = ["curl", "-sI", "-L", "--max-time", str(timeout)]
+    connect_timeout = max(1, min(10, int(timeout or 20)))
+    cmd = [
+        "curl", "-sI", "-L",
+        "--connect-timeout", str(connect_timeout),
+        "--max-time", str(max(1, int(timeout or 20))),
+    ]
     if NATIVE_PROXY:
         cmd.extend(["-x", NATIVE_PROXY])
     cmd.append(url)
     try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout + 5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        if r.returncode != 0:
+        result = run_capture_interruptible(cmd, timeout=timeout + 2)
+        if result.returncode != 0:
             return (0, 0, False)
-        blocks = [b for b in re.split(r"\r?\n\r?\n", r.stdout) if b.strip()]
-        last = blocks[-1] if blocks else r.stdout
+        blocks = [b for b in re.split(r"\r?\n\r?\n", result.stdout) if b.strip()]
+        last = blocks[-1] if blocks else result.stdout
         status = 0
         m = re.search(r"HTTP/[\d.]+\s+(\d+)", last)
         if m:

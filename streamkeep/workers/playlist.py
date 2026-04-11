@@ -2,6 +2,7 @@
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..http import http_interruptible
 from ..extractors.ytdlp import YtDlpExtractor
 
 
@@ -16,11 +17,20 @@ class PlaylistExpandWorker(QThread):
         super().__init__()
         self.url = url
 
+    def _interrupted(self):
+        return self.isInterruptionRequested()
+
     def run(self):
         try:
-            entries = YtDlpExtractor().list_playlist_entries(
-                self.url, log_fn=self.log.emit,
-            )
-            self.finished.emit(entries)
+            with http_interruptible(self._interrupted):
+                if self._interrupted():
+                    return
+                entries = YtDlpExtractor().list_playlist_entries(
+                    self.url, log_fn=self.log.emit,
+                )
+                if self._interrupted():
+                    return
+                self.finished.emit(entries)
         except Exception as e:
-            self.error.emit(str(e))
+            if not self._interrupted():
+                self.error.emit(str(e))

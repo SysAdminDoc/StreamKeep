@@ -15,6 +15,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
+from ..http import http_interrupted, run_capture_interruptible
 from ..paths import _CREATE_NO_WINDOW
 from ..models import QualityInfo, StreamInfo
 from ..utils import fmt_duration, scan_browser_cookies
@@ -37,14 +38,8 @@ class YtDlpExtractor(Extractor):
     sponsorblock = False
 
     def _has_ytdlp(self):
-        try:
-            subprocess.run(
-                ["yt-dlp", "--version"], capture_output=True, timeout=5,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-            return True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
+        result = run_capture_interruptible(["yt-dlp", "--version"], timeout=5)
+        return result.returncode == 0
 
     def extract_channel_id(self, url):
         try:
@@ -83,16 +78,15 @@ class YtDlpExtractor(Extractor):
         cmd = ["yt-dlp", "--dump-json", "--no-download",
                "--cookies-from-browser", browser_name, url]
         try:
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-            if r.returncode == 0:
-                return json.loads(r.stdout), None
-            err = r.stderr.strip().split("\n")[-1] if r.stderr else "Unknown error"
+            result = run_capture_interruptible(cmd, timeout=60)
+            if result.interrupted:
+                return None, "Interrupted"
+            if result.timed_out:
+                return None, "Timed out"
+            if result.returncode == 0:
+                return json.loads(result.stdout), None
+            err = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
             return None, err
-        except subprocess.TimeoutExpired:
-            return None, "Timed out"
         except json.JSONDecodeError:
             return None, "Bad JSON"
         except Exception as e:
@@ -190,6 +184,8 @@ class YtDlpExtractor(Extractor):
                 return None
 
             for _ in range(40):
+                if http_interrupted():
+                    return None
                 time.sleep(0.5)
                 if os.path.exists(done_flag):
                     break
@@ -266,8 +262,12 @@ class YtDlpExtractor(Extractor):
         )
 
         for display, ytdlp_name, path in browsers:
+            if http_interrupted():
+                return None
             self._log(log_fn, f"Trying cookies from {display} ({ytdlp_name})...")
             data, err = self._try_with_browser(url, ytdlp_name, log_fn)
+            if http_interrupted():
+                return None
             if data:
                 self._log(log_fn, f"Success with {display}! Saving as default.")
                 YtDlpExtractor.cookies_browser = ytdlp_name
@@ -301,7 +301,10 @@ class YtDlpExtractor(Extractor):
     def list_playlist_entries(self, url, log_fn=None, limit=200):
         """Probe URL for a playlist/channel. If it's a list container,
         return a list of entries (empty list for single videos)."""
-        if not self._has_ytdlp():
+        has_ytdlp = self._has_ytdlp()
+        if http_interrupted():
+            return []
+        if not has_ytdlp:
             return []
         self._log(log_fn, f"Probing for playlist/channel: {url}")
         cmd = [
@@ -314,14 +317,11 @@ class YtDlpExtractor(Extractor):
             cmd.extend(["--proxy", self.proxy])
         cmd.append(url)
         try:
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-            if r.returncode != 0:
+            result = run_capture_interruptible(cmd, timeout=60)
+            if result.interrupted or result.returncode != 0:
                 return []
-            data = json.loads(r.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            data = json.loads(result.stdout)
+        except (json.JSONDecodeError, OSError):
             return []
         if not isinstance(data, dict):
             return []
@@ -345,7 +345,10 @@ class YtDlpExtractor(Extractor):
         return results
 
     def resolve(self, url, log_fn=None):
-        if not self._has_ytdlp():
+        has_ytdlp = self._has_ytdlp()
+        if http_interrupted():
+            return None
+        if not has_ytdlp:
             self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
             return None
 
@@ -354,32 +357,42 @@ class YtDlpExtractor(Extractor):
         if self.cookies_browser:
             self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
         try:
-            r = subprocess.run(
-                self._build_cmd(url),
-                capture_output=True, text=True, timeout=60,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-            if r.returncode == 0:
-                data = json.loads(r.stdout)
-            elif self._is_auth_error(r.stderr):
-                data = self._auto_retry_with_browsers(url, r.stderr, log_fn)
+            result = run_capture_interruptible(self._build_cmd(url), timeout=60)
+            if result.interrupted:
+                return None
+            if result.timed_out:
+                self._log(log_fn, "yt-dlp timed out")
+                return None
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+            elif self._is_auth_error(result.stderr):
+                data = self._auto_retry_with_browsers(url, result.stderr, log_fn)
                 if data is None:
                     return None
             else:
-                err = r.stderr.strip().split("\n")[-1] if r.stderr else "Unknown error"
+                err = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
                 self._log(log_fn, f"yt-dlp error: {err}")
                 return None
-        except subprocess.TimeoutExpired:
-            self._log(log_fn, "yt-dlp timed out")
-            return None
         except json.JSONDecodeError:
             self._log(log_fn, "Failed to parse yt-dlp output")
+            return None
+        except Exception:
+            if http_interrupted():
+                return None
+            self._log(log_fn, "yt-dlp timed out")
             return None
 
         info = StreamInfo(
             platform="yt-dlp",
             url=url,
             title=data.get("title", ""),
+            channel=(
+                data.get("channel")
+                or data.get("uploader_id")
+                or data.get("uploader")
+                or data.get("channel_id")
+                or ""
+            ),
             is_live=data.get("is_live", False),
         )
 
