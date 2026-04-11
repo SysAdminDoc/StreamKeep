@@ -45,7 +45,16 @@ def ensure_playwright_browser(log_fn=None):
         return True
     except Exception as e:
         err_str = str(e)
-        if "Executable doesn't exist" in err_str or "playwright install" in err_str:
+        # `sys.executable` in a frozen PyInstaller exe is the exe itself,
+        # so `sys.executable -m playwright install chromium` would
+        # re-launch StreamKeep.exe in a loop. Skip the auto-install path
+        # when frozen and just surface the failure — the user must install
+        # Playwright browsers manually in that case.
+        _frozen = getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+        if (
+            not _frozen
+            and ("Executable doesn't exist" in err_str or "playwright install" in err_str)
+        ):
             if log_fn:
                 log_fn("[HEADLESS] Installing Chromium for Playwright (one-time, ~120MB)...")
             try:
@@ -72,7 +81,11 @@ def ensure_playwright_browser(log_fn=None):
                 _PLAYWRIGHT_READY = False
                 return False
         if log_fn:
-            log_fn(f"[HEADLESS] Launch failed: {err_str[:120]}")
+            log_fn(
+                f"[HEADLESS] Launch failed: {err_str[:120]}"
+                + (" (frozen build — install Playwright browsers manually)"
+                   if _frozen else "")
+            )
         _PLAYWRIGHT_READY = False
         return False
 
