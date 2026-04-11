@@ -20,9 +20,9 @@ class RedditExtractor(Extractor):
     ]
 
     def extract_channel_id(self, url):
-        m = re.search(r'/r/(\w+)/comments/(\w+)', url)
+        m = re.search(r'/r/(\w+)(?:/comments/\w+)?', url)
         if m:
-            return f"r_{m.group(1)}_{m.group(2)}"
+            return m.group(1)
         m = re.search(r'v\.redd\.it/(\w+)', url)
         return m.group(1) if m else None
 
@@ -58,6 +58,7 @@ class RedditExtractor(Extractor):
             platform="Reddit",
             url=url,
             title=post.get("title", ""),
+            channel=str(post.get("subreddit") or self.extract_channel_id(url) or ""),
             total_secs=rv.get("duration", 0),
         )
         info.duration_str = fmt_duration(info.total_secs)

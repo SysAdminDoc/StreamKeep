@@ -31,16 +31,21 @@ class KickExtractor(Extractor):
     def supports_live_check(self):
         return True
 
-    def check_live(self, url):
-        slug = self.extract_channel_id(url)
-        if not slug:
-            return None
+    def _livestream_data(self, slug):
         data = curl_json(
             f"https://kick.com/api/v2/channels/{slug}/livestream",
             headers={"User-Agent": CURL_UA, "Accept": "application/json"},
         )
         if data and isinstance(data, dict):
-            ls = data.get("data", data)
+            return data.get("data", data)
+        return None
+
+    def check_live(self, url):
+        slug = self.extract_channel_id(url)
+        if not slug:
+            return None
+        ls = self._livestream_data(slug)
+        if isinstance(ls, dict):
             return ls.get("playback_url") is not None
         return None
 
@@ -87,20 +92,41 @@ class KickExtractor(Extractor):
 
     def resolve(self, url, log_fn=None):
         """Resolve Kick m3u8 URL to StreamInfo."""
+        slug = self.extract_channel_id(url) or ""
         if ".m3u8" in url:
-            return self._resolve_m3u8(url, log_fn)
+            return self._resolve_m3u8(url, log_fn, channel=slug)
+        if slug:
+            ls = self._livestream_data(slug)
+            playback_url = str((ls or {}).get("playback_url") or "")
+            if playback_url:
+                info = self._resolve_m3u8(
+                    playback_url,
+                    log_fn,
+                    channel=slug,
+                    title=str((ls or {}).get("session_title") or (ls or {}).get("title") or ""),
+                )
+                if info:
+                    info.is_live = True
+                    if not info.duration_str:
+                        info.duration_str = "Live"
+                return info
         vods = self.list_vods(url, log_fn)
         if len(vods) == 1:
-            return self._resolve_m3u8(vods[0].source, log_fn)
+            return self._resolve_m3u8(
+                vods[0].source,
+                log_fn,
+                channel=slug or vods[0].channel,
+                title=vods[0].title,
+            )
         return None  # Multiple VODs handled by UI
 
-    def _resolve_m3u8(self, url, log_fn=None):
+    def _resolve_m3u8(self, url, log_fn=None, channel="", title=""):
         self._log(log_fn, f"Fetching playlist: {url}")
         body = curl(url)
         if not body or not body.startswith("#EXTM3U"):
             return None
 
-        info = StreamInfo(platform="Kick", url=url)
+        info = StreamInfo(platform="Kick", url=url, channel=channel or "", title=title or "")
 
         if "#EXT-X-STREAM-INF" in body:
             info.is_master = True
@@ -122,4 +148,6 @@ class KickExtractor(Extractor):
                 info.url = master_url
 
         info.duration_str = fmt_duration(info.total_secs)
+        if info.is_live and not info.duration_str:
+            info.duration_str = "Live"
         return info
