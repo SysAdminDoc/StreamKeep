@@ -8,27 +8,37 @@ platform-specific parsers.
 
 import os
 import re
-import subprocess
 import sys
 import urllib.parse
 
 from . import CURL_UA
-from .http import curl
+from .http import curl, http_interrupted, run_capture_interruptible
 from .models import QualityInfo, StreamInfo
-from .paths import _CREATE_NO_WINDOW
 
 
 # Module-level flag so we only probe the Playwright browser install once
 _PLAYWRIGHT_READY = None
 
 
-def ensure_playwright_browser(log_fn=None):
+def _cancelled(checker=None):
+    if checker is not None:
+        try:
+            if checker():
+                return True
+        except Exception:
+            pass
+    return http_interrupted()
+
+
+def ensure_playwright_browser(log_fn=None, should_cancel=None):
     """Check that Playwright is importable AND has a Chromium install.
     Attempts `playwright install chromium` on first use. Returns True
     if the browser is ready to use."""
     global _PLAYWRIGHT_READY
     if _PLAYWRIGHT_READY is not None:
         return _PLAYWRIGHT_READY
+    if _cancelled(should_cancel):
+        return False
     try:
         import playwright.sync_api  # noqa: F401
     except ImportError:
@@ -39,6 +49,9 @@ def ensure_playwright_browser(log_fn=None):
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
+            if _cancelled(should_cancel):
+                _PLAYWRIGHT_READY = False
+                return False
             browser = p.chromium.launch(headless=True)
             browser.close()
         _PLAYWRIGHT_READY = True
@@ -55,22 +68,33 @@ def ensure_playwright_browser(log_fn=None):
             not _frozen
             and ("Executable doesn't exist" in err_str or "playwright install" in err_str)
         ):
+            if _cancelled(should_cancel):
+                _PLAYWRIGHT_READY = False
+                return False
             if log_fn:
                 log_fn("[HEADLESS] Installing Chromium for Playwright (one-time, ~120MB)...")
-            try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "playwright", "install", "chromium"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    timeout=300,
-                )
-            except Exception as install_err:
+            result = run_capture_interruptible(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                timeout=300,
+            )
+            if result.interrupted or _cancelled(should_cancel):
+                _PLAYWRIGHT_READY = False
+                return False
+            if result.returncode != 0:
                 if log_fn:
+                    install_err = (
+                        result.stderr.strip().split("\n")[-1]
+                        if result.stderr else result.error or "Unknown error"
+                    )
                     log_fn(f"[HEADLESS] Install failed: {install_err}")
                 _PLAYWRIGHT_READY = False
                 return False
             try:
                 from playwright.sync_api import sync_playwright
                 with sync_playwright() as p:
+                    if _cancelled(should_cancel):
+                        _PLAYWRIGHT_READY = False
+                        return False
                     browser = p.chromium.launch(headless=True)
                     browser.close()
                 _PLAYWRIGHT_READY = True
@@ -91,11 +115,13 @@ def ensure_playwright_browser(log_fn=None):
 
 
 def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
-                                wait_seconds=8):
+                                wait_seconds=8, should_cancel=None):
     """Load a page in a headless Chromium browser and capture any network
     requests that look like media streams. Catches lazy-loaded players
     that the regex scraper can't see."""
-    if not ensure_playwright_browser(log_fn):
+    if not ensure_playwright_browser(log_fn, should_cancel=should_cancel):
+        return []
+    if _cancelled(should_cancel):
         return []
 
     media_ext_re = re.compile(
@@ -112,6 +138,8 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
     seen = set()
 
     def add(u, hint):
+        if _cancelled(should_cancel):
+            return
         if not u or u in seen:
             return
         if len(captured) >= max_links:
@@ -128,72 +156,108 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
+            if _cancelled(should_cancel):
+                return []
             browser = p.chromium.launch(
                 headless=True,
                 args=["--mute-audio", "--no-sandbox"],
             )
-            context = browser.new_context(
-                user_agent=CURL_UA,
-                viewport={"width": 1280, "height": 800},
-            )
-            page = context.new_page()
+            context = None
+            page = None
+            try:
+                context = browser.new_context(
+                    user_agent=CURL_UA,
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = context.new_page()
 
-            def on_request(req):
-                u = req.url
-                rtype = req.resource_type
-                if rtype in ("media", "xhr", "fetch"):
-                    if media_ext_re.search(u):
-                        add(u, f"headless {rtype}")
+                def on_request(req):
+                    if _cancelled(should_cancel):
                         return
-                if media_ext_re.search(u):
-                    add(u, "headless url-ext")
+                    u = req.url
+                    rtype = req.resource_type
+                    if rtype in ("media", "xhr", "fetch"):
+                        if media_ext_re.search(u):
+                            add(u, f"headless {rtype}")
+                            return
+                    if media_ext_re.search(u):
+                        add(u, "headless url-ext")
 
-            def on_response(resp):
-                try:
-                    ct = (resp.headers.get("content-type", "") or "").lower()
-                except Exception:
-                    return
-                if any(ct.startswith(prefix) for prefix in media_ct_prefixes):
-                    add(resp.url, f"headless {ct.split(';')[0]}")
-
-            page.on("request", on_request)
-            page.on("response", on_response)
-
-            if log_fn:
-                log_fn(f"[HEADLESS] Loading {page_url[:80]} (up to {wait_seconds}s)")
-            try:
-                page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
-            except Exception as nav_err:
-                if log_fn:
-                    log_fn(f"[HEADLESS] Navigation warning: {str(nav_err)[:80]}")
-
-            try:
-                page.evaluate("""
-                    const v = document.querySelector('video');
-                    if (v) v.scrollIntoView({behavior:'instant',block:'center'});
-                """)
-            except Exception:
-                pass
-            try:
-                for sel in [
-                    "button[aria-label*='play' i]", ".play-button",
-                    ".vjs-big-play-button", "button.ytp-large-play-button",
-                    ".plyr__control--overlaid",
-                ]:
+                def on_response(resp):
+                    if _cancelled(should_cancel):
+                        return
                     try:
-                        page.locator(sel).first.click(timeout=500)
-                        break
+                        ct = (resp.headers.get("content-type", "") or "").lower()
                     except Exception:
-                        continue
-            except Exception:
-                pass
+                        return
+                    if any(ct.startswith(prefix) for prefix in media_ct_prefixes):
+                        add(resp.url, f"headless {ct.split(';')[0]}")
 
-            try:
-                page.wait_for_timeout(int(wait_seconds * 1000))
-            except Exception:
-                pass
+                page.on("request", on_request)
+                page.on("response", on_response)
 
-            browser.close()
+                if log_fn:
+                    log_fn(f"[HEADLESS] Loading {page_url[:80]} (up to {wait_seconds}s)")
+                try:
+                    nav_timeout = max(4000, min(12000, int((wait_seconds + 2) * 1000)))
+                    page.goto(page_url, wait_until="domcontentloaded", timeout=nav_timeout)
+                except Exception as nav_err:
+                    if log_fn:
+                        log_fn(f"[HEADLESS] Navigation warning: {str(nav_err)[:80]}")
+                if _cancelled(should_cancel):
+                    return captured
+
+                try:
+                    page.evaluate("""
+                        const v = document.querySelector('video');
+                        if (v) v.scrollIntoView({behavior:'instant',block:'center'});
+                    """)
+                except Exception:
+                    pass
+                if _cancelled(should_cancel):
+                    return captured
+
+                try:
+                    for sel in [
+                        "button[aria-label*='play' i]", ".play-button",
+                        ".vjs-big-play-button", "button.ytp-large-play-button",
+                        ".plyr__control--overlaid",
+                    ]:
+                        if _cancelled(should_cancel):
+                            return captured
+                        try:
+                            page.locator(sel).first.click(timeout=500)
+                            break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+                try:
+                    remaining_ms = max(0, int(wait_seconds * 1000))
+                    while remaining_ms > 0:
+                        if _cancelled(should_cancel):
+                            return captured
+                        step = min(250, remaining_ms)
+                        page.wait_for_timeout(step)
+                        remaining_ms -= step
+                except Exception:
+                    pass
+            finally:
+                try:
+                    if page is not None:
+                        page.close()
+                except Exception:
+                    pass
+                try:
+                    if context is not None:
+                        context.close()
+                except Exception:
+                    pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
     except Exception as e:
         if log_fn:
             log_fn(f"[HEADLESS] Error: {str(e)[:120]}")
@@ -296,34 +360,51 @@ def detect_direct_media(url, log_fn=None):
     }
 
     parsed = urllib.parse.urlparse(url)
+
+    def infer_channel():
+        parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(parts) < 2:
+            return ""
+        lead = parts[0].strip()
+        if not lead or lead.isdigit():
+            return ""
+        return lead
+
     ext = os.path.splitext(parsed.path)[1].lower()
     if ext in MEDIA_EXTS:
         fmt = "hls" if ext in (".m3u8", ".mpd") else "mp4"
         if log_fn:
             log_fn(f"Direct media URL detected by extension: {ext}")
-        info = StreamInfo(platform="Direct", url=url, title=parsed.path.split("/")[-1])
+        info = StreamInfo(
+            platform="Direct",
+            url=url,
+            title=parsed.path.split("/")[-1],
+            channel=infer_channel(),
+        )
         info.qualities.append(QualityInfo(name=f"direct ({ext})", url=url, format_type=fmt))
         return info
 
     try:
         cmd = [
-            "curl", "-sI", "-L", "-o", "/dev/null",
+            "curl", "-sI", "-L",
+            "--connect-timeout", "5",
+            "--max-time", "10",
             "-w", "%{content_type}\\n%{url_effective}\\n%{size_download}",
             "-H", f"User-Agent: {CURL_UA}", url,
         ]
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=10,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        if r.returncode == 0:
-            lines = r.stdout.strip().split("\n")
+        result = run_capture_interruptible(cmd, timeout=12)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")
             ct = lines[0].split(";")[0].strip().lower() if lines else ""
             if ct in MEDIA_TYPES:
                 fmt = MEDIA_TYPES[ct]
                 if log_fn:
                     log_fn(f"Direct media URL detected: {ct}")
                 info = StreamInfo(
-                    platform="Direct", url=url, title=parsed.path.split("/")[-1]
+                    platform="Direct",
+                    url=url,
+                    title=parsed.path.split("/")[-1],
+                    channel=infer_channel(),
                 )
                 info.qualities.append(
                     QualityInfo(name=f"direct ({ct})", url=url, format_type=fmt)

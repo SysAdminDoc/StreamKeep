@@ -143,7 +143,7 @@ class TwitchExtractor(Extractor):
 
         return None  # UI handles VOD listing
 
-    def _resolve_vod(self, vod_id, log_fn=None):
+    def _resolve_vod(self, vod_id, log_fn=None, channel=""):
         self._log(log_fn, f"Resolving Twitch VOD: {vod_id}")
         token, sig = self._get_access_token(vod_id=vod_id, log_fn=log_fn)
         if not token or not sig:
@@ -162,7 +162,7 @@ class TwitchExtractor(Extractor):
             self._log(log_fn, "Failed to fetch m3u8 playlist")
             return None
 
-        info = StreamInfo(platform="Twitch", url=m3u8_url, is_master=True)
+        info = StreamInfo(platform="Twitch", url=m3u8_url, is_master=True, channel=channel or "")
         info.qualities = []
         res, bw, name = "?", 0, "unknown"
         for line in body.splitlines():
@@ -220,7 +220,13 @@ class TwitchExtractor(Extractor):
             self._log(log_fn, "Failed to fetch live m3u8")
             return None
 
-        info = StreamInfo(platform="Twitch", url=m3u8_url, is_master=True, is_live=True)
+        info = StreamInfo(
+            platform="Twitch",
+            url=m3u8_url,
+            is_master=True,
+            is_live=True,
+            channel=login,
+        )
         info.qualities = []
         res, bw, name = "?", 0, "unknown"
         for line in body.splitlines():

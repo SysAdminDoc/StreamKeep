@@ -46,6 +46,7 @@ class AudiusExtractor(Extractor):
             platform="Audius",
             url=url,
             title=track.get("title", ""),
+            channel=self.extract_channel_id(url) or "",
             total_secs=track.get("duration", 0),
         )
         info.duration_str = fmt_duration(info.total_secs)
