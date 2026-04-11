@@ -507,7 +507,19 @@ class StreamKeep(QMainWindow):
         if dw is not None and dw.isRunning():
             try:
                 dw.cancel()
-                dw.wait(3000)
+                if not dw.wait(3000):
+                    dw.terminate()
+                    dw.wait(1000)
+            except Exception:
+                pass
+        # Stop convert worker if running (standalone file/folder batch)
+        cw = getattr(self, "_convert_worker", None)
+        if cw is not None and cw.isRunning():
+            try:
+                cw.cancel()
+                if not cw.wait(3000):
+                    cw.terminate()
+                    cw.wait(1000)
             except Exception:
                 pass
         # Stop monitor timer
@@ -518,6 +530,15 @@ class StreamKeep(QMainWindow):
         # Stop clipboard monitor
         try:
             self.clipboard_monitor.stop()
+        except Exception:
+            pass
+        # Hide + remove tray icon so Windows doesn't leak a dead icon slot
+        # until explorer.exe is restarted.
+        try:
+            if self._tray_icon is not None:
+                self._tray_icon.hide()
+                self._tray_icon.deleteLater()
+                self._tray_icon = None
         except Exception:
             pass
         self._persist_config()
@@ -1269,8 +1290,26 @@ class StreamKeep(QMainWindow):
 
     # ── Actions ───────────────────────────────────────────────────────
 
+    # Soft cap on in-memory log panel lines. A long monitor/queue session
+    # can accumulate hundreds of MB of text over time — trim from the top
+    # in batches to keep append+scroll O(1) amortized.
+    _LOG_SOFT_MAX_BLOCKS = 5000
+    _LOG_TRIM_BLOCKS = 1000
+
     def _log(self, msg):
         self.log_text.append(msg)
+        doc = self.log_text.document()
+        if doc.blockCount() > self._LOG_SOFT_MAX_BLOCKS:
+            try:
+                from PyQt6.QtGui import QTextCursor
+                cursor = QTextCursor(doc)
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                for _ in range(self._LOG_TRIM_BLOCKS):
+                    cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    cursor.removeSelectedText()
+                    cursor.deleteChar()  # drop the now-empty block separator
+            except Exception:
+                pass
         sb = self.log_text.verticalScrollBar()
         sb.setValue(sb.maximum())
         _write_log_line(msg)
@@ -2065,10 +2104,21 @@ class StreamKeep(QMainWindow):
         if self.download_worker is not None:
             try:
                 self.download_worker.cancel()
-                self.download_worker.wait(5000)
+                if not self.download_worker.wait(5000):
+                    self.download_worker.terminate()
+                    self.download_worker.wait(1000)
             except Exception:
                 pass
             self.download_worker = None
+        # Clear any green/red chunk overrides left on segment bars so the
+        # next download starts from a neutral style instead of inheriting
+        # the previous run's success/fail colors.
+        for pbar in getattr(self, "_segment_progress", []):
+            try:
+                pbar.setStyleSheet("")
+                pbar.setValue(0)
+            except Exception:
+                pass
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
@@ -2186,12 +2236,21 @@ class StreamKeep(QMainWindow):
         if target is None:
             return
 
-        # Don't start a new download while one is already running
+        # Don't start a new download while one is already running.
         existing = getattr(self, "download_worker", None)
         if existing is not None and existing.isRunning():
             self._log(f"[AUTO-RECORD] Skipped {channel_id}: download already in progress")
             target.is_recording = False
             return
+        # If the slot holds a finished QThread, wait+clear it so the
+        # new worker assignment below doesn't drop signals on a still-
+        # alive old reference.
+        if existing is not None:
+            try:
+                existing.wait(500)
+            except Exception:
+                pass
+            self.download_worker = None
 
         self._log(f"[AUTO-RECORD] Starting recording for {target.platform}/{channel_id}")
         try:
@@ -2233,6 +2292,16 @@ class StreamKeep(QMainWindow):
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
+        # Release the download_worker reference so the next manual/auto
+        # download doesn't orphan signals on the finished QThread. wait()
+        # is cheap here — run() has already returned.
+        dw = getattr(self, "download_worker", None)
+        if dw is not None and not dw.isRunning():
+            try:
+                dw.wait(500)
+            except Exception:
+                pass
+            self.download_worker = None
         self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
         self._refresh_monitor_summary()
         self._set_status(f"Auto-record finished for {channel_id}.", "success")

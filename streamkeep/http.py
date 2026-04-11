@@ -176,6 +176,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         if NATIVE_PROXY:
             cmd.extend(["-x", NATIVE_PROXY])
         cmd.append(url)
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -189,6 +190,13 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                         proc.terminate()
                     except Exception:
                         pass
+                    try:
+                        proc.wait(timeout=2)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
                     return
                 if os.path.exists(part):
                     try:
@@ -201,6 +209,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             if proc.returncode != 0:
                 err = ""
                 try:
+                    # Non-blocking read; stderr is still open after Popen exits
                     err = (proc.stderr.read() or "").strip()[:120]
                 except Exception:
                     pass
@@ -209,6 +218,12 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             errors.append("curl not in PATH")
         except Exception as e:
             errors.append(f"part {i}: {e}")
+        finally:
+            if proc is not None and proc.stderr is not None:
+                try:
+                    proc.stderr.close()
+                except Exception:
+                    pass
 
     threads = []
     for i, start, end in ranges:
@@ -244,12 +259,26 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
     for t in threads:
         t.join(timeout=5)
 
+    def _cleanup_parts():
+        for p in part_paths:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
     if cancel_check and cancel_check():
+        _cleanup_parts()
         return False
 
     if errors:
         if log_fn:
             log_fn(f"[PARALLEL] failed: {'; '.join(errors[:3])}")
+        _cleanup_parts()
         return False
 
     for idx, (_, start, end) in enumerate(ranges):
@@ -261,6 +290,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                     f"[PARALLEL] size mismatch on part {idx}: "
                     f"{actual} != {expected}"
                 )
+            _cleanup_parts()
             return False
 
     try:
@@ -275,18 +305,10 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
     except Exception as e:
         if log_fn:
             log_fn(f"[PARALLEL] concat failed: {e}")
+        _cleanup_parts()
         return False
 
-    for p in part_paths:
-        try:
-            if os.path.exists(p):
-                os.remove(p)
-        except OSError:
-            pass
-    try:
-        os.rmdir(tmp_dir)
-    except OSError:
-        pass
+    _cleanup_parts()
 
     if progress_cb:
         try:

@@ -33,10 +33,12 @@ def fmt_size(b):
 
 def safe_filename(s, max_len=60):
     """Sanitize a string for use as a filename. Strips invalid chars,
-    control chars, trailing dots/spaces (invalid on Windows), and truncates."""
+    control chars, trailing dots/spaces (invalid on Windows), template
+    braces left behind by render_template fallbacks, and truncates."""
     if not s:
         return ""
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', s)
+    # Drop NT-invalid chars, control chars, and {} left over from templates.
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f{}]', '', s)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     cleaned = cleaned.rstrip(". ")
     reserved = (
@@ -46,7 +48,9 @@ def safe_filename(s, max_len=60):
     )
     if cleaned.upper() in reserved:
         cleaned = f"_{cleaned}"
-    return cleaned[:max_len].strip() or "download"
+    # Truncate, then re-strip trailing whitespace/dots exposed by the cut.
+    cleaned = cleaned[:max_len].rstrip(". ")
+    return cleaned or "download"
 
 
 def safe_path_component(s, max_len=80):

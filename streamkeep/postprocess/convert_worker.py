@@ -74,8 +74,17 @@ class ConvertWorker(QThread):
                     self.log.emit("Conversion cancelled.")
                     break
                 name = os.path.basename(path)
-                self.progress.emit(i, total, name)
+                # Emit 1-based index so the UI shows "1 of N" for the first
+                # file rather than "0 of N".
+                self.progress.emit(i + 1, total, name)
                 ext = os.path.splitext(path)[1].lower()
+                # If the source file vanished between file-dialog and worker,
+                # don't crash — skip and count as failure.
+                if not os.path.exists(path):
+                    self.log.emit(f"[CONVERT] Missing (skipped): {name}")
+                    failures += 1
+                    self.file_done.emit(path, False)
+                    continue
                 expected_ext = None
                 if ext in VIDEO_EXTS and self.do_video:
                     expected_ext = (self._video_format or "mp4").lower()

@@ -321,7 +321,9 @@ class YtDlpExtractor(Extractor):
             if r.returncode != 0:
                 return []
             data = json.loads(r.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            return []
+        if not isinstance(data, dict):
             return []
         if data.get("_type") not in ("playlist", "multi_video"):
             return []

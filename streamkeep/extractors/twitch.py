@@ -73,18 +73,31 @@ class TwitchExtractor(Extractor):
             self._log(log_fn, "GraphQL request failed")
             return []
 
-        user = data.get("data", {}).get("user", {})
-        edges = user.get("videos", {}).get("edges", [])
+        user = data.get("data") or {}
+        user = user.get("user") or {}
+        videos = user.get("videos") or {}
+        edges = videos.get("edges") or []
         vods = []
         for edge in edges:
-            node = edge["node"]
-            secs = node.get("lengthSeconds", 0)
+            if not isinstance(edge, dict):
+                continue
+            node = edge.get("node")
+            if not isinstance(node, dict):
+                continue
+            vod_id = node.get("id")
+            if not vod_id:
+                continue  # Can't resolve later without an ID — skip.
+            secs = node.get("lengthSeconds") or 0
+            try:
+                secs = int(secs)
+            except (TypeError, ValueError):
+                secs = 0
             vods.append(VODInfo(
-                title=node.get("title", "Untitled"),
-                date=node.get("createdAt", ""),
-                source=node["id"],  # VOD ID — resolved to m3u8 in resolve()
+                title=node.get("title") or "Untitled",
+                date=node.get("createdAt") or "",
+                source=vod_id,  # VOD ID — resolved to m3u8 in resolve()
                 is_live=False,
-                viewers=node.get("viewCount", 0),
+                viewers=node.get("viewCount") or 0,
                 duration=fmt_duration(secs) if secs else "",
                 duration_ms=secs * 1000,
                 platform="Twitch",
@@ -173,9 +186,15 @@ class TwitchExtractor(Extractor):
             sub = curl(info.qualities[0].url)
             if sub:
                 info.total_secs, info.start_time, info.segment_count = parse_hls_duration(sub)
-                # Twitch VODs may not have TOTAL-SECS — sum EXTINF instead
+                # Twitch VODs may not have TOTAL-SECS — sum EXTINF instead.
+                # Tolerate malformed tokens (e.g. live-edit playlists mid-rewrite).
                 if info.total_secs == 0:
-                    total = sum(float(m.group(1)) for m in re.finditer(r'#EXTINF:([\d.]+)', sub))
+                    total = 0.0
+                    for mm in re.finditer(r'#EXTINF:([\d.]+)', sub):
+                        try:
+                            total += float(mm.group(1))
+                        except ValueError:
+                            continue
                     info.total_secs = total
 
         info.duration_str = fmt_duration(info.total_secs)

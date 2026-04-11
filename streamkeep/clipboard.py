@@ -36,9 +36,19 @@ class ClipboardMonitor(QObject):
             return
         try:
             text = QApplication.clipboard().text() or ""
-            if text != self._last_clip and text.startswith("http"):
-                self._last_clip = text
-                if re.match(r'https?://[^\s]+', text):
-                    self.url_detected.emit(text.strip())
+            if text == self._last_clip:
+                return
+            self._last_clip = text
+            # Extract the first http(s) URL on the first non-empty line so
+            # pastes like "here's a link: https://..." still work, but
+            # multi-line garbage + stray whitespace can't pollute the field.
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.search(r'https?://[^\s<>"\'\\]+', line)
+                if m:
+                    self.url_detected.emit(m.group(0))
+                break
         except Exception:
             pass
