@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidgetItem, QProgressBar,
     QFileDialog, QFrame, QStackedWidget, QSystemTrayIcon,
-    QInputDialog, QCheckBox,
+    QInputDialog, QCheckBox, QMenu,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
@@ -33,7 +33,14 @@ from streamkeep.config import (
     write_log_line as _write_log_line,
 )
 from streamkeep.theme import CAT
-from streamkeep.models import HistoryEntry
+from streamkeep.models import HistoryEntry, ResumeState
+from streamkeep.resume import (
+    clear_resume_state,
+    remaining_segments,
+    save_resume_state,
+    scan_for_orphan_sidecars,
+)
+from streamkeep.storage import scan_storage
 from streamkeep.utils import (
     fmt_size as _fmt_size,
     fmt_duration as _fmt_duration,
@@ -70,7 +77,7 @@ from streamkeep.postprocess import (
     AUDIO_EXTS,
     available_video_codec_keys as _available_video_codec_keys,
 )
-from streamkeep.monitor import ChannelMonitor
+from streamkeep.monitor import ChannelMonitor, entry_in_schedule_window
 from streamkeep.clipboard import ClipboardMonitor
 
 # Legacy NATIVE_PROXY compatibility — some UI code below assigns this.
@@ -97,6 +104,9 @@ from .tabs.download import build_download_tab
 from .tabs.history import build_history_tab
 from .tabs.monitor import build_monitor_tab
 from .tabs.settings import build_settings_tab
+from .tabs.storage import (
+    build_storage_tab, populate_storage_table, prompt_confirm_delete,
+)
 
 
 class StreamKeep(QMainWindow):
@@ -174,6 +184,16 @@ class StreamKeep(QMainWindow):
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
         self._scheduler_timer.start(30_000)
         self._scheduler_tick()  # Apply bandwidth rule immediately on startup
+        # Hook history-table context menu (right-click → Trim / Open / Remove).
+        try:
+            self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.history_table.customContextMenuRequested.connect(self._on_history_context_menu)
+        except Exception:
+            pass
+        self._resume_candidates = []
+        # Deferred startup scan for orphan resume sidecars — run on the
+        # Qt event loop so the main window paints before we hit disk I/O.
+        QTimer.singleShot(800, self._scan_for_resumable_downloads)
 
     def _scheduler_tick(self):
         """Periodic check: start any queue items whose scheduled time has
@@ -910,7 +930,7 @@ class StreamKeep(QMainWindow):
         tab_lay.setSpacing(10)
 
         self._tab_btns = []
-        self._tab_names = ["Download", "Monitor", "History", "Settings"]
+        self._tab_names = ["Download", "Monitor", "History", "Storage", "Settings"]
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
             btn.setObjectName("tabActive" if i == 0 else "tab")
@@ -926,6 +946,7 @@ class StreamKeep(QMainWindow):
         self._stack.addWidget(self._wrap_scroll_page(build_download_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_monitor_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_history_tab(self)))
+        self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_settings_tab(self)))
         root.addWidget(self._stack, 1)
 
@@ -961,6 +982,12 @@ class StreamKeep(QMainWindow):
         self.open_folder_btn.setVisible(False)
         self.open_folder_btn.clicked.connect(self._on_open_folder)
         footer_lay.addWidget(self.open_folder_btn)
+
+        self.trim_btn = QPushButton("Trim...")
+        self.trim_btn.setObjectName("secondary")
+        self.trim_btn.setVisible(False)
+        self.trim_btn.clicked.connect(self._on_trim_last)
+        footer_lay.addWidget(self.trim_btn)
         root.addWidget(footer)
 
         self._set_status("Paste a URL to inspect a stream or VOD.", "idle")
@@ -970,6 +997,16 @@ class StreamKeep(QMainWindow):
         for i, btn in enumerate(self._tab_btns):
             btn.setObjectName("tabActive" if i == idx else "tab")
             btn.setStyleSheet(TAB_STYLE)
+        # Auto-scan Storage the first time the user opens the tab in a
+        # session, and on every subsequent visit (cheap on small archives,
+        # user can stop by switching away). Deferred so the tab paints
+        # before the scan runs.
+        try:
+            storage_idx = self._tab_names.index("Storage")
+        except ValueError:
+            storage_idx = -1
+        if idx == storage_idx and storage_idx >= 0:
+            QTimer.singleShot(200, self._on_storage_rescan)
 
     # ── Download Tab ──────────────────────────────────────────────────
 
@@ -1608,6 +1645,225 @@ class StreamKeep(QMainWindow):
         self._active_history_url = history_url
         self._active_stream_info = info or self.stream_info
 
+    # ── Resume sidecar integration ───────────────────────────────────
+
+    def _attach_resume_to_worker(self, worker, *, resume_existing=None):
+        """Wire a ResumeState into a DownloadWorker just before start().
+
+        If `resume_existing` is provided (from the startup-banner "Resume"
+        action), its completed-segments list is preserved and re-used.
+        Otherwise a fresh state is built from the active stream context.
+        Silent on failure — a resume sidecar is nice-to-have, never required.
+        """
+        try:
+            info = self._active_stream_info or self.stream_info
+            if resume_existing is not None:
+                state = resume_existing
+                # Refresh the parts of the sidecar that can have changed
+                # between the interrupted run and now (new token URLs, etc.).
+                state.playlist_url = worker.playlist_url
+                state.format_type = worker.format_type
+                state.audio_url = worker.audio_url or ""
+                state.ytdlp_source = worker.ytdlp_source or ""
+                state.ytdlp_format = worker.ytdlp_format or ""
+                state.output_dir = worker.output_dir
+                state.segments = [list(s) for s in worker.segments]
+            else:
+                state = ResumeState(
+                    source_url=self._active_history_url or "",
+                    platform=(info.platform if info else "") or "",
+                    title=(info.title if info else "") or "",
+                    channel=(info.channel if info else "") or "",
+                    quality_name=self._active_quality_name or "",
+                    output_dir=worker.output_dir,
+                )
+            worker.attach_resume_state(state)
+        except Exception as e:
+            self._log(f"[RESUME] Could not write sidecar: {e}")
+
+    def _collect_resume_scan_roots(self):
+        """Directories worth scanning for orphan resume sidecars.
+
+        Includes the active output-field value, the persisted default in
+        config, and any per-channel monitor override dirs.
+        """
+        roots = []
+        seen = set()
+
+        def _push(path):
+            if not path:
+                return
+            real = os.path.realpath(path)
+            if real in seen:
+                return
+            seen.add(real)
+            roots.append(path)
+
+        try:
+            _push(self.output_input.text().strip())
+        except Exception:
+            pass
+        _push(self._config.get("output_dir", ""))
+        _push(str(_default_output_dir()))
+        for entry in getattr(self.monitor, "entries", []) or []:
+            _push(getattr(entry, "override_output_dir", "") or "")
+        return roots
+
+    def _scan_for_resumable_downloads(self):
+        """Called once at startup — shows the resume banner if any orphan
+        sidecars look resumable."""
+        try:
+            roots = self._collect_resume_scan_roots()
+            found = scan_for_orphan_sidecars(roots)
+        except Exception as e:
+            self._log(f"[RESUME] Scan failed: {e}")
+            return
+        self._resume_candidates = found
+        self._refresh_resume_banner()
+
+    def _refresh_resume_banner(self):
+        """Show/hide the resume banner based on candidate count."""
+        banner = getattr(self, "resume_banner", None)
+        if banner is None:
+            return
+        count = len(getattr(self, "_resume_candidates", []) or [])
+        if count <= 0:
+            banner.setVisible(False)
+            return
+        label = getattr(self, "resume_banner_label", None)
+        if label is not None:
+            if count == 1:
+                state = self._resume_candidates[0]
+                total = len(state.segments or [])
+                done = len(state.completed or [])
+                title = (state.title or os.path.basename(state.output_dir) or "download")[:80]
+                if total:
+                    progress = f" ({done}/{total} segments done)"
+                else:
+                    progress = ""
+                label.setText(f"Interrupted download ready to resume: {title}{progress}")
+            else:
+                label.setText(f"{count} interrupted downloads are ready to resume.")
+        banner.setVisible(True)
+
+    def _on_resume_all(self):
+        """Resume the first candidate immediately; leave the rest queued for
+        after it finishes so we don't try to run N downloads in parallel."""
+        if not getattr(self, "_resume_candidates", None):
+            self._refresh_resume_banner()
+            return
+        if self.download_worker is not None and self.download_worker.isRunning():
+            self._set_status(
+                "Finish or stop the active download before resuming.",
+                "warning",
+            )
+            return
+        state = self._resume_candidates[0]
+        self._kick_off_resume(state)
+
+    def _on_resume_discard(self):
+        """Drop all resume candidates — remove their sidecars from disk."""
+        count = 0
+        for state in (getattr(self, "_resume_candidates", None) or []):
+            try:
+                clear_resume_state(state.output_dir)
+                count += 1
+            except Exception:
+                pass
+        self._resume_candidates = []
+        self._refresh_resume_banner()
+        if count:
+            self._log(f"[RESUME] Discarded {count} pending resume sidecar(s).")
+            self._set_status(
+                f"Discarded {count} interrupted download(s). They will not be resumed.",
+                "idle",
+            )
+
+    def _kick_off_resume(self, state):
+        """Re-resolve the source URL and start a DownloadWorker that picks
+        up from the saved segment list. Short-lived tokens get refreshed
+        through the extractor system."""
+        try:
+            self._resume_candidates = [
+                s for s in (self._resume_candidates or [])
+                if s.output_dir != state.output_dir
+            ]
+            self._refresh_resume_banner()
+            # Re-resolve when we have a usable source URL so that expired
+            # playlist tokens (common on Kick/Twitch, which rotate roughly
+            # every 24h) get refreshed before ffmpeg hits them with a 403.
+            refreshed_url = state.playlist_url
+            refreshed_audio = state.audio_url
+            if state.source_url:
+                ext = Extractor.detect(state.source_url)
+                if ext:
+                    try:
+                        info = ext.resolve(state.source_url, log_fn=self._log)
+                    except Exception as e:
+                        self._log(f"[RESUME] Re-resolve failed, trying saved URL: {e}")
+                        info = None
+                    if info and info.qualities:
+                        # Prefer a quality matching the saved name; fall back
+                        # to the top listed quality.
+                        chosen = info.qualities[0]
+                        for q in info.qualities:
+                            if q.name == state.quality_name:
+                                chosen = q
+                                break
+                        refreshed_url = chosen.url or refreshed_url
+                        refreshed_audio = chosen.audio_url or refreshed_audio
+                        state.playlist_url = refreshed_url
+                        state.audio_url = refreshed_audio
+                        save_resume_state(state)
+            remaining = remaining_segments(state)
+            if not remaining:
+                self._log(f"[RESUME] Nothing to resume in {state.output_dir} — clearing sidecar.")
+                clear_resume_state(state.output_dir)
+                return
+            self._log(
+                f"[RESUME] Resuming {state.title or state.output_dir} — "
+                f"{len(state.completed or [])}/{len(state.segments or [])} already done."
+            )
+            # Minimal context — the on_all_done path tolerates a missing
+            # info object and reads title/channel from self._active_stream_info
+            # only when present.
+            self._set_download_context(
+                out_dir=state.output_dir,
+                quality_name=state.quality_name,
+                history_url=state.source_url,
+                info=None,
+            )
+            worker = DownloadWorker(
+                refreshed_url or state.playlist_url,
+                remaining,
+                state.output_dir,
+                format_type=state.format_type or "hls",
+            )
+            worker.audio_url = refreshed_audio or ""
+            worker.ytdlp_source = state.ytdlp_source or ""
+            worker.ytdlp_format = state.ytdlp_format or ""
+            worker.cookies_browser = YtDlpExtractor.cookies_browser
+            worker.rate_limit = YtDlpExtractor.rate_limit
+            worker.proxy = YtDlpExtractor.proxy
+            worker.download_subs = YtDlpExtractor.download_subs
+            worker.sponsorblock = YtDlpExtractor.sponsorblock
+            worker.parallel_connections = self._parallel_connections
+            worker.progress.connect(self._on_dl_progress)
+            worker.segment_done.connect(self._on_segment_done)
+            worker.error.connect(self._on_dl_error)
+            worker.log.connect(self._log)
+            worker.all_done.connect(self._on_all_done)
+            self.download_worker = worker
+            self._attach_resume_to_worker(worker, resume_existing=state)
+            self._set_status(
+                f"Resuming {(state.title or 'download')[:60]}...",
+                "processing",
+            )
+            worker.start()
+        except Exception as e:
+            self._log(f"[RESUME] Could not resume: {e}")
+            self._set_status("Resume failed — see log for details.", "error")
+
     def _output_contains_media(self, out_dir):
         if not out_dir or not os.path.isdir(out_dir):
             return False
@@ -1875,6 +2131,8 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.setText("Fetching")
         self.download_btn.setEnabled(False)
         self.open_folder_btn.setVisible(False)
+        if hasattr(self, "trim_btn"):
+            self.trim_btn.setVisible(False)
         self.overall_progress.setVisible(False)
         self.quality_combo.clear()
         self.quality_combo.setEnabled(False)
@@ -2238,6 +2496,7 @@ class StreamKeep(QMainWindow):
         worker.log.connect(self._log)
         worker.all_done.connect(self._batch_vod_done)
         self.download_worker = worker
+        self._attach_resume_to_worker(worker)
         worker.start()
 
     def _batch_on_fetch_error(self, err):
@@ -2581,6 +2840,7 @@ class StreamKeep(QMainWindow):
         self.download_worker.error.connect(self._on_dl_error)
         self.download_worker.log.connect(self._log)
         self.download_worker.all_done.connect(self._on_all_done)
+        self._attach_resume_to_worker(self.download_worker)
         self.download_worker.start()
         return True
 
@@ -2630,6 +2890,8 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self.open_folder_btn.setVisible(True)
+        if hasattr(self, "trim_btn"):
+            self.trim_btn.setVisible(True)
         active_info = self._active_stream_info or self.stream_info
         out_dir = self._active_output_dir or self.output_input.text().strip()
         q_name = self._active_quality_name or (
@@ -2745,6 +3007,14 @@ class StreamKeep(QMainWindow):
         if os.path.isdir(out_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
 
+    def _on_trim_last(self):
+        """Open the trim dialog for the most-recently-finished download."""
+        out_dir = self._active_output_dir or self.output_input.text().strip()
+        if not out_dir or not os.path.isdir(out_dir):
+            self._set_status("No recent download folder to trim.", "warning")
+            return
+        self._open_clip_dialog_for_dir(out_dir)
+
     # ── Monitor Actions ───────────────────────────────────────────────
 
     def _on_monitor_add(self):
@@ -2825,14 +3095,195 @@ class StreamKeep(QMainWindow):
                 auto.setForeground(QColor(CAT["green"]))
             self.monitor_table.setItem(i, 4, auto)
 
-            rm_btn = QPushButton("Stop + Remove" if e.is_recording else "Remove")
+            # Column 5 now carries two buttons: Edit (profile) + Remove.
+            cell = QWidget()
+            cell_lay = QHBoxLayout(cell)
+            cell_lay.setContentsMargins(2, 2, 2, 2)
+            cell_lay.setSpacing(4)
+            edit_btn = QPushButton("Edit")
+            edit_btn.setObjectName("ghost")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setToolTip("Edit per-channel profile: output folder, quality, schedule, retention.")
+            edit_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_edit(idx))
+            cell_lay.addWidget(edit_btn)
+            rm_btn = QPushButton("Stop" if e.is_recording else "Remove")
             rm_btn.setObjectName("ghost")
             rm_btn.setFixedHeight(28)
             if e.is_recording:
                 rm_btn.setToolTip("Stops the active auto-recording first, then removes this channel.")
             rm_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_remove(idx))
-            self.monitor_table.setCellWidget(i, 5, rm_btn)
+            cell_lay.addWidget(rm_btn)
+            self.monitor_table.setCellWidget(i, 5, cell)
+
+            # Show a small schedule-window glyph next to the interval column
+            # when one is configured so the user can see which channels
+            # are time-gated without opening the profile dialog.
+            if e.schedule_start_hhmm and e.schedule_end_hhmm:
+                sched_item = self.monitor_table.item(i, 3)
+                if sched_item is not None:
+                    sched_item.setText(
+                        f"{e.interval_secs}s  \u23F0 {e.schedule_start_hhmm}-{e.schedule_end_hhmm}"
+                    )
         self._refresh_monitor_summary()
+
+    def _on_monitor_edit(self, idx):
+        """Open the per-channel profile dialog for entries[idx]."""
+        if not (0 <= idx < len(self.monitor.entries)):
+            return
+        entry = self.monitor.entries[idx]
+        from .monitor_entry_dialog import MonitorEntryDialog
+        globals_preview = {
+            "output_dir": self.output_input.text().strip() or str(_default_output_dir()),
+            "file_template": self._file_template or "",
+        }
+        dlg = MonitorEntryDialog(self, entry, globals_preview=globals_preview)
+        if dlg.exec():
+            self._refresh_monitor_table()
+            self._persist_config()
+            desc = []
+            if entry.override_output_dir:
+                desc.append("custom output dir")
+            if entry.override_quality_pref:
+                desc.append(f"quality={entry.override_quality_pref}")
+            if entry.schedule_start_hhmm and entry.schedule_end_hhmm:
+                desc.append(f"window {entry.schedule_start_hhmm}-{entry.schedule_end_hhmm}")
+            if entry.retention_keep_last:
+                desc.append(f"keep last {entry.retention_keep_last}")
+            self._set_status(
+                f"Updated profile for {entry.channel_id}"
+                + (f" — {', '.join(desc)}." if desc else " — cleared overrides."),
+                "success",
+            )
+
+    # ── Storage tab ──────────────────────────────────────────────────
+
+    def _storage_scan_root(self):
+        return self.output_input.text().strip() or str(_default_output_dir())
+
+    def _on_storage_rescan(self):
+        """Rescan the output root and repopulate the Storage table."""
+        root = self._storage_scan_root()
+        self.storage_root_label.setText(f"Scanning: {root}")
+        self.storage_rescan_btn.setEnabled(False)
+        try:
+            scan = scan_storage(root)
+        except Exception as e:
+            self._log(f"[STORAGE] Scan failed: {e}")
+            scan = None
+        finally:
+            self.storage_rescan_btn.setEnabled(True)
+        if scan is None:
+            return
+        populate_storage_table(self, scan)
+        self._set_status(
+            f"Storage scan complete — {scan.total_files} file(s), "
+            f"{_fmt_size(scan.total_size)}.",
+            "success" if scan.total_files else "idle",
+        )
+
+    def _on_storage_selection_changed(self):
+        count = len(self.storage_table.selectionModel().selectedRows())
+        self.storage_delete_btn.setEnabled(count > 0)
+
+    def _on_storage_delete_selected(self):
+        """Move selected recording folders to the system Recycle Bin."""
+        rows = sorted(
+            {idx.row() for idx in self.storage_table.selectionModel().selectedRows()},
+            reverse=True,
+        )
+        groups_attr = getattr(self, "_storage_groups", None) or []
+        targets = [groups_attr[r] for r in rows if 0 <= r < len(groups_attr)]
+        if not targets:
+            return
+        total_size = sum(g.total_size for g in targets)
+        sample_paths = [g.dir_path for g in targets]
+        if not prompt_confirm_delete(self, len(targets), total_size, sample_paths):
+            return
+        try:
+            from send2trash import send2trash as _send2trash
+        except ImportError:
+            self._log(
+                "[STORAGE] send2trash is not installed. Refusing to delete "
+                "permanently. Install with: pip install send2trash"
+            )
+            self._set_status(
+                "send2trash not installed — recycle-bin delete unavailable. "
+                "No files were changed.",
+                "error",
+            )
+            return
+        recycled = 0
+        for g in targets:
+            try:
+                _send2trash(g.dir_path)
+                recycled += 1
+            except Exception as e:
+                self._log(f"[STORAGE] Could not recycle {g.dir_path}: {e}")
+        if recycled:
+            self._log(
+                f"[STORAGE] Recycled {recycled} folder(s) totalling "
+                f"{_fmt_size(total_size)}."
+            )
+        self._set_status(
+            f"Recycled {recycled} of {len(targets)} folder(s).",
+            "success" if recycled == len(targets) else "warning",
+        )
+        self._on_storage_rescan()
+
+    def _apply_retention_for_channel(self, entry, out_dir):
+        """If the entry has a retention limit, recycle-bin the oldest
+        recordings in `out_dir` beyond the keep-last count. Logs what it
+        does; does not prompt — enabling retention on the profile is the
+        opt-in."""
+        keep = int(getattr(entry, "retention_keep_last", 0) or 0)
+        if keep <= 0 or not out_dir or not os.path.isdir(out_dir):
+            return
+        # Treat each immediate subdir under the channel's output root as
+        # one "recording". Group per-channel_id prefix so sibling channels
+        # sharing an output dir don't cannibalize each other.
+        prefix = f"auto_{entry.channel_id}_" if entry.channel_id else ""
+        candidates = []
+        try:
+            for child in os.scandir(out_dir):
+                if not child.is_dir():
+                    continue
+                if prefix and not child.name.startswith(prefix):
+                    continue
+                try:
+                    mtime = child.stat().st_mtime
+                except OSError:
+                    continue
+                candidates.append((mtime, child.path))
+        except OSError:
+            return
+        if len(candidates) <= keep:
+            return
+        candidates.sort(reverse=True)  # newest first
+        to_remove = candidates[keep:]
+        removed = 0
+        for _mtime, path in to_remove:
+            try:
+                from send2trash import send2trash as _send2trash
+                _send2trash(path)
+            except ImportError:
+                # send2trash not available — leave the recording in place
+                # rather than permanently deleting it. Retention without
+                # recycle-bin fallback is too dangerous.
+                self._log(
+                    "[RETENTION] send2trash not installed — skipping "
+                    "retention cleanup (would otherwise recycle "
+                    f"{os.path.basename(path)})."
+                )
+                break
+            except Exception as e:
+                self._log(f"[RETENTION] Could not recycle {path}: {e}")
+                continue
+            removed += 1
+        if removed:
+            self._log(
+                f"[RETENTION] {entry.channel_id}: recycled {removed} old "
+                f"recording(s), keeping last {keep}."
+            )
 
     def _on_monitor_remove(self, idx):
         channel_id = None
@@ -2916,10 +3367,24 @@ class StreamKeep(QMainWindow):
                 pass
             self.download_worker = None
 
+        # Respect the per-channel schedule window — if we're outside it,
+        # defer auto-record until the next poll tick that lands inside.
+        if not entry_in_schedule_window(target):
+            self._log(
+                f"[AUTO-RECORD] Skipping {channel_id} — outside channel's "
+                f"schedule window ({target.schedule_start_hhmm}-{target.schedule_end_hhmm})"
+            )
+            return False
         target.is_recording = True
         self._refresh_monitor_summary()
         self._log(f"[AUTO-RECORD] Preparing recording for {target.platform}/{channel_id}")
-        base_out = self.output_input.text().strip() or str(_default_output_dir())
+        # Per-channel override_output_dir wins over the global Download-tab
+        # output. Empty string = use global.
+        base_out = (
+            target.override_output_dir.strip()
+            if getattr(target, "override_output_dir", "")
+            else ""
+        ) or self.output_input.text().strip() or str(_default_output_dir())
         worker = AutoRecordResolveWorker(channel_id, target.url, base_out)
         worker.log.connect(self._log)
         worker.resolved.connect(self._on_auto_record_resolved)
@@ -2961,6 +3426,23 @@ class StreamKeep(QMainWindow):
             self._start_next_background_job()
             return
 
+        # Honor per-channel quality preference if set. "highest" and "" are
+        # both no-ops (we were already handed the top quality). For a named
+        # resolution ("720p", etc.) we look for a substring match and fall
+        # back to the resolver's choice if nothing matches.
+        pref = (target.override_quality_pref or "").strip().lower()
+        if pref and pref not in ("", "highest") and getattr(info, "qualities", None):
+            chosen = None
+            for candidate in info.qualities:
+                cname = (candidate.name or "").lower()
+                cres = (candidate.resolution or "").lower()
+                if pref in cname or pref in cres:
+                    chosen = candidate
+                    break
+            if chosen is not None and chosen is not q:
+                self._log(f"[AUTO-RECORD] Using channel profile quality: {chosen.name}")
+                q = chosen
+
         segments = [(0, "live_recording", 0, 0)]
         self._download_had_errors = False
         self._set_download_context(
@@ -2977,6 +3459,7 @@ class StreamKeep(QMainWindow):
         worker.error.connect(lambda _idx, err, ch=channel_id: self._auto_record_error(ch, err))
         worker.all_done.connect(lambda: self._auto_record_done(channel_id))
         self.download_worker = worker
+        self._attach_resume_to_worker(worker)
         worker.start()
         self._set_status(f"Auto-record started for {channel_id}.", "working")
 
@@ -3014,9 +3497,26 @@ class StreamKeep(QMainWindow):
 
     def _auto_record_done(self, channel_id):
         self._active_auto_record_channel = ""
+        finished_entry = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
+                finished_entry = e
+        # Retention: if this channel has a keep-last limit, prune old
+        # sibling recordings from the channel's output root after a
+        # successful run.
+        if (finished_entry is not None
+                and not self._download_had_errors
+                and self._output_contains_media(self._active_output_dir)):
+            out_root = (
+                finished_entry.override_output_dir.strip()
+                if getattr(finished_entry, "override_output_dir", "")
+                else ""
+            ) or self.output_input.text().strip() or str(_default_output_dir())
+            try:
+                self._apply_retention_for_channel(finished_entry, out_root)
+            except Exception as e:
+                self._log(f"[RETENTION] error: {e}")
         # Release the download_worker reference so the next manual/auto
         # download doesn't orphan signals on the finished QThread. wait()
         # is cheap here — run() has already returned.
@@ -3350,6 +3850,72 @@ class StreamKeep(QMainWindow):
         self._refresh_history_table()
         self._persist_config()
         self._set_status("Download history cleared.", "success")
+
+    def _on_history_context_menu(self, pos):
+        """Right-click menu for the history table — offers Trim for files
+        that still exist on disk."""
+        table = self.history_table
+        idx = table.indexAt(pos)
+        if not idx.isValid():
+            return
+        row = idx.row()
+        view = getattr(self, "_history_view", list(reversed(self._history)))
+        if row >= len(view):
+            return
+        h = view[row]
+        menu = QMenu(self)
+        open_act = menu.addAction("Open Folder")
+        open_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        trim_act = menu.addAction("Trim / Clip...")
+        trim_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        menu.addSeparator()
+        remove_act = menu.addAction("Remove from History")
+        chosen = menu.exec(table.viewport().mapToGlobal(pos))
+        if chosen == open_act and h.path and os.path.isdir(h.path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
+        elif chosen == trim_act and h.path and os.path.isdir(h.path):
+            self._open_clip_dialog_for_dir(h.path)
+        elif chosen == remove_act:
+            try:
+                # `_history_view` is most-recent-first; map back to the
+                # underlying list index (which is chronological).
+                real = self._history.index(h)
+                self._history.pop(real)
+                self._refresh_history_table()
+                self._persist_config()
+            except ValueError:
+                pass
+
+    def _open_clip_dialog_for_dir(self, dir_path):
+        """Offer a file picker inside the given directory, then open the
+        ClipDialog on the chosen file. Used from History right-click and
+        the Download-complete summary."""
+        from .clip_dialog import ClipDialog
+        from ..postprocess.codecs import VIDEO_EXTS, AUDIO_EXTS
+        if not dir_path or not os.path.isdir(dir_path):
+            return
+        exts = {e.lower() for e in (VIDEO_EXTS | AUDIO_EXTS)}
+        candidates = []
+        for entry in sorted(os.scandir(dir_path), key=lambda e: e.name):
+            if entry.is_file() and Path(entry.name).suffix.lower() in exts:
+                candidates.append(entry.path)
+        if not candidates:
+            self._set_status(
+                "No video/audio files found in that folder to trim.",
+                "warning",
+            )
+            return
+        if len(candidates) == 1:
+            target = candidates[0]
+        else:
+            target, _ = QFileDialog.getOpenFileName(
+                self, "Choose file to trim", dir_path,
+                "Media files (*.mp4 *.mkv *.webm *.mov *.ts *.mp3 *.m4a *.aac *.flac *.wav)",
+            )
+            if not target:
+                return
+        dlg = ClipDialog(self, target)
+        dlg.exec()
 
     def _on_history_double_click(self, index):
         row = index.row()
