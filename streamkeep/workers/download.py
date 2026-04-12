@@ -10,6 +10,9 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..http import parallel_http_download
 from ..paths import _CREATE_NO_WINDOW
+from ..resume import (
+    clear_resume_state, merge_completed, save_resume_state,
+)
 from ..utils import fmt_duration, fmt_size
 
 
@@ -39,6 +42,32 @@ class DownloadWorker(QThread):
         self.max_retries = 2
         self.parallel_connections = 4
         self._cancel = False
+        # Resume sidecar state. When set the worker keeps it fresh on
+        # segment completion and clears it on a clean finish. Callers
+        # (main_window) attach this via `attach_resume_state` just before
+        # `start()` so the worker doesn't need to know about extractor
+        # metadata.
+        self._resume_state = None
+
+    def attach_resume_state(self, state):
+        """Attach a ResumeState. The worker will write it on start, refresh
+        it on each segment_done, and clear it on clean all_done.
+
+        `state.completed` is treated as authoritative on start — any segment
+        already listed is considered complete and skipped (after verifying
+        the file still exists on disk).
+        """
+        self._resume_state = state
+        if state is not None:
+            # Pull shape from the worker so the sidecar is self-contained.
+            state.playlist_url = self.playlist_url
+            state.format_type = self.format_type
+            state.audio_url = self.audio_url or ""
+            state.ytdlp_source = self.ytdlp_source or ""
+            state.ytdlp_format = self.ytdlp_format or ""
+            state.output_dir = self.output_dir
+            state.segments = [list(s) for s in self.segments]
+            save_resume_state(state)
 
     def cancel(self):
         self._cancel = True
@@ -113,6 +142,7 @@ class DownloadWorker(QThread):
                 size = os.path.getsize(outfile)
                 self.progress.emit(seg_idx, 100, "Complete")
                 self.segment_done.emit(seg_idx, fmt_size(size))
+                self._mark_segment_done(seg_idx)
                 self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
                 return True
 
@@ -132,10 +162,18 @@ class DownloadWorker(QThread):
             self.log.emit(f"[ERROR] {label}: {e}")
             return False
 
+    def _mark_segment_done(self, seg_idx):
+        """Merge the segment into the resume sidecar and persist it."""
+        if self._resume_state is None:
+            return
+        merge_completed(self._resume_state, seg_idx)
+        save_resume_state(self._resume_state)
+
     def run(self):
         for seg_idx, label, start, duration in self.segments:
             if self._cancel:
                 self.log.emit("Download cancelled.")
+                # Leave the sidecar in place — the user may resume.
                 return
 
             outfile = os.path.join(self.output_dir, f"{label}.mp4")
@@ -145,6 +183,7 @@ class DownloadWorker(QThread):
                 if size > 1024:
                     self.log.emit(f"[SKIP] {label} ({fmt_size(size)})")
                     self.segment_done.emit(seg_idx, fmt_size(size))
+                    self._mark_segment_done(seg_idx)
                     continue
 
             duration_label = "live" if is_live_capture else f"{duration}s"
@@ -204,6 +243,7 @@ class DownloadWorker(QThread):
                     size = os.path.getsize(outfile)
                     self.progress.emit(seg_idx, 100, "Complete")
                     self.segment_done.emit(seg_idx, fmt_size(size))
+                    self._mark_segment_done(seg_idx)
                     self.log.emit(
                         f"[DONE] {label} - {fmt_size(size)} "
                         f"(parallel x{self.parallel_connections})"
@@ -332,6 +372,7 @@ class DownloadWorker(QThread):
                         size = os.path.getsize(outfile)
                         self.progress.emit(seg_idx, 100, "Complete")
                         self.segment_done.emit(seg_idx, fmt_size(size))
+                        self._mark_segment_done(seg_idx)
                         self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
                         segment_done_flag = True
                         break
@@ -366,4 +407,8 @@ class DownloadWorker(QThread):
                 self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
 
         if not self._cancel:
+            # Clean finish — remove the resume sidecar so the startup banner
+            # won't offer to resume a completed download.
+            if self._resume_state is not None:
+                clear_resume_state(self.output_dir)
             self.all_done.emit()

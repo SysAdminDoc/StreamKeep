@@ -34,8 +34,14 @@ def bootstrap():
     # elsewhere, not as a Python import). playwright is an optional page
     # scraper. `deno` was a bogus entry — the user-space tool is a native
     # binary, not a pip package — and attempting to install it was one of
-    # the fork-bomb triggers.
-    optional = {"yt_dlp": "yt-dlp", "playwright": "playwright"}
+    # the fork-bomb triggers. send2trash powers storage-manager + retention
+    # recycle-bin deletion; optional so the app still launches without it
+    # (features degrade to a warning, never silent permanent delete).
+    optional = {
+        "yt_dlp": "yt-dlp",
+        "playwright": "playwright",
+        "send2trash": "send2trash",
+    }
     import importlib
 
     for mod, pkg in required.items():

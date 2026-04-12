@@ -9,6 +9,7 @@ on the next tick.
 
 import threading
 import time
+from datetime import datetime
 
 from PyQt6.QtCore import (
     QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, pyqtSlot,
@@ -17,6 +18,37 @@ from PyQt6.QtCore import (
 from .extractors import Extractor
 from .http import http_interruptible
 from .models import MonitorEntry
+
+
+def entry_in_schedule_window(entry, now=None):
+    """Return True if an entry's schedule window includes the given time.
+
+    An entry with no start/end is always in-window. Days_mask 0 means
+    "every day"; otherwise bit i (Mon=0 ... Sun=6) must be set. Windows
+    may wrap midnight (e.g. 22:00 -> 04:00 = overnight)."""
+    start = getattr(entry, "schedule_start_hhmm", "") or ""
+    end = getattr(entry, "schedule_end_hhmm", "") or ""
+    if not start or not end:
+        return True
+    if now is None:
+        now = datetime.now()
+    mask = int(getattr(entry, "schedule_days_mask", 0) or 0)
+    if mask and not (mask & (1 << now.weekday())):
+        return False
+    try:
+        sh, sm = (int(x) for x in start.split(":", 1))
+        eh, em = (int(x) for x in end.split(":", 1))
+    except (ValueError, AttributeError):
+        return True
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
+    cur_min = now.hour * 60 + now.minute
+    if start_min == end_min:
+        return True
+    if start_min < end_min:
+        return start_min <= cur_min < end_min
+    # Wrap around midnight.
+    return cur_min >= start_min or cur_min < end_min
 
 
 class _PollSignals(QObject):
@@ -155,7 +187,10 @@ class ChannelMonitor(QObject):
         entry = entries_snapshot[self._poll_idx % len(entries_snapshot)]
         self._poll_idx += 1
         # Skip if entry was removed between snapshot and dispatch, or if a
-        # previous slow poll for the same channel is still running.
+        # previous slow poll for the same channel is still running, or if
+        # the entry's schedule window doesn't include right now.
+        if not entry_in_schedule_window(entry):
+            return
         with self._entries_lock:
             if entry not in self.entries:
                 return
@@ -220,6 +255,14 @@ class ChannelMonitor(QObject):
                 "auto_record": e.auto_record,
                 "subscribe_vods": e.subscribe_vods,
                 "archive_ids": list(e.archive_ids),
+                # Per-channel profile overrides (v4.14.0).
+                "override_output_dir": e.override_output_dir or "",
+                "override_quality_pref": e.override_quality_pref or "",
+                "override_filename_template": e.override_filename_template or "",
+                "schedule_start_hhmm": e.schedule_start_hhmm or "",
+                "schedule_end_hhmm": e.schedule_end_hhmm or "",
+                "schedule_days_mask": int(e.schedule_days_mask or 0),
+                "retention_keep_last": int(e.retention_keep_last or 0),
             }
             for e in self.entries
         ]
@@ -233,8 +276,21 @@ class ChannelMonitor(QObject):
             )
             if ok:
                 archive_ids = ch.get("archive_ids", [])
-                if isinstance(archive_ids, list):
-                    for e in self.entries:
-                        if e.url == ch["url"]:
+                for e in self.entries:
+                    if e.url == ch["url"]:
+                        if isinstance(archive_ids, list):
                             e.archive_ids = [str(x) for x in archive_ids if x]
-                            break
+                        e.override_output_dir = str(ch.get("override_output_dir", "") or "")
+                        e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
+                        e.override_filename_template = str(ch.get("override_filename_template", "") or "")
+                        e.schedule_start_hhmm = str(ch.get("schedule_start_hhmm", "") or "")
+                        e.schedule_end_hhmm = str(ch.get("schedule_end_hhmm", "") or "")
+                        try:
+                            e.schedule_days_mask = int(ch.get("schedule_days_mask", 0) or 0)
+                        except (TypeError, ValueError):
+                            e.schedule_days_mask = 0
+                        try:
+                            e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
+                        except (TypeError, ValueError):
+                            e.retention_keep_last = 0
+                        break

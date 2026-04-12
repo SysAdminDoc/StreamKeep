@@ -70,4 +70,48 @@ class MonitorEntry:
     last_status: str = "unknown"          # live, offline, error
     is_recording: bool = False
     archive_ids: list = field(default_factory=list)  # already-seen VOD source IDs
+    # Per-channel overrides (v4.14.0). None means "use the global default".
+    override_output_dir: str = ""         # empty = inherit global output dir
+    override_quality_pref: str = ""       # "", "highest", "source", "720p", "480p", ...
+    override_filename_template: str = ""  # empty = inherit global template
+    schedule_start_hhmm: str = ""         # "20:00" or "" = always active
+    schedule_end_hhmm: str = ""           # "23:00" or "" = always active
+    schedule_days_mask: int = 0           # 0 = all days; bit 0=Mon ... bit 6=Sun
+    retention_keep_last: int = 0          # 0 = keep everything
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
+
+
+@dataclass
+class ResumeState:
+    """Sidecar written next to an in-flight download so it can be resumed
+    across app crashes, network drops, and power loss.
+
+    Persisted as <outdir>/.streamkeep_resume.json. One per output directory;
+    the worker refreshes it on start, segment_done, and cancel, and deletes
+    it on clean all_done."""
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    # Source identity — used both for URL re-resolve and to tell the user
+    # what they're resuming.
+    source_url: str = ""                  # original page URL the user pasted
+    platform: str = ""
+    title: str = ""
+    channel: str = ""
+    # Playback target that was actually handed to ffmpeg / yt-dlp. May be
+    # a stale token URL — on resume we re-resolve via the extractor before
+    # trusting it.
+    playlist_url: str = ""
+    format_type: str = "hls"
+    audio_url: str = ""
+    ytdlp_source: str = ""
+    ytdlp_format: str = ""
+    quality_name: str = ""
+    # Per-segment state. `segments` stores the original tuples as lists so
+    # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.
+    segments: list = field(default_factory=list)     # list[[idx, label, start, duration]]
+    completed: list = field(default_factory=list)    # list[int]
+    output_dir: str = ""
+    # For yt-dlp direct downloads, the outfile layout is single-file; we
+    # record the expected path so the resume banner can show progress.
+    expected_outfile: str = ""
