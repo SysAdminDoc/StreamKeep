@@ -10,13 +10,11 @@ Handles anything the native extractors don't. Includes:
 import json
 import os
 import re
-import subprocess
 import time
 import urllib.parse
 from pathlib import Path
 
 from ..http import http_interrupted, run_capture_interruptible
-from ..paths import _CREATE_NO_WINDOW
 from ..models import QualityInfo, StreamInfo
 from ..utils import fmt_duration, scan_browser_cookies
 from .base import Extractor

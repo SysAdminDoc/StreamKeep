@@ -9,7 +9,6 @@ predictable file layout and keeps the runtime unchanged.
 import copy
 import json
 import os
-import re
 import subprocess
 import urllib.parse
 from datetime import datetime, timedelta
@@ -743,7 +742,6 @@ class StreamKeep(QMainWindow):
         output_sub = output_path if len(output_path) <= 50 else f"...{output_path[-47:]}"
         finalize_active = bool(self._finalize_worker is not None and self._finalize_worker.isRunning())
         finalize_queued = len(self._finalize_tasks)
-        finalize_total = finalize_queued + (1 if finalize_active else 0)
         if finalize_active:
             if self._finalize_active_total:
                 finalize_value = f"{self._finalize_active_step}/{self._finalize_active_total}"
@@ -1512,7 +1510,7 @@ class StreamKeep(QMainWindow):
             return
         # Basic URL sanity — reject newlines/control chars
         if "\n" in url or "\r" in url or len(url) > 2048:
-            self._log(f"[CLIPBOARD] Rejected malformed URL")
+            self._log("[CLIPBOARD] Rejected malformed URL")
             return
         # Dedup: ignore if already in the input box (avoids re-fetching on focus switches)
         if url == self.url_input.text().strip():
@@ -1844,7 +1842,7 @@ class StreamKeep(QMainWindow):
 
     def _clear_monitor_seed_worker(self, channel_id):
         worker = self._monitor_seed_workers.pop(channel_id, None)
-        if worker is not None and not worker.isRunning():
+        if worker is not None and worker.isRunning():
             try:
                 worker.wait(200)
             except Exception:
@@ -2294,7 +2292,7 @@ class StreamKeep(QMainWindow):
             self._set_status(f"Batch complete. Downloaded {self._batch_total} VOD(s).", "success")
             self._notify("StreamKeep — Batch complete", f"Downloaded {self._batch_total} VOD(s)")
             self._send_webhook("batch complete", f"{self._batch_total} VODs",
-                               f"Batch download finished")
+                               "Batch download finished")
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.vod_dl_all_btn.setEnabled(True)
@@ -2575,9 +2573,9 @@ class StreamKeep(QMainWindow):
         self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
         self.download_worker.parallel_connections = self._parallel_connections
         if audio_url:
-            self._log(f"Audio merge: enabled (video-only format detected)")
+            self._log("Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
-            self._log(f"Download mode: yt-dlp direct (handles URL refresh + format merge)")
+            self._log("Download mode: yt-dlp direct (handles URL refresh + format merge)")
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
@@ -2774,7 +2772,7 @@ class StreamKeep(QMainWindow):
             else:
                 self._set_status("Channel added to the watch list.", "success")
         else:
-            self._log(f"[MONITOR] Cannot add: unsupported or duplicate")
+            self._log("[MONITOR] Cannot add: unsupported or duplicate")
             self._set_status("Channel could not be added. It may already exist or be unsupported.", "error")
 
     def _on_monitor_seed_done(self, channel_id, sources):
