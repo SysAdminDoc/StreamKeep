@@ -103,7 +103,10 @@ class FinalizeWorker(QThread):
             self.done.emit(result)
             return
 
-        orig = {k: getattr(PostProcessor, k) for k in snapshot}
+        # Only snapshot keys that actually exist on PostProcessor — a stale
+        # config key must not AttributeError-crash the entire finalize pass
+        # before metadata is even saved.
+        orig = {k: getattr(PostProcessor, k) for k in snapshot if hasattr(PostProcessor, k)}
         try:
             if info and out_dir:
                 steps = self._planned_steps(task, info, snapshot)
@@ -147,7 +150,8 @@ class FinalizeWorker(QThread):
                     self._emit_progress("Running post-processing", step_no, total_steps)
                 if snapshot and not self._interrupted():
                     for k, v in snapshot.items():
-                        setattr(PostProcessor, k, v)
+                        if hasattr(PostProcessor, k):
+                            setattr(PostProcessor, k, v)
                     if PostProcessor.has_any_preset():
                         PostProcessor.process_directory(
                             out_dir,
