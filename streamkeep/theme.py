@@ -47,6 +47,19 @@ QFrame#card, QFrame#panel, QFrame#footerBar {{
     border: 1px solid {CAT['stroke']};
     border-radius: 18px;
 }}
+QFrame#resumeBanner {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(250, 179, 135, 45),
+        stop: 1 rgba(137, 180, 250, 45)
+    );
+    border: 1px solid {CAT['peach']};
+    border-radius: 14px;
+}}
+QLabel#resumeBannerLabel {{
+    color: {CAT['text']};
+    font-weight: 600;
+}}
 QFrame#subtleCard, QFrame#metricCard, QFrame#toolbar {{
     background-color: {CAT['panelSoft']};
     border: 1px solid {CAT['stroke']};
