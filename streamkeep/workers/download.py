@@ -41,6 +41,11 @@ class DownloadWorker(QThread):
         self.sponsorblock = False
         self.max_retries = 2
         self.parallel_connections = 4
+        # When > 0 and the segment is a live capture (duration <= 0), the
+        # ffmpeg command switches to the `segment` muxer so a long live
+        # recording is written as `<label>_part%03d.mp4` chunks instead of
+        # one monolithic 40+ GB file.
+        self.chunk_length_secs = 0
         self._cancel = False
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
@@ -251,6 +256,96 @@ class DownloadWorker(QThread):
                     continue
                 else:
                     self.log.emit(f"[INFO] {label}: falling back to ffmpeg")
+
+            # Live-only: split long captures into chunks via ffmpeg segment
+            # muxer. The outfile pattern `<base>_part%03d.mp4` gives us
+            # `live_recording_part000.mp4`, `_part001.mp4`, ... aligned
+            # roughly to `chunk_length_secs`. Only applies to live captures
+            # (duration <= 0) with no extra audio merge and no mp4 direct
+            # branch — otherwise fall through to the normal cmd build.
+            chunk_mode = (
+                is_live_capture
+                and self.chunk_length_secs > 0
+                and not self.audio_url
+                and self.format_type != "ytdlp_direct"
+            )
+            if chunk_mode:
+                base = os.path.join(self.output_dir, f"{label}_part%03d.mp4")
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "-i", self.playlist_url,
+                    "-c", "copy",
+                    "-f", "segment",
+                    "-segment_time", str(int(self.chunk_length_secs)),
+                    "-reset_timestamps", "1",
+                    "-strftime", "0",
+                    "-y", base,
+                ]
+                self.log.emit(
+                    f"[CHUNK] Live capture will be split every "
+                    f"{self.chunk_length_secs}s into {label}_partNNN.mp4"
+                )
+                # Live chunked capture — single attempt (no retry on lives),
+                # then fall through to the outer for-loop's next segment
+                # (lives always have just one segment, so we'll exit).
+                try:
+                    self._proc = subprocess.Popen(
+                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                        text=True, bufsize=1, encoding="utf-8",
+                        errors="replace",
+                        creationflags=_CREATE_NO_WINDOW,
+                    )
+                    for line in self._proc.stderr:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
+                        if time_match:
+                            try:
+                                h = int(time_match.group(1))
+                                m = int(time_match.group(2))
+                                s = int(time_match.group(3))
+                            except (ValueError, IndexError):
+                                continue
+                            elapsed = h * 3600 + m * 60 + s
+                            self.progress.emit(
+                                seg_idx, 0,
+                                f"{elapsed}s captured (chunked)",
+                            )
+                    self._proc.wait()
+                    # On cancel / normal exit, count how many chunks got
+                    # written so the UI can emit `segment_done` with a
+                    # meaningful size.
+                    total_size = 0
+                    chunk_count = 0
+                    try:
+                        prefix = f"{label}_part"
+                        for entry in os.scandir(self.output_dir):
+                            if entry.is_file() and entry.name.startswith(prefix):
+                                total_size += entry.stat().st_size
+                                chunk_count += 1
+                    except OSError:
+                        pass
+                    if chunk_count > 0:
+                        self.segment_done.emit(seg_idx, fmt_size(total_size))
+                        self.log.emit(
+                            f"[DONE] {label} - {chunk_count} chunk(s), "
+                            f"{fmt_size(total_size)} total"
+                        )
+                        self._mark_segment_done(seg_idx)
+                    elif self._cancel:
+                        pass
+                    else:
+                        self.error.emit(seg_idx, "Chunked capture produced no files")
+                except FileNotFoundError:
+                    self.error.emit(seg_idx, "ffmpeg not found in PATH")
+                    self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
+                    return
+                except Exception as e:
+                    self.log.emit(f"[ERROR] {label}: {e}")
+                if self._cancel:
+                    return
+                continue  # next segment (but live is always single-seg)
 
             # Build ffmpeg command with optional audio merge
             if self.audio_url:

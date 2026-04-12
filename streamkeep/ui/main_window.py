@@ -49,6 +49,8 @@ from streamkeep.utils import (
     render_template as _render_template,
     build_template_context as _build_template_context,
     scan_browser_cookies as _scan_browser_cookies,
+    free_space_bytes as _free_space_bytes,
+    estimate_download_bytes as _estimate_download_bytes,
     DEFAULT_FOLDER_TEMPLATE,
     DEFAULT_FILE_TEMPLATE,
 )
@@ -151,8 +153,21 @@ class StreamKeep(QMainWindow):
         self._pending_auto_records = []
         self._batch_active = False
         self._monitor_seed_workers = {}
+        # Legacy singletons retained for back-compat with the closeEvent
+        # teardown path; the new parallel auto-record dicts below are the
+        # source of truth.
         self._auto_record_resolve_worker = None
         self._active_auto_record_channel = ""
+        # Parallel auto-record pool (v4.15.0). Foreground DownloadWorker
+        # remains the singular `self.download_worker`; auto-records live
+        # here keyed by channel_id so multiple lives can be captured at
+        # the same time without blocking each other on the foreground.
+        self._autorecord_resolvers = {}     # channel_id -> AutoRecordResolveWorker
+        self._autorecord_workers = {}       # channel_id -> DownloadWorker
+        self._autorecord_contexts = {}      # channel_id -> dict (out_dir, info, q_name, history_url)
+        self._parallel_autorecords = 2      # cap; overridden from config below
+        self._chunk_long_captures = False
+        self._chunk_length_secs = 7200      # 2 hours default
         self._finalize_tasks = []
         self._finalize_worker = None
         self._finalize_active_title = ""
@@ -190,6 +205,12 @@ class StreamKeep(QMainWindow):
             self.history_table.customContextMenuRequested.connect(self._on_history_context_menu)
         except Exception:
             pass
+        # Thumbnail loaders for History and Storage tables (lazy-filled).
+        from .thumb_loader import ThumbLoader
+        self._history_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
+        self._history_thumb_loader.thumb_ready.connect(self._on_history_thumb_ready)
+        self._storage_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
+        self._storage_thumb_loader.thumb_ready.connect(self._on_storage_thumb_ready)
         self._resume_candidates = []
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
@@ -323,6 +344,23 @@ class StreamKeep(QMainWindow):
         self._parallel_connections = max(1, min(16, conns))
         if hasattr(self, "parallel_spin"):
             self.parallel_spin.setValue(self._parallel_connections)
+        # v4.15.0: parallel auto-records + chunked live captures.
+        try:
+            par_ar = int(cfg.get("parallel_autorecords", 2))
+        except (TypeError, ValueError):
+            par_ar = 2
+        self._parallel_autorecords = max(1, min(4, par_ar))
+        if hasattr(self, "parallel_autorecords_spin"):
+            self.parallel_autorecords_spin.setValue(self._parallel_autorecords)
+        self._chunk_long_captures = bool(cfg.get("chunk_long_captures", False))
+        try:
+            self._chunk_length_secs = int(cfg.get("chunk_length_secs", 7200) or 7200)
+        except (TypeError, ValueError):
+            self._chunk_length_secs = 7200
+        if hasattr(self, "chunk_check"):
+            self.chunk_check.setChecked(self._chunk_long_captures)
+        if hasattr(self, "chunk_length_spin"):
+            self.chunk_length_spin.setValue(self._chunk_length_secs)
         # Twitch chat download
         TwitchExtractor.download_chat_enabled = bool(cfg.get("download_twitch_chat", False))
         if hasattr(self, "chat_check"):
@@ -594,6 +632,25 @@ class StreamKeep(QMainWindow):
                 arw.wait(1500)
             except Exception:
                 pass
+        # Tear down every parallel auto-record resolver + worker.
+        for key, worker in list(getattr(self, "_autorecord_resolvers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.requestInterruption()
+                    worker.wait(1500)
+            except Exception:
+                pass
+            self._autorecord_resolvers.pop(key, None)
+        for key, worker in list(getattr(self, "_autorecord_workers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.cancel()
+                    if not worker.wait(3000):
+                        worker.terminate()
+                        worker.wait(500)
+            except Exception:
+                pass
+            self._autorecord_workers.pop(key, None)
         for key, worker in list(getattr(self, "_monitor_seed_workers", {}).items()):
             try:
                 if worker is not None and worker.isRunning():
@@ -785,11 +842,18 @@ class StreamKeep(QMainWindow):
         self._set_metric(self.download_platform_value, self.download_platform_sub, platform_value, platform_sub)
         self._set_metric(self.download_duration_value, self.download_duration_sub, duration_value, duration_sub)
         self._set_metric(self.download_selection_value, self.download_selection_sub, selection_value, selection_sub)
+        # Append free-disk hint to the output card subline so users see
+        # what they have to work with before starting a long download.
+        free_bytes = _free_space_bytes(output_path) if output_path else None
+        free_label = f"{_fmt_size(free_bytes)} free" if free_bytes else ""
+        output_sub_with_free = output_sub or "Choose a destination folder"
+        if free_label:
+            output_sub_with_free = f"{free_label} \u2022 {output_sub_with_free}"
         self._set_metric(
             self.download_output_value,
             self.download_output_sub,
             _path_label(output_path),
-            output_sub or "Choose a destination folder",
+            output_sub_with_free,
         )
         if hasattr(self, "download_finalize_value"):
             self._set_metric(
@@ -1435,6 +1499,16 @@ class StreamKeep(QMainWindow):
         NATIVE_PROXY = proxy
         # Apply parallel connections (affects direct MP4 downloads)
         self._parallel_connections = max(1, min(16, self.parallel_spin.value()))
+        # Parallel auto-records + chunked live captures (v4.15.0).
+        if hasattr(self, "parallel_autorecords_spin"):
+            self._parallel_autorecords = max(1, min(4, self.parallel_autorecords_spin.value()))
+            self._config["parallel_autorecords"] = self._parallel_autorecords
+        if hasattr(self, "chunk_check"):
+            self._chunk_long_captures = self.chunk_check.isChecked()
+            self._config["chunk_long_captures"] = self._chunk_long_captures
+        if hasattr(self, "chunk_length_spin"):
+            self._chunk_length_secs = int(self.chunk_length_spin.value())
+            self._config["chunk_length_secs"] = self._chunk_length_secs
         # Apply bandwidth schedule rule
         self._bandwidth_rule = {
             "enabled": self.bw_enable_check.isChecked(),
@@ -1647,16 +1721,31 @@ class StreamKeep(QMainWindow):
 
     # ── Resume sidecar integration ───────────────────────────────────
 
-    def _attach_resume_to_worker(self, worker, *, resume_existing=None):
+    def _attach_resume_to_worker(self, worker, *, resume_existing=None, context=None):
         """Wire a ResumeState into a DownloadWorker just before start().
 
         If `resume_existing` is provided (from the startup-banner "Resume"
         action), its completed-segments list is preserved and re-used.
-        Otherwise a fresh state is built from the active stream context.
+        Otherwise a fresh state is built from `context` (dict with
+        source_url/platform/title/channel/quality_name keys) or, if None,
+        from `self._active_*` for backwards-compat with the foreground path.
         Silent on failure — a resume sidecar is nice-to-have, never required.
         """
         try:
-            info = self._active_stream_info or self.stream_info
+            if context is None:
+                info = self._active_stream_info or self.stream_info
+                source_url = self._active_history_url or ""
+                platform = (info.platform if info else "") or ""
+                title = (info.title if info else "") or ""
+                channel = (info.channel if info else "") or ""
+                quality_name = self._active_quality_name or ""
+            else:
+                info = context.get("info")
+                source_url = context.get("source_url") or ""
+                platform = context.get("platform") or (info.platform if info else "") or ""
+                title = context.get("title") or (info.title if info else "") or ""
+                channel = context.get("channel") or (info.channel if info else "") or ""
+                quality_name = context.get("quality_name") or ""
             if resume_existing is not None:
                 state = resume_existing
                 # Refresh the parts of the sidecar that can have changed
@@ -1670,11 +1759,11 @@ class StreamKeep(QMainWindow):
                 state.segments = [list(s) for s in worker.segments]
             else:
                 state = ResumeState(
-                    source_url=self._active_history_url or "",
-                    platform=(info.platform if info else "") or "",
-                    title=(info.title if info else "") or "",
-                    channel=(info.channel if info else "") or "",
-                    quality_name=self._active_quality_name or "",
+                    source_url=source_url,
+                    platform=platform,
+                    title=title,
+                    channel=channel,
+                    quality_name=quality_name,
                     output_dir=worker.output_dir,
                 )
             worker.attach_resume_state(state)
@@ -2728,6 +2817,12 @@ class StreamKeep(QMainWindow):
     def _on_download(self):
         if not self.stream_info:
             return False
+        # Disk-space preflight — catches "no more room on device" before
+        # ffmpeg runs for three hours and exits with a muxing error. Only
+        # warns when we have a meaningful estimate; lives / unknown-duration
+        # streams skip the check.
+        if not self._preflight_disk_space():
+            return False
         total_secs = self.stream_info.total_secs
         is_live_capture = bool(self.stream_info.is_live or total_secs <= 0)
 
@@ -2941,7 +3036,8 @@ class StreamKeep(QMainWindow):
         worker = self.download_worker
         resume_background_jobs = bool(
             self._queue_active_item is not None
-            or self._active_auto_record_channel
+            or self._autorecord_workers
+            or self._autorecord_resolvers
             or self._pending_auto_records
         )
         live_capture = bool(
@@ -2961,6 +3057,31 @@ class StreamKeep(QMainWindow):
             except Exception:
                 pass
             self.download_worker = None
+        # Also stop any parallel auto-records. The stop button is a global
+        # "halt everything the user is actively watching" — parallel lives
+        # included. (Use the Monitor tab's per-row Stop+Remove for selective
+        # stops.)
+        for ch_id in list(self._autorecord_workers.keys()):
+            w = self._autorecord_workers.get(ch_id)
+            if w is not None and w.isRunning():
+                try:
+                    w.cancel()
+                    if not w.wait(3000):
+                        w.terminate()
+                        w.wait(500)
+                except Exception:
+                    pass
+        self._autorecord_workers.clear()
+        self._autorecord_contexts.clear()
+        for ch_id in list(self._autorecord_resolvers.keys()):
+            w = self._autorecord_resolvers.get(ch_id)
+            if w is not None and w.isRunning():
+                try:
+                    w.requestInterruption()
+                    w.wait(1500)
+                except Exception:
+                    pass
+        self._autorecord_resolvers.clear()
         # Clear any green/red chunk overrides left on segment bars so the
         # next download starts from a neutral style instead of inheriting
         # the previous run's success/fail colors.
@@ -3006,6 +3127,40 @@ class StreamKeep(QMainWindow):
         out_dir = self._active_output_dir or self.output_input.text().strip()
         if os.path.isdir(out_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
+
+    def _preflight_disk_space(self):
+        """Show a confirm dialog when the estimated download size is more
+        than 80% of free space. Returns True if the user wants to proceed
+        (or the check is inapplicable), False to abort.
+
+        Lives and unknown-duration streams pass through silently since we
+        can't estimate them meaningfully.
+        """
+        try:
+            out_dir = self.output_input.text().strip() or str(_default_output_dir())
+            free = _free_space_bytes(out_dir)
+            estimate = _estimate_download_bytes(self.stream_info)
+            if not free or not estimate or estimate <= 0:
+                return True
+            if estimate <= free * 0.8:
+                return True
+            from PyQt6.QtWidgets import QMessageBox
+            box = QMessageBox(self)
+            box.setWindowTitle("Disk space warning")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f"This download could need about {_fmt_size(estimate)}, "
+                f"but only {_fmt_size(free)} is free on the output drive.\n\n"
+                "Continue anyway?"
+            )
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+            )
+            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            return box.exec() == QMessageBox.StandardButton.Yes
+        except Exception as e:
+            self._log(f"[PREFLIGHT] disk-space check failed: {e}")
+            return True
 
     def _on_trim_last(self):
         """Open the trim dialog for the most-recently-finished download."""
@@ -3125,6 +3280,45 @@ class StreamKeep(QMainWindow):
                         f"{e.interval_secs}s  \u23F0 {e.schedule_start_hhmm}-{e.schedule_end_hhmm}"
                     )
         self._refresh_monitor_summary()
+
+    def _refresh_active_recordings_panel(self):
+        """Update the Monitor-tab panel that shows every currently-active
+        auto-record + resolver. No-op if the panel isn't built yet (early
+        calls during __init__)."""
+        panel = getattr(self, "active_recordings_panel", None)
+        if panel is None:
+            return
+        rows = []
+        for ch_id in sorted(self._autorecord_resolvers.keys()):
+            if self._autorecord_resolvers[ch_id].isRunning():
+                rows.append((ch_id, "Resolving live URL...", False))
+        for ch_id in sorted(self._autorecord_workers.keys()):
+            ctx = self._autorecord_contexts.get(ch_id, {})
+            status = ctx.get("last_status") or "Starting"
+            had_err = bool(ctx.get("had_errors"))
+            label_text = f"{ch_id} — {status}"
+            if had_err:
+                label_text += "  (errors)"
+            rows.append((ch_id, label_text, True))
+        if not rows:
+            panel.setVisible(False)
+            return
+        panel.setVisible(True)
+        # Clear existing dynamic rows (keep the header label at index 0).
+        while self.active_recordings_rows_layout.count():
+            item = self.active_recordings_rows_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for _ch_id, text, _live in rows:
+            label = QLabel(text)
+            label.setObjectName("sectionBody")
+            label.setWordWrap(True)
+            self.active_recordings_rows_layout.addWidget(label)
+        # Header label reflects count.
+        self.active_recordings_header.setText(
+            f"Active recordings ({len(rows)})"
+        )
 
     def _on_monitor_edit(self, idx):
         """Open the per-channel profile dialog for entries[idx]."""
@@ -3300,23 +3494,28 @@ class StreamKeep(QMainWindow):
                     seed_worker.wait(500)
                 except Exception:
                     pass
-            resolve_worker = getattr(self, "_auto_record_resolve_worker", None)
+            # Stop just this channel's resolver + auto-record worker if
+            # they're active. Other parallel auto-records are unaffected.
+            resolve_worker = self._autorecord_resolvers.pop(channel_id, None)
             if resolve_worker is not None and resolve_worker.isRunning():
                 try:
-                    if getattr(resolve_worker, "channel_id", "") == channel_id:
-                        resolve_worker.requestInterruption()
-                        resolve_worker.wait(500)
-                        self._auto_record_resolve_worker = None
+                    resolve_worker.requestInterruption()
+                    resolve_worker.wait(500)
                 except Exception:
                     pass
-            if (
-                is_recording
-                and self._active_auto_record_channel == channel_id
-                and self.download_worker is not None
-                and self.download_worker.isRunning()
-            ):
+            ar_worker = self._autorecord_workers.get(channel_id)
+            if is_recording and ar_worker is not None and ar_worker.isRunning():
                 self._log(f"[AUTO-RECORD] Stopping active recording before removing {channel_id}")
-                self._on_stop()
+                try:
+                    ar_worker.cancel()
+                    if not ar_worker.wait(5000):
+                        ar_worker.terminate()
+                        ar_worker.wait(1000)
+                except Exception:
+                    pass
+                self._autorecord_workers.pop(channel_id, None)
+                self._autorecord_contexts.pop(channel_id, None)
+                self._refresh_active_recordings_panel()
         self.monitor.remove_channel(idx)
         self._persist_config()
         self._set_status("Channel removed from the watch list.", "success")
@@ -3342,8 +3541,22 @@ class StreamKeep(QMainWindow):
         return False
 
     def _auto_record_error(self, channel_id, err):
-        self._download_had_errors = True
+        ctx = self._autorecord_contexts.get(channel_id)
+        if ctx is not None:
+            ctx["had_errors"] = True
         self._log(f"[AUTO-RECORD] {channel_id}: {err}")
+
+    def _active_autorecord_count(self):
+        """Number of channels currently resolving + recording via auto-record."""
+        resolvers = sum(
+            1 for w in self._autorecord_resolvers.values()
+            if w is not None and w.isRunning()
+        )
+        workers = sum(
+            1 for w in self._autorecord_workers.values()
+            if w is not None and w.isRunning()
+        )
+        return resolvers + workers
 
     def _try_start_auto_record(self, channel_id):
         target = None
@@ -3353,19 +3566,17 @@ class StreamKeep(QMainWindow):
                 break
         if target is None:
             return False
-
-        existing = getattr(self, "download_worker", None)
-        if existing is not None and existing.isRunning():
+        # Already recording / resolving this specific channel — nothing to do.
+        if channel_id in self._autorecord_workers or channel_id in self._autorecord_resolvers:
             return False
-        resolver = getattr(self, "_auto_record_resolve_worker", None)
-        if resolver is not None and resolver.isRunning():
+        # Parallel cap: don't exceed `parallel_autorecords`. Foreground
+        # download_worker doesn't count toward this cap — it's a separate
+        # track that doesn't interfere.
+        cap = max(1, int(self._parallel_autorecords or 1))
+        if self._active_autorecord_count() >= cap:
+            # Re-queue for the next poll tick; don't fail outright.
+            self._queue_auto_record_retry(channel_id)
             return False
-        if existing is not None:
-            try:
-                existing.wait(500)
-            except Exception:
-                pass
-            self.download_worker = None
 
         # Respect the per-channel schedule window — if we're outside it,
         # defer auto-record until the next poll tick that lands inside.
@@ -3389,18 +3600,17 @@ class StreamKeep(QMainWindow):
         worker.log.connect(self._log)
         worker.resolved.connect(self._on_auto_record_resolved)
         worker.error.connect(self._on_auto_record_resolve_error)
-        self._auto_record_resolve_worker = worker
+        self._autorecord_resolvers[channel_id] = worker
         worker.start()
         return True
 
     def _on_auto_record_resolved(self, channel_id, info, q, out_dir):
-        worker = getattr(self, "_auto_record_resolve_worker", None)
-        if worker is not None and not worker.isRunning():
+        resolver = self._autorecord_resolvers.pop(channel_id, None)
+        if resolver is not None and not resolver.isRunning():
             try:
-                worker.wait(200)
+                resolver.wait(200)
             except Exception:
                 pass
-        self._auto_record_resolve_worker = None
 
         target = None
         for e in self.monitor.entries:
@@ -3408,21 +3618,17 @@ class StreamKeep(QMainWindow):
                 target = e
                 break
         if target is None:
+            self._refresh_active_recordings_panel()
             self._start_next_background_job()
             return
 
-        existing = getattr(self, "download_worker", None)
-        if existing is not None and existing.isRunning():
-            target.is_recording = False
-            self._queue_auto_record_retry(channel_id)
-            self._start_next_background_job()
-            return
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as e:
             self._log(f"[AUTO-RECORD] Cannot create output folder: {e}")
             target.is_recording = False
             self._refresh_monitor_summary()
+            self._refresh_active_recordings_panel()
             self._start_next_background_job()
             return
 
@@ -3444,40 +3650,72 @@ class StreamKeep(QMainWindow):
                 q = chosen
 
         segments = [(0, "live_recording", 0, 0)]
-        self._download_had_errors = False
-        self._set_download_context(
-            out_dir=out_dir,
-            quality_name=q.name or "Live Capture",
-            history_url=target.url,
-            info=info,
-        )
         worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
         worker.audio_url = q.audio_url
         worker.parallel_connections = self._parallel_connections
-        self._active_auto_record_channel = channel_id
+        # Live auto-split: when enabled, long live captures are chunked.
+        if self._chunk_long_captures:
+            worker.chunk_length_secs = int(self._chunk_length_secs or 0)
         worker.log.connect(self._log)
         worker.error.connect(lambda _idx, err, ch=channel_id: self._auto_record_error(ch, err))
-        worker.all_done.connect(lambda: self._auto_record_done(channel_id))
-        self.download_worker = worker
-        self._attach_resume_to_worker(worker)
+        worker.progress.connect(
+            lambda _idx, pct, status, ch=channel_id:
+            self._on_autorecord_progress(ch, pct, status)
+        )
+        worker.all_done.connect(lambda ch=channel_id: self._auto_record_done(ch))
+        self._autorecord_workers[channel_id] = worker
+        self._autorecord_contexts[channel_id] = {
+            "out_dir": out_dir,
+            "q_name": q.name or "Live Capture",
+            "info": info,
+            "history_url": target.url,
+            "title": getattr(info, "title", "") or channel_id,
+            "had_errors": False,
+            "last_status": "",
+        }
+        self._attach_resume_to_worker(
+            worker,
+            context={
+                "source_url": target.url,
+                "platform": getattr(info, "platform", "") or target.platform,
+                "title": getattr(info, "title", "") or "",
+                "channel": getattr(info, "channel", "") or channel_id,
+                "quality_name": q.name or "Live Capture",
+                "info": info,
+            },
+        )
         worker.start()
-        self._set_status(f"Auto-record started for {channel_id}.", "working")
+        self._refresh_active_recordings_panel()
+        self._set_status(
+            f"Auto-record started for {channel_id}"
+            + (f" ({self._active_autorecord_count()} parallel)."
+               if self._active_autorecord_count() > 1 else "."),
+            "working",
+        )
 
     def _on_auto_record_resolve_error(self, channel_id, err):
-        worker = getattr(self, "_auto_record_resolve_worker", None)
-        if worker is not None and not worker.isRunning():
+        resolver = self._autorecord_resolvers.pop(channel_id, None)
+        if resolver is not None and not resolver.isRunning():
             try:
-                worker.wait(200)
+                resolver.wait(200)
             except Exception:
                 pass
-        self._auto_record_resolve_worker = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
         self._refresh_monitor_summary()
+        self._refresh_active_recordings_panel()
         self._log(f"[AUTO-RECORD] Error: {err}")
         self._set_status(f"Auto-record could not start for {channel_id}: {err}", "warning")
         self._start_next_background_job()
+
+    def _on_autorecord_progress(self, channel_id, _pct, status):
+        """Update the Active Recordings panel entry for this channel."""
+        ctx = self._autorecord_contexts.get(channel_id)
+        if ctx is None:
+            return
+        ctx["last_status"] = status or ""
+        self._refresh_active_recordings_panel()
 
     def _on_channel_live(self, channel_id):
         """Called when a monitored channel goes live."""
@@ -3496,18 +3734,25 @@ class StreamKeep(QMainWindow):
             )
 
     def _auto_record_done(self, channel_id):
-        self._active_auto_record_channel = ""
+        ctx = self._autorecord_contexts.pop(channel_id, None) or {}
+        worker = self._autorecord_workers.pop(channel_id, None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(500)
+            except Exception:
+                pass
         finished_entry = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
                 finished_entry = e
+        out_dir = ctx.get("out_dir", "")
+        had_errors = bool(ctx.get("had_errors", False))
+        media_present = self._output_contains_media(out_dir)
         # Retention: if this channel has a keep-last limit, prune old
         # sibling recordings from the channel's output root after a
         # successful run.
-        if (finished_entry is not None
-                and not self._download_had_errors
-                and self._output_contains_media(self._active_output_dir)):
+        if finished_entry is not None and not had_errors and media_present:
             out_root = (
                 finished_entry.override_output_dir.strip()
                 if getattr(finished_entry, "override_output_dir", "")
@@ -3517,29 +3762,33 @@ class StreamKeep(QMainWindow):
                 self._apply_retention_for_channel(finished_entry, out_root)
             except Exception as e:
                 self._log(f"[RETENTION] error: {e}")
-        # Release the download_worker reference so the next manual/auto
-        # download doesn't orphan signals on the finished QThread. wait()
-        # is cheap here — run() has already returned.
-        dw = getattr(self, "download_worker", None)
-        if dw is not None and not dw.isRunning():
-            try:
-                dw.wait(500)
-            except Exception:
-                pass
-            self.download_worker = None
         self._log(f"[AUTO-RECORD] Recording ended for {channel_id}")
         self._refresh_monitor_summary()
-        if self._download_had_errors:
-            self._set_status(f"Auto-record for {channel_id} ended with errors. Check the log.", "warning")
-        elif not self._output_contains_media(self._active_output_dir):
-            self._set_status(f"Auto-record for {channel_id} finished without saving media.", "warning")
+        self._refresh_active_recordings_panel()
+        if had_errors:
+            self._set_status(
+                f"Auto-record for {channel_id} ended with errors. Check the log.",
+                "warning",
+            )
+        elif not media_present:
+            self._set_status(
+                f"Auto-record for {channel_id} finished without saving media.",
+                "warning",
+            )
         else:
             self._save_metadata(
-                self._active_output_dir,
-                self._active_quality_name or "Live Capture",
-                history_url=self._active_history_url,
-                info=self._active_stream_info,
+                out_dir,
+                ctx.get("q_name", "Live Capture") or "Live Capture",
+                history_url=ctx.get("history_url", ""),
+                info=ctx.get("info"),
             )
+            # Clear the resume sidecar — live captures never really "finish"
+            # via all_done for the single-segment worker, but a successful
+            # stop produced media, so we don't need a future resume.
+            try:
+                clear_resume_state(out_dir)
+            except Exception:
+                pass
             self._set_status(f"Auto-record finished for {channel_id}.", "success")
         self._start_next_background_job()
 
@@ -3835,12 +4084,70 @@ class StreamKeep(QMainWindow):
         self._history_view = ordered  # used by double-click handler
         self.history_table.setRowCount(len(ordered))
         for i, h in enumerate(ordered):
-            for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path]):
+            # Column 0 = thumbnail cell (lazy-loaded).
+            thumb_label = QLabel()
+            thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            thumb_label.setStyleSheet(
+                "background-color: #181825; border-radius: 6px; color: #6c7086;"
+            )
+            thumb_label.setText("…")
+            self.history_table.setCellWidget(i, 0, thumb_label)
+            # Data columns 1..6
+            for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path], start=1):
                 item = QTableWidgetItem(val)
-                if col in (0, 1, 3, 4):
+                if col in (1, 2, 4, 5):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.history_table.setItem(i, col, item)
+            # Queue a thumb request. Row key is the history-row identity
+            # (path + title) so scroll + re-filter reuses the cached pixmap.
+            media = self._first_media_file(h.path) if h.path else ""
+            if media:
+                self._history_thumb_loader.request((h.path, h.title), media)
         self._refresh_history_summary()
+
+    def _first_media_file(self, dir_path):
+        if not dir_path or not os.path.isdir(dir_path):
+            return ""
+        try:
+            for entry in sorted(os.scandir(dir_path), key=lambda e: e.name):
+                if not entry.is_file():
+                    continue
+                ext = os.path.splitext(entry.name)[1].lower()
+                # Pick the biggest video file — matches user intuition for
+                # "the recording" vs a tiny preview / chat json.
+                if ext in {".mp4", ".mkv", ".webm", ".mov", ".ts"}:
+                    return entry.path
+        except OSError:
+            return ""
+        return ""
+
+    def _on_history_thumb_ready(self, row_key, pix):
+        """Loader emitted a thumb — find the matching row and paint it."""
+        view = getattr(self, "_history_view", None) or []
+        for i, h in enumerate(view):
+            if (h.path, h.title) == row_key:
+                label = self.history_table.cellWidget(i, 0)
+                if label is not None:
+                    label.setPixmap(pix.scaled(
+                        100, 56,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                return
+
+    def _on_storage_thumb_ready(self, row_key, pix):
+        """Loader emitted a thumb — find the matching storage row and paint it."""
+        groups = getattr(self, "_storage_groups", None) or []
+        for i, g in enumerate(groups):
+            if g.dir_path == row_key:
+                label = self.storage_table.cellWidget(i, 0)
+                if label is not None:
+                    label.setPixmap(pix.scaled(
+                        100, 56,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                return
 
     def _on_history_search(self, _text):
         self._refresh_history_table()

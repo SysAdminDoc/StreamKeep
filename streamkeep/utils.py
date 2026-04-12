@@ -2,8 +2,46 @@
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
+
+
+def free_space_bytes(path):
+    """Return free bytes on the disk containing `path`, or None on error.
+
+    Walks up the path if needed (the target dir may not exist yet)."""
+    if not path:
+        return None
+    probe = path
+    for _ in range(6):
+        try:
+            return shutil.disk_usage(probe).free
+        except (FileNotFoundError, OSError, ValueError):
+            parent = os.path.dirname(probe)
+            if not parent or parent == probe:
+                return None
+            probe = parent
+    return None
+
+
+def estimate_download_bytes(stream_info):
+    """Rough estimate of total download size from a StreamInfo, based on
+    manifest bandwidth × total_secs × 1.05 container overhead. Returns
+    None when we can't make a meaningful guess (no duration / no
+    bandwidth). Picks the highest bandwidth quality — matches the UI's
+    default selection."""
+    if not stream_info:
+        return None
+    total_secs = float(getattr(stream_info, "total_secs", 0) or 0)
+    if total_secs <= 0:
+        return None
+    qualities = getattr(stream_info, "qualities", None) or []
+    bandwidths = [int(getattr(q, "bandwidth", 0) or 0) for q in qualities]
+    bw = max(bandwidths) if bandwidths else 0
+    if bw <= 0:
+        return None
+    return int((bw / 8.0) * total_secs * 1.05)
 
 
 DEFAULT_FOLDER_TEMPLATE = "{channel}/{date} - {title}"

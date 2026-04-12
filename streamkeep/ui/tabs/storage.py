@@ -100,27 +100,29 @@ def build_storage_tab(win):
     card_lay.addWidget(hdr)
 
     win.storage_table = QTableWidget()
-    win.storage_table.setColumnCount(6)
+    win.storage_table.setColumnCount(7)
     win.storage_table.setHorizontalHeaderLabels(
-        ["Platform", "Channel", "Title", "Files", "Size", "Path"]
+        ["", "Platform", "Channel", "Title", "Files", "Size", "Path"]
     )
     hh = win.storage_table.horizontalHeader()
     hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-    hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-    hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-    hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+    hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+    hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+    hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
     hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-    hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-    win.storage_table.setColumnWidth(0, 90)
-    win.storage_table.setColumnWidth(1, 180)
-    win.storage_table.setColumnWidth(3, 60)
-    win.storage_table.setColumnWidth(4, 92)
+    hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+    hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+    win.storage_table.setColumnWidth(0, 112)
+    win.storage_table.setColumnWidth(1, 90)
+    win.storage_table.setColumnWidth(2, 180)
+    win.storage_table.setColumnWidth(4, 60)
+    win.storage_table.setColumnWidth(5, 92)
     win.storage_table.verticalHeader().setVisible(False)
     win.storage_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     win.storage_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.storage_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.storage_table.itemSelectionChanged.connect(win._on_storage_selection_changed)
-    style_table(win.storage_table, 40)
+    style_table(win.storage_table, 72)
     card_lay.addWidget(win.storage_table)
 
     win.storage_empty_label = QLabel(
@@ -154,6 +156,14 @@ def populate_storage_table(win, scan):
     # directory from the selected row index.
     win._storage_groups = list(scan.groups)
     for i, g in enumerate(scan.groups):
+        # Column 0 = thumbnail cell (lazy-filled by ThumbLoader).
+        thumb_label = QLabel()
+        thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thumb_label.setStyleSheet(
+            "background-color: #181825; border-radius: 6px; color: #6c7086;"
+        )
+        thumb_label.setText("…")
+        table.setCellWidget(i, 0, thumb_label)
         items = [
             g.platform,
             g.channel,
@@ -162,11 +172,20 @@ def populate_storage_table(win, scan):
             fmt_size(g.total_size),
             g.dir_path,
         ]
-        for col, val in enumerate(items):
+        for col, val in enumerate(items, start=1):
             item = QTableWidgetItem(val)
-            if col in (0, 3, 4):
+            if col in (1, 4, 5):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             table.setItem(i, col, item)
+        # Pick the biggest video file in the folder for the thumbnail.
+        media = None
+        for f in g.files:
+            ext = os.path.splitext(f.path)[1].lower()
+            if ext in {".mp4", ".mkv", ".webm", ".mov", ".ts"}:
+                if media is None or f.size > getattr(media, "size", 0):
+                    media = f
+        if media is not None and hasattr(win, "_storage_thumb_loader"):
+            win._storage_thumb_loader.request(g.dir_path, media.path)
     win.storage_empty_label.setVisible(len(scan.groups) == 0)
     win.storage_delete_btn.setEnabled(False)
 

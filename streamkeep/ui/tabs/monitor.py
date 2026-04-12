@@ -57,6 +57,22 @@ def build_monitor_tab(win):
     hero_lay.addLayout(monitor_metrics)
     lay.addWidget(hero)
 
+    # Active Recordings panel — hidden when empty. Populated by
+    # StreamKeep._refresh_active_recordings_panel as workers start/finish.
+    win.active_recordings_panel = QFrame()
+    win.active_recordings_panel.setObjectName("activeRecordings")
+    win.active_recordings_panel.setVisible(False)
+    ar_lay = QVBoxLayout(win.active_recordings_panel)
+    ar_lay.setContentsMargins(16, 12, 16, 12)
+    ar_lay.setSpacing(6)
+    win.active_recordings_header = QLabel("Active recordings")
+    win.active_recordings_header.setObjectName("sectionTitle")
+    ar_lay.addWidget(win.active_recordings_header)
+    win.active_recordings_rows_layout = QVBoxLayout()
+    win.active_recordings_rows_layout.setSpacing(4)
+    ar_lay.addLayout(win.active_recordings_rows_layout)
+    lay.addWidget(win.active_recordings_panel)
+
     manage_card = QFrame()
     manage_card.setObjectName("card")
     manage_lay = QVBoxLayout(manage_card)

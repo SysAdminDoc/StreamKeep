@@ -258,6 +258,52 @@ def build_settings_tab(win):
     par_row.addStretch(1)
     network_lay.addLayout(par_row)
 
+    # Parallel auto-records (v4.15.0)
+    par_ar_row = QHBoxLayout()
+    par_ar_row.setSpacing(8)
+    par_ar_label = QLabel("Parallel auto-records:")
+    par_ar_label.setFixedWidth(140)
+    par_ar_row.addWidget(par_ar_label)
+    win.parallel_autorecords_spin = QSpinBox()
+    win.parallel_autorecords_spin.setRange(1, 4)
+    win.parallel_autorecords_spin.setValue(int(win._parallel_autorecords or 2))
+    win.parallel_autorecords_spin.setToolTip(
+        "Maximum simultaneous auto-recordings when multiple monitored "
+        "channels go live at the same time. Each recording uses its "
+        "own ffmpeg process."
+    )
+    par_ar_row.addWidget(win.parallel_autorecords_spin)
+    par_ar_hint = QLabel("channels captured at once (default 2)")
+    par_ar_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    par_ar_row.addWidget(par_ar_hint)
+    par_ar_row.addStretch(1)
+    network_lay.addLayout(par_ar_row)
+
+    # Chunked live recording (v4.15.0)
+    chunk_row = QHBoxLayout()
+    chunk_row.setSpacing(8)
+    win.chunk_check = QCheckBox("Split long live captures into chunks")
+    win.chunk_check.setChecked(bool(win._chunk_long_captures))
+    win.chunk_check.setToolTip(
+        "When enabled, live captures are written as sequential _part001.mp4, "
+        "_part002.mp4, ... files of the configured chunk length. Only applies "
+        "to live recordings (not VODs)."
+    )
+    chunk_row.addWidget(win.chunk_check)
+    win.chunk_length_spin = QSpinBox()
+    win.chunk_length_spin.setRange(600, 21600)       # 10 min .. 6 h
+    win.chunk_length_spin.setSingleStep(600)
+    win.chunk_length_spin.setSuffix(" sec")
+    win.chunk_length_spin.setValue(int(win._chunk_length_secs or 7200))
+    win.chunk_length_spin.setEnabled(bool(win._chunk_long_captures))
+    win.chunk_check.toggled.connect(win.chunk_length_spin.setEnabled)
+    chunk_row.addWidget(win.chunk_length_spin)
+    chunk_hint = QLabel("per chunk (default 2 hours)")
+    chunk_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    chunk_row.addWidget(chunk_hint)
+    chunk_row.addStretch(1)
+    network_lay.addLayout(chunk_row)
+
     # Load saved network settings
     saved_rate = win._config.get("rate_limit", "")
     saved_proxy = win._config.get("proxy", "")

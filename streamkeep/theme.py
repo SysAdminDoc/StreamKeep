@@ -47,6 +47,15 @@ QFrame#card, QFrame#panel, QFrame#footerBar {{
     border: 1px solid {CAT['stroke']};
     border-radius: 18px;
 }}
+QFrame#activeRecordings {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(166, 227, 161, 35),
+        stop: 1 rgba(137, 180, 250, 25)
+    );
+    border: 1px solid {CAT['green']};
+    border-radius: 14px;
+}}
 QFrame#resumeBanner {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 0,
