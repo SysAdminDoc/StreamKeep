@@ -148,7 +148,7 @@
   add/remove/reorder. ClipWorker: ffmpeg concat demuxer for multi-range export.
   Start with hard-cut (stream-copy). Add crossfade toggle later (requires re-encode).
 
-- [ ] **F30 — Scene Detection + Storyboard** (Medium, ~150-180 lines)
+- [x] **F30 — Scene Detection + Storyboard** (Medium, ~150-180 lines)
   Optional dep: `scenedetect`. New `postprocess/scene_worker.py` runs
   `ContentDetector`, extracts thumbnail per scene boundary, caches as sprite sheet.
   ClipDialog: scrollable storyboard panel below filmstrip (click to jump).
