@@ -67,8 +67,16 @@ def build_download_tab(win):
     finalize_card, win.download_finalize_value, win.download_finalize_sub = make_metric_card(
         "Finalize", "Idle", "Metadata and post-processing will queue here"
     )
+    speed_card, win.download_speed_value, win.download_speed_sub = make_metric_card(
+        "Speed", "—", "Starts during download"
+    )
+    eta_card, win.download_eta_value, win.download_eta_sub = make_metric_card(
+        "ETA", "—", "Estimated time remaining"
+    )
     metrics_row.addWidget(duration_card)
     metrics_row.addWidget(selection_card)
+    metrics_row.addWidget(speed_card)
+    metrics_row.addWidget(eta_card)
     metrics_row.addWidget(output_card, 1)
     metrics_row.addWidget(finalize_card)
     hero_lay.addLayout(metrics_row)
