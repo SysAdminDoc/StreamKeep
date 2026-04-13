@@ -389,7 +389,7 @@
   Sidebar listing chapters + bookmarks. Click to seek. "Add bookmark here"
   saves current position with label. Loads from metadata.json + HistoryEntry.
 
-- [ ] **F56 — Playback Speed & Audio EQ Controls** (Small, ~80-100 lines)
+- [x] **F56 — Playback Speed & Audio EQ Controls** (Small, ~80-100 lines) v4.27.4
   Speed combo (0.25x-3x), 5-band EQ sliders, dynaudnorm toggle, mono/stereo.
   All via mpv properties. Persist globally or per-recording.
 

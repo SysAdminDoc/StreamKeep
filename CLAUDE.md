@@ -6,7 +6,7 @@
 - curl for API/playlist fetching
 - yt-dlp as optional fallback extractor
 
-## Package Layout (v4.25.0)
+## Package Layout (v4.27.4)
 
 ```
 StreamKeep.py                    59 lines  — launcher only
@@ -38,8 +38,15 @@ streamkeep/
     codecs.py                           — VIDEO/AUDIO_CODECS + HW encoder probe
     processor.py    PostProcessor       — all presets + converter
     convert_worker.py ConvertWorker     — standalone batch converter
+  player/                                 — embedded media player (F52-F56)
+    mpv_widget.py   MpvWidget           — libmpv Qt wrapper
+    player_controls.py PlayerControls   — transport + EQ + speed
+    player_panel.py PlayerPanel         — composite dialog
+    chapter_panel.py ChapterPanel       — sidebar navigation
+    pip_window.py   PiPWindow           — picture-in-picture overlay
+    sync_viewer.py  SyncViewer          — multi-stream grid
   ui/
-    main_window.py                      — StreamKeep QMainWindow (3751 lines — Phase 2 god object)
+    main_window.py                      — StreamKeep QMainWindow
 ```
 
 ## Architecture
@@ -105,6 +112,11 @@ No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 - v4.26.2 — **Proxy Pool with Per-Platform Routing (F49).** New `proxy.py`: multi-proxy pool, `resolve_proxy(url)` detects platform from domain, returns assigned proxy. Health check via curl timing.
 - v4.26.3 — **DASH/MPD Manifest Support (F50).** New `dash.py`: parses MPD XML into QualityInfo entries. SegmentTemplate, SegmentList, BaseURL. DRM detection + skip. ISO 8601 duration.
 - v4.26.4 — **Download Speed Scheduling (F51).** New `scheduler.py`: day/night/weekend speed tiers. `get_active_limit()` returns the right limit for the current time. Integrated into bandwidth rule timer. Settings UI: day hours, night limit, weekend limit.
+- v4.27.0 — **Embedded Media Player (F52).** New `streamkeep/player/` package: `MpvWidget` (libmpv via python-mpv, wid embedding, hw-accel), `PlayerControls` (transport bar), `PlayerPanel` (dialog with metadata + controls + keyboard shortcuts). History double-click plays in-app, persists watch position.
+- v4.27.1 — **Picture-in-Picture Mini Player (F53).** `PiPWindow`: floating always-on-top frameless, drag-to-move, re-parents MpvWidget from PlayerPanel. PiP button in controls.
+- v4.27.2 — **Multi-Stream Sync Viewer (F54).** `SyncViewer`: 2-4 mpv instances in adaptive grid, shared transport, per-stream audio toggle + offset +-30s. History multi-select context menu.
+- v4.27.3 — **Chapter & Bookmark Navigation Panel (F55).** `ChapterPanel`: sidebar listing chapters from metadata.json + .chapters.auto.txt + embedded MP4 + user bookmarks. Click to seek, add bookmark at current position.
+- v4.27.4 — **Playback Speed & Audio EQ Controls (F56).** 5-band EQ (superequalizer), dynaudnorm toggle, mono/stereo toggle. Speed combo 0.25x-3x. All via mpv properties.
 - v4.17.0 — **Round-4 pack: Kick chat, share bundles, Whisper, per-platform quality, Notifications Center.**
   1. **Kick live chat (Pusher WS)** — new `streamkeep/chat/kick_ws.py` `KickChatReader`. Resolves the chatroom id via `GET /api/v2/channels/{slug}`, connects to `wss://ws-{cluster}.pusher.com/app/{key}`, subscribes `chatrooms.<id>.v2`, parses `App\\Events\\ChatMessageEvent` envelopes into the same `{ts, nick, message, ...}` shape `ChatWorker` already consumes. Hard-coded Pusher app-key + cluster with an HTML-scrape fallback so rotations aren't fatal. `ChatWorker` now dispatches on `platform` so auto-record on Twitch or Kick captures chat; other platforms fall through silently. Depends on `websocket-client` (added to `bootstrap.py` optional list + the CI build step); missing dep = clear log message, never silent failure.
   2. **Share-archive export bundle** — new `streamkeep/postprocess/bundle_worker.py` `BundleWorker`. Walks a recording folder, keeps only media + sidecars (mp4, mkv, json, nfo, ass, srt, vtt, txt, jsonl, images), skips dot-prefixed caches (`.streamkeep_thumb.jpg`, `.streamkeep_resume.json`). Writes a `.zip` with `zipfile.ZIP_DEFLATED compresslevel=1` (already-compressed video barely re-compresses, so this just packages fast). `allowZip64=True` so >4 GB bundles work. Path-traversal guard via `_safe_relpath` — refuses any file whose resolved path escapes the recording root. Entry points: right-click in History or Storage → **Export share bundle (.zip)...**, default file name is `<folder>.zip` next to the recording dir.
