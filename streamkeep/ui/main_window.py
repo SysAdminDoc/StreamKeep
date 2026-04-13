@@ -5716,6 +5716,13 @@ class StreamKeep(QMainWindow):
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         silence_act = menu.addAction("Remove silence...")
         silence_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        # Chat highlights (F8) — only if chat.jsonl exists
+        has_chat = bool(
+            h.path and os.path.isdir(h.path)
+            and os.path.isfile(os.path.join(h.path, "chat.jsonl"))
+        )
+        chat_highlights_act = menu.addAction("Show chat highlights")
+        chat_highlights_act.setEnabled(has_chat)
         menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
@@ -5740,6 +5747,8 @@ class StreamKeep(QMainWindow):
             self._start_transcribe_for_dir(h.path)
         elif chosen == silence_act and h.path and os.path.isdir(h.path):
             self._run_silence_removal_for_dir(h.path)
+        elif chosen == chat_highlights_act and has_chat:
+            self._show_chat_highlights(h.path)
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
@@ -5776,6 +5785,35 @@ class StreamKeep(QMainWindow):
                 self.output_input.setText(parent)
         self._log(f"[RE-DOWNLOAD] {h.title or h.url[:80]}")
         self._on_fetch()
+
+    def _show_chat_highlights(self, src_dir):
+        """Show chat spike timestamps in the log and open Trim dialog."""
+        jsonl = os.path.join(src_dir, "chat.jsonl")
+        if not os.path.isfile(jsonl):
+            return
+        try:
+            from ..chat.spike_detect import detect_spikes
+        except Exception:
+            self._log("[CHAT] Could not load spike detector.")
+            return
+        spikes = detect_spikes(jsonl)
+        if not spikes:
+            self._log("[CHAT] No chat activity spikes found.")
+            self._set_status("No chat spikes detected in this recording.", "info")
+            return
+        self._log(f"\n[CHAT] Found {len(spikes)} chat spike(s):")
+        for sp in spikes:
+            t = sp["time"]
+            h = int(t // 3600)
+            m = int((t % 3600) // 60)
+            s = int(t % 60)
+            self._log(
+                f"  {h:02d}:{m:02d}:{s:02d}  —  "
+                f"{sp['count']} msgs ({sp['score']:.1f}σ)"
+            )
+        self._set_status(f"{len(spikes)} chat spike(s) found — see log.", "success")
+        # Open trim dialog so user sees the spike markers on the filmstrip
+        self._open_clip_dialog_for_dir(src_dir)
 
     def _run_silence_removal_for_dir(self, src_dir):
         """Run silence removal on the largest video in the folder."""
