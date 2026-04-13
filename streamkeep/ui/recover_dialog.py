@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
+from ..theme import CAT
+
 
 class _RecoverWorker(QThread):
     """Run recovery in background thread."""
@@ -58,7 +60,7 @@ class RecoverDialog(QDialog):
 
         root.addWidget(QLabel(
             "<b>Recover Deleted / Expired Twitch VODs</b><br>"
-            "<span style='color:#6c7086;'>Searches TwitchTracker for stream "
+            f"<span style='color:{CAT['overlay0']};'>Searches TwitchTracker for stream "
             "metadata and tests if CDN segments are still cached. "
             "Recovery is not guaranteed — Twitch purges CDN caches over time.</span>"
         ))
@@ -164,7 +166,7 @@ class RecoverDialog(QDialog):
             q_count = len(info.qualities)
             q_item = QTableWidgetItem(f"{q_count} stream(s)")
             q_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            q_item.setForeground(QColor("#a6e3a1"))
+            q_item.setForeground(QColor(CAT["green"]))
             self.table.setItem(i, 2, q_item)
 
             dl_btn = QPushButton("Download")

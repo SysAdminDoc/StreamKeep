@@ -14,8 +14,6 @@ from PyQt6.QtGui import QPixmap
 
 from ..postprocess import ThumbWorker, single_thumb_path
 
-PLACEHOLDER_COLOR = "#181825"
-
 
 class ThumbLoader(QObject):
     thumb_ready = pyqtSignal(object, QPixmap)   # row_key, pixmap
