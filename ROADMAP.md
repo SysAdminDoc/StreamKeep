@@ -322,7 +322,7 @@
   `--monitor` for headless auto-record. `--server` for REST API only.
   Extract shared engine from `main_window.py` into `streamkeep/engine.py`.
 
-- [ ] **F43 — Portable Mode** (Small, ~15-20 lines)
+- [x] **F43 — Portable Mode** (Small, ~15-20 lines) v4.25.2
   `portable.txt` marker file → store config/db/logs in `data/` next to exe.
   Redirect `CONFIG_DIR` in `paths.py` before any imports.
 
