@@ -377,7 +377,7 @@
   volume, speed, subtitle tracks, chapter markers, fullscreen. Persists
   playback position for resume. Double-click History/Storage to play.
 
-- [ ] **F53 — Picture-in-Picture Mini Player** (Small-Med, ~120-150 lines)
+- [x] **F53 — Picture-in-Picture Mini Player** (Small-Med, ~120-150 lines) v4.27.1
   Floating always-on-top `QWidget`. Re-parent mpv widget from main player.
   Drag to move, resize handle, click to expand back. Minimal controls.
 
