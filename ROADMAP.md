@@ -165,7 +165,7 @@
 ## Phase 4 — Notifications, Hooks & Integration
 > External connections — make StreamKeep play well with other tools.
 
-- [ ] **F4 — Persistent Notification Log Viewer** (Medium, ~120-150 lines)
+- [x] **F4 — Persistent Notification Log Viewer** (Medium, ~120-150 lines)
   File-backed notification persistence (JSON lines in `notifications.jsonl`).
   New log viewer dialog: filterable by severity, searchable, exportable.
   Wire to existing `_notify_center()` call sites.
