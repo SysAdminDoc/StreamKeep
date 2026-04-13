@@ -163,6 +163,12 @@ class StreamKeep(QMainWindow):
         self._download_had_errors = False
         self._queue_active_item = None
         self._queue_autostart = False
+        # Concurrent queue workers (F1). Each active queue item gets its own
+        # fetch + download pipeline, keyed by id(item).
+        self._queue_workers = {}          # id(item) -> DownloadWorker
+        self._queue_fetch_workers = {}    # id(item) -> FetchWorker
+        self._queue_contexts = {}         # id(item) -> dict
+        self._max_concurrent_downloads = 3
         self._pending_auto_records = []
         self._batch_active = False
         self._monitor_seed_workers = {}
@@ -547,6 +553,14 @@ class StreamKeep(QMainWindow):
         self._parallel_autorecords = max(1, min(4, par_ar))
         if hasattr(self, "parallel_autorecords_spin"):
             self.parallel_autorecords_spin.setValue(self._parallel_autorecords)
+        # Concurrent queue downloads (v4.19.0 — F1).
+        try:
+            cq = int(cfg.get("max_concurrent_downloads", 3))
+        except (TypeError, ValueError):
+            cq = 3
+        self._max_concurrent_downloads = max(1, min(8, cq))
+        if hasattr(self, "concurrent_queue_spin"):
+            self.concurrent_queue_spin.setValue(self._max_concurrent_downloads)
         self._chunk_long_captures = bool(cfg.get("chunk_long_captures", False))
         try:
             self._chunk_length_secs = int(cfg.get("chunk_length_secs", 7200) or 7200)
@@ -683,6 +697,7 @@ class StreamKeep(QMainWindow):
         cfg["download_queue"] = list(self._download_queue)
         cfg["write_nfo"] = self._write_nfo
         cfg["parallel_connections"] = self._parallel_connections
+        cfg["max_concurrent_downloads"] = self._max_concurrent_downloads
         cfg["download_twitch_chat"] = TwitchExtractor.download_chat_enabled
         cfg["pp_extract_audio"] = PostProcessor.extract_audio
         cfg["pp_normalize_loudness"] = PostProcessor.normalize_loudness
@@ -940,6 +955,27 @@ class StreamKeep(QMainWindow):
             except Exception:
                 pass
             self._autorecord_workers.pop(key, None)
+        # Tear down concurrent queue fetch workers.
+        for key, worker in list(getattr(self, "_queue_fetch_workers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.requestInterruption()
+                    worker.wait(1500)
+            except Exception:
+                pass
+            self._queue_fetch_workers.pop(key, None)
+        # Tear down concurrent queue download workers.
+        for key, worker in list(getattr(self, "_queue_workers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.cancel()
+                    if not worker.wait(3000):
+                        worker.terminate()
+                        worker.wait(500)
+            except Exception:
+                pass
+            self._queue_workers.pop(key, None)
+        self._queue_contexts.clear()
         for key, worker in list(getattr(self, "_chat_workers", {}).items()):
             try:
                 if worker is not None and worker.isRunning():
@@ -1817,6 +1853,9 @@ class StreamKeep(QMainWindow):
         if hasattr(self, "parallel_autorecords_spin"):
             self._parallel_autorecords = max(1, min(4, self.parallel_autorecords_spin.value()))
             self._config["parallel_autorecords"] = self._parallel_autorecords
+        if hasattr(self, "concurrent_queue_spin"):
+            self._max_concurrent_downloads = max(1, min(8, self.concurrent_queue_spin.value()))
+            self._config["max_concurrent_downloads"] = self._max_concurrent_downloads
         if hasattr(self, "chunk_check"):
             self._chunk_long_captures = self.chunk_check.isChecked()
             self._config["chunk_long_captures"] = self._chunk_long_captures
@@ -5038,49 +5077,203 @@ class StreamKeep(QMainWindow):
             return removed
         return None
 
-    def _advance_queue(self):
-        """Start the next queued item if nothing is downloading.
-        Scheduled items (start_at in the future) are skipped."""
-        worker = getattr(self, "download_worker", None)
-        if worker is not None and worker.isRunning():
-            return
-        resolve_worker = getattr(self, "_auto_record_resolve_worker", None)
-        if resolve_worker is not None and resolve_worker.isRunning():
-            return
-        fetch_worker = getattr(self, "_fetch_worker", None)
-        if fetch_worker is not None and fetch_worker.isRunning():
-            return
+    def _active_queue_download_count(self):
+        """Return the number of currently active queue downloads + fetches."""
+        active = len([w for w in self._queue_workers.values() if w.isRunning()])
+        active += len([w for w in self._queue_fetch_workers.values() if w.isRunning()])
+        # Count the legacy single-worker path too
         if self._queue_active_item is not None:
+            active += 1
+        return active
+
+    def _advance_queue(self):
+        """Start the next queued item(s) up to the concurrent download limit.
+        Scheduled items (start_at in the future) are skipped."""
+        # Legacy foreground worker blocks legacy queue path
+        worker = getattr(self, "download_worker", None)
+        fg_busy = worker is not None and worker.isRunning()
+        # Check concurrent capacity
+        cap = max(1, int(self._max_concurrent_downloads))
+        active = self._active_queue_download_count()
+        if active >= cap:
+            return
+        # Also block if legacy single-worker fetch is running and there's
+        # an active queue item using the old path
+        if self._queue_active_item is not None and fg_busy:
             return
         now = datetime.now()
-        next_item = None
+        ready = []
+        active_ids = set(self._queue_workers.keys()) | set(self._queue_fetch_workers.keys())
         for q in self._download_queue:
             if q.get("status") != "queued":
+                continue
+            if id(q) in active_ids:
                 continue
             start_at = q.get("start_at", "")
             if start_at:
                 try:
                     ts = datetime.fromisoformat(start_at)
                     if ts > now:
-                        continue  # still scheduled, skip
+                        continue
                 except Exception:
                     pass
-            next_item = q
-            break
-        if not next_item:
+            ready.append(q)
+            if active + len(ready) >= cap:
+                break
+        if not ready:
             return
-        self._queue_active_item = next_item
-        self._queue_autostart = True
-        self._set_queue_item_status(next_item, "fetching")
-        self._log(f"[QUEUE] Auto-starting: {next_item.get('title', '')[:60]}")
-        self.url_input.setText(next_item["url"])
-        self._switch_tab(0)
-        self._on_fetch(
-            vod_source=next_item.get("vod_source") or None,
-            vod_platform=next_item.get("vod_platform") or None,
-            vod_title=next_item.get("vod_title") or next_item.get("title") or None,
-            vod_channel=next_item.get("vod_channel") or None,
+        for item in ready:
+            self._start_queue_item(item)
+
+    def _start_queue_item(self, item):
+        """Launch a fetch→download pipeline for a single queue item using
+        a dedicated FetchWorker (concurrent, doesn't touch the UI state)."""
+        item_id = id(item)
+        self._set_queue_item_status(item, "fetching")
+        self._log(f"[QUEUE] Starting: {item.get('title', '')[:60]}")
+        # Use a dedicated FetchWorker that doesn't share the foreground UI state
+        url = item.get("vod_source") or item["url"]
+        fetch = FetchWorker(url)
+        fetch.done.connect(
+            lambda info, it=item: self._on_queue_fetch_done(it, info)
         )
+        fetch.error.connect(
+            lambda err, it=item: self._on_queue_fetch_error(it, err)
+        )
+        self._queue_fetch_workers[item_id] = fetch
+        fetch.start()
+
+    def _on_queue_fetch_done(self, item, info):
+        """Handle fetch completion for a concurrent queue item."""
+        item_id = id(item)
+        fw = self._queue_fetch_workers.pop(item_id, None)
+        if fw and not fw.isRunning():
+            try:
+                fw.wait(200)
+            except Exception:
+                pass
+        if info is None:
+            self._set_queue_item_status(item, "failed", "Fetch returned no data")
+            self._log(f"[QUEUE] Fetch failed: {item.get('title', '')[:60]}")
+            self._advance_queue()
+            return
+        # Pick the best quality
+        q_data = None
+        if info.qualities:
+            q_data = info.qualities[0]  # Highest quality (pre-sorted)
+        if q_data is None and not info.url:
+            self._set_queue_item_status(item, "failed", "No playable quality")
+            self._advance_queue()
+            return
+        # Build segments and output path
+        playlist_url = q_data.url if q_data else info.url
+        fmt_type = q_data.format_type if q_data else "hls"
+        audio_url = q_data.audio_url if q_data else ""
+        ytdlp_source = q_data.ytdlp_source if q_data else ""
+        ytdlp_format = q_data.ytdlp_format if q_data else ""
+        is_live = info.is_live or info.total_secs <= 0
+        title_safe = _safe_filename(info.title or item.get("title") or "download")
+        segments = [(0, title_safe, 0, 0 if is_live else int(info.total_secs))]
+        ctx = _build_template_context(info)
+        folder_parts = _render_template(self._folder_template, ctx)
+        base_out = self.output_input.text().strip() or str(_default_output_dir())
+        out_dir = os.path.join(base_out, *folder_parts) if folder_parts else base_out
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as e:
+            self._set_queue_item_status(item, "failed", f"Cannot create dir: {e}")
+            self._advance_queue()
+            return
+        # Create and start the DownloadWorker
+        self._set_queue_item_status(item, "downloading")
+        self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
+        worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
+        worker.audio_url = audio_url
+        worker.ytdlp_source = ytdlp_source
+        worker.ytdlp_format = ytdlp_format
+        worker.cookies_browser = YtDlpExtractor.cookies_browser
+        # Share bandwidth across concurrent workers
+        rl = YtDlpExtractor.rate_limit
+        active_count = self._active_queue_download_count() + 1
+        if rl and active_count > 1:
+            try:
+                rl_bytes = int(rl.replace("M", "000000").replace("K", "000").replace("k", "000"))
+                shared = max(100000, rl_bytes // active_count)
+                rl = str(shared)
+            except (ValueError, AttributeError):
+                pass
+        worker.rate_limit = rl
+        worker.proxy = YtDlpExtractor.proxy
+        worker.download_subs = YtDlpExtractor.download_subs
+        worker.sponsorblock = YtDlpExtractor.sponsorblock
+        worker.parallel_connections = self._parallel_connections
+        worker.log.connect(self._log)
+        worker.all_done.connect(lambda it=item, inf=info: self._on_queue_item_done(it, inf, out_dir))
+        worker.error.connect(lambda _idx, err, it=item: self._on_queue_item_error(it, err))
+        self._queue_workers[item_id] = worker
+        self._queue_contexts[item_id] = {
+            "out_dir": out_dir, "info": info,
+            "q_name": q_data.name if q_data else "",
+        }
+        worker.start()
+        self._update_tray_badge()
+        self._refresh_queue_table()
+        # Try to fill remaining slots
+        self._advance_queue()
+
+    def _on_queue_fetch_error(self, item, err):
+        """Handle fetch error for a concurrent queue item."""
+        item_id = id(item)
+        self._queue_fetch_workers.pop(item_id, None)
+        self._set_queue_item_status(item, "failed", str(err)[:120])
+        self._log(f"[QUEUE] Fetch error for {item.get('title', '')[:60]}: {err}")
+        self._advance_queue()
+
+    def _on_queue_item_done(self, item, info, out_dir):
+        """Handle download completion for a concurrent queue item."""
+        item_id = id(item)
+        ctx = self._queue_contexts.pop(item_id, {})
+        worker = self._queue_workers.pop(item_id, None)
+        if worker and not worker.isRunning():
+            try:
+                worker.wait(500)
+            except Exception:
+                pass
+        title = info.title if info else item.get("title", "Download")
+        self._log(f"[QUEUE] Complete: {title[:60]}")
+        self._notify_center(f"Queue download complete: {title[:50]}", "success")
+        # Save metadata + history entry
+        q_name = ctx.get("q_name", "")
+        self._save_metadata(out_dir, q_name, history_url=item.get("url", ""), info=info)
+        # Handle recurrence or mark done
+        rec = (item.get("recurrence") or "").strip()
+        if rec:
+            next_fire = self._compute_next_fire(item)
+            if next_fire:
+                item["status"] = "queued"
+                item["start_at"] = next_fire.isoformat()
+                item["note"] = f"recurring ({rec}) — next fire {next_fire.strftime('%Y-%m-%d %H:%M')}"
+            else:
+                item["status"] = "done"
+        else:
+            item["status"] = "done"
+        self._queue_status_changed()
+        self._update_tray_badge()
+        self._advance_queue()
+
+    def _on_queue_item_error(self, item, err):
+        """Handle download error for a concurrent queue item."""
+        item_id = id(item)
+        self._queue_contexts.pop(item_id, None)
+        worker = self._queue_workers.pop(item_id, None)
+        if worker and not worker.isRunning():
+            try:
+                worker.wait(500)
+            except Exception:
+                pass
+        self._set_queue_item_status(item, "failed", str(err)[:120])
+        self._log(f"[QUEUE] Error: {item.get('title', '')[:60]} — {err}")
+        self._advance_queue()
 
     def _refresh_queue_table(self):
         if not hasattr(self, "queue_table"):
@@ -5090,7 +5283,12 @@ class StreamKeep(QMainWindow):
         for i, q in enumerate(self._download_queue):
             # Compute effective status: "scheduled" if start_at is in the future
             status = q.get("status", "queued")
-            locked = q is self._queue_active_item or status in ("fetching", "downloading")
+            locked = (
+                q is self._queue_active_item
+                or id(q) in self._queue_workers
+                or id(q) in self._queue_fetch_workers
+                or status in ("fetching", "downloading")
+            )
             start_at = q.get("start_at", "")
             is_scheduled = False
             if start_at and status == "queued":
