@@ -56,6 +56,8 @@ class HistoryEntry:
     size: str = ""
     path: str = ""
     url: str = ""
+    favorite: bool = False                 # exempt from lifecycle cleanup (F32)
+    watched: bool = False                  # playback status (F32/F38)
 
 
 @dataclass
