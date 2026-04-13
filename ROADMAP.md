@@ -434,7 +434,7 @@
   New Analytics tab or overlay. QPainter charts: downloads/day (bar),
   cumulative data (line), platform breakdown (donut), top channels (ranked).
 
-- [ ] **F64 — Bandwidth Usage Tracker** (Small, ~80-100 lines)
+- [x] **F64 — Bandwidth Usage Tracker** (Small, ~80-100 lines) v4.29.1
   Track bytes transferred per session, persist daily totals. Status bar
   "Today: 12.4 GB". Optional daily/monthly cap with pause-queue action.
 
