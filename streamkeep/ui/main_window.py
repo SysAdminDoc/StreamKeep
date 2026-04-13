@@ -6029,6 +6029,7 @@ class StreamKeep(QMainWindow):
         menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
+        rename_act = menu.addAction("Batch Rename…")
         remove_act = menu.addAction("Remove from History")
         # Orphan cleanup (F14) — only show when orphans exist
         orphan_count = sum(
@@ -6066,6 +6067,11 @@ class StreamKeep(QMainWindow):
             self._persist_config()
         elif chosen == bookmark_act:
             self._add_bookmark_dialog(h)
+        elif chosen == rename_act:
+            from .rename_dialog import RenameDialog
+            entries = [e for e in self._history if e.path and os.path.isdir(e.path)]
+            if entries:
+                RenameDialog(self, entries).exec()
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
