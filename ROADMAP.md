@@ -362,7 +362,7 @@
   Parse MPD XML into `QualityInfo` entries. Handle SegmentTemplate and
   SegmentList addressing. Static VOD manifests first, live DASH later.
 
-- [ ] **F51 — Download Speed Scheduling** (Small, ~100-120 lines)
+- [x] **F51 — Download Speed Scheduling** (Small, ~100-120 lines) v4.26.4
   Time-based bandwidth rules. 7x24 weekly grid of speed tiers.
   Auto-updates active limit via 60-second QTimer. Applied to new downloads.
 
