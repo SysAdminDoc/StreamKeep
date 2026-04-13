@@ -265,6 +265,8 @@ class ChannelMonitor(QObject):
                 "retention_keep_last": int(e.retention_keep_last or 0),
                 "filter_keywords": e.filter_keywords or "",
                 "override_pp_preset": e.override_pp_preset or "",
+                "auto_upgrade": bool(e.auto_upgrade),
+                "min_upgrade_quality": e.min_upgrade_quality or "",
             }
             for e in self.entries
         ]
@@ -297,4 +299,6 @@ class ChannelMonitor(QObject):
                             e.retention_keep_last = 0
                         e.filter_keywords = str(ch.get("filter_keywords", "") or "")
                         e.override_pp_preset = str(ch.get("override_pp_preset", "") or "")
+                        e.auto_upgrade = bool(ch.get("auto_upgrade", False))
+                        e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
                         break
