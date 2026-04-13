@@ -416,7 +416,7 @@
   Feed transcript to ollama/Claude/OpenAI. Output `.summary.md` with
   overview, key topics, timestamped moments, participants. Chunked processing.
 
-- [ ] **F61 — Smart Thumbnail Generator** (Small-Med, ~150-180 lines)
+- [x] **F61 — Smart Thumbnail Generator** (Small-Med, ~150-180 lines) v4.28.4
   Score scene-boundary frames by contrast/edge density/face presence.
   Optional text overlay via Pillow. "Pick from top 5 candidates" UI.
 
