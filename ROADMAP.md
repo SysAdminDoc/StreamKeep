@@ -175,7 +175,7 @@
   Slack (blocks), Telegram (`sendMessage` + markdown), ntfy (headers).
   Settings: webhook type auto-detected from URL, indicator label.
 
-- [ ] **F24 — Event Hook System** (Small-Med, ~100-120 lines)
+- [x] **F24 — Event Hook System** (Small-Med, ~100-120 lines)
   New `hooks.py`: `fire_hook(event, context)` -> subprocess with env vars
   (`$SK_TITLE`, `$SK_CHANNEL`, `$SK_PATH`, etc.). Config: `hooks` dict
   (event_name -> command). Settings: event/command table with add/edit/remove.
