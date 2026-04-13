@@ -1,7 +1,7 @@
 """History tab — completed downloads table + stats dashboard."""
 
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QPushButton, QTableWidget, QVBoxLayout, QWidget,
 )
 
@@ -92,6 +92,12 @@ def build_history_tab(win):
     win.history_search.setPlaceholderText("Search by title, platform, or path...")
     win.history_search.textChanged.connect(win._on_history_search)
     search_row.addWidget(win.history_search, 1)
+    win.transcript_search_check = QCheckBox("Search transcripts")
+    win.transcript_search_check.setToolTip(
+        "When checked, queries search indexed transcript text (SRT/VTT) instead of metadata."
+    )
+    win.transcript_search_check.toggled.connect(lambda _: win._on_history_search(""))
+    search_row.addWidget(win.transcript_search_check)
     card_lay.addLayout(search_row)
 
     win.history_table = QTableWidget()

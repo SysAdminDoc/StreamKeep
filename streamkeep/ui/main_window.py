@@ -698,6 +698,9 @@ class StreamKeep(QMainWindow):
         self._refresh_download_summary()
         self._refresh_monitor_summary()
         self._refresh_history_summary()
+        # Build transcript search index in background (F27)
+        from .search import index_all_async
+        index_all_async(self._history, log_fn=self._log)
 
     def _persist_config(self):
         cfg = self._config
@@ -5880,7 +5883,25 @@ class StreamKeep(QMainWindow):
         if hasattr(self, "history_search"):
             query = self.history_search.text().strip().lower()
         ordered = list(reversed(self._history))
-        if query:
+        # Transcript FTS search mode (F27)
+        transcript_mode = (
+            hasattr(self, "transcript_search_check")
+            and self.transcript_search_check.isChecked()
+        )
+        self._transcript_hits = {}  # path -> list of {text, start_sec, end_sec}
+        if query and transcript_mode:
+            from ..search import search_transcripts
+            try:
+                hits = search_transcripts(query, limit=200)
+            except Exception:
+                hits = []
+            hit_paths = set()
+            for h in hits:
+                rp = h["recording_path"]
+                hit_paths.add(rp)
+                self._transcript_hits.setdefault(rp, []).append(h)
+            ordered = [h for h in ordered if h.path in hit_paths]
+        elif query:
             ordered = [
                 h for h in ordered
                 if query in (h.title or "").lower()
@@ -5926,6 +5947,15 @@ class StreamKeep(QMainWindow):
                     item.setForeground(_dim_color)
                 elif getattr(h, "watched", False) and col == 3:
                     item.setForeground(QColor(CAT["overlay0"]))
+                # Transcript search hit snippet as tooltip (F27)
+                if col == 3 and h.path and h.path in self._transcript_hits:
+                    snippets = self._transcript_hits[h.path][:3]
+                    tip_lines = []
+                    for s in snippets:
+                        mins = int(s["start_sec"]) // 60
+                        secs = int(s["start_sec"]) % 60
+                        tip_lines.append(f"[{mins}:{secs:02d}] {s['text']}")
+                    item.setToolTip("\n".join(tip_lines))
                 self.history_table.setItem(i, col, item)
             # Queue a thumb request (skip orphans — no file to thumbnail).
             if not orphan:
@@ -6427,5 +6457,11 @@ class StreamKeep(QMainWindow):
             db = _connect()
             auto_tag_recording(db, out_dir, info=info_copy)
             db.close()
+        except Exception:
+            pass
+        # Index transcripts for this recording (F27)
+        try:
+            from ..search import index_recording
+            index_recording(out_dir)
         except Exception:
             pass
