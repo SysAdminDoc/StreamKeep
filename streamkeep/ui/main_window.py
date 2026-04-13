@@ -4205,6 +4205,8 @@ class StreamKeep(QMainWindow):
     def _on_companion_toggled(self, checked):
         """Settings toggle — restart the companion server in-place."""
         self._config["companion_server_enabled"] = bool(checked)
+        if hasattr(self, "companion_lan_check"):
+            self._config["companion_bind_lan"] = bool(self.companion_lan_check.isChecked())
         self._persist_config()
         self._maybe_start_companion_server()
 
@@ -4372,7 +4374,9 @@ class StreamKeep(QMainWindow):
         running = self._companion_server is not None
         if enabled and not running:
             try:
-                srv = LocalCompanionServer()
+                bind_lan = bool(self._config.get("companion_bind_lan", False))
+                srv = LocalCompanionServer(bind_lan=bind_lan)
+                srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)
                 srv.start()
                 self._companion_server = srv
@@ -4401,6 +4405,50 @@ class StreamKeep(QMainWindow):
             if hasattr(self, "companion_token_display"):
                 self.companion_token_display.setText("")
             self._log("[COMPANION] Server stopped.")
+
+    def _api_state_snapshot(self):
+        """Return a dict snapshot of app state for the REST API (F37).
+        Called from the HTTP server thread — must be thread-safe."""
+        downloads = []
+        queue_items = []
+        try:
+            for q in getattr(self, "_download_queue", []):
+                queue_items.append({
+                    "url": q.get("url", ""),
+                    "title": q.get("title", ""),
+                })
+        except Exception:
+            pass
+        history = []
+        try:
+            for h in self._history[-50:]:
+                history.append({
+                    "title": h.title or "",
+                    "platform": h.platform or "",
+                    "date": h.date or "",
+                    "quality": h.quality or "",
+                    "size": h.size or "",
+                })
+        except Exception:
+            pass
+        monitor = []
+        try:
+            for e in self.monitor.entries:
+                monitor.append({
+                    "channel_id": e.channel_id,
+                    "platform": e.platform,
+                    "status": e.last_status,
+                })
+        except Exception:
+            pass
+        live_channels = [m for m in monitor if m.get("status") == "live"]
+        return {
+            "downloads": downloads,
+            "queue": queue_items,
+            "history": history,
+            "monitor": monitor,
+            "live_channels": live_channels,
+        }
 
     def _on_companion_url(self, url, action):
         """The extension just POSTed a URL. Route it through the Fetch

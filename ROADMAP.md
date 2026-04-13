@@ -284,7 +284,7 @@
   small dialog (channel name + date range). Maintenance note: CDN patterns
   rotate; this feature needs periodic updates.
 
-- [ ] **F37 — REST API + Web Remote UI** (Medium, ~300-400 lines server + ~400-500 lines HTML)
+- [x] **F37 — REST API + Web Remote UI** (Medium, ~300-400 lines server + ~400-500 lines HTML)
   Extend `local_server.py`: endpoints for status, queue CRUD, library search,
   monitor status. Serve single-page responsive HTML at `/`.
   Vanilla JS + CSS, no framework. Token auth on all endpoints.

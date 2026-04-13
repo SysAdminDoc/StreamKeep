@@ -640,6 +640,13 @@ def build_settings_tab(win):
     )
     win.companion_check.toggled.connect(win._on_companion_toggled)
     comp_row.addWidget(win.companion_check)
+    win.companion_lan_check = QCheckBox("Allow LAN access")
+    win.companion_lan_check.setChecked(bool(win._config.get("companion_bind_lan", False)))
+    win.companion_lan_check.setToolTip(
+        "Bind to 0.0.0.0 instead of 127.0.0.1 — allows access from other "
+        "devices on your network. The Web Remote UI is available at / in a browser."
+    )
+    comp_row.addWidget(win.companion_lan_check)
     comp_row.addStretch(1)
     network_lay.addLayout(comp_row)
 
