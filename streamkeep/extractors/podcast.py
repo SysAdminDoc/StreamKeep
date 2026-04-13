@@ -29,7 +29,7 @@ class PodcastRSSExtractor(Extractor):
     def supports_vod_listing(self):
         return True
 
-    def list_vods(self, url, log_fn=None):
+    def list_vods(self, url, log_fn=None, cursor=None):
         self._log(log_fn, f"Fetching podcast RSS: {url}")
         body = curl(
             url,
@@ -40,7 +40,7 @@ class PodcastRSSExtractor(Extractor):
         )
         if not body:
             self._log(log_fn, "Failed to fetch RSS feed")
-            return []
+            return [], None
 
         vods = []
         items = re.findall(r'<item>(.*?)</item>', body, re.DOTALL)
@@ -78,7 +78,7 @@ class PodcastRSSExtractor(Extractor):
             ))
 
         self._log(log_fn, f"Found {len(vods)} episode(s)")
-        return vods
+        return vods, None  # RSS feeds are not paginated
 
     def resolve(self, url, log_fn=None):
         if any(url.endswith(ext) for ext in (".mp3", ".m4a", ".ogg", ".wav", ".aac")):
