@@ -142,7 +142,7 @@
   above rolling average. Render as colored tick markers on ClipDialog filmstrip.
   History context menu: "Show chat highlights" -> list of timestamps.
 
-- [ ] **F9 — Multi-Range Highlight Reel** (Medium, ~200-250 lines)
+- [x] **F9 — Multi-Range Highlight Reel** (Medium, ~200-250 lines)
   *Pairs with F8 (chat markers suggest the ranges).*
   ClipDialog: multiple draggable range pairs on filmstrip. Range list panel with
   add/remove/reorder. ClipWorker: ffmpeg concat demuxer for multi-range export.
