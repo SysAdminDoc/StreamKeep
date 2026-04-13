@@ -349,7 +349,7 @@
   `browser_cookie3` or `rookiepy` for decryption. Netscape cookies.txt
   fallback. Inject into curl `--cookie` and yt-dlp `--cookies`.
 
-- [ ] **F48 — Platform Account Manager** (Medium, ~150-200 lines)
+- [x] **F48 — Platform Account Manager** (Medium, ~150-200 lines) v4.26.1
   Settings panel for auth credentials per platform. Twitch OAuth token,
   YouTube API key, Kick session token, generic headers. Encrypted storage
   (DPAPI). Status indicators: authenticated / expired / none.
