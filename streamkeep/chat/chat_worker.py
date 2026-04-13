@@ -14,6 +14,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .twitch_irc import TwitchIRCReader
+from .kick_ws import KickChatReader, is_available as kick_chat_available
 
 
 def _ass_time(secs):
@@ -56,10 +57,11 @@ class ChatWorker(QThread):
     log = pyqtSignal(str)
     done = pyqtSignal(int)
 
-    def __init__(self, channel, out_dir, *, render_ass=True, start_ts=None):
+    def __init__(self, channel, out_dir, *, platform="twitch", render_ass=True, start_ts=None):
         super().__init__()
         self.channel = channel
         self.out_dir = out_dir
+        self.platform = (platform or "twitch").lower()
         self.render_ass = bool(render_ass)
         self.start_ts = float(start_ts or time.time())
         self._cancel = False
@@ -79,14 +81,32 @@ class ChatWorker(QThread):
             return
         jsonl_path = os.path.join(self.out_dir, "chat.jsonl")
         ass_path = os.path.join(self.out_dir, "chat.ass") if self.render_ass else None
-        reader = TwitchIRCReader(self.channel, should_cancel=self._should_cancel)
+        if self.platform == "kick":
+            if not kick_chat_available():
+                self.log.emit(
+                    "[CHAT] Kick chat needs the `websocket-client` pip "
+                    "package — install with `pip install websocket-client` "
+                    "or re-run the bundled exe to bootstrap it."
+                )
+                self.done.emit(0)
+                return
+            reader = KickChatReader(self.channel, should_cancel=self._should_cancel)
+            platform_label = "kick"
+        else:
+            reader = TwitchIRCReader(self.channel, should_cancel=self._should_cancel)
+            platform_label = "twitch"
         try:
             reader.connect()
         except OSError as e:
-            self.log.emit(f"[CHAT] Could not connect to Twitch IRC: {e}")
+            self.log.emit(f"[CHAT] Could not connect to {platform_label}: {e}")
             self.done.emit(0)
             return
-        self.log.emit(f"[CHAT] Capturing chat for #{reader.channel}")
+        except Exception as e:
+            self.log.emit(f"[CHAT] {platform_label} reader failed: {e}")
+            self.done.emit(0)
+            return
+        ch_label = getattr(reader, "channel", None) or getattr(reader, "channel_name", "") or self.channel
+        self.log.emit(f"[CHAT] Capturing {platform_label} chat for {ch_label}")
         try:
             with open(jsonl_path, "a", encoding="utf-8") as jsonl_f:
                 ass_events = []

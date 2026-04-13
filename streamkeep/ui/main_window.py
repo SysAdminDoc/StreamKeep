@@ -44,6 +44,7 @@ from streamkeep.resume import (
 from streamkeep.storage import scan_storage
 from streamkeep.chat import ChatWorker
 from streamkeep.local_server import LocalCompanionServer
+from streamkeep.notifications import NotificationCenter
 from streamkeep.updater import (
     UpdateCheckWorker, DownloadUpdateWorker, arm_self_replace,
 )
@@ -173,6 +174,7 @@ class StreamKeep(QMainWindow):
         self._autorecord_contexts = {}      # channel_id -> dict (out_dir, info, q_name, history_url)
         self._chat_workers = {}              # channel_id -> ChatWorker (live capture)
         self._companion_server = None        # LocalCompanionServer instance
+        self._notifications = NotificationCenter(capacity=50)
         self._parallel_autorecords = 2      # cap; overridden from config below
         self._chunk_long_captures = False
         self._chunk_length_secs = 7200      # 2 hours default
@@ -217,6 +219,12 @@ class StreamKeep(QMainWindow):
             if hasattr(self, "queue_table"):
                 self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                 self.queue_table.customContextMenuRequested.connect(self._on_queue_context_menu)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "storage_table"):
+                self.storage_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                self.storage_table.customContextMenuRequested.connect(self._on_storage_context_menu)
         except Exception:
             pass
         try:
@@ -1038,6 +1046,15 @@ class StreamKeep(QMainWindow):
         version_card, _, _ = self._make_metric_card("Version", f"v{VERSION}", "Local desktop build")
         version_card.setMaximumWidth(170)
         header_top.addWidget(version_card)
+
+        # Notifications bell — shows unread count and opens a popup with
+        # the last N events.
+        self.notif_button = QPushButton("0 \U0001F514")
+        self.notif_button.setObjectName("secondary")
+        self.notif_button.setFixedWidth(72)
+        self.notif_button.setToolTip("Recent notifications")
+        self.notif_button.clicked.connect(self._on_show_notifications)
+        header_top.addWidget(self.notif_button)
         header_lay.addLayout(header_top)
 
         tab_shell = QFrame()
@@ -1568,6 +1585,15 @@ class StreamKeep(QMainWindow):
             self._config["capture_live_chat"] = bool(self.capture_chat_check.isChecked())
         if hasattr(self, "render_chat_ass_check"):
             self._config["render_chat_ass"] = bool(self.render_chat_ass_check.isChecked())
+        if hasattr(self, "quality_defaults_combos"):
+            self._config["quality_defaults"] = {
+                plat: (combo.currentData() or "")
+                for plat, combo in self.quality_defaults_combos.items()
+            }
+        if hasattr(self, "whisper_model_combo"):
+            self._config["whisper_model"] = str(self.whisper_model_combo.currentData() or "tiny")
+        if hasattr(self, "notif_sound_check"):
+            self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
         # Apply bandwidth schedule rule
         self._bandwidth_rule = {
             "enabled": self.bw_enable_check.isChecked(),
@@ -2392,16 +2418,16 @@ class StreamKeep(QMainWindow):
         # Populate qualities
         self.quality_combo.blockSignals(True)
         self.quality_combo.clear()
-        selected_idx = 0
         qualities = info.qualities or []
-        for i, q in enumerate(qualities):
+        for q in qualities:
             bw_mbps = q.bandwidth / 1_000_000 if q.bandwidth else 0
             ft_tag = f" [{q.format_type.upper()}]" if q.format_type != "hls" else ""
             label = f"{q.name} ({q.resolution}, {bw_mbps:.1f} Mbps){ft_tag}"
             self.quality_combo.addItem(label, q)
-            if "1080" in q.name or "source" in q.name.lower():
-                selected_idx = i
         if qualities:
+            selected_idx = self._choose_default_quality_index(
+                qualities, info.platform or ""
+            )
             self.quality_combo.setCurrentIndex(selected_idx)
         self.quality_combo.setEnabled(len(qualities) > 0)
         self.quality_combo.blockSignals(False)
@@ -3104,6 +3130,12 @@ class StreamKeep(QMainWindow):
         self.open_folder_btn.setVisible(True)
         if hasattr(self, "trim_btn"):
             self.trim_btn.setVisible(True)
+        active_info_n = self._active_stream_info or self.stream_info
+        title_n = (active_info_n.title if active_info_n and active_info_n.title else "Download")[:80]
+        self._notify_center(
+            f"Download complete: {title_n}",
+            "success" if not self._download_had_errors else "warning",
+        )
         active_info = self._active_stream_info or self.stream_info
         out_dir = self._active_output_dir or self.output_input.text().strip()
         q_name = self._active_quality_name or (
@@ -3397,6 +3429,94 @@ class StreamKeep(QMainWindow):
         self._persist_config()
         self._maybe_start_companion_server()
 
+    # ── Notifications Center ─────────────────────────────────────────
+
+    def _notify_center(self, text, level="info"):
+        """Push an entry onto the in-app notifications ring buffer and
+        refresh the header bell's unread badge. Optionally play a sound
+        when the user has enabled audio cues in Settings."""
+        self._notifications.push(text, level=level)
+        self._refresh_notif_badge()
+        if level in ("success", "warning", "error") and bool(self._config.get("notif_sound", False)):
+            try:
+                from PyQt6.QtWidgets import QApplication
+                QApplication.beep()
+            except Exception:
+                pass
+
+    def _refresh_notif_badge(self):
+        if not hasattr(self, "notif_button"):
+            return
+        unread = self._notifications.unread
+        if unread > 0:
+            self.notif_button.setText(f"{unread} \U0001F514")
+            self.notif_button.setStyleSheet("font-weight: 600;")
+        else:
+            self.notif_button.setText("0 \U0001F514")
+            self.notif_button.setStyleSheet("")
+
+    def _on_show_notifications(self):
+        """Build a transient QMenu popping down from the bell with the
+        most recent events. Marks all read on display."""
+        menu = QMenu(self)
+        items = self._notifications.items()
+        if not items:
+            empty = menu.addAction("No notifications yet")
+            empty.setEnabled(False)
+        else:
+            for n in items[:30]:
+                prefix = {
+                    "success": "\u2714",
+                    "warning": "\u26A0",
+                    "error": "\u2716",
+                    "info": "\u2022",
+                }.get(n.level, "\u2022")
+                act = menu.addAction(f"{n.ts}  {prefix}  {n.text}")
+                act.setEnabled(False)
+            menu.addSeparator()
+            clear_act = menu.addAction("Clear all")
+            clear_act.triggered.connect(self._on_clear_notifications)
+        self._notifications.mark_all_read()
+        self._refresh_notif_badge()
+        # Drop down from the button.
+        pos = self.notif_button.mapToGlobal(self.notif_button.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _on_clear_notifications(self):
+        self._notifications.clear()
+        self._refresh_notif_badge()
+
+    def _choose_default_quality_index(self, qualities, platform):
+        """Resolve the user's per-platform default to an index into the
+        given quality list. Fallbacks:
+
+          pref "1080p" -> first quality whose name/resolution contains "1080"
+          pref "720p"  -> first 720
+          pref "source"/"highest"/"" -> 1080-or-source heuristic (legacy)
+          pref "lowest"  -> last (qualities are typically sorted high→low)
+        """
+        prefs = self._config.get("quality_defaults") or {}
+        pkey = (platform or "").strip().lower() or "other"
+        pref = (prefs.get(pkey) or prefs.get("other") or "").strip().lower()
+        if not pref or pref in ("highest", "source"):
+            # Legacy behaviour: prefer 1080 or "source" if present, else 0.
+            for i, q in enumerate(qualities):
+                if "1080" in q.name or "source" in q.name.lower():
+                    return i
+            return 0
+        if pref == "lowest":
+            return len(qualities) - 1
+        for i, q in enumerate(qualities):
+            cname = (q.name or "").lower()
+            cres = (q.resolution or "").lower()
+            if pref in cname or pref in cres:
+                return i
+        # No match — fall back to the legacy heuristic.
+        for i, q in enumerate(qualities):
+            if "1080" in q.name or "source" in q.name.lower():
+                return i
+        return 0
+
     # ── Browser companion local server ───────────────────────────────
 
     def _maybe_start_companion_server(self):
@@ -3498,6 +3618,7 @@ class StreamKeep(QMainWindow):
                 label = f"{label} — {first_note}"
             self.update_banner_label.setText(label)
             self.update_banner.setVisible(True)
+        self._notify_center(f"Update available: StreamKeep {tag}", "info")
 
     def _on_update_install(self):
         payload = getattr(self, "_latest_update_payload", None) or {}
@@ -3814,6 +3935,31 @@ class StreamKeep(QMainWindow):
             "success" if scan.total_files else "idle",
         )
 
+    def _on_storage_context_menu(self, pos):
+        """Right-click menu on the Storage table — bundle the selected row."""
+        if not hasattr(self, "storage_table"):
+            return
+        idx = self.storage_table.indexAt(pos)
+        if not idx.isValid():
+            return
+        row = idx.row()
+        groups = getattr(self, "_storage_groups", None) or []
+        if not (0 <= row < len(groups)):
+            return
+        g = groups[row]
+        menu = QMenu(self)
+        bundle_act = menu.addAction("Export share bundle (.zip)...")
+        trim_act = menu.addAction("Trim / Clip...")
+        menu.addSeparator()
+        open_act = menu.addAction("Open Folder")
+        chosen = menu.exec(self.storage_table.viewport().mapToGlobal(pos))
+        if chosen == bundle_act:
+            self._start_bundle_export(g.dir_path)
+        elif chosen == trim_act:
+            self._open_clip_dialog_for_dir(g.dir_path)
+        elif chosen == open_act and os.path.isdir(g.dir_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(g.dir_path))
+
     def _on_storage_selection_changed(self):
         count = len(self.storage_table.selectionModel().selectedRows())
         self.storage_delete_btn.setEnabled(count > 0)
@@ -4124,15 +4270,17 @@ class StreamKeep(QMainWindow):
             },
         )
         worker.start()
-        # Kick off live Twitch chat capture alongside the recording, if
-        # the user has opted in and the platform is Twitch. Kick + other
-        # platforms don't have a ready capture path yet.
+        # Kick off live chat capture alongside the recording if the user
+        # has opted in. Twitch (IRC) and Kick (Pusher) are supported —
+        # other platforms fall through silently.
+        platform_key = (getattr(info, "platform", "") or "").lower()
         if (bool(self._config.get("capture_live_chat", False))
-                and (getattr(info, "platform", "") or "").lower() == "twitch"):
+                and platform_key in ("twitch", "kick")):
             try:
                 chat_channel = getattr(info, "channel", "") or channel_id
                 chat = ChatWorker(
                     chat_channel, out_dir,
+                    platform=platform_key,
                     render_ass=bool(self._config.get("render_chat_ass", True)),
                 )
                 chat.log.connect(self._log)
@@ -4199,6 +4347,7 @@ class StreamKeep(QMainWindow):
     def _on_channel_live(self, channel_id):
         """Called when a monitored channel goes live."""
         self._set_status(f"{channel_id} went live.", "warning")
+        self._notify_center(f"{channel_id} is live", "warning")
         if self._try_start_auto_record(channel_id):
             return
         worker = getattr(self, "download_worker", None)
@@ -4663,6 +4812,10 @@ class StreamKeep(QMainWindow):
         open_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         trim_act = menu.addAction("Trim / Clip...")
         trim_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        bundle_act = menu.addAction("Export share bundle (.zip)...")
+        bundle_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        transcribe_act = menu.addAction("Transcribe (Whisper)...")
+        transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         remove_act = menu.addAction("Remove from History")
         chosen = menu.exec(table.viewport().mapToGlobal(pos))
@@ -4670,6 +4823,10 @@ class StreamKeep(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
         elif chosen == trim_act and h.path and os.path.isdir(h.path):
             self._open_clip_dialog_for_dir(h.path)
+        elif chosen == bundle_act and h.path and os.path.isdir(h.path):
+            self._start_bundle_export(h.path)
+        elif chosen == transcribe_act and h.path and os.path.isdir(h.path):
+            self._start_transcribe_for_dir(h.path)
         elif chosen == remove_act:
             try:
                 # `_history_view` is most-recent-first; map back to the
@@ -4680,6 +4837,112 @@ class StreamKeep(QMainWindow):
                 self._persist_config()
             except ValueError:
                 pass
+
+    def _start_transcribe_for_dir(self, src_dir):
+        """Pick the biggest video in the folder and launch TranscribeWorker."""
+        from ..postprocess import TranscribeWorker, whisper_available
+        if not whisper_available():
+            self._set_status(
+                "No Whisper runtime installed. Install `faster-whisper` "
+                "or put whisper.cpp in PATH.",
+                "warning",
+            )
+            self._log("[TRANSCRIBE] No runtime found. See status bar.")
+            return
+        if getattr(self, "_transcribe_worker", None) is not None and self._transcribe_worker.isRunning():
+            self._set_status("A transcription is already running.", "warning")
+            return
+        # Find the largest mp4/mkv/webm in the folder.
+        media = None
+        biggest = 0
+        for entry in os.scandir(src_dir):
+            if not entry.is_file():
+                continue
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in {".mp4", ".mkv", ".webm", ".mov", ".ts"}:
+                try:
+                    sz = entry.stat().st_size
+                except OSError:
+                    continue
+                if sz > biggest:
+                    biggest = sz
+                    media = entry.path
+        if not media:
+            self._set_status("No video file to transcribe in that folder.", "warning")
+            return
+        model = str(self._config.get("whisper_model", "tiny") or "tiny")
+        worker = TranscribeWorker(media, model_name=model)
+        worker.progress.connect(self._on_transcribe_progress)
+        worker.done.connect(self._on_transcribe_done)
+        self._transcribe_worker = worker
+        self._set_status(
+            f"Transcribing {os.path.basename(media)} with Whisper ({model})...",
+            "processing",
+        )
+        worker.start()
+
+    def _on_transcribe_progress(self, pct, status):
+        self._set_status(f"Transcribing: {status} ({pct}%)", "processing")
+
+    def _on_transcribe_done(self, ok, path_or_err):
+        w = getattr(self, "_transcribe_worker", None)
+        if w is not None and not w.isRunning():
+            try:
+                w.wait(300)
+            except Exception:
+                pass
+        self._transcribe_worker = None
+        if ok:
+            self._log(f"[TRANSCRIBE] Wrote .srt / .vtt / .json / .chapters.auto.txt next to {path_or_err}")
+            self._set_status(
+                "Transcribe complete. SRT, VTT, and auto-chapters saved.",
+                "success",
+            )
+            self._notify_center(f"Transcribe finished: {os.path.basename(path_or_err)}", "success")
+        else:
+            self._log(f"[TRANSCRIBE] {path_or_err}")
+            self._set_status(f"Transcribe failed: {path_or_err}", "error")
+
+    def _start_bundle_export(self, src_dir):
+        """Offer a save-file dialog then run a BundleWorker. One worker at
+        a time — the button / context action disables until it finishes."""
+        if getattr(self, "_bundle_worker", None) is not None and self._bundle_worker.isRunning():
+            self._set_status("A bundle is already in progress.", "warning")
+            return
+        default_name = os.path.basename(src_dir.rstrip(os.sep)) + ".zip"
+        parent = os.path.dirname(src_dir.rstrip(os.sep)) or src_dir
+        default_path = os.path.join(parent, default_name)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export share bundle", default_path, "Zip archive (*.zip)"
+        )
+        if not path:
+            return
+        from ..postprocess import BundleWorker
+        worker = BundleWorker(src_dir, path)
+        worker.progress.connect(self._on_bundle_progress)
+        worker.done.connect(self._on_bundle_done)
+        self._bundle_worker = worker
+        self._set_status(f"Bundling {os.path.basename(src_dir)}...", "processing")
+        worker.start()
+
+    def _on_bundle_progress(self, pct, status):
+        self._set_status(f"Bundling: {status} ({pct}%)", "processing")
+
+    def _on_bundle_done(self, ok, path_or_err):
+        w = getattr(self, "_bundle_worker", None)
+        if w is not None and not w.isRunning():
+            try:
+                w.wait(300)
+            except Exception:
+                pass
+        self._bundle_worker = None
+        if ok:
+            self._log(f"[BUNDLE] Wrote {path_or_err}")
+            self._set_status(f"Bundle ready: {path_or_err}", "success")
+            self._notify_center(f"Bundle exported: {os.path.basename(path_or_err)}", "success")
+        else:
+            self._log(f"[BUNDLE] {path_or_err}")
+            self._set_status(f"Bundle failed: {path_or_err}", "error")
 
     def _open_clip_dialog_for_dir(self, dir_path):
         """Offer a file picker inside the given directory, then open the

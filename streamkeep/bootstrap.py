@@ -41,6 +41,9 @@ def bootstrap():
         "yt_dlp": "yt-dlp",
         "playwright": "playwright",
         "send2trash": "send2trash",
+        # Live Kick chat rides on Pusher WebSocket — degrades gracefully
+        # to "not supported" when missing, so it's optional, not required.
+        "websocket": "websocket-client",
     }
     import importlib
 
