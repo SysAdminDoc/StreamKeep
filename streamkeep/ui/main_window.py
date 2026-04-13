@@ -6930,8 +6930,13 @@ class StreamKeep(QMainWindow):
         if row >= len(view):
             return
         h = view[row]
-        # If the folder still exists, open it
+        # If the folder exists, try to play with embedded player (F52)
         if h.path and os.path.isdir(h.path):
+            media = self._find_media_in_dir(h.path)
+            if media:
+                self._open_player(h, media)
+                return
+            # No playable media — fall back to opening the folder
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
             return
         # Otherwise offer to retry the download if we have the URL
@@ -6943,6 +6948,51 @@ class StreamKeep(QMainWindow):
             self._on_fetch()
         else:
             self._set_status("Path missing and no saved URL to retry.", "warning")
+
+    def _find_media_in_dir(self, dir_path):
+        """Return the first media file path in *dir_path*, or ''."""
+        _MEDIA_EXTS = (".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi")
+        try:
+            for fn in sorted(os.listdir(dir_path)):
+                if fn.lower().endswith(_MEDIA_EXTS) and not fn.startswith("."):
+                    return os.path.join(dir_path, fn)
+        except OSError:
+            pass
+        return ""
+
+    def _open_player(self, history_entry, media_path):
+        """Open the embedded media player for a recording (F52)."""
+        from streamkeep.player import PlayerPanel, is_mpv_available
+        if not is_mpv_available():
+            # Fall back to opening the folder
+            self._log("[PLAYER] python-mpv not available — opening folder instead.")
+            if history_entry.path and os.path.isdir(history_entry.path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(history_entry.path))
+            return
+        panel = PlayerPanel(self)
+        start = float(getattr(history_entry, "watch_position_secs", 0) or 0)
+        panel.play_file(
+            media_path,
+            title=history_entry.title,
+            channel=history_entry.channel,
+            start_secs=start,
+            history_entry=history_entry,
+        )
+
+        def _on_close(pos):
+            # Persist playback position (F38 watch tracking)
+            history_entry.watch_position_secs = pos
+            if pos > 0 and not history_entry.watched:
+                # Mark as in-progress
+                pass
+            if getattr(history_entry, "db_id", 0):
+                _db.update_history_entry(history_entry.db_id, {
+                    "watch_position_secs": pos,
+                })
+            self._refresh_history_table()
+
+        panel.position_at_close.connect(_on_close)
+        panel.exec()
 
     # ── Metadata ──────────────────────────────────────────────────────
 
