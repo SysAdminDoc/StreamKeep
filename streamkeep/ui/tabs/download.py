@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir
 from ..widgets import make_field_block, make_metric_card, path_label, style_table
 
@@ -448,8 +449,8 @@ def build_download_tab(win):
     win.adv_toggle_btn.setCheckable(True)
     win.adv_override_badge = QLabel("")
     win.adv_override_badge.setStyleSheet(
-        "background:#fab387; color:#11111b; border-radius:8px; "
-        "font-size:10px; font-weight:bold; padding:2px 8px;"
+        f"background:{CAT['peach']}; color:{CAT['crust']}; border-radius:8px; "
+        f"font-size:10px; font-weight:bold; padding:2px 8px;"
     )
     win.adv_override_badge.setVisible(False)
     adv_toggle_row.addWidget(win.adv_toggle_btn)

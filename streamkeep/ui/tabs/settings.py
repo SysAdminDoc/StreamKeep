@@ -835,7 +835,7 @@ def build_settings_tab(win):
     )
     hook_lay.addWidget(win.webhook_input)
     win._webhook_type_label = QLabel("")
-    win._webhook_type_label.setStyleSheet("color: #a6adc8;")
+    win._webhook_type_label.setStyleSheet(f"color: {CAT['subtext0']};")
     hook_lay.addWidget(win._webhook_type_label)
     win.webhook_input.textChanged.connect(
         lambda text: _update_webhook_indicator(win, text))
