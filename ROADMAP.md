@@ -372,7 +372,7 @@
 > Watch content without leaving the app. F52 is the centerpiece;
 > F53-F56 extend it. All depend on mpv/libmpv.
 
-- [ ] **F52 — Embedded Media Player (mpv Backend)** (Large, ~400-500 lines)
+- [x] **F52 — Embedded Media Player (mpv Backend)** (Large, ~400-500 lines) v4.27.0
   `python-mpv` (libmpv) in a `QWidget`. Play/pause, seek with thumb preview,
   volume, speed, subtitle tracks, chapter markers, fullscreen. Persists
   playback position for resume. Double-click History/Storage to play.
