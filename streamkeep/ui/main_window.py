@@ -20,7 +20,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QTableWidgetItem, QProgressBar,
+    QLabel, QLineEdit, QPushButton, QTableWidgetItem, QProgressBar,
     QFileDialog, QFrame, QStackedWidget, QSystemTrayIcon,
     QInputDialog, QCheckBox, QMenu, QAbstractItemView,
 )
@@ -1476,6 +1476,33 @@ class StreamKeep(QMainWindow):
         tab_lay.addStretch(1)
         header_lay.addWidget(tab_shell)
         root.addWidget(header_card)
+
+        # ── Global search bar (F45) ──
+        self._global_search = QLineEdit()
+        self._global_search.setPlaceholderText(
+            "Search across History, Storage, Monitor, Queue, Transcripts..."
+        )
+        self._global_search.setClearButtonEnabled(True)
+        self._global_search.setObjectName("globalSearch")
+        self._global_search.setFixedHeight(36)
+        self._global_search_timer = QTimer(self)
+        self._global_search_timer.setSingleShot(True)
+        self._global_search_timer.setInterval(300)
+        self._global_search_timer.timeout.connect(self._on_global_search)
+        self._global_search.textChanged.connect(
+            lambda: self._global_search_timer.start()
+        )
+        self._global_search.returnPressed.connect(self._on_global_search)
+        root.addWidget(self._global_search)
+
+        # Global search results dropdown (hidden until needed)
+        from PyQt6.QtWidgets import QListWidget
+        self._global_results = QListWidget(self)
+        self._global_results.setObjectName("globalResults")
+        self._global_results.setMaximumHeight(280)
+        self._global_results.setVisible(False)
+        self._global_results.itemActivated.connect(self._on_global_result_click)
+        root.addWidget(self._global_results)
 
         self._stack = QStackedWidget()
         self._stack.addWidget(self._wrap_scroll_page(build_download_tab(self)))
@@ -6773,3 +6800,114 @@ class StreamKeep(QMainWindow):
             index_recording(out_dir)
         except Exception:
             pass
+
+    # ── Global Search (F45) ─────────────────────────────────────────
+
+    def _on_global_search(self):
+        """Run a unified search across History, Monitor, Queue, and transcripts."""
+        query = self._global_search.text().strip().lower()
+        results_widget = self._global_results
+        results_widget.clear()
+
+        if not query or len(query) < 2:
+            results_widget.setVisible(False)
+            return
+
+        from PyQt6.QtWidgets import QListWidgetItem
+        items = []
+        cap = 15  # max results per source
+
+        # History search
+        count = 0
+        for h in reversed(self._history):
+            if count >= cap:
+                break
+            if (query in (h.title or "").lower()
+                    or query in (h.channel or "").lower()
+                    or query in (h.platform or "").lower()):
+                item = QListWidgetItem(
+                    f"[History] {h.platform}: {h.channel} - {h.title[:50]}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("history", h))
+                items.append(item)
+                count += 1
+
+        # Monitor search
+        count = 0
+        for e in self.monitor.entries:
+            if count >= cap:
+                break
+            if (query in (e.channel_id or "").lower()
+                    or query in (e.url or "").lower()
+                    or query in (e.platform or "").lower()):
+                item = QListWidgetItem(
+                    f"[Monitor] {e.platform}: {e.channel_id} ({e.url})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("monitor", e))
+                items.append(item)
+                count += 1
+
+        # Queue search
+        count = 0
+        for q in self._download_queue:
+            if count >= cap:
+                break
+            if (query in (q.get("title", "") or "").lower()
+                    or query in (q.get("url", "") or "").lower()):
+                item = QListWidgetItem(
+                    f"[Queue] {q.get('title', q.get('url', ''))[:60]}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("queue", q))
+                items.append(item)
+                count += 1
+
+        # Transcript FTS search (F27)
+        try:
+            from ..search import search_transcripts
+            hits = search_transcripts(query, limit=cap)
+            for hit in hits:
+                snippet = (hit.get("text", "") or "")[:80]
+                item = QListWidgetItem(
+                    f"[Transcript] {snippet}... ({hit.get('recording_path', '')[-40:]})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("transcript", hit))
+                items.append(item)
+        except Exception:
+            pass
+
+        if items:
+            for it in items:
+                results_widget.addItem(it)
+            results_widget.setVisible(True)
+        else:
+            no_result = QListWidgetItem("No results found.")
+            no_result.setData(Qt.ItemDataRole.UserRole, None)
+            results_widget.addItem(no_result)
+            results_widget.setVisible(True)
+
+    def _on_global_result_click(self, item):
+        """Navigate to the source tab when a global search result is clicked."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        source, entry = data
+        self._global_results.setVisible(False)
+
+        if source == "history":
+            self._switch_tab(2)
+            # Try to select the row in history
+            if hasattr(self, "history_search"):
+                self.history_search.setText(
+                    getattr(entry, "title", "")[:30]
+                )
+        elif source == "monitor":
+            self._switch_tab(1)
+        elif source == "queue":
+            self._switch_tab(0)
+        elif source == "transcript":
+            self._switch_tab(2)
+            if hasattr(self, "history_search") and hasattr(self, "transcript_search_check"):
+                self.transcript_search_check.setChecked(True)
+                self.history_search.setText(
+                    self._global_search.text().strip()[:30]
+                )
