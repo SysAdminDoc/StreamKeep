@@ -170,7 +170,7 @@
   New log viewer dialog: filterable by severity, searchable, exportable.
   Wire to existing `_notify_center()` call sites.
 
-- [ ] **F15 — Webhook Expansion (Slack / Telegram / Ntfy)** (Medium, ~100-120 lines)
+- [x] **F15 — Webhook Expansion (Slack / Telegram / Ntfy)** (Medium, ~100-120 lines)
   URL pattern detection in `_send_webhook()`. Formatters per target:
   Slack (blocks), Telegram (`sendMessage` + markdown), ntfy (headers).
   Settings: webhook type auto-detected from URL, indicator label.
