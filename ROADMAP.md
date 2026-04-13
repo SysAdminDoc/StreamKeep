@@ -326,7 +326,7 @@
   `portable.txt` marker file → store config/db/logs in `data/` next to exe.
   Redirect `CONFIG_DIR` in `paths.py` before any imports.
 
-- [ ] **F44 — Batch URL Import from File** (Small, ~80-100 lines)
+- [x] **F44 — Batch URL Import from File** (Small, ~80-100 lines) v4.25.3
   Text file or clipboard paste, one URL per line. `#` comments, blank skips.
   Preview dialog with valid/invalid counts. Queue all valid URLs.
 
