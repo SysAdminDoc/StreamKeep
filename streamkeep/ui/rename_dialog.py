@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
+from ..theme import CAT
+
 
 def _read_metadata(dir_path):
     """Read metadata.json from a recording directory."""
@@ -143,8 +145,8 @@ class RenameDialog(QDialog):
             if nl in seen:
                 conflicts += 1
                 for col in range(2):
-                    self.table.item(i, col).setForeground(QColor("#f38ba8"))
-                    self.table.item(seen[nl], col).setForeground(QColor("#f38ba8"))
+                    self.table.item(i, col).setForeground(QColor(CAT["red"]))
+                    self.table.item(seen[nl], col).setForeground(QColor(CAT["red"]))
             else:
                 seen[nl] = i
 
