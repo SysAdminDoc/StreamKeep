@@ -304,6 +304,56 @@ def build_settings_tab(win):
     chunk_row.addStretch(1)
     network_lay.addLayout(chunk_row)
 
+    # Per-platform default quality (v4.17.0)
+    quality_hdr = QLabel("Default quality per platform")
+    quality_hdr.setObjectName("sectionTitle")
+    network_lay.addWidget(quality_hdr)
+    win.quality_defaults_combos = {}
+    quality_opts = [
+        ("", "Highest available (default)"),
+        ("source", "Source / best"),
+        ("1080p", "1080p"),
+        ("720p", "720p"),
+        ("480p", "480p"),
+        ("360p", "360p"),
+        ("lowest", "Lowest available"),
+    ]
+    saved_q = dict(win._config.get("quality_defaults") or {})
+    for platform in ("twitch", "kick", "rumble", "youtube", "other"):
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        lbl = QLabel(platform.capitalize() + ":")
+        lbl.setFixedWidth(90)
+        row.addWidget(lbl)
+        combo = QComboBox()
+        for val, text in quality_opts:
+            combo.addItem(text, userData=val)
+        current = saved_q.get(platform, "")
+        idx = max(0, combo.findData(current))
+        combo.setCurrentIndex(idx)
+        row.addWidget(combo)
+        row.addStretch(1)
+        network_lay.addLayout(row)
+        win.quality_defaults_combos[platform] = combo
+
+    # Whisper transcription model (v4.17.0)
+    whisper_row = QHBoxLayout()
+    whisper_row.setSpacing(8)
+    whisper_row.addWidget(QLabel("Whisper model:"))
+    win.whisper_model_combo = QComboBox()
+    for m in ("tiny", "base", "small", "medium", "large-v3"):
+        win.whisper_model_combo.addItem(m, userData=m)
+    wm = str(win._config.get("whisper_model", "tiny") or "tiny")
+    idx = max(0, win.whisper_model_combo.findData(wm))
+    win.whisper_model_combo.setCurrentIndex(idx)
+    win.whisper_model_combo.setToolTip(
+        "tiny/base are fast on CPU; medium/large-v3 need GPU for sane speeds."
+    )
+    whisper_row.addWidget(win.whisper_model_combo)
+    whisper_row.addWidget(QLabel("(used by Transcribe... in History)"))
+    whisper_row.addStretch(1)
+    network_lay.addLayout(whisper_row)
+
     # Live chat capture (v4.16.0)
     chat_row = QHBoxLayout()
     chat_row.setSpacing(8)
@@ -361,6 +411,20 @@ def build_settings_tab(win):
     )
     comp_token_row.addWidget(win.companion_token_display, 1)
     network_lay.addLayout(comp_token_row)
+
+    # Notifications sound cue (v4.17.0)
+    notif_row = QHBoxLayout()
+    notif_row.setSpacing(8)
+    win.notif_sound_check = QCheckBox("Audible beep on notification events")
+    win.notif_sound_check.setChecked(bool(win._config.get("notif_sound", False)))
+    win.notif_sound_check.setToolTip(
+        "Play the system beep when a notable event fires (live detected, "
+        "download complete, error). The Notifications bell in the header "
+        "always updates regardless of this setting."
+    )
+    notif_row.addWidget(win.notif_sound_check)
+    notif_row.addStretch(1)
+    network_lay.addLayout(notif_row)
 
     # Auto-update checker (v4.16.0)
     update_row = QHBoxLayout()

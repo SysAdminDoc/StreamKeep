@@ -20,6 +20,8 @@ from .thumb_worker import (
     strip_thumb_paths,
     probe_duration,
 )
+from .bundle_worker import BundleWorker
+from .transcribe_worker import TranscribeWorker, is_available as whisper_available
 
 __all__ = [
     "VIDEO_CONTAINERS", "VIDEO_CODECS",
@@ -28,5 +30,6 @@ __all__ = [
     "detect_ffmpeg_encoders", "available_video_codec_keys",
     "video_codec_extra_args",
     "PostProcessor", "ConvertWorker", "ClipWorker", "ThumbWorker",
+    "BundleWorker", "TranscribeWorker", "whisper_available",
     "single_thumb_path", "strip_thumb_paths", "probe_duration",
 ]
