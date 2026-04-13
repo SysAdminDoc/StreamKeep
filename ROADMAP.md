@@ -250,7 +250,7 @@
   Read `metadata.json` for token values. Undo log to disk.
   Update `HistoryEntry.path` after rename.
 
-- [ ] **F27 — Full-Text Transcript Search** (Medium, ~150-180 lines)
+- [x] **F27 — Full-Text Transcript Search** (Medium, ~150-180 lines)
   *Benefits from F29 (WhisperX) for word-level timestamps.*
   SQLite FTS5 index built on transcript generation. History tab: "Search transcripts"
   toggle on search bar. Results: text snippet + timestamp + recording title.
