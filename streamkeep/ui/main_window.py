@@ -2162,6 +2162,51 @@ class StreamKeep(QMainWindow):
                 inputs[plat_key][1].setText(credential_status(plat_key))
         self._set_status("All platform tokens cleared.", "success")
 
+    def _save_proxy_pool(self):
+        """Parse the proxy pool text and persist (F49)."""
+        from streamkeep.proxy import set_pool
+        edit = getattr(self, "proxy_pool_edit", None)
+        if edit is None:
+            return
+        entries = []
+        for line in edit.toPlainText().strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("|")
+            url = parts[0].strip()
+            if not url:
+                continue
+            platforms = [p.strip() for p in (parts[1] if len(parts) > 1 else "").split(",") if p.strip()]
+            label = parts[2].strip() if len(parts) > 2 else ""
+            entries.append({
+                "url": url, "platforms": platforms,
+                "label": label, "enabled": True,
+            })
+        set_pool(entries)
+        self._config["proxy_pool"] = entries
+
+    def _on_test_proxies(self):
+        """Run health checks on all proxy pool entries (F49)."""
+        self._save_proxy_pool()
+        from streamkeep.proxy import health_check_all
+        results = health_check_all(timeout=8)
+        if not results:
+            self._set_status("No proxies configured to test.", "warning")
+            return
+        lines = []
+        for label, ok, ms in results:
+            if ok:
+                lines.append(f"  {label}: {ms}ms")
+            else:
+                lines.append(f"  {label}: FAILED")
+        self._log("[PROXY] Health check results:\n" + "\n".join(lines))
+        ok_count = sum(1 for _, ok, _ in results if ok)
+        self._set_status(
+            f"Proxy test: {ok_count}/{len(results)} reachable.",
+            "success" if ok_count == len(results) else "warning",
+        )
+
     def _on_save_settings(self):
         self.output_input.setText(self.settings_output.text())
         # Apply browser cookies setting
@@ -2189,6 +2234,8 @@ class StreamKeep(QMainWindow):
         _set_native_proxy(proxy)
         global NATIVE_PROXY
         NATIVE_PROXY = proxy
+        # Save proxy pool (F49)
+        self._save_proxy_pool()
         # Apply parallel connections (affects direct MP4 downloads)
         self._parallel_connections = max(1, min(16, self.parallel_spin.value()))
         # Parallel auto-records + chunked live captures (v4.15.0).

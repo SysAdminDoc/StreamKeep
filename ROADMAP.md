@@ -354,7 +354,7 @@
   YouTube API key, Kick session token, generic headers. Encrypted storage
   (DPAPI). Status indicators: authenticated / expired / none.
 
-- [ ] **F49 — Proxy Pool with Per-Platform Routing** (Medium, ~150-200 lines)
+- [x] **F49 — Proxy Pool with Per-Platform Routing** (Medium, ~150-200 lines) v4.26.2
   Multiple proxies, each assigned to specific platforms. HTTP/SOCKS5/SOCKS5h.
   Health check with latency. Auto-failover (3 attempts → direct fallback).
 

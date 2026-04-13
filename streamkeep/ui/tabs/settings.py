@@ -11,8 +11,8 @@ import subprocess
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ... import VERSION
@@ -461,6 +461,41 @@ def build_settings_tab(win):
     win.proxy_input.setPlaceholderText("e.g. socks5://127.0.0.1:1080 or http://proxy:8080")
     proxy_row.addWidget(win.proxy_input, 1)
     network_lay.addLayout(proxy_row)
+
+    # Proxy pool (F49)
+    proxy_pool_hint = QLabel(
+        "Proxy pool: assign proxies to specific platforms. "
+        "Format per line: url|platform1,platform2|label (platforms optional)."
+    )
+    proxy_pool_hint.setObjectName("subtleText")
+    proxy_pool_hint.setWordWrap(True)
+    network_lay.addWidget(proxy_pool_hint)
+    win.proxy_pool_edit = QPlainTextEdit()
+    win.proxy_pool_edit.setMaximumHeight(100)
+    win.proxy_pool_edit.setPlaceholderText(
+        "socks5://us.proxy:1080|twitch,kick|US proxy\n"
+        "http://de.proxy:8080|youtube|DE proxy\n"
+        "http://fallback:3128||Global fallback"
+    )
+    network_lay.addWidget(win.proxy_pool_edit)
+    # Load saved pool
+    _saved_pool = win._config.get("proxy_pool", [])
+    if isinstance(_saved_pool, list) and _saved_pool:
+        lines = []
+        for pe in _saved_pool:
+            if isinstance(pe, dict) and pe.get("url"):
+                plats = ",".join(pe.get("platforms", []))
+                label = pe.get("label", "")
+                lines.append(f"{pe['url']}|{plats}|{label}")
+        win.proxy_pool_edit.setPlainText("\n".join(lines))
+        from streamkeep.proxy import set_pool
+        set_pool(_saved_pool)
+
+    proxy_test_btn = QPushButton("Test Proxies")
+    proxy_test_btn.setObjectName("secondary")
+    proxy_test_btn.setFixedWidth(110)
+    proxy_test_btn.clicked.connect(win._on_test_proxies)
+    network_lay.addWidget(proxy_test_btn)
 
     # Bandwidth schedule
     win.bw_enable_check = QCheckBox(
