@@ -298,8 +298,231 @@
 
 ---
 
+# Wave 2 — Features F41-F80
+
+> Wave 1 (F1-F40) shipped in v4.18.0-v4.24.5. Wave 2 expands StreamKeep
+> into a full media management platform: headless/CLI operation, authenticated
+> downloads, built-in playback, AI-assisted editing, analytics, distribution
+> pipelines, and deep UX polish.
+
+---
+
+## Phase 8 — Foundation & Scale
+> Infrastructure that future Wave 2 features depend on.
+> SQLite migration (F41) unblocks analytics, plugin data, and scale.
+> CLI mode (F42) unlocks headless deployment.
+
+- [x] **F41 — SQLite Library Database Migration** (Large, ~300-400 lines) v4.25.0
+  Migrate history, monitor, queue, notifications from JSON config to
+  `library.db`. Normalized tables, WAL mode, indexed queries. Config retains
+  only user preferences. One-way migration with `.json.migrated` backup.
+
+- [ ] **F42 — CLI / Headless Mode** (Large, ~300-400 lines + ~200 engine extraction)
+  `StreamKeep.py --url URL --quality best --output ./` for single downloads.
+  `--monitor` for headless auto-record. `--server` for REST API only.
+  Extract shared engine from `main_window.py` into `streamkeep/engine.py`.
+
+- [ ] **F43 — Portable Mode** (Small, ~15-20 lines)
+  `portable.txt` marker file → store config/db/logs in `data/` next to exe.
+  Redirect `CONFIG_DIR` in `paths.py` before any imports.
+
+- [ ] **F44 — Batch URL Import from File** (Small, ~80-100 lines)
+  Text file or clipboard paste, one URL per line. `#` comments, blank skips.
+  Preview dialog with valid/invalid counts. Queue all valid URLs.
+
+- [ ] **F45 — Global Unified Search Bar** (Small-Med, ~150-180 lines)
+  Persistent search bar above tab bar. Searches History, Storage, Monitor,
+  Queue, transcripts (FTS5), tags. Results grouped by tab with jump-to.
+
+- [ ] **F46 — Recording Hover Preview** (Small, ~100-120 lines)
+  Animated 5-frame thumbnail loop on hover in History/Storage.
+  Reuse `ThumbWorker`. Cached as `.streamkeep_preview.jpg` sprite strip.
+
+---
+
+## Phase 9 — Authentication & Network
+> Unlock paywalled and geo-blocked content. Cookie import (F47) is
+> the highest-impact feature in this phase.
+
+- [ ] **F47 — Browser Cookie Import** (Medium, ~150-200 lines)
+  Extract cookies from Chrome/Firefox/Edge for Twitch/YouTube/Kick.
+  `browser_cookie3` or `rookiepy` for decryption. Netscape cookies.txt
+  fallback. Inject into curl `--cookie` and yt-dlp `--cookies`.
+
+- [ ] **F48 — Platform Account Manager** (Medium, ~150-200 lines)
+  Settings panel for auth credentials per platform. Twitch OAuth token,
+  YouTube API key, Kick session token, generic headers. Encrypted storage
+  (DPAPI). Status indicators: authenticated / expired / none.
+
+- [ ] **F49 — Proxy Pool with Per-Platform Routing** (Medium, ~150-200 lines)
+  Multiple proxies, each assigned to specific platforms. HTTP/SOCKS5/SOCKS5h.
+  Health check with latency. Auto-failover (3 attempts → direct fallback).
+
+- [ ] **F50 — DASH/MPD Manifest Support** (Medium, ~200-250 lines)
+  Parse MPD XML into `QualityInfo` entries. Handle SegmentTemplate and
+  SegmentList addressing. Static VOD manifests first, live DASH later.
+
+- [ ] **F51 — Download Speed Scheduling** (Small, ~100-120 lines)
+  Time-based bandwidth rules. 7x24 weekly grid of speed tiers.
+  Auto-updates active limit via 60-second QTimer. Applied to new downloads.
+
+---
+
+## Phase 10 — Built-in Player
+> Watch content without leaving the app. F52 is the centerpiece;
+> F53-F56 extend it. All depend on mpv/libmpv.
+
+- [ ] **F52 — Embedded Media Player (mpv Backend)** (Large, ~400-500 lines)
+  `python-mpv` (libmpv) in a `QWidget`. Play/pause, seek with thumb preview,
+  volume, speed, subtitle tracks, chapter markers, fullscreen. Persists
+  playback position for resume. Double-click History/Storage to play.
+
+- [ ] **F53 — Picture-in-Picture Mini Player** (Small-Med, ~120-150 lines)
+  Floating always-on-top `QWidget`. Re-parent mpv widget from main player.
+  Drag to move, resize handle, click to expand back. Minimal controls.
+
+- [ ] **F54 — Multi-Stream Sync Viewer** (Large, ~250-300 lines)
+  2-4 mpv instances in a grid with shared transport. Sync seek/play/pause.
+  Per-stream audio toggle and offset slider (±30s). History multi-select entry.
+
+- [ ] **F55 — Chapter & Bookmark Navigation Panel** (Small, ~100-120 lines)
+  Sidebar listing chapters + bookmarks. Click to seek. "Add bookmark here"
+  saves current position with label. Loads from metadata.json + HistoryEntry.
+
+- [ ] **F56 — Playback Speed & Audio EQ Controls** (Small, ~80-100 lines)
+  Speed combo (0.25x-3x), 5-band EQ sliders, dynaudnorm toggle, mono/stereo.
+  All via mpv properties. Persist globally or per-recording.
+
+---
+
+## Phase 11 — Intelligence
+> Let the app make smart decisions about content. F57 combines
+> existing chat/audio/scene signals. F58-F62 are independent.
+
+- [ ] **F57 — AI Auto-Highlight Generator** (Large, ~200-250 lines)
+  Composite scoring: chat spikes + audio peaks + scene change frequency.
+  Top-N highlights with preview panel. Export as highlight reel (via F9).
+
+- [ ] **F58 — SponsorBlock Integration** (Small, ~100-120 lines)
+  Query SponsorBlock API for YouTube segment data. Colored markers on
+  download preview. Options: skip during download, mark as chapters,
+  remove in post-processing.
+
+- [ ] **F59 — Platform Subtitle Download** (Small, ~100-120 lines)
+  Download platform-provided CC/subtitles alongside video. Twitch captions,
+  YouTube multi-language subs via yt-dlp `--write-subs`. Save as `.srt`/`.vtt`.
+
+- [ ] **F60 — Content Summary via LLM** (Medium, ~200-250 lines)
+  Feed transcript to ollama/Claude/OpenAI. Output `.summary.md` with
+  overview, key topics, timestamped moments, participants. Chunked processing.
+
+- [ ] **F61 — Smart Thumbnail Generator** (Small-Med, ~150-180 lines)
+  Score scene-boundary frames by contrast/edge density/face presence.
+  Optional text overlay via Pillow. "Pick from top 5 candidates" UI.
+
+- [ ] **F62 — Audio Normalization Profiles** (Small, ~100-120 lines)
+  LUFS-based loudnorm: Broadcast (-24), Podcast (-16), YouTube (-14),
+  Streaming (-18), Custom. Two-pass FFmpeg. Integrates with PP presets (F7).
+
+---
+
+## Phase 12 — Analytics & Health
+> Visibility into your archive. Data sourced from History + DB.
+> All features in this phase are independent.
+
+- [ ] **F63 — Download Analytics Dashboard** (Medium, ~250-300 lines)
+  New Analytics tab or overlay. QPainter charts: downloads/day (bar),
+  cumulative data (line), platform breakdown (donut), top channels (ranked).
+
+- [ ] **F64 — Bandwidth Usage Tracker** (Small, ~80-100 lines)
+  Track bytes transferred per session, persist daily totals. Status bar
+  "Today: 12.4 GB". Optional daily/monthly cap with pause-queue action.
+
+- [ ] **F65 — Download Integrity Verification** (Small, ~80-100 lines)
+  Post-download ffprobe: verify valid container, duration within 2% of
+  expected, no truncation. Green/yellow/red badge on History rows.
+
+- [ ] **F66 — Channel Statistics & Growth Trends** (Medium, ~200-250 lines)
+  Log monitor poll transitions (live/offline) to DB. Per-channel insights:
+  streams/week, avg duration, top game. Sparklines in Monitor tab.
+
+- [ ] **F67 — Storage Health Monitor & Disk Alerts** (Small, ~60-80 lines)
+  30-second disk usage poll. Status bar indicator with color thresholds.
+  Auto-pause queue on critical low space. Multi-drive support.
+
+---
+
+## Phase 13 — Distribution & Sharing
+> Get content out of StreamKeep. Upload destinations (F68) is the
+> big one; others are lighter integration features.
+
+- [ ] **F68 — Upload Destinations (YouTube/S3/FTP/WebDAV)** (Large, ~400-500 lines)
+  Adapter pattern: `UploadDestination` base → YouTube (OAuth + resumable),
+  S3/B2 (boto3 multipart), FTP/SFTP (paramiko), WebDAV (HTTP PUT).
+  Per-destination naming template. Wire to FinalizeWorker completion.
+
+- [ ] **F69 — Clip Share via Local Web Gallery** (Small-Med, ~150-200 lines)
+  Extend web server: `/share/{id}` HTML player, `/media/{id}` Range streaming,
+  `/gallery` browsable grid. "Share on network" toggle per recording.
+
+- [ ] **F70 — RSS Feed Generator** (Small, ~100-120 lines)
+  Serve RSS 2.0 feeds via web server. Per-channel + combined "all" feeds.
+  `<enclosure>` tags for podcast app compatibility. Persist port across launches.
+
+- [ ] **F71 — Recording Notes & Annotations** (Small, ~100-120 lines)
+  Markdown notes per recording as `.notes.md` sidecars. Auto-template on
+  first open. Searchable via global search (F45). Notes panel in History.
+
+- [ ] **F72 — Backup & Restore Wizard** (Small-Med, ~150-180 lines)
+  Export config + DB + sidecars as encrypted `.skbackup`. Restore with
+  schema migration. Scheduled auto-backup (daily/weekly). Passphrase-protected.
+
+---
+
+## Phase 14 — UX & Extensibility
+> Polish and open up. Plugin SDK (F77) is the strategic feature;
+> i18n (F74) has the widest user impact.
+
+- [ ] **F73 — Custom Accent Color Picker** (Small, ~60-80 lines)
+  8 preset swatches + custom hex via `QColorDialog`. Patches `CAT["accent"]`
+  and rebuilds stylesheet. Live preview. Persist as `accent_color` in config.
+
+- [ ] **F74 — Multi-Language (i18n)** (Large, codebase-wide string wrapping)
+  Qt `QTranslator` + `.ts`/`.qm` files. Ship EN + 8 community languages.
+  Settings language combo with instant apply. `self.tr()` on all strings.
+
+- [ ] **F75 — Layout Density Modes** (Small, ~60-80 lines)
+  Compact / Cozy / Spacious presets. Font size, row height, padding,
+  thumbnail dimensions. QSS template interpolation with density multiplier.
+
+- [ ] **F76 — First-Run Onboarding Wizard** (Small-Med, ~200-250 lines)
+  Multi-step wizard: ffmpeg check, output dir, theme, cookies, first channel,
+  UI tour. Skippable. `first_run_complete` config flag.
+
+- [ ] **F77 — Plugin / Extension SDK** (Large, ~200-250 lines)
+  Load Python modules from `plugins/`. Types: extractors, PP filters, upload
+  destinations, UI panels. `plugin.json` manifest. Settings: plugin list
+  with enable/disable.
+
+- [ ] **F78 — Accessibility (Screen Reader + High Contrast)** (Medium, ~200-300 lines)
+  `setAccessibleName()` on all widgets. High-contrast theme (WCAG AAA).
+  Focus rings, tab order audit, alt text on images. Codebase-wide sweep.
+
+- [ ] **F79 — Encrypted Config Storage** (Small, ~80-100 lines)
+  DPAPI on Windows for sensitive fields (tokens, webhooks, proxy creds).
+  `secrets.py` encrypt/decrypt. Migration: encrypt existing plaintext on
+  first run after upgrade. "Show decrypted" toggle in Settings.
+
+- [ ] **F80 — Native OS Notifications** (Small, ~120-150 lines)
+  Windows Toast (with action buttons), macOS Notification Center, Linux
+  libnotify. "Record now" button on channel-live toast. Fallback to Qt
+  `showMessage()`.
+
+---
+
 ## Dependency Graph (cross-feature)
 
+### Wave 1 (completed)
 ```
 F17 (Pagination) ──> F2 (Batch VOD) ──> F1 (Queue) enables full batch flow
 F8 (Chat markers) ──> F9 (Multi-range highlight reel)
@@ -313,9 +536,27 @@ F4 (Notification log) ──> F15 (Webhook expansion) more targets for same even
 F24 (Event hooks) ──> F33 (Media server) can be wired via hooks as alternative
 ```
 
+### Wave 2
+```
+F41 (SQLite) ──> F63 (Analytics) + F64 (Bandwidth) + F66 (Channel stats)
+                  require indexed queries on large datasets
+F41 (SQLite) ──> F72 (Backup/Restore) includes DB export
+F42 (CLI) ──> decouples engine from Qt for headless deployment
+F47 (Cookies) ──> F48 (Accounts) builds on cookie-based auth
+F52 (Player) ──> F53 (PiP) + F54 (Sync) + F55 (Chapters) + F56 (EQ)
+                  all depend on embedded mpv
+F8+F34+F30 (Wave 1 signals) ──> F57 (AI highlights) combines all three
+F37 (REST API, Wave 1) ──> F69 (Gallery) + F70 (RSS) extend the web server
+F45 (Global search) ──> F71 (Notes) adds notes to search corpus
+F41 (SQLite) ──> F77 (Plugins) need DB for plugin state/settings
+F79 (Encrypted config) ──> F48 (Accounts) stores credentials securely
+```
+
 ---
 
 ## Version Plan
+
+### Wave 1 (completed)
 
 | Phase | Target Version | Features | Theme |
 |-------|---------------|----------|-------|
@@ -326,6 +567,18 @@ F24 (Event hooks) ──> F33 (Media server) can be wired via hooks as alternati
 | 5 | v4.22.0 | F18, F25, F32, F39 | Monitor intelligence |
 | 6 | v4.23.0 | F38, F13, F35, F36, F27 | Library |
 | 7 | v4.24.0 | F29, F22, F23, F37, F20 | Advanced |
+
+### Wave 2 (planned)
+
+| Phase | Target Version | Features | Theme |
+|-------|---------------|----------|-------|
+| 8  | v4.25.0 | F41, F42, F43, F44, F45, F46 | Foundation & scale |
+| 9  | v4.26.0 | F47, F48, F49, F50, F51 | Auth & network |
+| 10 | v4.27.0 | F52, F53, F54, F55, F56 | Built-in player |
+| 11 | v4.28.0 | F57, F58, F59, F60, F61, F62 | Intelligence |
+| 12 | v4.29.0 | F63, F64, F65, F66, F67 | Analytics & health |
+| 13 | v4.30.0 | F68, F69, F70, F71, F72 | Distribution |
+| 14 | v4.31.0 | F73, F74, F75, F76, F77, F78, F79, F80 | UX & extensibility |
 
 ---
 
