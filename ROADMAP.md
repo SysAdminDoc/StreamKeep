@@ -381,7 +381,7 @@
   Floating always-on-top `QWidget`. Re-parent mpv widget from main player.
   Drag to move, resize handle, click to expand back. Minimal controls.
 
-- [ ] **F54 — Multi-Stream Sync Viewer** (Large, ~250-300 lines)
+- [x] **F54 — Multi-Stream Sync Viewer** (Large, ~250-300 lines) v4.27.2
   2-4 mpv instances in a grid with shared transport. Sync seek/play/pause.
   Per-stream audio toggle and offset slider (±30s). History multi-select entry.
 
