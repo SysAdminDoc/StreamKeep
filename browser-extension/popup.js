@@ -76,10 +76,37 @@ async function sendUrl(action) {
   }
 }
 
+async function sendAllTabs() {
+  setStatus("Sending tabs…");
+  try {
+    const tabs = await chrome.tabs.query({});
+    const urls = tabs
+      .map((t) => t.url)
+      .filter((u) => u && /^https?:/.test(u));
+    if (urls.length === 0) {
+      setStatus("No http(s) tabs found.", "err");
+      return;
+    }
+    let ok = 0;
+    for (const url of urls) {
+      try {
+        await companionCall("/send_url", "POST", { url, action: "queue" });
+        ok++;
+      } catch (_) {
+        /* skip individual failures */
+      }
+    }
+    setStatus(`Sent ${ok} of ${urls.length} tabs.`, ok > 0 ? "ok" : "err");
+  } catch (e) {
+    setStatus(`Send failed: ${e.message}`, "err");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   load();
   $("save").addEventListener("click", save);
   $("test").addEventListener("click", testPairing);
   $("send-fetch").addEventListener("click", () => sendUrl("fetch"));
   $("send-queue").addEventListener("click", () => sendUrl("queue"));
+  $("send-all-tabs").addEventListener("click", sendAllTabs);
 });
