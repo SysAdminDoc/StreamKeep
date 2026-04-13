@@ -456,7 +456,7 @@
 > Get content out of StreamKeep. Upload destinations (F68) is the
 > big one; others are lighter integration features.
 
-- [ ] **F68 — Upload Destinations (YouTube/S3/FTP/WebDAV)** (Large, ~400-500 lines)
+- [x] **F68 — Upload Destinations (YouTube/S3/FTP/WebDAV)** (Large, ~400-500 lines) v4.30.0
   Adapter pattern: `UploadDestination` base → YouTube (OAuth + resumable),
   S3/B2 (boto3 multipart), FTP/SFTP (paramiko), WebDAV (HTTP PUT).
   Per-destination naming template. Wire to FinalizeWorker completion.
