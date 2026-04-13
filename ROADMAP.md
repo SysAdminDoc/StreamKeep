@@ -403,7 +403,7 @@
   Composite scoring: chat spikes + audio peaks + scene change frequency.
   Top-N highlights with preview panel. Export as highlight reel (via F9).
 
-- [ ] **F58 — SponsorBlock Integration** (Small, ~100-120 lines)
+- [x] **F58 — SponsorBlock Integration** (Small, ~100-120 lines) v4.28.1
   Query SponsorBlock API for YouTube segment data. Colored markers on
   download preview. Options: skip during download, mark as chapters,
   remove in post-processing.
