@@ -9,8 +9,8 @@ converter buttons, import/export/save row.
 import subprocess
 
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ... import VERSION
@@ -30,6 +30,151 @@ from ...utils import (
     render_template as _render_template,
 )
 from ..widgets import make_field_block, make_metric_card
+
+
+BUILTIN_PRESETS = {
+    "Archive Quality": {
+        "extract_audio": False, "normalize_loudness": True,
+        "reencode_h265": True, "contact_sheet": True,
+        "split_by_chapter": False, "remove_silence": False,
+        "convert_video": False, "convert_audio": False,
+    },
+    "Quick Share": {
+        "extract_audio": False, "normalize_loudness": False,
+        "reencode_h265": False, "contact_sheet": False,
+        "split_by_chapter": False, "remove_silence": False,
+        "convert_video": True, "convert_video_format": "mp4",
+        "convert_video_codec": "h264", "convert_video_scale": "720p",
+        "convert_video_fps": "30", "convert_audio": False,
+    },
+    "Raw — No Processing": {
+        "extract_audio": False, "normalize_loudness": False,
+        "reencode_h265": False, "contact_sheet": False,
+        "split_by_chapter": False, "remove_silence": False,
+        "convert_video": False, "convert_audio": False,
+    },
+}
+
+
+def _pp_snapshot():
+    """Capture the current PostProcessor state as a dict."""
+    return {
+        "extract_audio": PostProcessor.extract_audio,
+        "normalize_loudness": PostProcessor.normalize_loudness,
+        "reencode_h265": PostProcessor.reencode_h265,
+        "contact_sheet": PostProcessor.contact_sheet,
+        "split_by_chapter": PostProcessor.split_by_chapter,
+        "remove_silence": PostProcessor.remove_silence,
+        "silence_noise_db": PostProcessor.silence_noise_db,
+        "silence_min_duration": PostProcessor.silence_min_duration,
+        "convert_video": PostProcessor.convert_video,
+        "convert_video_format": PostProcessor.convert_video_format,
+        "convert_video_codec": PostProcessor.convert_video_codec,
+        "convert_video_scale": PostProcessor.convert_video_scale,
+        "convert_video_fps": PostProcessor.convert_video_fps,
+        "convert_audio": PostProcessor.convert_audio,
+        "convert_audio_format": PostProcessor.convert_audio_format,
+        "convert_audio_codec": PostProcessor.convert_audio_codec,
+        "convert_audio_bitrate": PostProcessor.convert_audio_bitrate,
+        "convert_audio_samplerate": PostProcessor.convert_audio_samplerate,
+        "convert_delete_source": PostProcessor.convert_delete_source,
+    }
+
+
+def _pp_apply_snapshot(snap, win=None):
+    """Apply a preset dict to the PostProcessor class vars and optionally
+    refresh the Settings tab widgets."""
+    for key, val in snap.items():
+        if hasattr(PostProcessor, key):
+            setattr(PostProcessor, key, val)
+    if win is None:
+        return
+    # Refresh UI checkboxes/combos to match
+    _setc = lambda w, v: (w.blockSignals(True), w.setChecked(bool(v)), w.blockSignals(False))
+    if hasattr(win, "pp_audio_check"):
+        _setc(win.pp_audio_check, PostProcessor.extract_audio)
+    if hasattr(win, "pp_loud_check"):
+        _setc(win.pp_loud_check, PostProcessor.normalize_loudness)
+    if hasattr(win, "pp_h265_check"):
+        _setc(win.pp_h265_check, PostProcessor.reencode_h265)
+    if hasattr(win, "pp_contact_check"):
+        _setc(win.pp_contact_check, PostProcessor.contact_sheet)
+    if hasattr(win, "pp_split_check"):
+        _setc(win.pp_split_check, PostProcessor.split_by_chapter)
+    if hasattr(win, "pp_silence_check"):
+        _setc(win.pp_silence_check, PostProcessor.remove_silence)
+    if hasattr(win, "pp_silence_db_spin"):
+        win.pp_silence_db_spin.setValue(int(PostProcessor.silence_noise_db or -30))
+    if hasattr(win, "pp_silence_dur_spin"):
+        win.pp_silence_dur_spin.setValue(int(PostProcessor.silence_min_duration or 3))
+    if hasattr(win, "pp_convert_video_check"):
+        _setc(win.pp_convert_video_check, PostProcessor.convert_video)
+    if hasattr(win, "pp_convert_audio_check"):
+        _setc(win.pp_convert_audio_check, PostProcessor.convert_audio)
+
+
+def _get_user_presets(win):
+    """Return the user-defined presets dict from config."""
+    cfg = getattr(win, "_config", {})
+    return dict(cfg.get("pp_presets", {}))
+
+
+def _save_user_presets(win, presets):
+    cfg = getattr(win, "_config", {})
+    cfg["pp_presets"] = dict(presets)
+
+
+def _populate_pp_presets(win):
+    """Refresh the preset combo box."""
+    combo = win.pp_preset_combo
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("(custom)", userData="")
+    for name in BUILTIN_PRESETS:
+        combo.addItem(f"★ {name}", userData=name)
+    for name in _get_user_presets(win):
+        combo.addItem(name, userData=name)
+    combo.setCurrentIndex(0)
+    combo.blockSignals(False)
+
+
+def _on_pp_preset_selected(win):
+    """User picked a preset from the combo — apply it."""
+    name = win.pp_preset_combo.currentData()
+    if not name:
+        return  # "(custom)" selected — no-op
+    snap = BUILTIN_PRESETS.get(name) or _get_user_presets(win).get(name)
+    if snap:
+        _pp_apply_snapshot(snap, win)
+
+
+def _on_pp_preset_save(win):
+    """Save current PP state as a named preset."""
+    name, ok = QInputDialog.getText(win, "Save Preset", "Preset name:")
+    if not ok or not name.strip():
+        return
+    name = name.strip()
+    if name in BUILTIN_PRESETS:
+        return  # Don't overwrite built-ins
+    presets = _get_user_presets(win)
+    presets[name] = _pp_snapshot()
+    _save_user_presets(win, presets)
+    _populate_pp_presets(win)
+    # Select the newly saved preset
+    idx = win.pp_preset_combo.findData(name)
+    if idx >= 0:
+        win.pp_preset_combo.setCurrentIndex(idx)
+
+
+def _on_pp_preset_delete(win):
+    """Delete the currently selected user preset."""
+    name = win.pp_preset_combo.currentData()
+    if not name or name in BUILTIN_PRESETS:
+        return
+    presets = _get_user_presets(win)
+    presets.pop(name, None)
+    _save_user_presets(win, presets)
+    _populate_pp_presets(win)
 
 
 def build_settings_tab(win):
@@ -612,6 +757,31 @@ def build_settings_tab(win):
         "Post-Processing",
         "Automatic ffmpeg operations on each downloaded file. Originals are preserved.",
     )
+    # Preset selector (v4.20.0 — F7)
+    preset_row = QHBoxLayout()
+    preset_row.setSpacing(8)
+    preset_row.addWidget(QLabel("Preset:"))
+    win.pp_preset_combo = QComboBox()
+    win.pp_preset_combo.setMinimumWidth(180)
+    win.pp_preset_combo.setToolTip("Load a saved post-processing profile")
+    _populate_pp_presets(win)
+    win.pp_preset_combo.currentIndexChanged.connect(
+        lambda _idx, w=win: _on_pp_preset_selected(w)
+    )
+    preset_row.addWidget(win.pp_preset_combo)
+    win.pp_preset_save_btn = QPushButton("Save As…")
+    win.pp_preset_save_btn.setObjectName("ghost")
+    win.pp_preset_save_btn.setFixedWidth(80)
+    win.pp_preset_save_btn.clicked.connect(lambda _c=False, w=win: _on_pp_preset_save(w))
+    preset_row.addWidget(win.pp_preset_save_btn)
+    win.pp_preset_del_btn = QPushButton("Delete")
+    win.pp_preset_del_btn.setObjectName("ghost")
+    win.pp_preset_del_btn.setFixedWidth(60)
+    win.pp_preset_del_btn.clicked.connect(lambda _c=False, w=win: _on_pp_preset_delete(w))
+    preset_row.addWidget(win.pp_preset_del_btn)
+    preset_row.addStretch(1)
+    pp_lay.addLayout(preset_row)
+
     win.pp_audio_check = QCheckBox("Extract audio as MP3 (libmp3lame, VBR quality 2)")
     win.pp_audio_check.setChecked(PostProcessor.extract_audio)
     pp_lay.addWidget(win.pp_audio_check)

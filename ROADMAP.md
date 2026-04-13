@@ -131,7 +131,7 @@
   Expose as Settings checkbox + History right-click action.
   Config: noise floor slider (-20dB to -50dB), min silence duration.
 
-- [ ] **F7 — Post-Processing Presets** (Medium, ~150-200 lines)
+- [x] **F7 — Post-Processing Presets** (Medium, ~150-200 lines) ✓ v4.20.0
   Named preset dicts in config. Settings UI: combo box + save/delete/rename.
   Ship 3 built-ins: "Archive Quality", "Quick Share", "Raw — No Processing".
   Per-channel preset selector in `monitor_entry_dialog.py`.
