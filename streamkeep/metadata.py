@@ -67,7 +67,7 @@ class MetadataSaver:
         chapters = getattr(stream_info, "chapters", None) or []
         if not chapters:
             return False
-        base = file_base or "chapters"
+        base = os.path.basename(file_base) if file_base else "chapters"
         try:
             txt_path = os.path.join(output_dir, f"{base}.chapters.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
@@ -156,9 +156,10 @@ class MetadataSaver:
         lines.append('</movie>')
 
         try:
+            safe_base = os.path.basename(file_base) if file_base else ""
             nfo_path = os.path.join(
                 output_dir,
-                (file_base + ".nfo") if file_base else "movie.nfo",
+                (safe_base + ".nfo") if safe_base else "movie.nfo",
             )
             with open(nfo_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
