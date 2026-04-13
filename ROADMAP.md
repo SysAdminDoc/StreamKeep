@@ -408,7 +408,7 @@
   download preview. Options: skip during download, mark as chapters,
   remove in post-processing.
 
-- [ ] **F59 — Platform Subtitle Download** (Small, ~100-120 lines)
+- [x] **F59 — Platform Subtitle Download** (Small, ~100-120 lines) v4.28.2
   Download platform-provided CC/subtitles alongside video. Twitch captions,
   YouTube multi-language subs via yt-dlp `--write-subs`. Save as `.srt`/`.vtt`.
 
