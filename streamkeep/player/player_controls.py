@@ -1,7 +1,11 @@
-"""Player transport controls — play/pause, seek, volume, speed, subs (F52)."""
+"""Player transport controls — play/pause, seek, volume, speed, subs (F52).
+
+Extended with 5-band EQ, dynaudnorm toggle, and mono/stereo toggle (F56).
+"""
 
 from PyQt6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QPushButton, QSlider, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSlider,
+    QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -22,15 +26,24 @@ class PlayerControls(QWidget):
     subtitle_changed = pyqtSignal(object)   # track_id or False
     fullscreen_requested = pyqtSignal()
     pip_requested = pyqtSignal()
+    eq_changed = pyqtSignal(list)           # [bass, lo_mid, mid, hi_mid, treble] dB
+    normalize_changed = pyqtSignal(bool)
+    mono_changed = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._duration = 0.0
         self._seeking = False
 
-        lay = QHBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Row 1: main transport
+        lay = QHBoxLayout()
         lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(8)
+        outer.addLayout(lay)
 
         # Play/Pause
         self.play_btn = QPushButton("||")
@@ -111,6 +124,37 @@ class PlayerControls(QWidget):
         fs_btn.setToolTip("Toggle fullscreen")
         fs_btn.clicked.connect(self.fullscreen_requested.emit)
         lay.addWidget(fs_btn)
+
+        # Row 2: EQ + audio toggles (F56)
+        eq_row = QHBoxLayout()
+        eq_row.setContentsMargins(8, 0, 8, 2)
+        eq_row.setSpacing(6)
+        eq_row.addWidget(QLabel("EQ:"))
+        self._eq_sliders = []
+        _EQ_BANDS = ["Bass", "Lo-Mid", "Mid", "Hi-Mid", "Treble"]
+        for band_name in _EQ_BANDS:
+            sl = QSlider(Qt.Orientation.Horizontal)
+            sl.setRange(-12, 12)
+            sl.setValue(0)
+            sl.setFixedWidth(50)
+            sl.setToolTip(f"{band_name} (-12 to +12 dB)")
+            sl.valueChanged.connect(self._emit_eq)
+            eq_row.addWidget(sl)
+            self._eq_sliders.append(sl)
+        self._normalize_check = QCheckBox("Normalize")
+        self._normalize_check.setToolTip("Dynamic audio normalization (mpv dynaudnorm)")
+        self._normalize_check.toggled.connect(self.normalize_changed.emit)
+        eq_row.addWidget(self._normalize_check)
+        self._mono_check = QCheckBox("Mono")
+        self._mono_check.setToolTip("Downmix to mono")
+        self._mono_check.toggled.connect(self.mono_changed.emit)
+        eq_row.addWidget(self._mono_check)
+        eq_row.addStretch(1)
+        outer.addLayout(eq_row)
+
+    def _emit_eq(self):
+        vals = [sl.value() for sl in self._eq_sliders]
+        self.eq_changed.emit(vals)
 
     def set_position(self, secs):
         """Update the seek slider and time label from the current position."""

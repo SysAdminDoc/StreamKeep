@@ -184,6 +184,43 @@ class MpvWidget(QWidget):
             except Exception:
                 pass
 
+    def set_eq(self, bands):
+        """Set 5-band EQ. *bands* is [bass, lo_mid, mid, hi_mid, treble] in dB (F56)."""
+        if not self._mpv or len(bands) < 5:
+            return
+        try:
+            # mpv superequalizer: 10 bands, we map 5 to the most useful ones
+            # Bands 0-1 (bass), 2-3 (lo-mid), 4-5 (mid), 6-7 (hi-mid), 8-9 (treble)
+            af_str = (
+                f"superequalizer="
+                f"1={bands[0]}:2={bands[0]}:"
+                f"3={bands[1]}:4={bands[1]}:"
+                f"5={bands[2]}:6={bands[2]}:"
+                f"7={bands[3]}:8={bands[3]}:"
+                f"9={bands[4]}:10={bands[4]}"
+            )
+            self._mpv.af = af_str
+        except Exception:
+            pass
+
+    def set_normalize(self, enabled):
+        """Toggle dynamic audio normalization (F56)."""
+        if not self._mpv:
+            return
+        try:
+            self._mpv.af = "dynaudnorm" if enabled else ""
+        except Exception:
+            pass
+
+    def set_mono(self, enabled):
+        """Toggle mono downmix (F56)."""
+        if not self._mpv:
+            return
+        try:
+            self._mpv.audio_channels = "mono" if enabled else "auto"
+        except Exception:
+            pass
+
     @property
     def subtitle_tracks(self):
         """Return list of (track_id, title_or_lang) for subtitle tracks."""

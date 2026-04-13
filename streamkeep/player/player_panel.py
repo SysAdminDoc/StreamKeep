@@ -89,6 +89,10 @@ class PlayerPanel(QDialog):
         self.controls.fullscreen_requested.connect(self._toggle_fullscreen)
         if hasattr(self.controls, "pip_requested"):
             self.controls.pip_requested.connect(self._enter_pip)
+        # EQ / normalize / mono (F56)
+        self.controls.eq_changed.connect(self.mpv.set_eq)
+        self.controls.normalize_changed.connect(self.mpv.set_normalize)
+        self.controls.mono_changed.connect(self.mpv.set_mono)
         self._pip_window = None
 
         # Wire mpv -> controls + chapter panel
