@@ -9,9 +9,12 @@ predictable file layout and keeps the runtime unchanged.
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import urllib.parse
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -3318,6 +3321,7 @@ class StreamKeep(QMainWindow):
         self._total_segments = len(segments)
         self._completed_segments = 0
         self._download_had_errors = False
+        self._init_speed_tracking()
         self.download_btn.setEnabled(False)
         self.fetch_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
@@ -3377,6 +3381,75 @@ class StreamKeep(QMainWindow):
                 f"Downloading {self._completed_segments}/{self._total_segments}. Segment {idx + 1}: {status}",
                 "working",
             )
+        # Parse speed from the status text (F16 speed dashboard)
+        self._update_speed_from_status(status)
+
+    # ── Speed & ETA Tracking (F16) ──────────────────────────────────
+
+    def _init_speed_tracking(self):
+        """Reset speed tracking state at the start of a download."""
+        self._speed_samples = deque(maxlen=60)  # (timestamp, speed_bytes_per_sec)
+        self._dl_start_time = time.monotonic()
+        if hasattr(self, "download_speed_value"):
+            self.download_speed_value.setText("—")
+            self.download_speed_sub.setText("Waiting for data")
+        if hasattr(self, "download_eta_value"):
+            self.download_eta_value.setText("—")
+            self.download_eta_sub.setText("Estimating...")
+
+    def _update_speed_from_status(self, status):
+        """Parse speed info from the progress status string and update the
+        speed/ETA dashboard cards."""
+        if not hasattr(self, "download_speed_value"):
+            return
+        # Try to extract a speed like "12.4MB/s" or "3.2MiB/s" from the status
+        m = re.search(r'([\d.]+)\s*(B|KB|KiB|MB|MiB|GB|GiB)/s', status, re.IGNORECASE)
+        if not m:
+            return
+        val = float(m.group(1))
+        unit = m.group(2).upper().replace("I", "")
+        multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+        bps = val * multipliers.get(unit, 1)
+        now = time.monotonic()
+        self._speed_samples.append((now, bps))
+        # Compute 5-second smoothed average
+        cutoff = now - 5.0
+        recent = [(t, s) for t, s in self._speed_samples if t >= cutoff]
+        if recent:
+            avg_speed = sum(s for _, s in recent) / len(recent)
+        else:
+            avg_speed = bps
+        # Display speed
+        self.download_speed_value.setText(_fmt_size(int(avg_speed)) + "/s")
+        self.download_speed_sub.setText(f"5-sec avg ({len(recent)} samples)")
+        # Calculate ETA from remaining segments
+        total = getattr(self, "_total_segments", 0)
+        done = getattr(self, "_completed_segments", 0)
+        if total > 0 and done < total and avg_speed > 0:
+            # Estimate bytes remaining from elapsed speed and segment ratio
+            elapsed = now - getattr(self, "_dl_start_time", now)
+            if elapsed > 0 and done > 0:
+                est_total_time = elapsed * total / done
+                remaining = est_total_time - elapsed
+                if remaining > 0:
+                    self.download_eta_value.setText(_fmt_duration(remaining))
+                    self.download_eta_sub.setText(
+                        f"{done}/{total} segments done"
+                    )
+                    return
+            self.download_eta_value.setText("Estimating...")
+        elif total > 0 and done >= total:
+            self.download_eta_value.setText("Done")
+            self.download_eta_sub.setText("Finalizing...")
+
+    def _reset_speed_dashboard(self):
+        """Clear speed/ETA cards after download completes."""
+        if hasattr(self, "download_speed_value"):
+            self.download_speed_value.setText("—")
+            self.download_speed_sub.setText("Starts during download")
+        if hasattr(self, "download_eta_value"):
+            self.download_eta_value.setText("—")
+            self.download_eta_sub.setText("Estimated time remaining")
 
     def _on_segment_done(self, idx, size_str):
         if idx < len(self._segment_progress):
@@ -3463,6 +3536,7 @@ class StreamKeep(QMainWindow):
                 self._release_queue_item("done")
         self._persist_config()
         self._update_tray_badge()
+        self._reset_speed_dashboard()
         self._start_next_background_job()
 
     def _on_stop(self):
