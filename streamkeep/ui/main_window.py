@@ -1987,6 +1987,13 @@ class StreamKeep(QMainWindow):
             self._config["enable_diarization"] = bool(self.diarize_check.isChecked())
         if hasattr(self, "hf_token_input"):
             self._config["hf_token"] = self.hf_token_input.text().strip()
+        # Chat render settings (F22)
+        if hasattr(self, "chat_render_width_spin"):
+            self._config["chat_render_width"] = self.chat_render_width_spin.value()
+            self._config["chat_render_height"] = self.chat_render_height_spin.value()
+            self._config["chat_render_font_size"] = self.chat_render_font_spin.value()
+            self._config["chat_render_msg_duration"] = self.chat_render_duration_spin.value()
+            self._config["chat_render_bg_opacity"] = self.chat_render_opacity_spin.value()
         if hasattr(self, "notif_sound_check"):
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
         # Apply bandwidth schedule rule
@@ -6051,6 +6058,10 @@ class StreamKeep(QMainWindow):
         )
         chat_highlights_act = menu.addAction("Show chat highlights")
         chat_highlights_act.setEnabled(has_chat)
+        chat_render_act = menu.addAction("Render chat overlay...")
+        chat_render_act.setEnabled(has_chat)
+        chat_preview_act = menu.addAction("Preview chat render (60s)")
+        chat_preview_act.setEnabled(has_chat)
         storyboard_act = menu.addAction("Generate storyboard")
         storyboard_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
@@ -6087,6 +6098,10 @@ class StreamKeep(QMainWindow):
             self._run_silence_removal_for_dir(h.path)
         elif chosen == chat_highlights_act and has_chat:
             self._show_chat_highlights(h.path)
+        elif chosen == chat_render_act and has_chat:
+            self._start_chat_render(h.path, preview_secs=0)
+        elif chosen == chat_preview_act and has_chat:
+            self._start_chat_render(h.path, preview_secs=60)
         elif chosen == storyboard_act and h.path:
             self._generate_storyboard(h.path)
         elif chosen == watch_act:
@@ -6333,6 +6348,57 @@ class StreamKeep(QMainWindow):
         else:
             self._log(f"[TRANSCRIBE] {path_or_err}")
             self._set_status(f"Transcribe failed: {path_or_err}", "error")
+
+    # ── Chat render (F22) ────────────────────────────────────────────
+
+    def _start_chat_render(self, src_dir, preview_secs=0):
+        """Launch a ChatRenderWorker for a directory that has chat.jsonl."""
+        jsonl_path = os.path.join(src_dir, "chat.jsonl")
+        if not os.path.isfile(jsonl_path):
+            self._set_status("No chat.jsonl found in that folder.", "warning")
+            return
+        if getattr(self, "_chat_render_worker", None) is not None and self._chat_render_worker.isRunning():
+            self._set_status("A chat render is already running.", "warning")
+            return
+        from ..postprocess.chat_render_worker import ChatRenderWorker
+        cfg = self._config
+        suffix = "_preview" if preview_secs else ""
+        out_path = os.path.join(src_dir, f"chat_render{suffix}.mp4")
+        worker = ChatRenderWorker(
+            jsonl_path, out_path,
+            width=int(cfg.get("chat_render_width", 400) or 400),
+            height=int(cfg.get("chat_render_height", 600) or 600),
+            font_size=int(cfg.get("chat_render_font_size", 14) or 14),
+            msg_duration=float(cfg.get("chat_render_msg_duration", 8.0) or 8.0),
+            bg_opacity=int(cfg.get("chat_render_bg_opacity", 180) or 180),
+            preview_secs=preview_secs,
+        )
+        worker.progress.connect(self._on_chat_render_progress)
+        worker.log.connect(self._log)
+        worker.done.connect(self._on_chat_render_done)
+        self._chat_render_worker = worker
+        label = "preview" if preview_secs else "full"
+        self._set_status(f"Rendering chat overlay ({label})...", "processing")
+        worker.start()
+
+    def _on_chat_render_progress(self, pct, status):
+        self._set_status(f"Chat render: {status} ({pct}%)", "processing")
+
+    def _on_chat_render_done(self, ok, path_or_err):
+        w = getattr(self, "_chat_render_worker", None)
+        if w is not None and not w.isRunning():
+            try:
+                w.wait(300)
+            except Exception:
+                pass
+        self._chat_render_worker = None
+        if ok:
+            self._log(f"[CHAT RENDER] Output: {path_or_err}")
+            self._set_status("Chat render complete.", "success")
+            self._notify_center(f"Chat render done: {os.path.basename(path_or_err)}", "success")
+        else:
+            self._log(f"[CHAT RENDER] Failed: {path_or_err}")
+            self._set_status(f"Chat render failed: {path_or_err}", "error")
 
     def _start_bundle_export(self, src_dir):
         """Offer a save-file dialog then run a BundleWorker. One worker at

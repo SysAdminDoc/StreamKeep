@@ -269,7 +269,7 @@
   New `.transcript.json` schema: `{word, start, end, speaker}`.
   Settings: "Enable speaker diarization" toggle.
 
-- [ ] **F22 — Chat-to-Video Render Engine** (Large, ~400-500 lines)
+- [x] **F22 — Chat-to-Video Render Engine** (Large, ~400-500 lines)
   New `postprocess/chat_render_worker.py`. Parse `.chat.jsonl`, fetch emote images
   (BTTV/FFZ/7TV APIs with local cache), render frames via Pillow or FFmpeg
   drawtext filter chain, pipe to ffmpeg for video encoding.
