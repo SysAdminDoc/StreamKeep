@@ -157,7 +157,8 @@ class RecoverDialog(QDialog):
             date_item = QTableWidgetItem(info.title.replace("Recovered VOD — ", ""))
             self.table.setItem(i, 0, date_item)
 
-            sid_item = QTableWidgetItem(info.url.split("/")[-3] if "/" in info.url else "")
+            parts = info.url.split("/")
+            sid_item = QTableWidgetItem(parts[-3] if len(parts) >= 3 else "")
             self.table.setItem(i, 1, sid_item)
 
             q_count = len(info.qualities)
@@ -171,6 +172,15 @@ class RecoverDialog(QDialog):
             dl_btn.setFixedHeight(28)
             dl_btn.clicked.connect(lambda checked, url=info.url: self._on_download(url))
             self.table.setCellWidget(i, 3, dl_btn)
+
+    def reject(self):
+        """Stop the worker thread before closing."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.progress.disconnect()
+            self._worker.done.disconnect()
+            self._worker.quit()
+            self._worker.wait(2000)
+        super().reject()
 
     def _on_download(self, url):
         self.download_requested.emit(url)

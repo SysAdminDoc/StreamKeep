@@ -15,10 +15,12 @@ from PyQt6.QtWidgets import (
 
 from ..theme import CAT
 
-_BLOCK_COLORS = [
-    CAT["blue"], CAT["green"], CAT["peach"], CAT["mauve"],
-    CAT["teal"], CAT["pink"], CAT["yellow"], CAT["lavender"],
-]
+_BLOCK_COLOR_KEYS = ["blue", "green", "peach", "mauve", "teal", "pink", "yellow", "lavender"]
+
+
+def _block_colors():
+    """Return current block colors from the live CAT dict (theme-safe)."""
+    return [CAT[k] for k in _BLOCK_COLOR_KEYS]
 
 _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -42,12 +44,13 @@ class _GridCanvas(QWidget):
 
     def set_segments(self, week_segments):
         """*week_segments*: list of ``(day_idx, hour_frac, seg_dict)``."""
+        colors = _block_colors()
         self._segments = []
         for day_idx, hour_frac, seg in week_segments:
             ch = seg.get("channel", "")
             if ch not in self._channel_colors:
-                idx = len(self._channel_colors) % len(_BLOCK_COLORS)
-                self._channel_colors[ch] = _BLOCK_COLORS[idx]
+                idx = len(self._channel_colors) % len(colors)
+                self._channel_colors[ch] = colors[idx]
             color = self._channel_colors[ch]
             self._segments.append((day_idx, hour_frac, seg, color))
         self.update()
