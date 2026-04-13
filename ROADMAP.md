@@ -330,7 +330,7 @@
   Text file or clipboard paste, one URL per line. `#` comments, blank skips.
   Preview dialog with valid/invalid counts. Queue all valid URLs.
 
-- [ ] **F45 — Global Unified Search Bar** (Small-Med, ~150-180 lines)
+- [x] **F45 — Global Unified Search Bar** (Small-Med, ~150-180 lines) v4.25.4
   Persistent search bar above tab bar. Searches History, Storage, Monitor,
   Queue, transcripts (FTS5), tags. Results grouped by tab with jump-to.
 
