@@ -109,7 +109,7 @@
   Add `offset`/`cursor` params to `list_vods()` in kick.py, twitch.py, ytdlp.py.
   "Load More" button below VOD table. Accumulate results across pages.
 
-- [ ] **F2 — Batch VOD Selection** (Medium, ~120-150 lines)
+- [x] **F2 — Batch VOD Selection** (Medium, ~120-150 lines) ✓ v4.19.0
   *Benefits from F1 (queue) and F17 (pagination).*
   Enhance VOD list viewer: multi-select checkboxes, metadata columns (duration,
   date, views), "Download Selected" -> queue all with auto quality selection.
