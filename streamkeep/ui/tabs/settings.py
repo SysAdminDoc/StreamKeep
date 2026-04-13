@@ -304,6 +304,78 @@ def build_settings_tab(win):
     chunk_row.addStretch(1)
     network_lay.addLayout(chunk_row)
 
+    # Live chat capture (v4.16.0)
+    chat_row = QHBoxLayout()
+    chat_row.setSpacing(8)
+    win.capture_chat_check = QCheckBox("Capture Twitch chat during live recordings")
+    win.capture_chat_check.setChecked(bool(win._config.get("capture_live_chat", False)))
+    win.capture_chat_check.setToolTip(
+        "Attach an anonymous Twitch IRC reader to every auto-recorded "
+        "Twitch stream. Writes chat.jsonl sidecar in the output folder. "
+        "Kick and other platforms are not supported yet."
+    )
+    chat_row.addWidget(win.capture_chat_check)
+    win.render_chat_ass_check = QCheckBox(".ass sidecar for replay sync")
+    win.render_chat_ass_check.setChecked(bool(win._config.get("render_chat_ass", True)))
+    win.render_chat_ass_check.setToolTip(
+        "In addition to chat.jsonl, write chat.ass next to the video. "
+        "VLC/mpv will pick it up automatically on replay."
+    )
+    chat_row.addWidget(win.render_chat_ass_check)
+    chat_row.addStretch(1)
+    network_lay.addLayout(chat_row)
+
+    # Browser companion local server (v4.16.0)
+    comp_row = QHBoxLayout()
+    comp_row.setSpacing(8)
+    win.companion_check = QCheckBox("Enable browser-extension companion (local server)")
+    win.companion_check.setChecked(bool(win._config.get("companion_server_enabled", False)))
+    win.companion_check.setToolTip(
+        "Starts a 127.0.0.1-only HTTP server on a random port so the "
+        "StreamKeep browser extension can send URLs with one click. The "
+        "server requires a bearer token shown below, regenerated each "
+        "app launch."
+    )
+    win.companion_check.toggled.connect(win._on_companion_toggled)
+    comp_row.addWidget(win.companion_check)
+    comp_row.addStretch(1)
+    network_lay.addLayout(comp_row)
+
+    comp_status_row = QHBoxLayout()
+    comp_status_row.setSpacing(8)
+    comp_status_row.addWidget(QLabel("Server:"))
+    win.companion_status_label = QLabel("Disabled")
+    win.companion_status_label.setStyleSheet(f"color: {CAT['subtext0']};")
+    comp_status_row.addWidget(win.companion_status_label, 1)
+    network_lay.addLayout(comp_status_row)
+
+    comp_token_row = QHBoxLayout()
+    comp_token_row.setSpacing(8)
+    comp_token_row.addWidget(QLabel("Pairing token:"))
+    win.companion_token_display = QLineEdit("")
+    win.companion_token_display.setReadOnly(True)
+    win.companion_token_display.setPlaceholderText("Enable server to generate a token")
+    win.companion_token_display.setToolTip(
+        "Paste this into the StreamKeep browser extension's popup. "
+        "Regenerated on each launch — never stored on disk."
+    )
+    comp_token_row.addWidget(win.companion_token_display, 1)
+    network_lay.addLayout(comp_token_row)
+
+    # Auto-update checker (v4.16.0)
+    update_row = QHBoxLayout()
+    update_row.setSpacing(8)
+    win.update_check_check = QCheckBox("Check for updates on startup")
+    win.update_check_check.setChecked(bool(win._config.get("check_for_updates", False)))
+    win.update_check_check.setToolTip(
+        "Once per launch, asks GitHub whether a newer StreamKeep release "
+        "is available. The check is opt-in; downloads and installs still "
+        "require explicit confirmation."
+    )
+    update_row.addWidget(win.update_check_check)
+    update_row.addStretch(1)
+    network_lay.addLayout(update_row)
+
     # Load saved network settings
     saved_rate = win._config.get("rate_limit", "")
     saved_proxy = win._config.get("proxy", "")

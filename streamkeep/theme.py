@@ -56,6 +56,19 @@ QFrame#activeRecordings {{
     border: 1px solid {CAT['green']};
     border-radius: 14px;
 }}
+QFrame#updateBanner {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(203, 166, 247, 50),
+        stop: 1 rgba(137, 180, 250, 35)
+    );
+    border: 1px solid {CAT['mauve']};
+    border-radius: 14px;
+}}
+QLabel#updateBannerLabel {{
+    color: {CAT['text']};
+    font-weight: 600;
+}}
 QFrame#resumeBanner {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 0,
