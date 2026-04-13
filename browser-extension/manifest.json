@@ -3,7 +3,7 @@
   "name": "StreamKeep Companion",
   "version": "1.0.0",
   "description": "One-click send of the current page URL to the StreamKeep desktop app.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "contextMenus", "tabs"],
   "host_permissions": ["http://127.0.0.1/*"],
   "action": {
     "default_title": "Send to StreamKeep",
