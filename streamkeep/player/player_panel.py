@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from ..theme import CAT
 from .mpv_widget import MpvWidget
 from .player_controls import PlayerControls
+from .chapter_panel import ChapterPanel
 
 
 class PlayerPanel(QDialog):
@@ -59,9 +60,18 @@ class PlayerPanel(QDialog):
         meta_lay.addWidget(self.channel_label)
         layout.addWidget(meta_bar)
 
-        # MPV widget
+        # MPV widget + chapter panel (F55) in a horizontal split
+        from PyQt6.QtWidgets import QHBoxLayout as _HBox
+        player_row = _HBox()
+        player_row.setContentsMargins(0, 0, 0, 0)
+        player_row.setSpacing(0)
         self.mpv = MpvWidget(self)
-        layout.addWidget(self.mpv, 1)
+        player_row.addWidget(self.mpv, 1)
+        self.chapter_panel = ChapterPanel(self)
+        self.chapter_panel.seek_requested.connect(self.mpv.seek)
+        self.chapter_panel.bookmark_added.connect(self._on_bookmark_added)
+        player_row.addWidget(self.chapter_panel)
+        layout.addLayout(player_row, 1)
 
         # Transport controls
         self.controls = PlayerControls(self)
@@ -81,8 +91,9 @@ class PlayerPanel(QDialog):
             self.controls.pip_requested.connect(self._enter_pip)
         self._pip_window = None
 
-        # Wire mpv -> controls
+        # Wire mpv -> controls + chapter panel
         self.mpv.position_changed.connect(self.controls.set_position)
+        self.mpv.position_changed.connect(self.chapter_panel.set_position)
         self.mpv.duration_changed.connect(self._on_duration)
         self.mpv.file_loaded.connect(self._on_file_loaded)
         self.mpv.eof_reached.connect(self._on_eof)
@@ -117,6 +128,30 @@ class PlayerPanel(QDialog):
         tracks = self.mpv.subtitle_tracks
         if tracks:
             self.controls.set_subtitle_tracks(tracks)
+        # Load chapters + bookmarks (F55)
+        recording_dir = ""
+        bookmarks = []
+        if self._history_entry:
+            recording_dir = getattr(self._history_entry, "path", "") or ""
+            bookmarks = getattr(self._history_entry, "bookmarks", []) or []
+        self.chapter_panel.load_chapters(
+            recording_dir,
+            mpv_chapters=self.mpv.chapter_list,
+            bookmarks=bookmarks,
+        )
+
+    def _on_bookmark_added(self, name, secs):
+        """Persist a new bookmark to the history entry (F55)."""
+        if self._history_entry is None:
+            return
+        if not hasattr(self._history_entry, "bookmarks") or self._history_entry.bookmarks is None:
+            self._history_entry.bookmarks = []
+        self._history_entry.bookmarks.append({"name": name, "secs": secs})
+        if getattr(self._history_entry, "db_id", 0):
+            from .. import db as _db
+            _db.update_history_entry(self._history_entry.db_id, {
+                "bookmarks": self._history_entry.bookmarks,
+            })
 
     def _on_eof(self):
         self.controls.set_paused(True)
