@@ -234,7 +234,7 @@
   right-click "Mark as watched/unwatched", "Add bookmark" dialog.
   **Implement this before F32** so lifecycle policies can use watch status.
 
-- [ ] **F13 — Storage Filtering & Analytics** (Medium, ~150-200 lines)
+- [x] **F13 — Storage Filtering & Analytics** (Medium, ~150-200 lines)
   Filter combos (Platform, Channel) above Storage table. Date range picker.
   Sparkline: persist daily size snapshots in config (rolling 90 days),
   render as QPainter polyline. Client-side filtering on cached scan results.

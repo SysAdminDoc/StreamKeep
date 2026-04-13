@@ -7,14 +7,63 @@ send2trash so nothing is ever permanently removed from inside the app.
 import os
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPainter, QColor
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ...utils import default_output_dir as _default_output_dir, fmt_size
 from ..widgets import make_metric_card, style_table
+
+
+class _SparklineWidget(QWidget):
+    """Tiny line chart showing storage size trend (up to 90 daily samples)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._data = []
+
+    def set_data(self, values):
+        """*values* is a list of numeric values (bytes)."""
+        self._data = list(values)[-90:]
+        self.update()
+
+    def paintEvent(self, event):
+        if len(self._data) < 2:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        lo = min(self._data)
+        hi = max(self._data)
+        rng = hi - lo or 1
+        n = len(self._data)
+        step = w / max(1, n - 1)
+        pen_color = QColor("#89b4fa")
+        p.setPen(pen_color)
+        for i in range(n - 1):
+            x1 = int(i * step)
+            y1 = int(h - (self._data[i] - lo) / rng * (h - 4) - 2)
+            x2 = int((i + 1) * step)
+            y2 = int(h - (self._data[i + 1] - lo) / rng * (h - 4) - 2)
+            p.drawLine(x1, y1, x2, y2)
+        p.end()
+
+
+def _apply_storage_filter(win):
+    """Filter storage table rows by selected platform/channel combos."""
+    plat = win.storage_platform_filter.currentText()
+    chan = win.storage_channel_filter.currentText()
+    groups = getattr(win, "_storage_groups", [])
+    for i, g in enumerate(groups):
+        show = True
+        if plat != "All" and g.platform != plat:
+            show = False
+        if chan != "All" and g.channel != chan:
+            show = False
+        win.storage_table.setRowHidden(i, not show)
 
 
 def build_storage_tab(win):
@@ -89,6 +138,33 @@ def build_storage_tab(win):
     act_lay.addWidget(win.storage_delete_btn)
     lay.addWidget(action_card)
 
+    # ── Filter row (F13) ────────────────────────────────────────────
+    filter_card = QFrame()
+    filter_card.setObjectName("card")
+    filt_lay = QHBoxLayout(filter_card)
+    filt_lay.setContentsMargins(18, 10, 18, 10)
+    filt_lay.setSpacing(10)
+    filt_lay.addWidget(QLabel("Platform:"))
+    win.storage_platform_filter = QComboBox()
+    win.storage_platform_filter.addItem("All")
+    win.storage_platform_filter.setMinimumWidth(120)
+    win.storage_platform_filter.currentIndexChanged.connect(
+        lambda _: _apply_storage_filter(win))
+    filt_lay.addWidget(win.storage_platform_filter)
+    filt_lay.addWidget(QLabel("Channel:"))
+    win.storage_channel_filter = QComboBox()
+    win.storage_channel_filter.addItem("All")
+    win.storage_channel_filter.setMinimumWidth(160)
+    win.storage_channel_filter.currentIndexChanged.connect(
+        lambda _: _apply_storage_filter(win))
+    filt_lay.addWidget(win.storage_channel_filter)
+    filt_lay.addStretch(1)
+    # Sparkline widget (F13)
+    win.storage_sparkline = _SparklineWidget()
+    win.storage_sparkline.setFixedSize(120, 30)
+    filt_lay.addWidget(win.storage_sparkline)
+    lay.addWidget(filter_card)
+
     # Table
     card = QFrame()
     card.setObjectName("card")
@@ -137,8 +213,49 @@ def build_storage_tab(win):
     return page
 
 
+def _update_storage_filters(win, scan):
+    """Refresh the Platform and Channel filter combos from scan results."""
+    plat_combo = win.storage_platform_filter
+    chan_combo = win.storage_channel_filter
+    plat_combo.blockSignals(True)
+    chan_combo.blockSignals(True)
+    plat_combo.clear()
+    plat_combo.addItem("All")
+    chan_combo.clear()
+    chan_combo.addItem("All")
+    platforms = sorted(scan.by_platform.keys())
+    channels = sorted(scan.by_channel.keys())
+    for p in platforms:
+        plat_combo.addItem(p)
+    for c in channels:
+        chan_combo.addItem(c)
+    plat_combo.blockSignals(False)
+    chan_combo.blockSignals(False)
+
+
+def _record_daily_snapshot(win, total_bytes):
+    """Persist today's total size for the sparkline trend."""
+    from datetime import date
+    key = date.today().isoformat()
+    snapshots = win._config.get("storage_snapshots", {})
+    snapshots[key] = total_bytes
+    # Trim to 90 days
+    sorted_keys = sorted(snapshots.keys())
+    if len(sorted_keys) > 90:
+        for k in sorted_keys[:-90]:
+            del snapshots[k]
+    win._config["storage_snapshots"] = snapshots
+    return snapshots
+
+
 def populate_storage_table(win, scan):
     """Fill the Storage tab's metrics + table from a StorageScan."""
+    _update_storage_filters(win, scan)
+    # Record daily snapshot + update sparkline
+    snapshots = _record_daily_snapshot(win, scan.total_size)
+    if hasattr(win, "storage_sparkline"):
+        values = [snapshots[k] for k in sorted(snapshots.keys())]
+        win.storage_sparkline.set_data(values)
     win.storage_total_value.setText(fmt_size(scan.total_size) if scan.total_size else "0 B")
     win.storage_total_sub.setText(
         f"{scan.total_files} media file(s)" if scan.total_files else "No scan yet"
