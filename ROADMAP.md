@@ -465,7 +465,7 @@
   Extend web server: `/share/{id}` HTML player, `/media/{id}` Range streaming,
   `/gallery` browsable grid. "Share on network" toggle per recording.
 
-- [ ] **F70 — RSS Feed Generator** (Small, ~100-120 lines)
+- [x] **F70 — RSS Feed Generator** (Small, ~100-120 lines) v4.30.2
   Serve RSS 2.0 feeds via web server. Per-channel + combined "all" feeds.
   `<enclosure>` tags for podcast app compatibility. Persist port across launches.
 
