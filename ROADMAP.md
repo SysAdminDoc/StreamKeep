@@ -182,7 +182,7 @@
   Events: download_start, download_complete, download_error, channel_live,
   auto_record_start, auto_record_end, transcode_complete.
 
-- [ ] **F19 — Browser Extension: Context Menu + Multi-Tab** (Small, ~60-80 lines)
+- [x] **F19 — Browser Extension: Context Menu + Multi-Tab** (Small, ~60-80 lines)
   `manifest.json`: add `contextMenus` permission.
   `background.js`: register "Send link to StreamKeep" context menu.
   `popup.js`: "Send all tabs" button -> `chrome.tabs.query` -> POST each URL.

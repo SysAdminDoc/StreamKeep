@@ -1,7 +1,36 @@
-// Service worker — no-op for now. Kept so we can wire a right-click
-// context menu "Send to StreamKeep" in a future release without needing
-// a manifest update to re-pair existing users.
+// Service worker — registers right-click context menu and handles sends.
+
+async function companionPost(path, body) {
+  const { host, port, token } = await chrome.storage.local.get([
+    "host", "port", "token",
+  ]);
+  if (!host || !port || !token) return;
+  const url = `http://${host}:${port}${path}`;
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
 
 chrome.runtime.onInstalled.addListener(() => {
-  // Reserved for future context-menu / command registration.
+  chrome.contextMenus.create({
+    id: "send-link",
+    title: "Send link to StreamKeep",
+    contexts: ["link"],
+  });
+  chrome.contextMenus.create({
+    id: "send-page",
+    title: "Send page to StreamKeep",
+    contexts: ["page"],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info) => {
+  const url = info.linkUrl || info.pageUrl;
+  if (!url || !/^https?:/.test(url)) return;
+  companionPost("/send_url", { url, action: "queue" });
 });
