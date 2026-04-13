@@ -399,7 +399,7 @@
 > Let the app make smart decisions about content. F57 combines
 > existing chat/audio/scene signals. F58-F62 are independent.
 
-- [ ] **F57 — AI Auto-Highlight Generator** (Large, ~200-250 lines)
+- [x] **F57 — AI Auto-Highlight Generator** (Large, ~200-250 lines) v4.28.0
   Composite scoring: chat spikes + audio peaks + scene change frequency.
   Top-N highlights with preview panel. Export as highlight reel (via F9).
 
