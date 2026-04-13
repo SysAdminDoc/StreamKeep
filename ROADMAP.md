@@ -120,7 +120,7 @@
 > Make the editing pipeline powerful. Build low-level features first,
 > then composite features that combine them.
 
-- [ ] **F34 — Audio Waveform in Trim Dialog** (Small, ~200 lines)
+- [x] **F34 — Audio Waveform in Trim Dialog** (Small, ~200 lines) ✓ v4.20.0
   `WaveformWidget(QWidget)` below filmstrip. FFmpeg extract PCM -> NumPy peaks
   -> QPainter fill. Cache as `.waveform.bin`. Sync cursor with filmstrip scrubber.
   Overlay silence regions as tinted bands.
