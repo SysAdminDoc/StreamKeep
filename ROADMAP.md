@@ -469,7 +469,7 @@
   Serve RSS 2.0 feeds via web server. Per-channel + combined "all" feeds.
   `<enclosure>` tags for podcast app compatibility. Persist port across launches.
 
-- [ ] **F71 — Recording Notes & Annotations** (Small, ~100-120 lines)
+- [x] **F71 — Recording Notes & Annotations** (Small, ~100-120 lines) v4.30.3
   Markdown notes per recording as `.notes.md` sidecars. Auto-template on
   first open. Searchable via global search (F45). Notes panel in History.
 
