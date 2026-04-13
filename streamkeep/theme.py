@@ -42,7 +42,41 @@ CAT_LATTE = {
 # across the app pick up theme changes without reimporting.
 CAT = dict(CAT_MOCHA)
 
-THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE}
+CAT_HIGH_CONTRAST = {
+    "base": "#000000", "mantle": "#0a0a0a", "crust": "#000000",
+    "surface0": "#1a1a1a", "surface1": "#2a2a2a", "surface2": "#3a3a3a",
+    "overlay0": "#555555", "overlay1": "#666666",
+    "text": "#ffffff", "subtext0": "#cccccc", "subtext1": "#dddddd",
+    "lavender": "#8888ff", "blue": "#6699ff", "sapphire": "#55bbff",
+    "sky": "#55ddff", "teal": "#55eedd", "green": "#55ff55",
+    "yellow": "#ffff55", "peach": "#ffaa55", "maroon": "#ff8888",
+    "red": "#ff4444", "mauve": "#bb77ff", "pink": "#ff88cc",
+    "flamingo": "#ff9999", "rosewater": "#ffbbbb",
+    "panel": "#0a0a0a", "panelHi": "#151515", "panelSoft": "#050505",
+    "stroke": "#444444", "muted": "#999999", "accent": "#6699ff",
+    "accentSoft": "#55ff55", "gold": "#ffff55",
+}
+
+THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE, "high_contrast": CAT_HIGH_CONTRAST}
+
+# Layout density presets (F75)
+DENSITY_COMPACT = {"font_size": 11, "row_height": 48, "padding": 4, "thumb_w": 80, "name": "compact"}
+DENSITY_COZY = {"font_size": 13, "row_height": 72, "padding": 8, "thumb_w": 112, "name": "cozy"}
+DENSITY_SPACIOUS = {"font_size": 16, "row_height": 96, "padding": 12, "thumb_w": 160, "name": "spacious"}
+DENSITIES = {"compact": DENSITY_COMPACT, "cozy": DENSITY_COZY, "spacious": DENSITY_SPACIOUS}
+_active_density = dict(DENSITY_COZY)
+
+
+def get_density():
+    """Return the active density preset dict."""
+    return dict(_active_density)
+
+
+def set_density(name):
+    """Set the active layout density. Returns the density dict."""
+    global _active_density
+    _active_density = dict(DENSITIES.get(name, DENSITY_COZY))
+    return _active_density
 
 
 def _detect_system_theme():

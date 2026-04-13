@@ -483,37 +483,37 @@
 > Polish and open up. Plugin SDK (F77) is the strategic feature;
 > i18n (F74) has the widest user impact.
 
-- [ ] **F73 — Custom Accent Color Picker** (Small, ~60-80 lines)
+- [x] **F73 — Custom Accent Color Picker** (Small, ~60-80 lines) v4.31.0
   8 preset swatches + custom hex via `QColorDialog`. Patches `CAT["accent"]`
   and rebuilds stylesheet. Live preview. Persist as `accent_color` in config.
 
-- [ ] **F74 — Multi-Language (i18n)** (Large, codebase-wide string wrapping)
+- [x] **F74 — Multi-Language (i18n)** (Large, codebase-wide string wrapping) v4.31.0
   Qt `QTranslator` + `.ts`/`.qm` files. Ship EN + 8 community languages.
   Settings language combo with instant apply. `self.tr()` on all strings.
 
-- [ ] **F75 — Layout Density Modes** (Small, ~60-80 lines)
+- [x] **F75 — Layout Density Modes** (Small, ~60-80 lines) v4.31.0
   Compact / Cozy / Spacious presets. Font size, row height, padding,
   thumbnail dimensions. QSS template interpolation with density multiplier.
 
-- [ ] **F76 — First-Run Onboarding Wizard** (Small-Med, ~200-250 lines)
+- [x] **F76 — First-Run Onboarding Wizard** (Small-Med, ~200-250 lines) v4.31.0
   Multi-step wizard: ffmpeg check, output dir, theme, cookies, first channel,
   UI tour. Skippable. `first_run_complete` config flag.
 
-- [ ] **F77 — Plugin / Extension SDK** (Large, ~200-250 lines)
+- [x] **F77 — Plugin / Extension SDK** (Large, ~200-250 lines) v4.31.0
   Load Python modules from `plugins/`. Types: extractors, PP filters, upload
   destinations, UI panels. `plugin.json` manifest. Settings: plugin list
   with enable/disable.
 
-- [ ] **F78 — Accessibility (Screen Reader + High Contrast)** (Medium, ~200-300 lines)
+- [x] **F78 — Accessibility (Screen Reader + High Contrast)** (Medium, ~200-300 lines) v4.31.0
   `setAccessibleName()` on all widgets. High-contrast theme (WCAG AAA).
   Focus rings, tab order audit, alt text on images. Codebase-wide sweep.
 
-- [ ] **F79 — Encrypted Config Storage** (Small, ~80-100 lines)
+- [x] **F79 — Encrypted Config Storage** (Small, ~80-100 lines) v4.31.0
   DPAPI on Windows for sensitive fields (tokens, webhooks, proxy creds).
   `secrets.py` encrypt/decrypt. Migration: encrypt existing plaintext on
   first run after upgrade. "Show decrypted" toggle in Settings.
 
-- [ ] **F80 — Native OS Notifications** (Small, ~120-150 lines)
+- [x] **F80 — Native OS Notifications** (Small, ~120-150 lines) v4.31.0
   Windows Toast (with action buttons), macOS Notification Center, Linux
   libnotify. "Record now" button on channel-live toast. Fallback to Qt
   `showMessage()`.
