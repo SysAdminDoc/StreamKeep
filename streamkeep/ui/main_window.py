@@ -466,6 +466,14 @@ class StreamKeep(QMainWindow):
                     self._log(f"[BANDWIDTH] Outside window: baseline = {baseline or 'unlimited'}")
         except Exception as e:
             self._log(f"[BANDWIDTH] Rule error: {e}")
+        # F51 speed schedule override
+        try:
+            from streamkeep.scheduler import get_active_limit
+            sched_limit = get_active_limit()
+            if sched_limit and sched_limit != YtDlpExtractor.rate_limit:
+                YtDlpExtractor.rate_limit = sched_limit
+        except Exception:
+            pass
 
     # ── Drag and Drop ─────────────────────────────────────────────────
 
@@ -2236,6 +2244,19 @@ class StreamKeep(QMainWindow):
         NATIVE_PROXY = proxy
         # Save proxy pool (F49)
         self._save_proxy_pool()
+        # Save speed schedule (F51)
+        if hasattr(self, "sched_enable_check"):
+            sched = {
+                "enabled": self.sched_enable_check.isChecked(),
+                "day_start": self.sched_day_start.value(),
+                "day_end": self.sched_day_end.value(),
+                "day_limit": self.sched_day_limit.text().strip(),
+                "night_limit": self.sched_night_limit.text().strip(),
+                "weekend_limit": self.sched_weekend_limit.text().strip(),
+            }
+            self._config["speed_schedule"] = sched
+            from streamkeep.scheduler import configure as _sched_configure
+            _sched_configure(sched, rate_limit)
         # Apply parallel connections (affects direct MP4 downloads)
         self._parallel_connections = max(1, min(16, self.parallel_spin.value()))
         # Parallel auto-records + chunked live captures (v4.15.0).
