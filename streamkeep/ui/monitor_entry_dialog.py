@@ -130,6 +130,17 @@ class MonitorEntryDialog(QDialog):
             "the channel's output folder down to this count. Set to 0 to "
             "keep everything.",
         ))
+        # Keyword filter (F3)
+        root.addWidget(self._section_label(
+            "Title Keywords",
+            "Comma-separated keywords. Auto-record only triggers when the "
+            "stream title contains at least one keyword. Leave blank to "
+            "record all streams.",
+        ))
+        self.keywords_input = QLineEdit(entry.filter_keywords or "")
+        self.keywords_input.setPlaceholderText("e.g. speedrun, tournament, collab")
+        root.addWidget(self.keywords_input)
+
         ret_row = QHBoxLayout()
         ret_row.setSpacing(8)
         ret_row.addWidget(QLabel("Keep last"))
@@ -204,4 +215,5 @@ class MonitorEntryDialog(QDialog):
             mask = 0
         entry.schedule_days_mask = mask
         entry.retention_keep_last = int(self.retention_spin.value())
+        entry.filter_keywords = self.keywords_input.text().strip()
         self.accept()

@@ -78,6 +78,7 @@ class MonitorEntry:
     schedule_end_hhmm: str = ""           # "23:00" or "" = always active
     schedule_days_mask: int = 0           # 0 = all days; bit 0=Mon ... bit 6=Sun
     retention_keep_last: int = 0          # 0 = keep everything
+    filter_keywords: str = ""             # comma-separated keywords for title matching (F3)
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
 
 
