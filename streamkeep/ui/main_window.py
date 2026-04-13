@@ -5671,13 +5671,71 @@ class StreamKeep(QMainWindow):
         self._persist_config()
         self._refresh_queue_table()
 
+    @staticmethod
+    def _quality_rank(quality_str):
+        """Parse a quality string like '1080p', 'source', '720p60' into a
+        numeric rank for comparison.  Higher is better."""
+        if not quality_str:
+            return 0
+        q = quality_str.lower().strip()
+        if q in ("source", "best", "highest"):
+            return 9999
+        digits = ""
+        for c in q:
+            if c.isdigit():
+                digits += c
+            elif digits:
+                break
+        return int(digits) if digits else 0
+
+    def _check_quality_upgrade(self, channel_id, vod):
+        """Return True if *vod* should trigger a quality upgrade for
+        an existing recording of the same content."""
+        entry = None
+        for e in self.monitor.entries:
+            if e.channel_id == channel_id:
+                entry = e
+                break
+        if not entry or not entry.auto_upgrade:
+            return False
+        # Find existing recording in history for this channel
+        existing = None
+        for h in reversed(self._history):
+            if (h.channel or "").lower() == channel_id.lower():
+                existing = h
+                break
+        if not existing or not existing.quality:
+            return False
+        # Compare quality rank
+        existing_rank = self._quality_rank(existing.quality)
+        # Use the VOD's resolution if available; otherwise skip
+        vod_quality = getattr(vod, "quality", "") or ""
+        if not vod_quality:
+            return False
+        new_rank = self._quality_rank(vod_quality)
+        if new_rank <= existing_rank:
+            return False
+        # Check minimum upgrade threshold
+        min_q = entry.min_upgrade_quality or ""
+        if min_q:
+            min_rank = self._quality_rank(min_q)
+            if new_rank < min_rank:
+                return False
+        self._log(
+            f"[UPGRADE] {channel_id}: {existing.quality} → {vod_quality} "
+            f"— queuing quality upgrade"
+        )
+        return True
+
     def _on_new_vods_found(self, channel_id, vods):
         """New VODs from a subscribed channel — queue their source URLs
         so they get downloaded in the background."""
         added = 0
         for v in vods:
+            # Quality auto-upgrade check (F25)
+            is_upgrade = self._check_quality_upgrade(channel_id, v)
             # Skip if already in history (prevents re-downloading on seed)
-            if self._find_duplicate("", v.title, platform=v.platform):
+            if not is_upgrade and self._find_duplicate("", v.title, platform=v.platform):
                 continue
             if self._queue_add(
                 v.source,
@@ -5690,8 +5748,11 @@ class StreamKeep(QMainWindow):
             ):
                 if self._download_queue:
                     self._download_queue[-1]["vod_date"] = v.date
+                    if is_upgrade:
+                        self._download_queue[-1]["is_upgrade"] = True
                 added += 1
-                self._log(f"[SUBSCRIBE] Queued: {v.title[:60]}")
+                tag = "[UPGRADE]" if is_upgrade else "[SUBSCRIBE]"
+                self._log(f"{tag} Queued: {v.title[:60]}")
         if added and hasattr(self, "queue_table"):
             self._refresh_queue_table()
         # Kick off the queue if nothing is downloading

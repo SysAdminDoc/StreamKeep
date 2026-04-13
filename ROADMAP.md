@@ -204,7 +204,7 @@
   post-process preset (from F7), rate limit, template. Merge into worker context
   on `_on_download()`. Clear after download starts. Badge when overrides active.
 
-- [ ] **F25 — Quality Auto-Upgrade** (Medium, ~120-150 lines)
+- [x] **F25 — Quality Auto-Upgrade** (Medium, ~120-150 lines)
   *Requires F3 (keyword filters) to be in place for the MonitorEntry pattern.*
   After VOD detection in monitor, compare quality to existing `metadata.json`.
   If better by threshold, queue re-download. `MonitorEntry` gets `auto_upgrade: bool`,

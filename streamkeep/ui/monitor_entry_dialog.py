@@ -164,6 +164,33 @@ class MonitorEntryDialog(QDialog):
         self.pp_preset_combo.setCurrentIndex(idx)
         root.addWidget(self.pp_preset_combo)
 
+        # Quality auto-upgrade (F25)
+        root.addWidget(self._section_label(
+            "Quality Auto-Upgrade",
+            "When a VOD appears at higher quality than the existing recording, "
+            "re-download automatically. Requires VOD subscription to be active.",
+        ))
+        self.auto_upgrade_check = QCheckBox("Auto-upgrade when better quality VOD appears")
+        self.auto_upgrade_check.setChecked(bool(entry.auto_upgrade))
+        root.addWidget(self.auto_upgrade_check)
+        upgrade_row = QHBoxLayout()
+        upgrade_row.setSpacing(8)
+        upgrade_row.addWidget(QLabel("Minimum quality to trigger:"))
+        self.min_upgrade_combo = QComboBox()
+        for key, label in [
+            ("", "Any improvement"),
+            ("480p", "480p or better"),
+            ("720p", "720p or better"),
+            ("1080p", "1080p or better"),
+            ("source", "Source / original only"),
+        ]:
+            self.min_upgrade_combo.addItem(label, userData=key)
+        cur_up_idx = max(0, self.min_upgrade_combo.findData(entry.min_upgrade_quality or ""))
+        self.min_upgrade_combo.setCurrentIndex(cur_up_idx)
+        upgrade_row.addWidget(self.min_upgrade_combo)
+        upgrade_row.addStretch(1)
+        root.addLayout(upgrade_row)
+
         ret_row = QHBoxLayout()
         ret_row.setSpacing(8)
         ret_row.addWidget(QLabel("Keep last"))
@@ -240,4 +267,6 @@ class MonitorEntryDialog(QDialog):
         entry.retention_keep_last = int(self.retention_spin.value())
         entry.filter_keywords = self.keywords_input.text().strip()
         entry.override_pp_preset = self.pp_preset_combo.currentData() or ""
+        entry.auto_upgrade = self.auto_upgrade_check.isChecked()
+        entry.min_upgrade_quality = self.min_upgrade_combo.currentData() or ""
         self.accept()

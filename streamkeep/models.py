@@ -80,6 +80,8 @@ class MonitorEntry:
     retention_keep_last: int = 0          # 0 = keep everything
     filter_keywords: str = ""             # comma-separated keywords for title matching (F3)
     override_pp_preset: str = ""          # named post-processing preset (F7)
+    auto_upgrade: bool = False            # re-download when higher quality VOD appears (F25)
+    min_upgrade_quality: str = ""         # minimum quality to trigger upgrade (e.g. "1080p")
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
 
 
