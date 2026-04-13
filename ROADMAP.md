@@ -210,7 +210,7 @@
   If better by threshold, queue re-download. `MonitorEntry` gets `auto_upgrade: bool`,
   `min_upgrade_quality: str`. Atomic swap: download new, verify, recycle old.
 
-- [ ] **F32 — Auto-Cleanup Lifecycle Policies** (Medium, ~150-200 lines)
+- [x] **F32 — Auto-Cleanup Lifecycle Policies** (Medium, ~150-200 lines)
   *Benefits from F38 (watch status) for "delete after watched" rules.*
   New `lifecycle.py`. Rules: max_days, delete_watched, max_total_gb, favorites exempt.
   Per-channel overrides. Cleanup preview dialog (table + size totals).
