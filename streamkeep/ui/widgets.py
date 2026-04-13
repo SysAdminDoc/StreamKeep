@@ -16,22 +16,44 @@ from PyQt6.QtWidgets import (
 from ..theme import CAT
 
 
-# Platform badge colors — the detected extractor paints this label next
-# to the URL input. Map is populated at UI build time using CAT[] lookups.
-PLATFORM_BADGES = {
-    "Kick":       {"color": CAT["green"],   "text": "Kick"},
-    "Twitch":     {"color": CAT["mauve"],   "text": "Twitch"},
-    "Rumble":     {"color": CAT["green"],   "text": "Rumble"},
-    "SoundCloud": {"color": CAT["peach"],   "text": "SoundCloud"},
-    "Reddit":     {"color": CAT["peach"],   "text": "Reddit"},
-    "Audius":     {"color": CAT["mauve"],   "text": "Audius"},
-    "Podcast":    {"color": CAT["yellow"],  "text": "Podcast"},
-    "Direct":     {"color": CAT["blue"],    "text": "Direct"},
-    "yt-dlp":     {"color": CAT["overlay1"], "text": "yt-dlp"},
+# Platform badge mapping — key → (CAT colour key, display text).
+# Resolved via PLATFORM_BADGES property so colours track theme changes.
+_BADGE_MAP = {
+    "Kick":       ("green",    "Kick"),
+    "Twitch":     ("mauve",    "Twitch"),
+    "Rumble":     ("green",    "Rumble"),
+    "SoundCloud": ("peach",    "SoundCloud"),
+    "Reddit":     ("peach",    "Reddit"),
+    "Audius":     ("mauve",    "Audius"),
+    "Podcast":    ("yellow",   "Podcast"),
+    "Direct":     ("blue",     "Direct"),
+    "yt-dlp":     ("overlay1", "yt-dlp"),
 }
 
 
-TAB_STYLE = f"""
+class _BadgeLookup(dict):
+    """Dict-like that rebuilds badge colours from the live CAT dict on
+    every access, so theme switches are reflected immediately."""
+
+    def __getitem__(self, key):
+        cat_key, text = _BADGE_MAP[key]
+        return {"color": CAT[cat_key], "text": text}
+
+    def __contains__(self, key):
+        return key in _BADGE_MAP
+
+    def get(self, key, default=None):
+        if key in _BADGE_MAP:
+            return self[key]
+        return default
+
+
+PLATFORM_BADGES = _BadgeLookup()
+
+
+def TAB_STYLE():
+    """Build tab stylesheet from the live CAT dict (theme-safe)."""
+    return f"""
 QPushButton#tab {{
     background-color: {CAT['panelSoft']};
     color: {CAT['muted']};

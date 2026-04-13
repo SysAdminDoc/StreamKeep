@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..paths import _CREATE_NO_WINDOW
+from ..theme import CAT
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
@@ -526,14 +527,14 @@ class ClipDialog(QDialog):
         self.preview_label.setFixedSize(260, 146)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setStyleSheet(
-            "background-color: #181825; border: 1px solid #313244; "
-            "border-radius: 8px; color: #6c7086;"
+            f"background-color: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
+            f"border-radius: 8px; color: {CAT['overlay0']};"
         )
         self.preview_label.setText("Drag the handles")
         preview_col.addWidget(self.preview_label)
         self.preview_time_label = QLabel("—")
         self.preview_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_time_label.setStyleSheet("color: #a6adc8;")
+        self.preview_time_label.setStyleSheet(f"color: {CAT['subtext0']};")
         preview_col.addWidget(self.preview_time_label)
         strip_row.addLayout(preview_col, 0)
         root.addLayout(strip_row)
@@ -555,14 +556,14 @@ class ClipDialog(QDialog):
         self._story_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._story_scroll.setStyleSheet(
-            "QScrollArea { background: #181825; border: 1px solid #313244; "
-            "border-radius: 6px; }")
+            f"QScrollArea {{ background: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
+            f"border-radius: 6px; }}")
         self._story_widget = QWidget()
         self._story_lay = QHBoxLayout(self._story_widget)
         self._story_lay.setContentsMargins(4, 2, 4, 2)
         self._story_lay.setSpacing(4)
         self._story_placeholder = QLabel("No storyboard")
-        self._story_placeholder.setStyleSheet("color: #6c7086;")
+        self._story_placeholder.setStyleSheet(f"color: {CAT['overlay0']};")
         self._story_lay.addWidget(self._story_placeholder)
         self._story_lay.addStretch(1)
         self._story_scroll.setWidget(self._story_widget)
@@ -596,7 +597,7 @@ class ClipDialog(QDialog):
         dur_col.setSpacing(4)
         dur_col.addWidget(QLabel("Clip length"))
         self.dur_label = QLabel(format_hhmmss(default_end))
-        self.dur_label.setStyleSheet("color: #a6e3a1; font-weight: 600;")
+        self.dur_label.setStyleSheet(f"color: {CAT['green']}; font-weight: 600;")
         dur_col.addWidget(self.dur_label)
         range_row.addLayout(dur_col, 0)
         root.addLayout(range_row)
@@ -607,9 +608,9 @@ class ClipDialog(QDialog):
         self.range_list = QListWidget()
         self.range_list.setFixedHeight(90)
         self.range_list.setStyleSheet(
-            "QListWidget { background: #1e1e2e; border: 1px solid #313244; "
-            "border-radius: 6px; color: #cdd6f4; }"
-            "QListWidget::item:selected { background: #45475a; }"
+            f"QListWidget {{ background: {CAT['base']}; border: 1px solid {CAT['surface0']}; "
+            f"border-radius: 6px; color: {CAT['text']}; }}"
+            f"QListWidget::item:selected {{ background: {CAT['surface1']}; }}"
         )
         self.range_list.currentRowChanged.connect(self._on_range_selected)
         ranges_section.addWidget(self.range_list, 1)
@@ -1056,7 +1057,7 @@ class ClipDialog(QDialog):
             img.mousePressEvent = lambda ev, ts=t: self._on_story_click(ts)
             col.addWidget(img)
             lbl = QLabel(format_hhmmss(t)[:8])
-            lbl.setStyleSheet("color: #a6adc8; font-size: 10px;")
+            lbl.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 10px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             col.addWidget(lbl)
             self._story_lay.addWidget(frame)
