@@ -239,7 +239,7 @@
   Sparkline: persist daily size snapshots in config (rolling 90 days),
   render as QPainter polyline. Client-side filtering on cached scan results.
 
-- [ ] **F35 — Tags & Smart Collections** (Medium, ~300-400 lines)
+- [x] **F35 — Tags & Smart Collections** (Medium, ~300-400 lines)
   SQLite for tags (many-to-many). Auto-tag on download (channel, platform,
   game/category, resolution, duration bucket). Tag chips on History rows.
   Filter sidebar with clickable tags. Smart collection editor (rule builder).
