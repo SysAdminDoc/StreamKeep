@@ -105,7 +105,7 @@
   5. FinalizeWorker stays single-threaded (sequential finalization is fine).
   6. Persist queue state in config for crash recovery.
 
-- [ ] **F17 — Deep Archive: VOD Listing Pagination** (Medium, ~100-150 lines)
+- [x] **F17 — Deep Archive: VOD Listing Pagination** (Medium, ~100-150 lines) ✓ v4.19.0
   Add `offset`/`cursor` params to `list_vods()` in kick.py, twitch.py, ytdlp.py.
   "Load More" button below VOD table. Accumulate results across pages.
 

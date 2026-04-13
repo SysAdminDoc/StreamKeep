@@ -1,6 +1,6 @@
 """Async QThread workers — fetch, download, playlist expand, page scrape."""
 
-from .fetch import FetchWorker
+from .fetch import FetchWorker, VodPageWorker
 from .download import DownloadWorker
 from .finalize import FinalizeWorker
 from .playlist import PlaylistExpandWorker
@@ -9,6 +9,7 @@ from .monitor_ops import SeedArchiveWorker, AutoRecordResolveWorker
 
 __all__ = [
     "FetchWorker",
+    "VodPageWorker",
     "DownloadWorker",
     "FinalizeWorker",
     "PlaylistExpandWorker",

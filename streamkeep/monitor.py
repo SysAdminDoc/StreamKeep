@@ -96,7 +96,7 @@ class _PollTask(QRunnable):
                         )
                 if self.check_vods and ext.supports_vod_listing() and not getattr(entry, "_cancel_requested", False):
                     try:
-                        vods = ext.list_vods(
+                        vods, _cursor = ext.list_vods(
                             entry.url, log_fn=self.signals.log.emit
                         )
                         new_vods = [

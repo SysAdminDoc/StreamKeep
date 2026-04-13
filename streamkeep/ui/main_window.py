@@ -75,6 +75,7 @@ from streamkeep.extractors import (
 )
 from streamkeep.workers import (
     FetchWorker,
+    VodPageWorker,
     DownloadWorker,
     FinalizeWorker,
     PlaylistExpandWorker as _PlaylistExpandWorker,
@@ -135,6 +136,9 @@ class StreamKeep(QMainWindow):
         self.download_worker = None
         self._vod_list = []
         self._vod_checks = []
+        self._vod_next_cursor = None
+        self._vod_source_url = ""
+        self._vod_page_worker = None
         self._segment_checks = []
         self._segment_progress = []
         self._last_auto_output = ""
@@ -920,6 +924,13 @@ class StreamKeep(QMainWindow):
             try:
                 fw.requestInterruption()
                 fw.wait(1500)
+            except Exception:
+                pass
+        vpw = getattr(self, "_vod_page_worker", None)
+        if vpw is not None and vpw.isRunning():
+            try:
+                vpw.requestInterruption()
+                vpw.wait(1500)
             except Exception:
                 pass
         bfw = getattr(self, "_batch_fetch_worker", None)
@@ -2816,7 +2827,9 @@ class StreamKeep(QMainWindow):
             self._release_queue_item("failed", err[:120])
             self._start_next_background_job()
 
-    def _on_vods_found(self, vod_list, platform_name):
+    def _on_vods_found(self, vod_list, platform_name, next_cursor=None):
+        self._vod_next_cursor = next_cursor
+        self._vod_source_url = self.url_input.text().strip()
         if self._queue_autostart and self._queue_active_item is not None:
             added = 0
             for vod in vod_list:
@@ -2883,6 +2896,10 @@ class StreamKeep(QMainWindow):
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
         self._refresh_vod_summary()
+        if hasattr(self, "vod_load_more_btn"):
+            self.vod_load_more_btn.setVisible(bool(next_cursor))
+            self.vod_load_more_btn.setEnabled(bool(next_cursor))
+            self.vod_load_more_btn.setText("Load More VODs")
         self._set_status(f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.", "success")
 
     def _on_vod_select_all(self, state):
@@ -2905,6 +2922,84 @@ class StreamKeep(QMainWindow):
                 return
         self._log("No VOD checked.")
         self._set_status("Select at least one VOD before loading it.", "warning")
+
+    def _on_vod_load_more(self):
+        """Fetch the next page of VODs and append to the table."""
+        cursor = getattr(self, "_vod_next_cursor", None)
+        url = getattr(self, "_vod_source_url", "")
+        if not cursor or not url:
+            return
+        # Cancel any previous page worker
+        pw = getattr(self, "_vod_page_worker", None)
+        if pw is not None and pw.isRunning():
+            pw.requestInterruption()
+            pw.wait(1500)
+        if hasattr(self, "vod_load_more_btn"):
+            self.vod_load_more_btn.setEnabled(False)
+            self.vod_load_more_btn.setText("Loading…")
+        self._log(f"[VOD] Fetching next page (cursor: {str(cursor)[:20]}…)")
+        worker = VodPageWorker(url, cursor)
+        worker.log.connect(self._log)
+        worker.page_ready.connect(self._on_vod_page_ready)
+        worker.error.connect(self._on_vod_page_error)
+        self._vod_page_worker = worker
+        worker.start()
+
+    def _on_vod_page_ready(self, new_vods, next_cursor):
+        """Append a page of VODs to the existing table."""
+        self._vod_next_cursor = next_cursor
+        if not new_vods:
+            self._log("[VOD] No more VODs on the next page.")
+            self._set_status("No additional VODs found.", "info")
+            if hasattr(self, "vod_load_more_btn"):
+                self.vod_load_more_btn.setVisible(False)
+            return
+        # Append to the existing list
+        start_row = len(self._vod_list)
+        self._vod_list.extend(new_vods)
+        self.vod_table.setRowCount(len(self._vod_list))
+        for i, v in enumerate(new_vods, start=start_row):
+            cb = QCheckBox()
+            cb.stateChanged.connect(lambda _state, self=self: self._refresh_vod_summary())
+            cb_widget = QWidget()
+            cb_lay = QHBoxLayout(cb_widget)
+            cb_lay.addWidget(cb)
+            cb_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_lay.setContentsMargins(0, 0, 0, 0)
+            self.vod_table.setCellWidget(i, 0, cb_widget)
+            self._vod_checks.append(cb)
+            badge = PLATFORM_BADGES.get(v.platform, {})
+            plat_item = QTableWidgetItem(v.platform)
+            plat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if badge.get("color"):
+                plat_item.setForeground(QColor(badge["color"]))
+            self.vod_table.setItem(i, 1, plat_item)
+            live = " [LIVE]" if v.is_live else ""
+            title_item = QTableWidgetItem(f"{v.title}{live}")
+            if v.is_live:
+                title_item.setForeground(QColor(CAT["green"]))
+            self.vod_table.setItem(i, 2, title_item)
+            date_item = QTableWidgetItem(v.date)
+            date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.vod_table.setItem(i, 3, date_item)
+            dur_item = QTableWidgetItem(v.duration if v.duration else "Live")
+            dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.vod_table.setItem(i, 4, dur_item)
+        self._refresh_vod_summary()
+        if hasattr(self, "vod_load_more_btn"):
+            self.vod_load_more_btn.setVisible(bool(next_cursor))
+            self.vod_load_more_btn.setEnabled(bool(next_cursor))
+            self.vod_load_more_btn.setText("Load More VODs")
+        total = len(self._vod_list)
+        self._log(f"[VOD] Loaded {len(new_vods)} more — {total} total")
+        self._set_status(f"{total} VOD(s) loaded. {len(new_vods)} new from this page.", "success")
+
+    def _on_vod_page_error(self, err):
+        self._log(f"[VOD] Pagination error: {err}")
+        self._set_status(f"Failed to load more VODs: {err}", "error")
+        if hasattr(self, "vod_load_more_btn"):
+            self.vod_load_more_btn.setEnabled(True)
+            self.vod_load_more_btn.setText("Load More VODs")
 
     def _on_vod_download_all(self):
         checked = [self._vod_list[i] for i, cb in enumerate(self._vod_checks) if cb.isChecked()]

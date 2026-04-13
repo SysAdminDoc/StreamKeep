@@ -41,9 +41,15 @@ class Extractor:
         Returns StreamInfo or None."""
         raise NotImplementedError
 
-    def list_vods(self, url, log_fn=None):
-        """List available VODs for a channel. Returns list[VODInfo]."""
-        return []
+    def list_vods(self, url, log_fn=None, cursor=None):
+        """List available VODs for a channel.
+
+        Returns ``(list[VODInfo], next_cursor)`` where *next_cursor* is
+        an opaque value to pass back for the next page, or ``None`` when
+        there are no more results.  Legacy callers that only check for a
+        list still work because the tuple is truthy when non-empty.
+        """
+        return [], None
 
     def supports_vod_listing(self):
         return False
