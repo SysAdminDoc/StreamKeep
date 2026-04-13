@@ -216,7 +216,7 @@
   Per-channel overrides. Cleanup preview dialog (table + size totals).
   Always `send2trash`, never permanent delete. Wire to post-auto-record path.
 
-- [ ] **F39 — Stream Schedule Calendar** (Medium, ~300-400 lines)
+- [x] **F39 — Stream Schedule Calendar** (Medium, ~300-400 lines)
   New `schedule.py`: Twitch Schedule API fetch + cache.
   New `ui/calendar_widget.py`: week-view grid (day columns, hour rows, colored blocks).
   Monitor tab toggle: List | Calendar. Block click -> stream details + auto-record button.
