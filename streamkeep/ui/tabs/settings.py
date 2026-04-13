@@ -630,6 +630,35 @@ def build_settings_tab(win):
     win.pp_split_check.setChecked(PostProcessor.split_by_chapter)
     pp_lay.addWidget(win.pp_split_check)
 
+    # Silence removal (v4.20.0 — F26)
+    silence_row = QHBoxLayout()
+    silence_row.setSpacing(8)
+    win.pp_silence_check = QCheckBox("Remove silence / dead air")
+    win.pp_silence_check.setChecked(PostProcessor.remove_silence)
+    win.pp_silence_check.setToolTip(
+        "Detect silent segments with ffmpeg silencedetect and cut them out.\n"
+        "Produces a .nosilence copy — the original is preserved."
+    )
+    silence_row.addWidget(win.pp_silence_check)
+    silence_row.addWidget(QLabel("Threshold:"))
+    win.pp_silence_db_spin = QSpinBox()
+    win.pp_silence_db_spin.setRange(-60, -10)
+    win.pp_silence_db_spin.setSuffix(" dB")
+    win.pp_silence_db_spin.setValue(int(PostProcessor.silence_noise_db or -30))
+    win.pp_silence_db_spin.setToolTip("Noise floor — lower values are more aggressive")
+    win.pp_silence_db_spin.setFixedWidth(90)
+    silence_row.addWidget(win.pp_silence_db_spin)
+    silence_row.addWidget(QLabel("Min:"))
+    win.pp_silence_dur_spin = QSpinBox()
+    win.pp_silence_dur_spin.setRange(1, 60)
+    win.pp_silence_dur_spin.setSuffix("s")
+    win.pp_silence_dur_spin.setValue(int(PostProcessor.silence_min_duration or 3))
+    win.pp_silence_dur_spin.setToolTip("Minimum consecutive silence before cutting")
+    win.pp_silence_dur_spin.setFixedWidth(80)
+    silence_row.addWidget(win.pp_silence_dur_spin)
+    silence_row.addStretch(1)
+    pp_lay.addLayout(silence_row)
+
     # Video converter row
     win.pp_convert_video_check = QCheckBox("Convert video to:")
     win.pp_convert_video_check.setChecked(PostProcessor.convert_video)
