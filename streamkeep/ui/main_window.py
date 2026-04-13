@@ -5723,6 +5723,8 @@ class StreamKeep(QMainWindow):
         )
         chat_highlights_act = menu.addAction("Show chat highlights")
         chat_highlights_act.setEnabled(has_chat)
+        storyboard_act = menu.addAction("Generate storyboard")
+        storyboard_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
@@ -5749,6 +5751,8 @@ class StreamKeep(QMainWindow):
             self._run_silence_removal_for_dir(h.path)
         elif chosen == chat_highlights_act and has_chat:
             self._show_chat_highlights(h.path)
+        elif chosen == storyboard_act and h.path:
+            self._generate_storyboard(h.path)
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
@@ -5814,6 +5818,48 @@ class StreamKeep(QMainWindow):
         self._set_status(f"{len(spikes)} chat spike(s) found — see log.", "success")
         # Open trim dialog so user sees the spike markers on the filmstrip
         self._open_clip_dialog_for_dir(src_dir)
+
+    def _generate_storyboard(self, src_dir):
+        """Run scene detection on the largest video in the folder."""
+        vids = []
+        try:
+            for f in os.listdir(src_dir):
+                ext = os.path.splitext(f)[1].lower()
+                if ext in (".mp4", ".mkv", ".webm", ".ts"):
+                    fp = os.path.join(src_dir, f)
+                    if os.path.isfile(fp):
+                        vids.append((os.path.getsize(fp), fp))
+        except OSError:
+            pass
+        if not vids:
+            self._set_status("No video files found.", "warning")
+            return
+        vids.sort(reverse=True)
+        src = vids[0][1]
+        try:
+            from ..postprocess.scene_worker import SceneWorker
+        except Exception:
+            self._log("[SCENE] Could not load scene detector.")
+            return
+        worker = SceneWorker(src)
+        worker.log.connect(self._log)
+        worker.scenes_ready.connect(
+            lambda scenes: self._on_storyboard_ready(scenes, src_dir))
+        worker.progress.connect(lambda _p, s: self._set_status(s, "info"))
+        self._storyboard_worker = worker
+        worker.start()
+        self._set_status("Running scene detection…", "info")
+
+    def _on_storyboard_ready(self, scenes, src_dir):
+        if scenes:
+            n = len(scenes)
+            self._log(f"[SCENE] Storyboard generated — {n} scene(s).")
+            self._set_status(
+                f"Storyboard ready — {n} scenes. Open Trim dialog to view.",
+                "success")
+        else:
+            self._set_status(
+                "No scenes detected or scenedetect not installed.", "warning")
 
     def _run_silence_removal_for_dir(self, src_dir):
         """Run silence removal on the largest video in the folder."""
