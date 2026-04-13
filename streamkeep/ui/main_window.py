@@ -2020,9 +2020,19 @@ class StreamKeep(QMainWindow):
             return f"{platform}/{channel}"
         return channel
 
-    def _find_duplicate(self, url, title="", platform=""):
-        """Check history for a matching URL (exact) or title (fuzzy).
-        Returns matching HistoryEntry or None."""
+    @staticmethod
+    def _title_token_overlap(a, b):
+        """Return the fraction of shared tokens between two titles (0..1)."""
+        ta = set(a.strip().lower().split())
+        tb = set(b.strip().lower().split())
+        if not ta or not tb:
+            return 0.0
+        return len(ta & tb) / max(len(ta), len(tb))
+
+    def _find_duplicate(self, url, title="", platform="", duration_secs=0):
+        """Check history for a matching URL (exact), exact title, or fuzzy
+        metadata match (channel + title token overlap >= 70%). Returns
+        matching HistoryEntry or None."""
         if not self._check_duplicates:
             return None
         if url:
@@ -2036,6 +2046,15 @@ class StreamKeep(QMainWindow):
                         and h.platform.strip().lower() != platform.strip().lower()):
                     continue
                 if h.title and h.title.strip().lower() == norm and h.path:
+                    return h
+            # Fuzzy title-token overlap (F40)
+            for h in self._history:
+                if not h.title or not h.path:
+                    continue
+                if (platform and h.platform
+                        and h.platform.strip().lower() != platform.strip().lower()):
+                    continue
+                if self._title_token_overlap(title, h.title) >= 0.70:
                     return h
         return None
 
@@ -2703,14 +2722,37 @@ class StreamKeep(QMainWindow):
         self.download_btn.setEnabled(True)
         self._refresh_download_summary()
 
-        # Title-based duplicate check after resolve (more accurate than URL match)
-        dup = self._find_duplicate("", info.title, platform=info.platform)
+        # Metadata-based duplicate check after resolve (F40 — fuzzy matching)
+        dup = self._find_duplicate(
+            "", info.title, platform=info.platform,
+            duration_secs=info.total_secs,
+        )
         if dup:
-            self._log(f"[DUPLICATE] Title match: already downloaded {dup.date} to {dup.path}")
+            self._log(f"[DUPLICATE] Match: already downloaded {dup.date} to {dup.path}")
             self._set_status(
-                f"Title matches a previous download ({dup.date}). Proceed if intentional.",
+                f"Possible duplicate of \"{dup.title}\" ({dup.date}). Download anyway if intentional.",
                 "warning",
             )
+            # Advisory dialog — non-blocking for queue/batch, shown for manual fetches
+            if not self._queue_autostart:
+                from PyQt6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Possible Duplicate")
+                msg.setIcon(QMessageBox.Icon.Warning)
+                msg.setText(
+                    f"You may already have this recording:\n\n"
+                    f"  \"{dup.title}\"\n"
+                    f"  Downloaded {dup.date}  |  {dup.quality}  |  {dup.size}\n"
+                    f"  {dup.path}\n\n"
+                    f"Download anyway?"
+                )
+                msg.setStandardButtons(
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                if msg.exec() == QMessageBox.StandardButton.No:
+                    self._set_status("Download skipped — duplicate detected.", "idle")
+                    return
         elif info.is_live or info.total_secs <= 0:
             self._set_status("Live source ready. Start recording and stop it when you have enough footage.", "success")
         else:
