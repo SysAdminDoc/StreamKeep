@@ -36,6 +36,7 @@ class ClipWorker(QThread):
         reencode=False,
         video_codec="libx264",
         audio_codec="aac",
+        video_filter="",
     ):
         super().__init__()
         self.source_path = source_path
@@ -45,6 +46,7 @@ class ClipWorker(QThread):
         self.reencode = bool(reencode)
         self.video_codec = video_codec or "libx264"
         self.audio_codec = audio_codec or "aac"
+        self.video_filter = video_filter or ""
         self._cancel = False
         self._proc = None
 
@@ -74,15 +76,20 @@ class ClipWorker(QThread):
                 "-avoid_negative_ts", "make_zero",
                 "-y", self.output_path,
             ]
-        return [
+        cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "info",
             "-i", self.source_path,
             "-ss", f"{self.start_secs:.3f}",
             "-t", f"{dur:.3f}",
+        ]
+        if self.video_filter:
+            cmd.extend(["-vf", self.video_filter])
+        cmd.extend([
             "-c:v", self.video_codec,
             "-c:a", self.audio_codec,
             "-y", self.output_path,
-        ]
+        ])
+        return cmd
 
     def run(self):
         cmd = self._build_cmd()
