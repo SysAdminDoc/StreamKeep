@@ -22,7 +22,10 @@ from PyQt6.QtWidgets import (
     QInputDialog, QCheckBox, QMenu, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
+from PyQt6.QtGui import (
+    QColor, QDesktopServices, QIcon, QKeySequence, QPixmap, QPainter, QBrush,
+    QShortcut,
+)
 
 # Package re-exports under legacy underscore-prefixed names so the existing
 # method bodies below don't need modification.
@@ -260,6 +263,127 @@ class StreamKeep(QMainWindow):
         # Start the browser-companion local server if the user opted in.
         # Deferred so the UI paints before we open a socket.
         QTimer.singleShot(1000, self._maybe_start_companion_server)
+        # Keyboard shortcuts (F11)
+        self._setup_shortcuts()
+
+    # ── Keyboard Shortcuts ────────────────────────────────────────────
+
+    def _setup_shortcuts(self):
+        """Register global keyboard shortcuts for power-user operation."""
+        # Tab switching: Ctrl+1..5
+        for i in range(min(5, self._stack.count())):
+            sc = QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self)
+            sc.activated.connect(lambda idx=i: self._switch_tab(idx))
+        # Fetch / download: Enter triggers fetch when URL input has focus,
+        # otherwise starts download if the button is enabled.
+        sc_enter = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
+        sc_enter.activated.connect(self._shortcut_enter)
+        # Stop: Escape
+        sc_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        sc_esc.activated.connect(self._on_stop)
+        # Focus search on History: Ctrl+F
+        sc_find = QShortcut(QKeySequence("Ctrl+F"), self)
+        sc_find.activated.connect(self._shortcut_focus_search)
+        # Delete selected items (tab-aware): Delete key
+        sc_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self)
+        sc_del.activated.connect(self._shortcut_delete_selected)
+        # Select all rows in the active table: Ctrl+A
+        sc_sel = QShortcut(QKeySequence("Ctrl+A"), self)
+        sc_sel.activated.connect(self._shortcut_select_all)
+        # Update tooltips to show shortcut hints
+        self._annotate_shortcut_tooltips()
+
+    def _annotate_shortcut_tooltips(self):
+        for i, btn in enumerate(self._tab_btns):
+            existing = btn.toolTip() or btn.text()
+            btn.setToolTip(f"{existing}  (Ctrl+{i + 1})")
+        if hasattr(self, "fetch_btn"):
+            self.fetch_btn.setToolTip("Fetch stream info  (Enter)")
+        if hasattr(self, "download_btn"):
+            self.download_btn.setToolTip("Start download  (Enter)")
+        if hasattr(self, "stop_btn"):
+            self.stop_btn.setToolTip("Stop  (Esc)")
+        if hasattr(self, "history_search"):
+            self.history_search.setToolTip("Search history  (Ctrl+F)")
+
+    def _shortcut_enter(self):
+        """Enter key: fetch if URL input focused/non-empty, else start download."""
+        if hasattr(self, "url_input") and self.url_input.hasFocus():
+            self._on_fetch()
+            return
+        tab = self._stack.currentIndex()
+        if tab == 0:
+            if hasattr(self, "url_input") and self.url_input.text().strip():
+                if hasattr(self, "download_btn") and self.download_btn.isEnabled():
+                    self._on_download()
+                elif hasattr(self, "fetch_btn") and self.fetch_btn.isEnabled():
+                    self._on_fetch()
+
+    def _shortcut_focus_search(self):
+        """Ctrl+F: switch to History tab and focus the search box."""
+        self._switch_tab(2)  # History is tab index 2
+        if hasattr(self, "history_search"):
+            self.history_search.setFocus()
+            self.history_search.selectAll()
+
+    def _shortcut_delete_selected(self):
+        """Delete key: remove selected items from the active tab's table."""
+        tab = self._stack.currentIndex()
+        if tab == 1 and hasattr(self, "monitor_table"):
+            # Monitor tab: remove selected channels
+            sel = sorted(
+                {idx.row() for idx in self.monitor_table.selectionModel().selectedRows()},
+                reverse=True,
+            )
+            for row in sel:
+                if 0 <= row < len(self.monitor.entries):
+                    self._on_monitor_remove(row)
+        elif tab == 2 and hasattr(self, "history_table"):
+            # History tab: remove selected history entries
+            sel = sorted(
+                {idx.row() for idx in self.history_table.selectionModel().selectedRows()},
+                reverse=True,
+            )
+            view = getattr(self, "_history_view", list(reversed(self._history)))
+            for row in sel:
+                if 0 <= row < len(view):
+                    try:
+                        real = self._history.index(view[row])
+                        self._history.pop(real)
+                    except ValueError:
+                        pass
+            if sel:
+                self._refresh_history_table()
+                self._persist_config()
+        elif tab == 0 and hasattr(self, "queue_table"):
+            # Download tab queue: remove selected queue items
+            sel = sorted(
+                {idx.row() for idx in self.queue_table.selectionModel().selectedRows()},
+                reverse=True,
+            )
+            for row in sel:
+                if 0 <= row < len(self._download_queue):
+                    item = self._download_queue[row]
+                    if item.get("status") != "downloading":
+                        self._download_queue.pop(row)
+            if sel:
+                self._refresh_queue_table()
+                self._persist_config()
+
+    def _shortcut_select_all(self):
+        """Ctrl+A: select all rows in the current tab's table."""
+        tab = self._stack.currentIndex()
+        table = None
+        if tab == 0 and hasattr(self, "queue_table"):
+            table = self.queue_table
+        elif tab == 1 and hasattr(self, "monitor_table"):
+            table = self.monitor_table
+        elif tab == 2 and hasattr(self, "history_table"):
+            table = self.history_table
+        elif tab == 3 and hasattr(self, "storage_table"):
+            table = self.storage_table
+        if table:
+            table.selectAll()
 
     def _scheduler_tick(self):
         """Periodic check: start any queue items whose scheduled time has
