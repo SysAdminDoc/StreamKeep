@@ -358,7 +358,7 @@
   Multiple proxies, each assigned to specific platforms. HTTP/SOCKS5/SOCKS5h.
   Health check with latency. Auto-failover (3 attempts → direct fallback).
 
-- [ ] **F50 — DASH/MPD Manifest Support** (Medium, ~200-250 lines)
+- [x] **F50 — DASH/MPD Manifest Support** (Medium, ~200-250 lines) v4.26.3
   Parse MPD XML into `QualityInfo` entries. Handle SegmentTemplate and
   SegmentList addressing. Static VOD manifests first, live DASH later.
 
