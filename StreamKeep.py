@@ -30,17 +30,23 @@ bootstrap()
 import sys
 import subprocess
 
-from PyQt6.QtWidgets import QApplication, QMessageBox
-
 from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
 from streamkeep.paths import _CREATE_NO_WINDOW
-from streamkeep.theme import apply_theme
 from streamkeep.crash_log import setup_crash_logging
-from streamkeep.ui.main_window import StreamKeep
 
 
 def main():
     setup_crash_logging()
+
+    # CLI / headless mode (F42): detect subcommands before creating the GUI
+    from streamkeep.cli import has_cli_args, run_cli
+    if has_cli_args():
+        run_cli()
+        return
+
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from streamkeep.theme import apply_theme
+    from streamkeep.ui.main_window import StreamKeep
 
     # QApplication must exist before any QWidget (e.g. a QMessageBox in the
     # ffmpeg error path). Create it first so every failure branch is safe.
