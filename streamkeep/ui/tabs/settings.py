@@ -396,6 +396,47 @@ def build_settings_tab(win):
     if hasattr(win, "_update_cookies_status"):
         win._update_cookies_status()
 
+    # ── Platform Accounts (F48) ───────────────────────────────────
+    accounts_block, accounts_lay = make_field_block(
+        "Platform Accounts",
+        "Store API tokens for authenticated platform access. "
+        "Tokens are encrypted with Windows DPAPI.",
+    )
+    from streamkeep.accounts import PLATFORMS as _ACCT_PLATFORMS, credential_status
+    win._account_inputs = {}
+    for plat_key, plat_info in _ACCT_PLATFORMS.items():
+        arow = QHBoxLayout()
+        arow.setSpacing(8)
+        alabel = QLabel(f"{plat_info['label']}:")
+        alabel.setFixedWidth(100)
+        arow.addWidget(alabel)
+        ainput = QLineEdit()
+        ainput.setPlaceholderText(plat_info["hint"])
+        ainput.setEchoMode(QLineEdit.EchoMode.Password)
+        arow.addWidget(ainput, 1)
+        status = credential_status(plat_key)
+        astatus = QLabel(status)
+        astatus.setFixedWidth(100)
+        astatus.setObjectName("subtleText")
+        arow.addWidget(astatus)
+        accounts_lay.addLayout(arow)
+        win._account_inputs[plat_key] = (ainput, astatus)
+
+    acct_btn_row = QHBoxLayout()
+    acct_btn_row.setSpacing(8)
+    win.acct_save_btn = QPushButton("Save Tokens")
+    win.acct_save_btn.setObjectName("secondary")
+    win.acct_save_btn.clicked.connect(win._on_save_account_tokens)
+    acct_btn_row.addWidget(win.acct_save_btn)
+    win.acct_clear_btn = QPushButton("Clear All")
+    win.acct_clear_btn.setObjectName("secondary")
+    win.acct_clear_btn.setFixedWidth(80)
+    win.acct_clear_btn.clicked.connect(win._on_clear_account_tokens)
+    acct_btn_row.addWidget(win.acct_clear_btn)
+    acct_btn_row.addStretch(1)
+    accounts_lay.addLayout(acct_btn_row)
+    card_lay.addWidget(accounts_block)
+
     # ── Network ────────────────────────────────────────────────────
     network_block, network_lay = make_field_block(
         "Network",
