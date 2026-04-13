@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QTime
 
+from ..theme import CAT
+
 
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -29,7 +31,7 @@ class MonitorEntryDialog(QDialog):
 
         head = QLabel(
             f"<b>Channel:</b> {entry.channel_id or '—'}<br>"
-            f"<span style='color:#a6adc8'>{entry.url}</span>"
+            f"<span style='color:{CAT['subtext0']}'>{entry.url}</span>"
         )
         head.setWordWrap(True)
         root.addWidget(head)
@@ -217,7 +219,7 @@ class MonitorEntryDialog(QDialog):
         root.addLayout(btn_row)
 
     def _section_label(self, title, helper):
-        w = QLabel(f"<b>{title}</b><br><span style='color:#a6adc8'>{helper}</span>")
+        w = QLabel(f"<b>{title}</b><br><span style='color:{CAT['subtext0']}'>{helper}</span>")
         w.setWordWrap(True)
         return w
 
