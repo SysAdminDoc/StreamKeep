@@ -264,11 +264,14 @@ class StreamKeep(QMainWindow):
         except Exception:
             pass
         # Thumbnail loaders for History and Storage tables (lazy-filled).
-        from .thumb_loader import ThumbLoader
+        from .thumb_loader import ThumbLoader, PreviewLoader
         self._history_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
         self._history_thumb_loader.thumb_ready.connect(self._on_history_thumb_ready)
         self._storage_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
         self._storage_thumb_loader.thumb_ready.connect(self._on_storage_thumb_ready)
+        # Hover preview loader (F46)
+        self._preview_loader = PreviewLoader(self)
+        self._preview_loader.frame_ready.connect(self._on_preview_frame)
         self._resume_candidates = []
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
@@ -6246,6 +6249,45 @@ class StreamKeep(QMainWindow):
                         Qt.TransformationMode.SmoothTransformation,
                     ))
                 return
+
+    # ── Hover Preview (F46) ───────────────────────────────────────────
+
+    def _on_history_cell_hover(self, row, col):
+        """When the mouse enters a history table row, start the animated
+        preview on the thumbnail column (col 0)."""
+        view = getattr(self, "_history_view", None) or []
+        if row < 0 or row >= len(view):
+            self._preview_loader.stop_preview()
+            return
+        h = view[row]
+        if not h.path or not os.path.isdir(h.path):
+            self._preview_loader.stop_preview()
+            return
+        # Find first media file in the recording dir
+        media = ""
+        for fn in os.listdir(h.path):
+            if fn.lower().endswith((".mp4", ".mkv", ".ts", ".webm", ".flv")):
+                media = os.path.join(h.path, fn)
+                break
+        if not media:
+            self._preview_loader.stop_preview()
+            return
+        self._preview_loader.start_preview((row, "history"), media)
+
+    def _on_preview_frame(self, row_key, pix):
+        """PreviewLoader emitted a frame — update the thumbnail cell."""
+        row, source = row_key
+        if source == "history":
+            table = self.history_table
+        else:
+            return
+        label = table.cellWidget(row, 0)
+        if label is not None:
+            label.setPixmap(pix.scaled(
+                100, 56,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
 
     def _on_storage_thumb_ready(self, row_key, pix):
         """Loader emitted a thumb — find the matching storage row and paint it."""
