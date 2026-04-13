@@ -806,6 +806,67 @@ def build_settings_tab(win):
     lib_lay.addWidget(win.chat_check)
     card_lay.addWidget(lib_block)
 
+    # ── Media Server Auto-Import (F33) ────────────────────────────
+    from ...integrations.media_server import SERVER_TYPES
+    ms_block, ms_lay = make_field_block(
+        "Media Server Auto-Import",
+        "Copy recordings into a Plex/Jellyfin/Emby library folder and trigger "
+        "a library scan after each download.",
+    )
+    ms_cfg = win._config.get("media_server", {})
+    win.ms_enable_check = QCheckBox("Enable auto-import after download")
+    win.ms_enable_check.setChecked(bool(ms_cfg.get("enabled")))
+    ms_lay.addWidget(win.ms_enable_check)
+
+    ms_type_row = QHBoxLayout()
+    ms_type_row.setSpacing(8)
+    ms_type_row.addWidget(QLabel("Server type:"))
+    win.ms_type_combo = QComboBox()
+    win.ms_type_combo.addItems([t.title() for t in SERVER_TYPES])
+    cur_type = (ms_cfg.get("server_type") or "plex").lower()
+    idx = SERVER_TYPES.index(cur_type) if cur_type in SERVER_TYPES else 0
+    win.ms_type_combo.setCurrentIndex(idx)
+    ms_type_row.addWidget(win.ms_type_combo)
+    ms_type_row.addStretch(1)
+    ms_lay.addLayout(ms_type_row)
+
+    ms_url_row = QHBoxLayout()
+    ms_url_row.setSpacing(8)
+    ms_url_row.addWidget(QLabel("Server URL:"))
+    win.ms_url_input = QLineEdit(ms_cfg.get("url", ""))
+    win.ms_url_input.setPlaceholderText("http://localhost:32400")
+    ms_url_row.addWidget(win.ms_url_input)
+    ms_lay.addLayout(ms_url_row)
+
+    ms_token_row = QHBoxLayout()
+    ms_token_row.setSpacing(8)
+    ms_token_row.addWidget(QLabel("API token:"))
+    win.ms_token_input = QLineEdit(ms_cfg.get("token", ""))
+    win.ms_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+    win.ms_token_input.setPlaceholderText("Plex token / Jellyfin API key")
+    ms_token_row.addWidget(win.ms_token_input)
+    ms_lay.addLayout(ms_token_row)
+
+    ms_lib_row = QHBoxLayout()
+    ms_lib_row.setSpacing(8)
+    ms_lib_row.addWidget(QLabel("Library ID:"))
+    win.ms_library_id_input = QLineEdit(ms_cfg.get("library_id", "1"))
+    win.ms_library_id_input.setFixedWidth(60)
+    win.ms_library_id_input.setToolTip("Plex library section ID (e.g. 1). Ignored for Jellyfin/Emby.")
+    ms_lib_row.addWidget(win.ms_library_id_input)
+    ms_lib_row.addStretch(1)
+    ms_lay.addLayout(ms_lib_row)
+
+    ms_path_row = QHBoxLayout()
+    ms_path_row.setSpacing(8)
+    ms_path_row.addWidget(QLabel("Library path:"))
+    win.ms_path_input = QLineEdit(ms_cfg.get("library_path", ""))
+    win.ms_path_input.setPlaceholderText("/path/to/media/library")
+    ms_path_row.addWidget(win.ms_path_input)
+    ms_lay.addLayout(ms_path_row)
+
+    card_lay.addWidget(ms_block)
+
     # ── Post-Processing ────────────────────────────────────────────
     pp_block, pp_lay = make_field_block(
         "Post-Processing",

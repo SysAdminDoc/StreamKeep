@@ -187,7 +187,7 @@
   `background.js`: register "Send link to StreamKeep" context menu.
   `popup.js`: "Send all tabs" button -> `chrome.tabs.query` -> POST each URL.
 
-- [ ] **F33 — Media Server Auto-Import** (Small-Med, ~120-150 lines)
+- [x] **F33 — Media Server Auto-Import** (Small-Med, ~120-150 lines)
   New `integrations/media_server.py`. Plex: `GET /library/sections/{id}/refresh`.
   Jellyfin/Emby: `POST /Library/Refresh`. File copy/hardlink with naming template.
   Reuse NFO writer from `metadata.py`. Settings: server type/URL/token/library path.
