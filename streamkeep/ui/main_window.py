@@ -1622,6 +1622,18 @@ class StreamKeep(QMainWindow):
         self._log(f"[SCRAPE] {err}")
         self._set_status(f"Scan failed: {err}", "error")
 
+    def _on_recover_vod(self):
+        """Open the Deleted VOD Recovery Wizard dialog (F23)."""
+        from .recover_dialog import RecoverDialog
+        dlg = RecoverDialog(self, log_fn=self._log)
+        dlg.download_requested.connect(self._on_recover_download)
+        dlg.exec()
+
+    def _on_recover_download(self, url):
+        """Handle a recovered VOD URL — paste into input and trigger fetch."""
+        self.url_input.setText(url)
+        self._on_fetch()
+
     def _on_queue_url(self):
         """Add the current URL input to the persistent queue."""
         url = self.url_input.text().strip()

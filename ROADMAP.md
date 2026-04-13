@@ -277,7 +277,7 @@
   Settings: width, font size, message duration, background opacity.
   Offer "preview first 60s" before full render.
 
-- [ ] **F23 — Deleted VOD Recovery Wizard** (Medium, ~200-250 lines)
+- [x] **F23 — Deleted VOD Recovery Wizard** (Medium, ~200-250 lines)
   New `extractors/twitch_recover.py`. Scrape TwitchTracker for stream IDs
   given channel + date range. Construct CDN URL candidates. Test with HEAD.
   Return valid URLs as StreamInfo. Download tab: "Recover VOD" action ->
