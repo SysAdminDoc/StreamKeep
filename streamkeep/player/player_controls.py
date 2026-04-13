@@ -21,6 +21,7 @@ class PlayerControls(QWidget):
     speed_changed = pyqtSignal(float)
     subtitle_changed = pyqtSignal(object)   # track_id or False
     fullscreen_requested = pyqtSignal()
+    pip_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,6 +95,14 @@ class PlayerControls(QWidget):
             lambda i: self.subtitle_changed.emit(self.sub_combo.itemData(i))
         )
         lay.addWidget(self.sub_combo)
+
+        # PiP (F53)
+        pip_btn = QPushButton("PiP")
+        pip_btn.setFixedWidth(36)
+        pip_btn.setObjectName("secondary")
+        pip_btn.setToolTip("Picture-in-Picture mini player")
+        pip_btn.clicked.connect(self.pip_requested.emit)
+        lay.addWidget(pip_btn)
 
         # Fullscreen
         fs_btn = QPushButton("[ ]")
