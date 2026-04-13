@@ -442,7 +442,7 @@
   Post-download ffprobe: verify valid container, duration within 2% of
   expected, no truncation. Green/yellow/red badge on History rows.
 
-- [ ] **F66 — Channel Statistics & Growth Trends** (Medium, ~200-250 lines)
+- [x] **F66 — Channel Statistics & Growth Trends** (Medium, ~200-250 lines) v4.29.3
   Log monitor poll transitions (live/offline) to DB. Per-channel insights:
   streams/week, avg duration, top game. Sparklines in Monitor tab.
 
