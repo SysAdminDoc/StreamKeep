@@ -2080,6 +2080,60 @@ class StreamKeep(QMainWindow):
         )
         if f:
             self.cookies_file_input.setText(f)
+            # Also import to StreamKeep's cookies.txt (F47)
+            from streamkeep.cookies import import_from_file
+            ok, msg = import_from_file(f)
+            self._update_cookies_status()
+            if ok:
+                self._set_status(msg, "success")
+            else:
+                self._set_status(msg, "warning")
+
+    def _on_import_browser_cookies(self):
+        """Extract cookies from the selected browser to cookies.txt (F47)."""
+        from streamkeep.cookies import import_from_browser
+        browser_text = self.cookies_combo.currentText()
+        browser_data = self.cookies_combo.currentData()
+        if browser_text == "None" or not browser_data:
+            self._set_status("Select a browser first, then click Import.", "warning")
+            return
+        ytdlp_name = str(browser_data)
+        ok, msg = import_from_browser(ytdlp_name)
+        self._update_cookies_status()
+        if ok:
+            self._set_status(msg, "success")
+            self._log(f"[COOKIES] {msg}")
+        else:
+            self._set_status(msg, "error")
+            self._log(f"[COOKIES] Error: {msg}")
+
+    def _on_clear_cookies(self):
+        """Delete the cookies.txt file (F47)."""
+        from streamkeep.cookies import clear_cookies
+        ok, msg = clear_cookies()
+        self._update_cookies_status()
+        self._set_status(msg, "success" if ok else "error")
+
+    def _update_cookies_status(self):
+        """Refresh the cookies status label (F47)."""
+        from streamkeep.cookies import cookies_file_path, cookies_file_age_secs
+        label = getattr(self, "cookies_status_label", None)
+        if label is None:
+            return
+        cpath = cookies_file_path()
+        if not cpath:
+            label.setText("No cookies.txt — authenticated content may fail.")
+            return
+        age = cookies_file_age_secs()
+        if age < 0:
+            label.setText("cookies.txt present.")
+        elif age < 3600:
+            label.setText(f"cookies.txt present (updated {age // 60}m ago).")
+        elif age < 86400:
+            label.setText(f"cookies.txt present (updated {age // 3600}h ago).")
+        else:
+            days = age // 86400
+            label.setText(f"cookies.txt present ({days}d old — consider refreshing).")
 
     def _on_save_settings(self):
         self.output_input.setText(self.settings_output.text())
