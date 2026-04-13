@@ -8,17 +8,22 @@ accept manual entry.
 Stream-copy (default) is keyframe-aligned (fast, can be off by up to one
 GOP). Re-encode is frame-accurate (slower) and exposes the existing video
 codec picker.
+
+An audio waveform strip (F34) sits below the filmstrip, showing a filled
+amplitude envelope extracted from the source audio. Peaks are cached as
+`.waveform.bin` alongside the video so re-opens are instant.
 """
 
 import os
+import struct
 import subprocess
 
 from PyQt6.QtCore import Qt, QRectF, QThread, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QPen, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
-    QLineEdit, QProgressBar, QPushButton, QTextEdit, QVBoxLayout,
+    QLineEdit, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..paths import _CREATE_NO_WINDOW
@@ -197,6 +202,221 @@ class ScrubberView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
 
+WAVE_H = 48           # Waveform widget height
+WAVE_SAMPLE_RATE = 8000  # Mono 8 kHz — ~1 MB per minute of audio
+WAVE_BIN_VERSION = 1
+
+
+class _WaveformWorker(QThread):
+    """Extract audio peaks from a media file via ffmpeg.
+
+    Output is a list of (min_peak, max_peak) tuples normalised to [-1, 1],
+    one pair per display column. The result is cached as `.waveform.bin`
+    next to the source file so re-opens are instant.
+    """
+
+    ready = pyqtSignal(list)    # list[(float, float)] — per-column peaks
+    log = pyqtSignal(str)
+
+    def __init__(self, src_path, columns=600):
+        super().__init__()
+        self.src_path = src_path
+        self.columns = columns
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            # Check cache first
+            cache = self._cache_path()
+            if cache and os.path.exists(cache):
+                peaks = self._load_cache(cache)
+                if peaks is not None:
+                    self.ready.emit(peaks)
+                    return
+
+            # Extract raw 16-bit signed PCM mono at 8 kHz
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", self.src_path,
+                "-ac", "1", "-ar", str(WAVE_SAMPLE_RATE),
+                "-f", "s16le", "pipe:1",
+            ]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    creationflags=_CREATE_NO_WINDOW,
+                    timeout=120,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                self.ready.emit([])
+                return
+
+            if self._cancel or proc.returncode != 0 or not proc.stdout:
+                self.ready.emit([])
+                return
+
+            raw = proc.stdout
+            # Each sample is 2 bytes (s16le)
+            n_samples = len(raw) // 2
+            if n_samples < 2:
+                self.ready.emit([])
+                return
+
+            # Compute per-column min/max peaks
+            cols = max(1, self.columns)
+            samples_per_col = max(1, n_samples // cols)
+            peaks = []
+            offset = 0
+            for _ in range(cols):
+                if self._cancel:
+                    self.ready.emit([])
+                    return
+                end = min(offset + samples_per_col, n_samples)
+                chunk = raw[offset * 2 : end * 2]
+                if not chunk:
+                    peaks.append((0.0, 0.0))
+                    offset = end
+                    continue
+                # Unpack s16le samples
+                count = len(chunk) // 2
+                samples = struct.unpack(f"<{count}h", chunk)
+                lo = min(samples) / 32768.0
+                hi = max(samples) / 32768.0
+                peaks.append((lo, hi))
+                offset = end
+
+            # Cache
+            if cache:
+                self._save_cache(cache, peaks)
+
+            if not self._cancel:
+                self.ready.emit(peaks)
+        except Exception:
+            self.ready.emit([])
+
+    def _cache_path(self):
+        try:
+            d = os.path.dirname(self.src_path)
+            base = os.path.basename(self.src_path)
+            return os.path.join(d, f".{base}.waveform.bin")
+        except Exception:
+            return None
+
+    def _save_cache(self, path, peaks):
+        try:
+            with open(path, "wb") as f:
+                f.write(struct.pack("<BH", WAVE_BIN_VERSION, len(peaks)))
+                for lo, hi in peaks:
+                    f.write(struct.pack("<ff", lo, hi))
+        except OSError:
+            pass
+
+    def _load_cache(self, path):
+        try:
+            with open(path, "rb") as f:
+                header = f.read(3)
+                if len(header) < 3:
+                    return None
+                ver, count = struct.unpack("<BH", header)
+                if ver != WAVE_BIN_VERSION:
+                    return None
+                data = f.read(count * 8)
+                if len(data) < count * 8:
+                    return None
+                peaks = []
+                for i in range(count):
+                    lo, hi = struct.unpack_from("<ff", data, i * 8)
+                    peaks.append((lo, hi))
+                return peaks
+        except (OSError, struct.error):
+            return None
+
+
+class WaveformWidget(QWidget):
+    """Filled amplitude-envelope waveform synced with the scrubber handles.
+
+    Displays selection region tint and supports click-to-seek.
+    """
+
+    seek_requested = pyqtSignal(float)  # ratio 0..1
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._peaks = []
+        self._start_ratio = 0.0
+        self._end_ratio = 1.0
+        self.setFixedHeight(WAVE_H)
+        self.setMinimumWidth(200)
+
+    def set_peaks(self, peaks):
+        self._peaks = peaks
+        self.update()
+
+    def set_selection(self, start_ratio, end_ratio):
+        self._start_ratio = start_ratio
+        self._end_ratio = end_ratio
+        self.update()
+
+    def paintEvent(self, event):
+        if not self._peaks:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = self.width()
+        h = self.height()
+        mid = h / 2.0
+
+        # Background
+        p.fillRect(0, 0, w, h, QColor(24, 24, 37))  # CAT crust
+
+        # Dim region outside selection
+        sx = int(self._start_ratio * w)
+        ex = int(self._end_ratio * w)
+        dim = QColor(0, 0, 0, 120)
+        if sx > 0:
+            p.fillRect(0, 0, sx, h, dim)
+        if ex < w:
+            p.fillRect(ex, 0, w - ex, h, dim)
+
+        # Draw waveform columns
+        n_peaks = len(self._peaks)
+        in_color = QColor(137, 180, 250, 180)    # CAT blue
+        out_color = QColor(88, 91, 112, 140)      # CAT overlay0 dimmed
+        for x in range(w):
+            idx = int(x * n_peaks / w)
+            if idx >= n_peaks:
+                idx = n_peaks - 1
+            lo, hi = self._peaks[idx]
+            # Map [-1, 1] to pixel Y
+            y_top = int(mid - hi * mid)
+            y_bot = int(mid - lo * mid)
+            col = in_color if sx <= x <= ex else out_color
+            p.setPen(QPen(col, 1))
+            p.drawLine(x, y_top, x, y_bot)
+
+        # Handle markers
+        p.setPen(QPen(QColor(137, 180, 250), 2))
+        p.drawLine(sx, 0, sx, h)
+        p.setPen(QPen(QColor(166, 227, 161), 2))
+        p.drawLine(ex, 0, ex, h)
+
+        p.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.width() > 0:
+            ratio = max(0.0, min(1.0, event.pos().x() / self.width()))
+            self.seek_requested.emit(ratio)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self.width() > 0:
+            ratio = max(0.0, min(1.0, event.pos().x() / self.width()))
+            self.seek_requested.emit(ratio)
+
+
 class ClipDialog(QDialog):
     """Modal dialog that runs a ClipWorker with a visual scrubber."""
 
@@ -209,6 +429,7 @@ class ClipDialog(QDialog):
         self._worker = None
         self._thumb_worker = None
         self._preview_worker = None
+        self._waveform_worker = None
         self._duration = probe_duration(source_path)
         if default_end is None:
             default_end = self._duration or 0.0
@@ -250,6 +471,12 @@ class ClipDialog(QDialog):
         preview_col.addWidget(self.preview_time_label)
         strip_row.addLayout(preview_col, 0)
         root.addLayout(strip_row)
+
+        # Audio waveform strip (F34) — sits below filmstrip
+        self.waveform = WaveformWidget()
+        self.waveform.seek_requested.connect(self._on_waveform_seek)
+        self.scrubber.handles_changed.connect(self.waveform.set_selection)
+        root.addWidget(self.waveform)
 
         # In / Out text fields (kept so power users can type exact times)
         range_row = QHBoxLayout()
@@ -342,7 +569,9 @@ class ClipDialog(QDialog):
             # Seed initial handle state from default_end.
             end_ratio = min(1.0, max(0.0, default_end / self._duration))
             self.scrubber.set_handles(0.0, end_ratio, emit=False)
+            self.waveform.set_selection(0.0, end_ratio)
             self._kick_off_thumbnails()
+            self._kick_off_waveform()
 
     # ── Thumbnail + preview ─────────────────────────────────────
 
@@ -352,6 +581,25 @@ class ClipDialog(QDialog):
         )
         self._thumb_worker.thumb_ready.connect(self.scrubber.set_thumb)
         self._thumb_worker.start()
+
+    def _kick_off_waveform(self):
+        """Extract audio peaks in the background for the waveform strip."""
+        cols = max(200, self.waveform.width() or 600)
+        self._waveform_worker = _WaveformWorker(self.source_path, columns=cols)
+        self._waveform_worker.ready.connect(self._on_waveform_ready)
+        self._waveform_worker.start()
+
+    def _on_waveform_ready(self, peaks):
+        if peaks:
+            self.waveform.set_peaks(peaks)
+
+    def _on_waveform_seek(self, ratio):
+        """Click/drag on waveform → move nearest scrubber handle + preview."""
+        if abs(ratio - self.scrubber._start_ratio) <= abs(ratio - self.scrubber._end_ratio):
+            self.scrubber.set_handles(ratio, self.scrubber._end_ratio)
+        else:
+            self.scrubber.set_handles(self.scrubber._start_ratio, ratio)
+        self.scrubber.preview_requested.emit(ratio)
 
     def _on_preview_requested(self, ratio):
         if not self._duration:
@@ -492,7 +740,8 @@ class ClipDialog(QDialog):
         self.accept()
 
     def reject(self):
-        for w in (self._worker, self._thumb_worker, self._preview_worker):
+        for w in (self._worker, self._thumb_worker, self._preview_worker,
+                  self._waveform_worker):
             try:
                 if w is not None and w.isRunning():
                     w.cancel() if hasattr(w, "cancel") else None
