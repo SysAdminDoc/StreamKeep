@@ -377,6 +377,30 @@ QSplitter::handle {{
 """
 
 
+ACCENT_PRESETS = {
+    "Mauve": "#cba6f7", "Blue": "#89b4fa", "Green": "#a6e3a1",
+    "Peach": "#fab387", "Pink": "#f5c2e7", "Red": "#f38ba8",
+    "Teal": "#94e2d5", "Yellow": "#f9e2af",
+}
+
+
+def apply_accent(hex_color, app=None):
+    """Override the accent color and rebuild the stylesheet (F73).
+
+    Patches CAT["accent"], CAT["blue"], and CAT["lavender"] with the
+    chosen color so all accent-dependent QSS picks it up.
+    """
+    global STYLESHEET
+    if hex_color:
+        CAT["accent"] = hex_color
+        CAT["blue"] = hex_color
+        CAT["lavender"] = hex_color
+    STYLESHEET = build_stylesheet(CAT)
+    if app is not None:
+        app.setStyleSheet(STYLESHEET)
+    return STYLESHEET
+
+
 def apply_theme(name, app=None):
     """Switch the active theme. Updates CAT in-place and rebuilds STYLESHEET.
 

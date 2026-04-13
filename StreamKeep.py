@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """StreamKeep — multi-platform stream/VOD downloader.
 
 This file is a thin launcher. All code lives in the `streamkeep/` package:
