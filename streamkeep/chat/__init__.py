@@ -5,6 +5,10 @@ of encrypted channels) and is its own moderate feature.
 """
 
 from .twitch_irc import TwitchIRCReader
+from .kick_ws import KickChatReader, is_available as kick_chat_available
 from .chat_worker import ChatWorker
 
-__all__ = ["TwitchIRCReader", "ChatWorker"]
+__all__ = [
+    "TwitchIRCReader", "KickChatReader",
+    "kick_chat_available", "ChatWorker",
+]
