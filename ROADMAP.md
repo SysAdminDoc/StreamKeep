@@ -334,7 +334,7 @@
   Persistent search bar above tab bar. Searches History, Storage, Monitor,
   Queue, transcripts (FTS5), tags. Results grouped by tab with jump-to.
 
-- [ ] **F46 — Recording Hover Preview** (Small, ~100-120 lines)
+- [x] **F46 — Recording Hover Preview** (Small, ~100-120 lines) v4.25.5
   Animated 5-frame thumbnail loop on hover in History/Storage.
   Reuse `ThumbWorker`. Cached as `.streamkeep_preview.jpg` sprite strip.
 
