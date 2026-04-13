@@ -344,7 +344,7 @@
 > Unlock paywalled and geo-blocked content. Cookie import (F47) is
 > the highest-impact feature in this phase.
 
-- [ ] **F47 — Browser Cookie Import** (Medium, ~150-200 lines)
+- [x] **F47 — Browser Cookie Import** (Medium, ~150-200 lines) v4.26.0
   Extract cookies from Chrome/Firefox/Edge for Twitch/YouTube/Kick.
   `browser_cookie3` or `rookiepy` for decryption. Netscape cookies.txt
   fallback. Inject into curl `--cookie` and yt-dlp `--cookies`.

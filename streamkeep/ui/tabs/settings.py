@@ -352,10 +352,33 @@ def build_settings_tab(win):
     row_cookiefile.addWidget(browse_cookies)
     cookies_lay.addLayout(row_cookiefile)
 
+    # Import cookies to cookies.txt (F47)
+    row_import = QHBoxLayout()
+    row_import.setSpacing(8)
+    win.cookies_import_btn = QPushButton("Import Cookies from Browser")
+    win.cookies_import_btn.setObjectName("secondary")
+    win.cookies_import_btn.setToolTip(
+        "Extract cookies from the selected browser and save as cookies.txt "
+        "for authenticated downloads (F47)"
+    )
+    win.cookies_import_btn.clicked.connect(win._on_import_browser_cookies)
+    row_import.addWidget(win.cookies_import_btn)
+    win.cookies_clear_btn = QPushButton("Clear")
+    win.cookies_clear_btn.setObjectName("secondary")
+    win.cookies_clear_btn.setFixedWidth(70)
+    win.cookies_clear_btn.clicked.connect(win._on_clear_cookies)
+    row_import.addWidget(win.cookies_clear_btn)
+    cookies_lay.addLayout(row_import)
+
     win.cookies_scan_label = QLabel("")
     win.cookies_scan_label.setObjectName("subtleText")
     win.cookies_scan_label.setWordWrap(True)
     cookies_lay.addWidget(win.cookies_scan_label)
+
+    # Show cookies.txt status
+    win.cookies_status_label = QLabel("")
+    win.cookies_status_label.setObjectName("subtleText")
+    cookies_lay.addWidget(win.cookies_status_label)
     card_lay.addWidget(cookies_block)
 
     saved_browser = win._config.get("cookies_browser", "")
@@ -369,6 +392,9 @@ def build_settings_tab(win):
         if idx >= 0:
             win.cookies_combo.setCurrentIndex(idx)
         YtDlpExtractor.cookies_browser = saved_browser
+    # Update cookies.txt status indicator (F47)
+    if hasattr(win, "_update_cookies_status"):
+        win._update_cookies_status()
 
     # ── Network ────────────────────────────────────────────────────
     network_block, network_lay = make_field_block(

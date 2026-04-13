@@ -122,7 +122,7 @@ def run_capture_interruptible(cmd, timeout=30):
 
 
 def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
-    """Assemble a curl command with proxy + headers + optional POST body.
+    """Assemble a curl command with proxy + cookies + headers + optional POST body.
     Shared by curl/curl_json/curl_post_json so the proxy/header logic
     lives in exactly one place."""
     max_time = max(1, int(timeout or 30))
@@ -134,6 +134,11 @@ def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
     ]
     if NATIVE_PROXY:
         cmd.extend(["-x", NATIVE_PROXY])
+    # Inject cookies.txt if present (F47)
+    from .cookies import cookies_file_path
+    cpath = cookies_file_path()
+    if cpath:
+        cmd.extend(["--cookie", cpath])
     if method and method.upper() != "GET":
         cmd.extend(["-X", method.upper()])
     if body is not None:
