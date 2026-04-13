@@ -4217,6 +4217,7 @@ class StreamKeep(QMainWindow):
                             e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
                         except (TypeError, ValueError):
                             e.retention_keep_last = 0
+                        e.filter_keywords = str(ch.get("filter_keywords", "") or "")
                         break
                 added += 1
                 existing_urls.add(ch["url"])
@@ -4703,6 +4704,22 @@ class StreamKeep(QMainWindow):
             self._refresh_active_recordings_panel()
             self._start_next_background_job()
             return
+
+        # Keyword filter check (F3) — skip if title doesn't match any keyword
+        keywords = (target.filter_keywords or "").strip()
+        if keywords and info and info.title:
+            kw_list = [k.strip().lower() for k in keywords.split(",") if k.strip()]
+            title_lower = info.title.lower()
+            if kw_list and not any(kw in title_lower for kw in kw_list):
+                self._log(
+                    f"[AUTO-RECORD] Skipping {channel_id} — title \"{info.title[:60]}\" "
+                    f"does not match keywords: {keywords}"
+                )
+                target.is_recording = False
+                self._refresh_monitor_summary()
+                self._refresh_active_recordings_panel()
+                self._start_next_background_job()
+                return
 
         try:
             os.makedirs(out_dir, exist_ok=True)
