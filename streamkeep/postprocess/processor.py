@@ -22,6 +22,7 @@ class PostProcessor:
 
     extract_audio = False       # Extract audio as MP3
     normalize_loudness = False  # EBU R128 loudness normalization
+    normalization_profile = "Podcast"  # Named profile for loudnorm (F62)
     reencode_h265 = False       # Re-encode to H.265/HEVC
     contact_sheet = False       # Generate 3x3 thumbnail grid
     split_by_chapter = False    # Split into per-chapter files
@@ -143,14 +144,19 @@ class PostProcessor:
         dst = base + ".loudnorm" + ext
         if os.path.exists(dst):
             return
+        # Use two-pass normalization with named profile (F62)
+        from .normalization import normalize_two_pass, get_profile
+        profile = get_profile(cls.normalization_profile)
         if log_fn:
-            log_fn(f"[POST] Normalizing loudness (EBU R128): {os.path.basename(dst)}")
-        cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", src, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-            "-c:v", "copy", dst,
-        ]
-        cls._ffmpeg_run(cmd, log_fn, "loudness normalize")
+            log_fn(f"[POST] Normalizing loudness ({cls.normalization_profile}, "
+                   f"{profile['I']} LUFS): {os.path.basename(dst)}")
+        normalize_two_pass(
+            src, dst,
+            target_i=profile["I"],
+            target_tp=profile["TP"],
+            target_lra=profile["LRA"],
+            log_fn=log_fn,
+        )
 
     @classmethod
     def _run_h265(cls, src, log_fn):
