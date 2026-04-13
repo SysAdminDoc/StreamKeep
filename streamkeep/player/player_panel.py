@@ -77,6 +77,9 @@ class PlayerPanel(QDialog):
         self.controls.speed_changed.connect(self._set_speed)
         self.controls.subtitle_changed.connect(self.mpv.set_subtitle_track)
         self.controls.fullscreen_requested.connect(self._toggle_fullscreen)
+        if hasattr(self.controls, "pip_requested"):
+            self.controls.pip_requested.connect(self._enter_pip)
+        self._pip_window = None
 
         # Wire mpv -> controls
         self.mpv.position_changed.connect(self.controls.set_position)
@@ -123,6 +126,32 @@ class PlayerPanel(QDialog):
             self.showNormal()
         else:
             self.showFullScreen()
+
+    def _enter_pip(self):
+        """Detach mpv into a floating PiP window (F53)."""
+        from .pip_window import PiPWindow
+        if self._pip_window is not None:
+            return
+        self._pip_window = PiPWindow(mpv_widget=self.mpv, parent=None)
+        self._pip_window.closed.connect(self._on_pip_closed)
+        self._pip_window.expand_requested.connect(self._on_pip_expand)
+        self._pip_window.show()
+        # Hide the main player dialog while PiP is active
+        self.hide()
+
+    def _on_pip_closed(self):
+        """PiP was dismissed — re-parent mpv back and show the panel."""
+        if self._pip_window:
+            self._pip_window = None
+        # Re-insert mpv widget into our layout
+        self.layout().insertWidget(1, self.mpv, 1)
+        self.mpv.show()
+
+    def _on_pip_expand(self):
+        """User wants to return from PiP to full player."""
+        self._on_pip_closed()
+        self.show()
+        self.raise_()
 
     def closeEvent(self, event):
         self.last_position = self.mpv.position
