@@ -6505,6 +6505,11 @@ class StreamKeep(QMainWindow):
         fav_label = "Remove from favorites" if getattr(h, "favorite", False) else "Add to favorites"
         fav_act = menu.addAction(fav_label)
         bookmark_act = menu.addAction("Add bookmark…")
+        # Multi-stream sync (F54) — show when 2+ rows are selected
+        selected_rows = sorted({idx.row() for idx in table.selectionModel().selectedRows()})
+        sync_entries = [view[r] for r in selected_rows if 0 <= r < len(view)]
+        sync_act = menu.addAction(f"Watch together ({len(sync_entries)} streams)")
+        sync_act.setEnabled(len(sync_entries) >= 2)
         menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
@@ -6520,7 +6525,9 @@ class StreamKeep(QMainWindow):
                 f"Remove missing entries ({orphan_count})"
             )
         chosen = menu.exec(table.viewport().mapToGlobal(pos))
-        if chosen == open_act and h.path and os.path.isdir(h.path):
+        if chosen == sync_act and len(sync_entries) >= 2:
+            self._open_sync_viewer(sync_entries)
+        elif chosen == open_act and h.path and os.path.isdir(h.path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
         elif chosen == trim_act and h.path and os.path.isdir(h.path):
             self._open_clip_dialog_for_dir(h.path)
@@ -6993,6 +7000,25 @@ class StreamKeep(QMainWindow):
 
         panel.position_at_close.connect(_on_close)
         panel.exec()
+
+    def _open_sync_viewer(self, history_entries):
+        """Open the multi-stream sync viewer for 2-4 recordings (F54)."""
+        from streamkeep.player.sync_viewer import SyncViewer
+        from streamkeep.player.mpv_widget import is_mpv_available
+        if not is_mpv_available():
+            self._set_status("python-mpv not available for sync viewer.", "warning")
+            return
+        viewer = SyncViewer(self)
+        for h in history_entries[:4]:
+            media = self._find_media_in_dir(h.path) if h.path else ""
+            if media:
+                viewer.add_stream(media, label=f"{h.channel}: {h.title[:30]}")
+        if not viewer._slots:
+            self._set_status("No playable media found in selected entries.", "warning")
+            viewer.close()
+            return
+        viewer.start_all()
+        viewer.exec()
 
     # ── Metadata ──────────────────────────────────────────────────────
 
