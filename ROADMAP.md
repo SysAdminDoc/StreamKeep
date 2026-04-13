@@ -473,7 +473,7 @@
   Markdown notes per recording as `.notes.md` sidecars. Auto-template on
   first open. Searchable via global search (F45). Notes panel in History.
 
-- [ ] **F72 — Backup & Restore Wizard** (Small-Med, ~150-180 lines)
+- [x] **F72 — Backup & Restore Wizard** (Small-Med, ~150-180 lines) v4.30.4
   Export config + DB + sidecars as encrypted `.skbackup`. Restore with
   schema migration. Scheduled auto-backup (daily/weekly). Passphrase-protected.
 
