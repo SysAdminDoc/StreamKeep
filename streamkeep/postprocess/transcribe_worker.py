@@ -319,7 +319,9 @@ class TranscribeWorker(QThread):
 
 
 def _srt_to_secs(stamp):
-    # "HH:MM:SS,mmm"
+    # "HH:MM:SS,mmm" or "HH:MM:SS.mmm" (whisper.cpp uses dot)
     hhmmss, _, ms = stamp.partition(",")
+    if not ms:
+        hhmmss, _, ms = stamp.partition(".")
     h, m, s = hhmmss.split(":")
     return int(h) * 3600 + int(m) * 60 + int(s) + (int(ms or 0) / 1000.0)

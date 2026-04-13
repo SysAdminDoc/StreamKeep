@@ -87,11 +87,6 @@ def _build_handler(expected_token, signals, state_provider=None):
         def _auth_ok(self):
             hdr = self.headers.get("Authorization", "") or ""
             if not hdr.startswith("Bearer "):
-                # Also check query param for web UI convenience
-                if "?token=" in (self.path or ""):
-                    _, _, qtoken = self.path.partition("?token=")
-                    qtoken = qtoken.split("&")[0].strip()
-                    return hmac.compare_digest(qtoken, expected_token)
                 return False
             return hmac.compare_digest(hdr[7:].strip(), expected_token)
 
@@ -111,9 +106,11 @@ def _build_handler(expected_token, signals, state_provider=None):
             self.end_headers()
             self.wfile.write(body)
 
-        def _read_body(self):
+        def _read_body(self, max_bytes=1_048_576):
             try:
                 length = int(self.headers.get("Content-Length", 0) or 0)
+                if length > max_bytes:
+                    return {}
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 return json.loads(raw) if raw else {}
             except (ValueError, OSError):
@@ -290,10 +287,10 @@ button:hover{background:#74c7ec}
 <div id="app">
 <h1>StreamKeep Remote</h1>
 <div class="tab-bar">
-<button class="active" onclick="switchTab('status')">Status</button>
-<button onclick="switchTab('queue')">Add URL</button>
-<button onclick="switchTab('library')">Library</button>
-<button onclick="switchTab('monitor')">Channels</button>
+<button class="active" onclick="switchTab('status',this)">Status</button>
+<button onclick="switchTab('queue',this)">Add URL</button>
+<button onclick="switchTab('library',this)">Library</button>
+<button onclick="switchTab('monitor',this)">Channels</button>
 </div>
 <div id="tab-status" class="tab-content active">
 <div class="card"><h2>Active Downloads</h2><div id="dl-list"><p class="empty">Loading...</p></div></div>
@@ -326,18 +323,19 @@ function doAuth(){
   TOKEN=document.getElementById('token-input').value.trim();
   api('/ping').then(d=>{
     if(d.ok){document.getElementById('auth').style.display='none';
-      document.getElementById('app').style.display='block';refresh();}
+      document.getElementById('app').style.display='block';refresh();
+      _refreshId=setInterval(refresh,5000);}
     else throw new Error();
   }).catch(()=>{
     document.getElementById('auth-err').style.display='block';
     document.getElementById('auth-err').textContent='Invalid token or server unreachable.';
   });
 }
-function switchTab(name){
+function switchTab(name,btn){
   document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.tab-bar button').forEach(e=>e.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  event.target.classList.add('active');
+  btn.classList.add('active');
 }
 function addUrl(){
   const url=document.getElementById('url-input').value.trim();
@@ -376,8 +374,8 @@ function refresh(){
         ' <span style="color:#6c7086">('+esc(i.platform||'')+')</span></div>');
   }).catch(()=>{});
 }
-function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-setInterval(refresh,5000);
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+let _refreshId=0;
 </script>
 </body>
 </html>"""

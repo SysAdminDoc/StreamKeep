@@ -1129,6 +1129,18 @@ class StreamKeep(QMainWindow):
                     cw.wait(1000)
             except Exception:
                 pass
+        # Stop transcribe / chat-render / bundle workers (F27/F22 audit fix)
+        for attr in ("_transcribe_worker", "_chat_render_worker", "_bundle_worker"):
+            w = getattr(self, attr, None)
+            if w is not None and w.isRunning():
+                try:
+                    if hasattr(w, "cancel"):
+                        w.cancel()
+                    if not w.wait(2000):
+                        w.terminate()
+                        w.wait(500)
+                except Exception:
+                    pass
         # Stop monitor timer
         try:
             self.monitor._timer.stop()
@@ -4327,6 +4339,12 @@ class StreamKeep(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             removed = execute_cleanup(removals, log_fn=self._log)
+            if removed:
+                removed_entries = {id(h) for h, _reason in removals
+                                   if not os.path.isdir(getattr(h, "path", "") or "")}
+                self._history = [h for h in self._history
+                                 if id(h) not in removed_entries]
+                self._refresh_history_table()
             self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
             self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
 
@@ -4340,6 +4358,12 @@ class StreamKeep(QMainWindow):
         if removals:
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:
+                # Remove orphan HistoryEntry objects whose dirs were recycled
+                removed_entries = {id(h) for h, _reason in removals
+                                   if not os.path.isdir(getattr(h, "path", "") or "")}
+                self._history = [h for h in self._history
+                                 if id(h) not in removed_entries]
+                self._refresh_history_table()
                 self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
 
     def _choose_default_quality_index(self, qualities, platform):
@@ -4417,11 +4441,12 @@ class StreamKeep(QMainWindow):
 
     def _api_state_snapshot(self):
         """Return a dict snapshot of app state for the REST API (F37).
-        Called from the HTTP server thread — must be thread-safe."""
+        Called from the HTTP server thread — must be thread-safe.
+        Take list() copies of shared collections to avoid race conditions."""
         downloads = []
         queue_items = []
         try:
-            for q in getattr(self, "_download_queue", []):
+            for q in list(getattr(self, "_download_queue", [])):
                 queue_items.append({
                     "url": q.get("url", ""),
                     "title": q.get("title", ""),
@@ -4430,7 +4455,7 @@ class StreamKeep(QMainWindow):
             pass
         history = []
         try:
-            for h in self._history[-50:]:
+            for h in list(self._history)[-50:]:
                 history.append({
                     "title": h.title or "",
                     "platform": h.platform or "",
@@ -4442,7 +4467,7 @@ class StreamKeep(QMainWindow):
             pass
         monitor = []
         try:
-            for e in self.monitor.entries:
+            for e in list(self.monitor.entries):
                 monitor.append({
                     "channel_id": e.channel_id,
                     "platform": e.platform,
@@ -4720,10 +4745,23 @@ class StreamKeep(QMainWindow):
         )
 
     def _on_refresh_schedules(self):
-        """Refresh stream schedules for all monitored Twitch channels (F39)."""
-        from ..schedule import refresh_schedules
-        cache = self._config.get("schedules", {})
-        cache = refresh_schedules(self.monitor.entries, cache, log_fn=self._log)
+        """Refresh stream schedules in a background thread (F39 audit fix)."""
+        import threading
+
+        def _bg():
+            from ..schedule import refresh_schedules
+            cache = dict(self._config.get("schedules", {}))
+            cache = refresh_schedules(
+                list(self.monitor.entries), cache, log_fn=self._log,
+            )
+            # Marshal result back to the main thread via QTimer.singleShot
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._apply_schedule_cache(cache))
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _apply_schedule_cache(self, cache):
+        """Apply refreshed schedule cache on the main thread."""
         self._config["schedules"] = cache
         if hasattr(self, "schedule_calendar"):
             self.schedule_calendar.set_cache(cache)
@@ -6366,7 +6404,12 @@ class StreamKeep(QMainWindow):
         # Find the largest mp4/mkv/webm in the folder.
         media = None
         biggest = 0
-        for entry in os.scandir(src_dir):
+        try:
+            scan_iter = os.scandir(src_dir)
+        except OSError as e:
+            self._log(f"[TRANSCRIBE] Cannot read directory: {e}")
+            return
+        for entry in scan_iter:
             if not entry.is_file():
                 continue
             ext = os.path.splitext(entry.name)[1].lower()

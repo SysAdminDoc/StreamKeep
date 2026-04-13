@@ -25,28 +25,22 @@ def _safe_name(s, max_len=80):
         return "Unknown"
     bad = '<>:"/\\|?*'
     out = "".join(c if c not in bad else "_" for c in s.strip())
-    return out[:max_len] or "Unknown"
+    out = out[:max_len].rstrip(". ")  # trailing dots/spaces invalid on Windows
+    return out or "Unknown"
 
 
 def _next_episode(season_dir):
     """Scan *season_dir* and return the next episode number."""
+    import re
     if not os.path.isdir(season_dir):
         return 1
     existing = []
     for f in os.listdir(season_dir):
-        # Look for SxxxxExx pattern
-        upper = f.upper()
-        idx = upper.find("E")
-        if idx < 0:
-            continue
-        ep_str = ""
-        for c in upper[idx + 1:]:
-            if c.isdigit():
-                ep_str += c
-            else:
-                break
-        if ep_str:
-            existing.append(int(ep_str))
+        # Match S<digits>E<digits> pattern — avoids false hits on channel
+        # names that contain the letter E (e.g. "Echo").
+        m = re.search(r"S\d+E(\d+)", f, re.IGNORECASE)
+        if m:
+            existing.append(int(m.group(1)))
     return max(existing, default=0) + 1
 
 

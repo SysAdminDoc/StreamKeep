@@ -33,7 +33,8 @@ def _safe_name(s, max_len=120):
     if not s:
         return ""
     bad = '<>:"/\\|?*'
-    return "".join(c if c not in bad else "_" for c in s.strip())[:max_len]
+    out = "".join(c if c not in bad else "_" for c in s.strip())[:max_len]
+    return out.rstrip(". ")  # trailing dots/spaces invalid on Windows
 
 
 def _resolve_template(template, meta, seq):
