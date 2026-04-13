@@ -23,8 +23,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import (
-    QColor, QDesktopServices, QIcon, QKeySequence, QPixmap, QPainter, QBrush,
-    QShortcut,
+    QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPixmap, QPainter,
+    QBrush, QShortcut,
 )
 
 # Package re-exports under legacy underscore-prefixed names so the existing
@@ -710,29 +710,123 @@ class StreamKeep(QMainWindow):
         timer.start(max(0, int(delay_ms)))
 
     def _init_tray_icon(self):
-        """Create a system tray icon for completion notifications.
+        """Create a system tray icon with badge overlay and live dropdown (F28).
         Falls back gracefully if tray isn't supported."""
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
-        # Build a simple colored icon programmatically (no asset file needed)
-        pix = QPixmap(32, 32)
-        pix.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pix)
+        self._tray_base_pix = QPixmap(32, 32)
+        self._tray_base_pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(self._tray_base_pix)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(QBrush(QColor(CAT["green"])))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(2, 2, 28, 28, 6, 6)
         painter.end()
-        self._tray_icon = QSystemTrayIcon(QIcon(pix), self)
+        self._tray_icon = QSystemTrayIcon(QIcon(self._tray_base_pix), self)
         self._tray_icon.setToolTip(f"StreamKeep v{VERSION}")
         self._tray_icon.activated.connect(self._on_tray_activated)
         self._tray_icon.show()
+        self._update_tray_badge()
+
+    def _update_tray_badge(self):
+        """Redraw the tray icon with a badge showing the count of live
+        channels + active downloads. Called whenever monitor status or
+        download state changes."""
+        if self._tray_icon is None:
+            return
+        live = sum(1 for e in self.monitor.entries if e.last_status == "live")
+        active_dl = 1 if (self.download_worker and self.download_worker.isRunning()) else 0
+        active_dl += len([w for w in self._autorecord_workers.values() if w.isRunning()])
+        count = live + active_dl
+        pix = self._tray_base_pix.copy()
+        if count > 0:
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            # Red badge circle in the top-right corner
+            painter.setBrush(QBrush(QColor(CAT["red"])))
+            painter.setPen(Qt.PenStyle.NoPen)
+            badge_size = 16
+            painter.drawEllipse(pix.width() - badge_size, 0, badge_size, badge_size)
+            # White count text
+            painter.setPen(QColor("#ffffff"))
+            font = QFont("Arial", 8, QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(
+                pix.width() - badge_size, 0, badge_size, badge_size,
+                Qt.AlignmentFlag.AlignCenter, str(min(count, 9)),
+            )
+            painter.end()
+        self._tray_icon.setIcon(QIcon(pix))
+        parts = []
+        if live:
+            parts.append(f"{live} live")
+        if active_dl:
+            parts.append(f"{active_dl} downloading")
+        tip = f"StreamKeep v{VERSION}"
+        if parts:
+            tip += " — " + ", ".join(parts)
+        self._tray_icon.setToolTip(tip)
+
+    def _build_tray_context_menu(self):
+        """Build the tray icon right-click dropdown with live channels,
+        active downloads, recent notifications, and Quit."""
+        menu = QMenu(self)
+        # Live channels
+        live_entries = [e for e in self.monitor.entries if e.last_status == "live"]
+        if live_entries:
+            header = menu.addAction("Live Channels")
+            header.setEnabled(False)
+            for e in live_entries[:8]:
+                label = f"  \u25cf {e.channel_id} ({e.platform})"
+                menu.addAction(label)
+            menu.addSeparator()
+        # Active downloads
+        dl_lines = []
+        if self.download_worker and self.download_worker.isRunning():
+            done = getattr(self, "_completed_segments", 0)
+            total = getattr(self, "_total_segments", 0)
+            info = getattr(self, "_active_stream_info", None)
+            name = info.title[:40] if info and info.title else "Download"
+            pct_str = f"{done}/{total}" if total else "..."
+            dl_lines.append(f"  {name} — {pct_str}")
+        for ch_id, w in self._autorecord_workers.items():
+            if w.isRunning():
+                dl_lines.append(f"  Auto: {ch_id}")
+        if dl_lines:
+            header = menu.addAction("Active Downloads")
+            header.setEnabled(False)
+            for line in dl_lines[:5]:
+                menu.addAction(line)
+            menu.addSeparator()
+        # Recent notifications
+        recent = self._notifications.items()[:5]
+        if recent:
+            header = menu.addAction("Recent Notifications")
+            header.setEnabled(False)
+            for item in recent:
+                ts = item.get("time", "")
+                text = item.get("text", "")[:50]
+                menu.addAction(f"  {ts} {text}")
+            menu.addSeparator()
+        # Show / Quit
+        show_act = menu.addAction("Show StreamKeep")
+        quit_act = menu.addAction("Quit")
+        return menu, show_act, quit_act
 
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.showNormal()
             self.activateWindow()
             self.raise_()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:
+            menu, show_act, quit_act = self._build_tray_context_menu()
+            chosen = menu.exec(self._tray_icon.geometry().bottomLeft())
+            if chosen == show_act:
+                self.showNormal()
+                self.activateWindow()
+                self.raise_()
+            elif chosen == quit_act:
+                self.close()
 
     def _notify(self, title, message, icon=QSystemTrayIcon.MessageIcon.Information):
         """Show a tray notification if the window is not focused."""
@@ -3326,6 +3420,7 @@ class StreamKeep(QMainWindow):
             if self._queue_active_item is not None:
                 self._release_queue_item("done")
         self._persist_config()
+        self._update_tray_badge()
         self._start_next_background_job()
 
     def _on_stop(self):
@@ -3987,6 +4082,7 @@ class StreamKeep(QMainWindow):
                         f"{e.interval_secs}s  \u23F0 {e.schedule_start_hhmm}-{e.schedule_end_hhmm}"
                     )
         self._refresh_monitor_summary()
+        self._update_tray_badge()
 
     def _refresh_active_recordings_panel(self):
         """Update the Monitor-tab panel that shows every currently-active
