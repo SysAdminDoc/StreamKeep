@@ -546,6 +546,29 @@ def build_settings_tab(win):
     whisper_row.addStretch(1)
     network_lay.addLayout(whisper_row)
 
+    # Speaker diarization (F29)
+    diarize_row = QHBoxLayout()
+    diarize_row.setSpacing(8)
+    win.diarize_check = QCheckBox("Enable speaker diarization")
+    win.diarize_check.setChecked(bool(win._config.get("enable_diarization", False)))
+    win.diarize_check.setToolTip(
+        "Requires WhisperX + pyannote-audio + a HuggingFace token. "
+        "Labels transcript segments with speaker IDs (Speaker 1, Speaker 2, ...)."
+    )
+    diarize_row.addWidget(win.diarize_check)
+    diarize_row.addWidget(QLabel("HF token:"))
+    win.hf_token_input = QLineEdit()
+    win.hf_token_input.setPlaceholderText("hf_...")
+    win.hf_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+    win.hf_token_input.setText(str(win._config.get("hf_token", "") or ""))
+    win.hf_token_input.setMaximumWidth(260)
+    win.hf_token_input.setToolTip(
+        "Free HuggingFace token for pyannote speaker diarization models."
+    )
+    diarize_row.addWidget(win.hf_token_input)
+    diarize_row.addStretch(1)
+    network_lay.addLayout(diarize_row)
+
     # Live chat capture (v4.16.0)
     chat_row = QHBoxLayout()
     chat_row.setSpacing(8)

@@ -262,7 +262,7 @@
 > Larger features that add differentiated capabilities.
 > Each is independent and can be tackled in any order.
 
-- [ ] **F29 — WhisperX Upgrade** (Medium, ~120-150 lines)
+- [x] **F29 — WhisperX Upgrade** (Medium, ~120-150 lines)
   WhisperX as preferred backend in `transcribe_worker.py` (fall back to faster-whisper).
   Word-level timestamps via wav2vec2 forced alignment.
   Speaker diarization via pyannote-audio (opt-in, needs HuggingFace token).
