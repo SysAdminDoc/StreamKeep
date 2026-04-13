@@ -686,6 +686,8 @@ class StreamKeep(QMainWindow):
                     size=str(h.get("size", "")),
                     path=str(h.get("path", "")),
                     url=str(h.get("url", "")),
+                    favorite=bool(h.get("favorite", False)),
+                    watched=bool(h.get("watched", False)),
                 )
                 self._history.append(entry)
             except Exception:
@@ -702,7 +704,9 @@ class StreamKeep(QMainWindow):
         cfg["history"] = [{"date": h.date, "platform": h.platform, "title": h.title,
                            "channel": h.channel,
                            "quality": h.quality, "size": h.size, "path": h.path,
-                           "url": h.url}
+                           "url": h.url,
+                           "favorite": bool(getattr(h, "favorite", False)),
+                           "watched": bool(getattr(h, "watched", False))}
                          for h in self._history[-200:]]  # keep last 200
         cfg["folder_template"] = self._folder_template
         cfg["file_template"] = self._file_template
@@ -2003,6 +2007,15 @@ class StreamKeep(QMainWindow):
             self._config["hooks"] = hooks
         # Apply duplicate detection
         self._check_duplicates = self.dup_check.isChecked()
+        # Apply lifecycle policies (F32)
+        if hasattr(self, "lc_enable_check"):
+            self._config["lifecycle"] = {
+                "enabled": self.lc_enable_check.isChecked(),
+                "max_days": self.lc_max_days_spin.value(),
+                "max_total_gb": self.lc_max_gb_spin.value(),
+                "delete_watched": self.lc_watched_check.isChecked(),
+                "favorites_exempt": self.lc_fav_exempt_check.isChecked(),
+            }
         # Apply library/NFO + chat
         self._write_nfo = self.nfo_check.isChecked()
         TwitchExtractor.download_chat_enabled = self.chat_check.isChecked()
@@ -3912,6 +3925,7 @@ class StreamKeep(QMainWindow):
             if self._queue_active_item is not None:
                 self._release_queue_item("done")
         self._persist_config()
+        self._run_lifecycle_cleanup()
         self._update_tray_badge()
         self._reset_speed_dashboard()
         self._start_next_background_job()
@@ -4228,6 +4242,64 @@ class StreamKeep(QMainWindow):
         from .notification_log_dialog import NotificationLogDialog
         dlg = NotificationLogDialog(self, self._notifications)
         dlg.exec()
+
+    def _on_lifecycle_preview(self):
+        """Show a preview of what the lifecycle cleanup would remove."""
+        from ..lifecycle import evaluate_cleanup, execute_cleanup
+        policy = self._config.get("lifecycle", {})
+        if not policy.get("enabled"):
+            policy = dict(policy, enabled=True)  # preview even if disabled
+        removals = evaluate_cleanup(self._history, policy)
+        if not removals:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Cleanup Preview", "No recordings match the current cleanup rules.")
+            return
+        # Build preview text
+        total_size = 0
+        lines = []
+        for h, reason in removals:
+            title = getattr(h, "title", "") or "Untitled"
+            path = getattr(h, "path", "") or ""
+            sz = 0
+            if path and os.path.isdir(path):
+                for f in os.scandir(path):
+                    if f.is_file():
+                        try:
+                            sz += f.stat().st_size
+                        except OSError:
+                            pass
+            total_size += sz
+            sz_mb = sz / (1024 * 1024)
+            lines.append(f"  {title[:50]}  ({sz_mb:.1f} MB) — {reason}")
+        msg = (
+            f"The current policy would recycle {len(removals)} recording(s) "
+            f"({total_size / (1024 ** 3):.2f} GB):\n\n"
+            + "\n".join(lines[:30])
+        )
+        if len(lines) > 30:
+            msg += f"\n  … and {len(lines) - 30} more"
+        msg += "\n\nProceed? (Files go to recycle bin.)"
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Cleanup Preview", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            removed = execute_cleanup(removals, log_fn=self._log)
+            self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
+            self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
+
+    def _run_lifecycle_cleanup(self):
+        """Run lifecycle cleanup silently after a download completes."""
+        from ..lifecycle import evaluate_cleanup, execute_cleanup
+        policy = self._config.get("lifecycle", {})
+        if not policy or not policy.get("enabled"):
+            return
+        removals = evaluate_cleanup(self._history, policy)
+        if removals:
+            removed = execute_cleanup(removals, log_fn=self._log)
+            if removed:
+                self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
 
     def _choose_default_quality_index(self, qualities, platform):
         """Resolve the user's per-platform default to an index into the
