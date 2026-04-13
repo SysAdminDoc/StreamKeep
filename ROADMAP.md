@@ -420,7 +420,7 @@
   Score scene-boundary frames by contrast/edge density/face presence.
   Optional text overlay via Pillow. "Pick from top 5 candidates" UI.
 
-- [ ] **F62 — Audio Normalization Profiles** (Small, ~100-120 lines)
+- [x] **F62 — Audio Normalization Profiles** (Small, ~100-120 lines) v4.28.5
   LUFS-based loudnorm: Broadcast (-24), Podcast (-16), YouTube (-14),
   Streaming (-18), Custom. Two-pass FFmpeg. Integrates with PP presets (F7).
 
