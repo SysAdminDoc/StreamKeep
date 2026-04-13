@@ -199,7 +199,7 @@
 > Make auto-record smarter. These features build on the existing
 > ChannelMonitor and MonitorEntry infrastructure.
 
-- [ ] **F18 — Per-Download Settings Override** (Medium, ~120-150 lines)
+- [x] **F18 — Per-Download Settings Override** (Medium, ~120-150 lines)
   Collapsible "Advanced" QFrame in Download tab. Override widgets: quality combo,
   post-process preset (from F7), rate limit, template. Merge into worker context
   on `_on_download()`. Clear after download starts. Badge when overrides active.
