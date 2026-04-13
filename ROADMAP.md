@@ -228,7 +228,7 @@
 > Transform History from a download log into a browsable media library.
 > F38 (watch status) enables F32 (lifecycle cleanup) from Phase 5.
 
-- [ ] **F38 — Watch Queue + Playback Progress** (Small-Med, ~150-200 lines)
+- [x] **F38 — Watch Queue + Playback Progress** (Small-Med, ~150-200 lines)
   `HistoryEntry` gets `watched`, `watch_position_secs`, `bookmarks` fields.
   History tab: progress bar overlay on thumbnails, "Continue Watching" section,
   right-click "Mark as watched/unwatched", "Add bookmark" dialog.
