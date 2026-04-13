@@ -280,6 +280,27 @@ def build_settings_tab(win):
     par_ar_row.addStretch(1)
     network_lay.addLayout(par_ar_row)
 
+    # Concurrent queue downloads (v4.19.0 — F1)
+    cq_row = QHBoxLayout()
+    cq_row.setSpacing(8)
+    cq_label = QLabel("Concurrent queue jobs:")
+    cq_label.setFixedWidth(140)
+    cq_row.addWidget(cq_label)
+    win.concurrent_queue_spin = QSpinBox()
+    win.concurrent_queue_spin.setRange(1, 8)
+    win.concurrent_queue_spin.setValue(int(getattr(win, "_max_concurrent_downloads", 3)))
+    win.concurrent_queue_spin.setToolTip(
+        "Maximum queued downloads that run at the same time.\n"
+        "Bandwidth is shared evenly across active jobs when a\n"
+        "rate limit is set."
+    )
+    cq_row.addWidget(win.concurrent_queue_spin)
+    cq_hint = QLabel("simultaneous queue downloads (default 3)")
+    cq_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    cq_row.addWidget(cq_hint)
+    cq_row.addStretch(1)
+    network_lay.addLayout(cq_row)
+
     # Chunked live recording (v4.15.0)
     chunk_row = QHBoxLayout()
     chunk_row.setSpacing(8)

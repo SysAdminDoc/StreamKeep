@@ -81,21 +81,21 @@
 > Strengthen the core download workflow. F1 (queue) is the centerpiece.
 > Build supporting features first, then tackle the queue.
 
-- [ ] **F16 — Download Speed & ETA Dashboard** (Small-Med, ~80-100 lines)
+- [x] **F16 — Download Speed & ETA Dashboard** (Small-Med, ~80-100 lines) ✓ v4.19.0
   Speed label + ETA label in hero metrics row. Calculate from `_on_dl_progress()`
   byte deltas (5-sec smoothing window). Optional: 120x30 sparkline widget (60 samples).
 
-- [ ] **F21 — Pre-Download Time-Range Crop** (Small-Med, ~80-100 lines)
+- [x] **F21 — Pre-Download Time-Range Crop** (Small-Med, ~80-100 lines) ✓ v4.19.0
   Optional start/end HH:MM:SS inputs on Download tab (visible after fetch).
   Filter segment list to time range before handing to DownloadWorker.
   For yt-dlp: pass `--download-sections *start-end`.
 
-- [ ] **F3 — Keyword / Title Filters for Auto-Record** (Small, ~50-70 lines)
+- [x] **F3 — Keyword / Title Filters for Auto-Record** (Small, ~50-70 lines) ✓ v4.19.0
   Add `filter_keywords: str` to `MonitorEntry`. Text field in `monitor_entry_dialog.py`.
   Check in `_PollTask.run()` or auto-record trigger: skip if title doesn't match.
   Simple comma-separated keywords, case-insensitive substring match.
 
-- [ ] **F1 — Download Queue with Concurrent Downloads** (Large, ~300-400 lines)
+- [x] **F1 — Download Queue with Concurrent Downloads** (Large, ~300-400 lines) ✓ v4.19.0
   **This is the biggest single feature.** Implementation approach:
   1. Refactor `self.download_worker` from single instance to a worker pool (reuse
      the `_autorecord_workers` dict pattern, max 3 concurrent).
