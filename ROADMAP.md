@@ -430,7 +430,7 @@
 > Visibility into your archive. Data sourced from History + DB.
 > All features in this phase are independent.
 
-- [ ] **F63 — Download Analytics Dashboard** (Medium, ~250-300 lines)
+- [x] **F63 — Download Analytics Dashboard** (Medium, ~250-300 lines) v4.29.0
   New Analytics tab or overlay. QPainter charts: downloads/day (bar),
   cumulative data (line), platform breakdown (donut), top channels (ranked).
 

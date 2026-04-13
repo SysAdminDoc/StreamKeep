@@ -1476,7 +1476,7 @@ class StreamKeep(QMainWindow):
         tab_lay.setSpacing(10)
 
         self._tab_btns = []
-        self._tab_names = ["Download", "Monitor", "History", "Storage", "Settings"]
+        self._tab_names = ["Download", "Monitor", "History", "Storage", "Analytics", "Settings"]
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
             btn.setObjectName("tabActive" if i == 0 else "tab")
@@ -1520,6 +1520,8 @@ class StreamKeep(QMainWindow):
         self._stack.addWidget(self._wrap_scroll_page(build_monitor_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_history_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
+        from .tabs.analytics import build_analytics_tab
+        self._stack.addWidget(self._wrap_scroll_page(build_analytics_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_settings_tab(self)))
         root.addWidget(self._stack, 1)
 
@@ -1580,6 +1582,14 @@ class StreamKeep(QMainWindow):
             storage_idx = -1
         if idx == storage_idx and storage_idx >= 0:
             QTimer.singleShot(200, self._on_storage_rescan)
+        # Refresh Analytics tab on visit (F63)
+        try:
+            analytics_idx = self._tab_names.index("Analytics")
+        except ValueError:
+            analytics_idx = -1
+        if idx == analytics_idx and analytics_idx >= 0:
+            from .tabs.analytics import _refresh_analytics
+            QTimer.singleShot(100, lambda: _refresh_analytics(self))
 
     # ── Download Tab ──────────────────────────────────────────────────
 
