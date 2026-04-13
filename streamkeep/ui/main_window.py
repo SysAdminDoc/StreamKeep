@@ -1468,7 +1468,7 @@ class StreamKeep(QMainWindow):
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
             btn.setObjectName("tabActive" if i == 0 else "tab")
-            btn.setStyleSheet(TAB_STYLE)
+            btn.setStyleSheet(TAB_STYLE())
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
@@ -1530,7 +1530,7 @@ class StreamKeep(QMainWindow):
         self._stack.setCurrentIndex(idx)
         for i, btn in enumerate(self._tab_btns):
             btn.setObjectName("tabActive" if i == idx else "tab")
-            btn.setStyleSheet(TAB_STYLE)
+            btn.setStyleSheet(TAB_STYLE())
         # Auto-scan Storage the first time the user opens the tab in a
         # session, and on every subsequent visit (cheap on small archives,
         # user can stop by switching away). Deferred so the tab paints
@@ -6039,7 +6039,7 @@ class StreamKeep(QMainWindow):
             thumb_label = QLabel()
             thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb_label.setStyleSheet(
-                "background-color: #181825; border-radius: 6px; color: #6c7086;"
+                f"background-color: {CAT['mantle']}; border-radius: 6px; color: {CAT['overlay0']};"
             )
             thumb_label.setText(_warn_prefix if orphan else "…")
             self.history_table.setCellWidget(i, 0, thumb_label)
