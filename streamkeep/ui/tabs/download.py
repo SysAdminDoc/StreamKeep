@@ -322,6 +322,31 @@ def build_download_tab(win):
     segment_lay.addWidget(win.segment_combo)
     controls_lay.addWidget(segment_block, 0, 1)
 
+    # Time-range crop (F21) — optional start/end for partial downloads
+    crop_block, crop_lay = make_field_block(
+        "Time Range (optional)",
+        "Download only a portion. Leave blank for full download.",
+    )
+    crop_row = QHBoxLayout()
+    crop_row.setSpacing(8)
+    crop_start_label = QLabel("Start:")
+    crop_start_label.setFixedWidth(36)
+    crop_row.addWidget(crop_start_label)
+    win.crop_start_input = QLineEdit()
+    win.crop_start_input.setPlaceholderText("HH:MM:SS")
+    win.crop_start_input.setFixedWidth(100)
+    crop_row.addWidget(win.crop_start_input)
+    crop_end_label = QLabel("End:")
+    crop_end_label.setFixedWidth(28)
+    crop_row.addWidget(crop_end_label)
+    win.crop_end_input = QLineEdit()
+    win.crop_end_input.setPlaceholderText("HH:MM:SS")
+    win.crop_end_input.setFixedWidth(100)
+    crop_row.addWidget(win.crop_end_input)
+    crop_row.addStretch(1)
+    crop_lay.addLayout(crop_row)
+    controls_lay.addWidget(crop_block, 1, 0)
+
     output_block, output_lay = make_field_block(
         "Output Folder", "Downloads are saved exactly where you point the app."
     )
@@ -335,7 +360,7 @@ def build_download_tab(win):
     browse_btn.clicked.connect(win._on_browse)
     output_row.addWidget(browse_btn)
     output_lay.addLayout(output_row)
-    controls_lay.addWidget(output_block, 1, 0, 1, 2)
+    controls_lay.addWidget(output_block, 1, 1)
     controls_lay.setColumnStretch(0, 1)
     controls_lay.setColumnStretch(1, 1)
     root.addWidget(controls_card)
