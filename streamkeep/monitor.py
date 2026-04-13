@@ -263,6 +263,7 @@ class ChannelMonitor(QObject):
                 "schedule_end_hhmm": e.schedule_end_hhmm or "",
                 "schedule_days_mask": int(e.schedule_days_mask or 0),
                 "retention_keep_last": int(e.retention_keep_last or 0),
+                "filter_keywords": e.filter_keywords or "",
             }
             for e in self.entries
         ]
@@ -293,4 +294,5 @@ class ChannelMonitor(QObject):
                             e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
                         except (TypeError, ValueError):
                             e.retention_keep_last = 0
+                        e.filter_keywords = str(ch.get("filter_keywords", "") or "")
                         break
