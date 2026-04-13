@@ -244,7 +244,7 @@
   game/category, resolution, duration bucket). Tag chips on History rows.
   Filter sidebar with clickable tags. Smart collection editor (rule builder).
 
-- [ ] **F36 — Batch Rename Studio** (Small-Med, ~200-250 lines)
+- [x] **F36 — Batch Rename Studio** (Small-Med, ~200-250 lines)
   New `ui/rename_dialog.py`. Template input with token autocomplete.
   Live preview table (old name | new name). Conflict detection (red highlight).
   Read `metadata.json` for token values. Undo log to disk.
