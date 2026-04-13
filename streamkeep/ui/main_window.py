@@ -4632,6 +4632,33 @@ class StreamKeep(QMainWindow):
             "success" if added else "warning",
         )
 
+    def _on_refresh_schedules(self):
+        """Refresh stream schedules for all monitored Twitch channels (F39)."""
+        from ..schedule import refresh_schedules
+        cache = self._config.get("schedules", {})
+        cache = refresh_schedules(self.monitor.entries, cache, log_fn=self._log)
+        self._config["schedules"] = cache
+        if hasattr(self, "schedule_calendar"):
+            self.schedule_calendar.set_cache(cache)
+        self._log("[SCHEDULE] Schedule refresh complete.")
+
+    def _on_schedule_block_clicked(self, seg):
+        """Handle click on a calendar schedule block (F39)."""
+        channel = seg.get("channel", "")
+        title = seg.get("title", "")
+        cat = seg.get("category", "")
+        start = seg.get("start_iso", "")[:16].replace("T", " ")
+        from PyQt6.QtWidgets import QMessageBox
+        msg = (
+            f"Channel: {channel}\n"
+            f"Title: {title}\n"
+        )
+        if cat:
+            msg += f"Category: {cat}\n"
+        msg += f"Starts: {start}\n\n"
+        msg += "Auto-record is configured per-channel in the Monitor entry profile."
+        QMessageBox.information(self, "Scheduled Stream", msg)
+
     def _on_monitor_add(self):
         url = self.monitor_url_input.text().strip()
         if not url:

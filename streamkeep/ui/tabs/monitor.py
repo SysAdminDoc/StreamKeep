@@ -194,5 +194,47 @@ def build_monitor_tab(win):
     table_lay.addWidget(win.monitor_table)
 
     lay.addWidget(table_card, 1)
+
+    # ── Schedule Calendar (F39) ───────────────────────────────────
+    from ..calendar_widget import ScheduleCalendar
+    cal_card = QFrame()
+    cal_card.setObjectName("card")
+    cal_card.setVisible(False)
+    cal_lay = QVBoxLayout(cal_card)
+    cal_lay.setContentsMargins(18, 14, 18, 14)
+    cal_lay.setSpacing(8)
+    cal_hdr = QLabel("Stream Schedule")
+    cal_hdr.setObjectName("sectionTitle")
+    cal_lay.addWidget(cal_hdr)
+    win.schedule_calendar = ScheduleCalendar()
+    win.schedule_calendar.refresh_btn.clicked.connect(win._on_refresh_schedules)
+    win.schedule_calendar.block_clicked.connect(win._on_schedule_block_clicked)
+    cal_lay.addWidget(win.schedule_calendar)
+    win._schedule_cal_card = cal_card
+    lay.addWidget(cal_card, 1)
+
+    # View toggle: List | Calendar
+    toggle_row = QHBoxLayout()
+    toggle_row.setSpacing(8)
+    toggle_row.addStretch(1)
+    win.monitor_view_toggle = QPushButton("Show Calendar")
+    win.monitor_view_toggle.setObjectName("secondary")
+    win.monitor_view_toggle.setFixedWidth(140)
+    win.monitor_view_toggle.setCheckable(True)
+
+    def _on_view_toggle(checked):
+        table_card.setVisible(not checked)
+        cal_card.setVisible(checked)
+        win.monitor_view_toggle.setText(
+            "Show List" if checked else "Show Calendar"
+        )
+        if checked:
+            cache = win._config.get("schedules", {})
+            win.schedule_calendar.set_cache(cache)
+
+    win.monitor_view_toggle.toggled.connect(_on_view_toggle)
+    toggle_row.addWidget(win.monitor_view_toggle)
+    lay.addLayout(toggle_row)
+
     win._refresh_monitor_summary()
     return page
