@@ -247,6 +247,13 @@ def build_download_tab(win):
     win.fetch_btn.clicked.connect(win._on_fetch)
     url_row.addWidget(win.fetch_btn)
 
+    win.batch_import_btn = QPushButton("Import URLs")
+    win.batch_import_btn.setObjectName("secondary")
+    win.batch_import_btn.setFixedWidth(110)
+    win.batch_import_btn.setToolTip("Import URLs from a text file (one per line) and queue them all (F44)")
+    win.batch_import_btn.clicked.connect(win._on_batch_url_import)
+    url_row.addWidget(win.batch_import_btn)
+
     win.expand_btn = QPushButton("Expand Playlist")
     win.expand_btn.setObjectName("secondary")
     win.expand_btn.setFixedWidth(130)
