@@ -6415,3 +6415,11 @@ class StreamKeep(QMainWindow):
             "title": display_title,
         }
         self._enqueue_finalize_task(task)
+        # Auto-tag recording (F35)
+        try:
+            from ..tags import _connect, auto_tag_recording
+            db = _connect()
+            auto_tag_recording(db, out_dir, info=info_copy)
+            db.close()
+        except Exception:
+            pass
