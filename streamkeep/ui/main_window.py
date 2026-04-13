@@ -1545,6 +1545,100 @@ class StreamKeep(QMainWindow):
 
     # ── Download Tab ──────────────────────────────────────────────────
 
+    def _on_batch_url_import(self):
+        """Import URLs from a text file or clipboard paste and queue them (F44)."""
+        from PyQt6.QtWidgets import (
+            QDialog, QDialogButtonBox, QFileDialog, QPlainTextEdit,
+            QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+        )
+        import re as _re
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Batch URL Import")
+        dlg.setMinimumSize(600, 400)
+        layout = QVBoxLayout(dlg)
+
+        hint = QLabel(
+            "Paste URLs below (one per line) or load from a text file.\n"
+            "Lines starting with # are comments and will be skipped."
+        )
+        layout.addWidget(hint)
+
+        text_edit = QPlainTextEdit()
+        text_edit.setPlaceholderText("https://twitch.tv/videos/123456\nhttps://kick.com/channel\n# this is a comment")
+        layout.addWidget(text_edit)
+
+        btn_row = QHBoxLayout()
+        load_btn = QPushButton("Load from file...")
+        load_btn.setObjectName("secondary")
+
+        def _on_load_file():
+            path, _ = QFileDialog.getOpenFileName(
+                dlg, "Open URL list", "",
+                "Text files (*.txt);;All files (*)",
+            )
+            if path:
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        text_edit.setPlainText(f.read())
+                except Exception as e:
+                    self._set_status(f"Failed to read file: {e}", "error")
+
+        load_btn.clicked.connect(_on_load_file)
+        btn_row.addWidget(load_btn)
+
+        status_label = QLabel("")
+        btn_row.addWidget(status_label, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_row.addWidget(buttons)
+        layout.addLayout(btn_row)
+
+        _url_re = _re.compile(r"^https?://\S+$", _re.IGNORECASE)
+
+        def _update_count():
+            lines = text_edit.toPlainText().strip().splitlines()
+            valid = sum(1 for ln in lines if _url_re.match(ln.strip()))
+            total = sum(1 for ln in lines if ln.strip() and not ln.strip().startswith("#"))
+            invalid = total - valid
+            parts = [f"{valid} valid URL(s)"]
+            if invalid:
+                parts.append(f"{invalid} invalid")
+            status_label.setText("  ".join(parts))
+
+        text_edit.textChanged.connect(_update_count)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        lines = text_edit.toPlainText().strip().splitlines()
+        added = 0
+        skipped = 0
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if not _url_re.match(line):
+                skipped += 1
+                continue
+            ok = self._queue_add(url=line)
+            if ok:
+                added += 1
+            else:
+                skipped += 1
+
+        self._refresh_queue_table()
+        self._persist_config()
+        msg = f"Queued {added} URL(s)"
+        if skipped:
+            msg += f", skipped {skipped} (invalid or duplicate)"
+        self._set_status(msg, "success" if added else "warning")
+        self._log(f"[BATCH] {msg}")
+
     def _on_expand_playlist(self):
         """Probe the URL for playlist/channel entries and queue them all."""
         url = self.url_input.text().strip()
