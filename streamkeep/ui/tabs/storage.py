@@ -7,13 +7,14 @@ send2trash so nothing is ever permanently removed from inside the app.
 import os
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter, QColor
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
+from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
 from ..widgets import make_metric_card, style_table
 
@@ -277,7 +278,7 @@ def populate_storage_table(win, scan):
         thumb_label = QLabel()
         thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumb_label.setStyleSheet(
-            "background-color: #181825; border-radius: 6px; color: #6c7086;"
+            f"background-color: {CAT['mantle']}; border-radius: 6px; color: {CAT['overlay0']};"
         )
         thumb_label.setText("…")
         table.setCellWidget(i, 0, thumb_label)
