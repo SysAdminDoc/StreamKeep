@@ -141,6 +141,29 @@ class MonitorEntryDialog(QDialog):
         self.keywords_input.setPlaceholderText("e.g. speedrun, tournament, collab")
         root.addWidget(self.keywords_input)
 
+        # Post-processing preset (F7)
+        root.addWidget(self._section_label(
+            "Post-Processing Preset",
+            "Apply a named preset when this channel's recordings are "
+            "processed. Leave on 'Use global default' to inherit "
+            "Settings → Post-Processing.",
+        ))
+        self.pp_preset_combo = QComboBox()
+        self.pp_preset_combo.addItem("Use global default", userData="")
+        try:
+            from .tabs.settings import BUILTIN_PRESETS, _get_user_presets
+            for name in BUILTIN_PRESETS:
+                self.pp_preset_combo.addItem(f"★ {name}", userData=name)
+            if parent:
+                for name in _get_user_presets(parent):
+                    self.pp_preset_combo.addItem(name, userData=name)
+        except Exception:
+            pass
+        current_preset = entry.override_pp_preset or ""
+        idx = max(0, self.pp_preset_combo.findData(current_preset))
+        self.pp_preset_combo.setCurrentIndex(idx)
+        root.addWidget(self.pp_preset_combo)
+
         ret_row = QHBoxLayout()
         ret_row.setSpacing(8)
         ret_row.addWidget(QLabel("Keep last"))
@@ -216,4 +239,5 @@ class MonitorEntryDialog(QDialog):
         entry.schedule_days_mask = mask
         entry.retention_keep_last = int(self.retention_spin.value())
         entry.filter_keywords = self.keywords_input.text().strip()
+        entry.override_pp_preset = self.pp_preset_combo.currentData() or ""
         self.accept()
