@@ -4973,6 +4973,8 @@ class StreamKeep(QMainWindow):
         transcribe_act = menu.addAction("Transcribe (Whisper)...")
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
+        redownload_act = menu.addAction("Re-download")
+        redownload_act.setEnabled(bool(h.url))
         remove_act = menu.addAction("Remove from History")
         # Orphan cleanup (F14) — only show when orphans exist
         orphan_count = sum(
@@ -4992,6 +4994,8 @@ class StreamKeep(QMainWindow):
             self._start_bundle_export(h.path)
         elif chosen == transcribe_act and h.path and os.path.isdir(h.path):
             self._start_transcribe_for_dir(h.path)
+        elif chosen == redownload_act and h.url:
+            self._redownload_from_history(h)
         elif chosen == remove_act:
             try:
                 # `_history_view` is most-recent-first; map back to the
@@ -5014,6 +5018,18 @@ class StreamKeep(QMainWindow):
             self._set_status(
                 f"Removed {removed} missing history entries.", "success"
             )
+
+    def _redownload_from_history(self, h):
+        """Pre-fill the Download tab from a HistoryEntry and trigger fetch."""
+        self._switch_tab(0)
+        self.url_input.setText(h.url)
+        # Restore output dir to the parent of the original recording folder
+        if h.path:
+            parent = os.path.dirname(h.path)
+            if parent and os.path.isdir(parent):
+                self.output_input.setText(parent)
+        self._log(f"[RE-DOWNLOAD] {h.title or h.url[:80]}")
+        self._on_fetch()
 
     def _start_transcribe_for_dir(self, src_dir):
         """Pick the biggest video in the folder and launch TranscribeWorker."""
