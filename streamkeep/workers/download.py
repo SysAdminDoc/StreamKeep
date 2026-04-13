@@ -94,6 +94,12 @@ class DownloadWorker(QThread):
         ]
         if self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        # Inject cookies.txt for authenticated downloads (F47)
+        if not self.cookies_browser:
+            from ..cookies import cookies_file_path
+            cpath = cookies_file_path()
+            if cpath:
+                cmd.extend(["--cookies", cpath])
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.proxy:
