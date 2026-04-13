@@ -123,6 +123,9 @@ def build_history_tab(win):
     win.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.history_table.doubleClicked.connect(win._on_history_double_click)
+    # Enable hover preview (F46)
+    win.history_table.setMouseTracking(True)
+    win.history_table.cellEntered.connect(win._on_history_cell_hover)
     style_table(win.history_table, 72)
     card_lay.addWidget(win.history_table)
 
