@@ -10,6 +10,7 @@ import copy
 import json
 import os
 import subprocess
+import sys
 import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,7 +19,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTableWidgetItem, QProgressBar,
     QFileDialog, QFrame, QStackedWidget, QSystemTrayIcon,
-    QInputDialog, QCheckBox, QMenu,
+    QInputDialog, QCheckBox, QMenu, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QPainter, QBrush
@@ -41,6 +42,11 @@ from streamkeep.resume import (
     scan_for_orphan_sidecars,
 )
 from streamkeep.storage import scan_storage
+from streamkeep.chat import ChatWorker
+from streamkeep.local_server import LocalCompanionServer
+from streamkeep.updater import (
+    UpdateCheckWorker, DownloadUpdateWorker, arm_self_replace,
+)
 from streamkeep.utils import (
     fmt_size as _fmt_size,
     fmt_duration as _fmt_duration,
@@ -165,6 +171,8 @@ class StreamKeep(QMainWindow):
         self._autorecord_resolvers = {}     # channel_id -> AutoRecordResolveWorker
         self._autorecord_workers = {}       # channel_id -> DownloadWorker
         self._autorecord_contexts = {}      # channel_id -> dict (out_dir, info, q_name, history_url)
+        self._chat_workers = {}              # channel_id -> ChatWorker (live capture)
+        self._companion_server = None        # LocalCompanionServer instance
         self._parallel_autorecords = 2      # cap; overridden from config below
         self._chunk_long_captures = False
         self._chunk_length_secs = 7200      # 2 hours default
@@ -205,6 +213,26 @@ class StreamKeep(QMainWindow):
             self.history_table.customContextMenuRequested.connect(self._on_history_context_menu)
         except Exception:
             pass
+        try:
+            if hasattr(self, "queue_table"):
+                self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                self.queue_table.customContextMenuRequested.connect(self._on_queue_context_menu)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "monitor_table"):
+                self.monitor_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+                self.monitor_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+                self.monitor_table.setDragEnabled(True)
+                self.monitor_table.setAcceptDrops(True)
+                self.monitor_table.setDropIndicatorShown(True)
+                self.monitor_table.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+                self.monitor_table.setDefaultDropAction(Qt.DropAction.MoveAction)
+                self.monitor_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                self.monitor_table.customContextMenuRequested.connect(self._on_monitor_context_menu)
+                self.monitor_table.model().rowsMoved.connect(self._on_monitor_rows_moved)
+        except Exception:
+            pass
         # Thumbnail loaders for History and Storage tables (lazy-filled).
         from .thumb_loader import ThumbLoader
         self._history_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
@@ -215,6 +243,15 @@ class StreamKeep(QMainWindow):
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
         QTimer.singleShot(800, self._scan_for_resumable_downloads)
+        # Auto-update check — opt-in, deferred so the UI paints first and
+        # so the release-API call doesn't block startup.
+        self._update_check_worker = None
+        self._update_download_worker = None
+        self._latest_update_payload = None
+        QTimer.singleShot(2500, self._maybe_check_for_updates)
+        # Start the browser-companion local server if the user opted in.
+        # Deferred so the UI paints before we open a socket.
+        QTimer.singleShot(1000, self._maybe_start_companion_server)
 
     def _scheduler_tick(self):
         """Periodic check: start any queue items whose scheduled time has
@@ -651,6 +688,22 @@ class StreamKeep(QMainWindow):
             except Exception:
                 pass
             self._autorecord_workers.pop(key, None)
+        for key, worker in list(getattr(self, "_chat_workers", {}).items()):
+            try:
+                if worker is not None and worker.isRunning():
+                    worker.cancel()
+                    worker.wait(2000)
+            except Exception:
+                pass
+            self._chat_workers.pop(key, None)
+        # Tear down the browser-companion HTTP server.
+        srv = getattr(self, "_companion_server", None)
+        if srv is not None:
+            try:
+                srv.stop()
+            except Exception:
+                pass
+            self._companion_server = None
         for key, worker in list(getattr(self, "_monitor_seed_workers", {}).items()):
             try:
                 if worker is not None and worker.isRunning():
@@ -1509,6 +1562,12 @@ class StreamKeep(QMainWindow):
         if hasattr(self, "chunk_length_spin"):
             self._chunk_length_secs = int(self.chunk_length_spin.value())
             self._config["chunk_length_secs"] = self._chunk_length_secs
+        if hasattr(self, "update_check_check"):
+            self._config["check_for_updates"] = bool(self.update_check_check.isChecked())
+        if hasattr(self, "capture_chat_check"):
+            self._config["capture_live_chat"] = bool(self.capture_chat_check.isChecked())
+        if hasattr(self, "render_chat_ass_check"):
+            self._config["render_chat_ass"] = bool(self.render_chat_ass_check.isChecked())
         # Apply bandwidth schedule rule
         self._bandwidth_rule = {
             "enabled": self.bw_enable_check.isChecked(),
@@ -2037,6 +2096,22 @@ class StreamKeep(QMainWindow):
         if item is None:
             return
         if status == "done":
+            # Recurring items re-schedule themselves for the next window
+            # instead of being removed — this is what turns the queue into
+            # "DVR my weekly show" instead of "one-off".
+            recurrence = (item.get("recurrence") or "").strip().lower()
+            next_fire = self._compute_next_fire(recurrence, item.get("start_at", ""))
+            if next_fire:
+                item["status"] = "queued"
+                item["start_at"] = next_fire.isoformat(timespec="minutes")
+                item["note"] = f"recurring ({recurrence}) — next fire {next_fire.strftime('%a %H:%M')}"
+                self._log(
+                    f"[QUEUE] Recurring item rescheduled for "
+                    f"{next_fire.strftime('%Y-%m-%d %H:%M')}: "
+                    f"{(item.get('title') or item.get('url', ''))[:60]}"
+                )
+                self._queue_status_changed()
+                return
             try:
                 self._download_queue.remove(item)
             except ValueError:
@@ -2045,6 +2120,48 @@ class StreamKeep(QMainWindow):
             return
         if status:
             self._set_queue_item_status(item, status, note)
+
+    def _compute_next_fire(self, recurrence, start_at_iso):
+        """Return the datetime of the next fire for a recurring queue
+        item, or None for one-shot / unparseable recurrence strings.
+
+        Accepted shapes (case-insensitive):
+          "daily"          every 24h from last fire
+          "weekly"         every 7 days from last fire
+          "mon,wed,fri"    next occurrence on one of the named days
+        Days use first 3 letters; any subset of mon/tue/wed/thu/fri/sat/sun.
+        """
+        if not recurrence:
+            return None
+        try:
+            last = datetime.fromisoformat(start_at_iso) if start_at_iso else datetime.now()
+        except Exception:
+            last = datetime.now()
+        now = datetime.now()
+        # If the last fire was in the past we pivot off "now" so we never
+        # backfill missed windows.
+        base = max(last, now)
+        if recurrence == "daily":
+            return base + timedelta(days=1)
+        if recurrence == "weekly":
+            return base + timedelta(days=7)
+        day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+        wanted = []
+        for part in recurrence.replace(" ", "").split(","):
+            if part in day_map:
+                wanted.append(day_map[part])
+        if not wanted:
+            return None
+        wanted.sort()
+        # Keep the wall-clock time of day from the original start_at.
+        target_time = last.time() if start_at_iso else now.time()
+        today_wd = now.weekday()
+        for offset in range(1, 8):
+            candidate_wd = (today_wd + offset) % 7
+            if candidate_wd in wanted:
+                target_date = now.date() + timedelta(days=offset)
+                return datetime.combine(target_date, target_time)
+        return None
 
     def _resolve_history_url(self):
         if self._active_history_url:
@@ -3082,6 +3199,16 @@ class StreamKeep(QMainWindow):
                 except Exception:
                     pass
         self._autorecord_resolvers.clear()
+        # Stop any paired live-chat captures.
+        for ch_id in list(self._chat_workers.keys()):
+            w = self._chat_workers.get(ch_id)
+            if w is not None and w.isRunning():
+                try:
+                    w.cancel()
+                    w.wait(2000)
+                except Exception:
+                    pass
+        self._chat_workers.clear()
         # Clear any green/red chunk overrides left on segment bars so the
         # next download starts from a neutral style instead of inheriting
         # the previous run's success/fail colors.
@@ -3127,6 +3254,318 @@ class StreamKeep(QMainWindow):
         out_dir = self._active_output_dir or self.output_input.text().strip()
         if os.path.isdir(out_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
+
+    # ── Queue context menu: recurrence editor ────────────────────────
+
+    def _on_queue_context_menu(self, pos):
+        if not hasattr(self, "queue_table"):
+            return
+        idx = self.queue_table.indexAt(pos)
+        if not idx.isValid():
+            return
+        row = idx.row()
+        if not (0 <= row < len(self._download_queue)):
+            return
+        item = self._download_queue[row]
+        menu = QMenu(self)
+        current = (item.get("recurrence") or "").strip().lower() or "(one-shot)"
+        header = menu.addAction(f"Recurrence: {current}")
+        header.setEnabled(False)
+        menu.addSeparator()
+        one_shot = menu.addAction("One-shot (no recurrence)")
+        daily = menu.addAction("Daily")
+        weekly = menu.addAction("Weekly")
+        custom = menu.addAction("Weekday mask... (mon,tue,fri)")
+        chosen = menu.exec(self.queue_table.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        new_rec = ""
+        if chosen == one_shot:
+            new_rec = ""
+        elif chosen == daily:
+            new_rec = "daily"
+        elif chosen == weekly:
+            new_rec = "weekly"
+        elif chosen == custom:
+            text, ok = QInputDialog.getText(
+                self, "Weekday mask",
+                "Enter comma-separated days (mon,tue,wed,thu,fri,sat,sun):",
+                text=item.get("recurrence", "") or "mon,wed,fri",
+            )
+            if not ok:
+                return
+            new_rec = text.strip().lower()
+        item["recurrence"] = new_rec
+        if new_rec:
+            item["note"] = f"recurring ({new_rec})"
+        else:
+            item["note"] = ""
+        self._queue_status_changed()
+        self._set_status(
+            f"Queue item recurrence set to '{new_rec or 'one-shot'}'.",
+            "success",
+        )
+
+    # ── Monitor tab: drag-reorder + bulk context menu ────────────────
+
+    def _on_monitor_rows_moved(self, _parent, start, end, _dest, dest_row):
+        """Qt-level rowsMoved; sync `self.monitor.entries` to the new
+        order so persistence + polling match what the user sees."""
+        with self.monitor._entries_lock:
+            entries = self.monitor.entries
+            if not (0 <= start <= end < len(entries)):
+                return
+            moved = entries[start:end + 1]
+            del entries[start:end + 1]
+            # Adjust dest if the removal shifted it left.
+            insert_at = dest_row if dest_row <= start else dest_row - len(moved)
+            insert_at = max(0, min(insert_at, len(entries)))
+            for i, m in enumerate(moved):
+                entries.insert(insert_at + i, m)
+        self._persist_config()
+
+    def _on_monitor_context_menu(self, pos):
+        if not hasattr(self, "monitor_table"):
+            return
+        sel_rows = sorted({idx.row() for idx in self.monitor_table.selectionModel().selectedRows()})
+        if not sel_rows:
+            idx = self.monitor_table.indexAt(pos)
+            if idx.isValid():
+                sel_rows = [idx.row()]
+            else:
+                return
+        menu = QMenu(self)
+        header = menu.addAction(f"{len(sel_rows)} channel(s) selected")
+        header.setEnabled(False)
+        menu.addSeparator()
+        act_edit = menu.addAction("Edit profile...") if len(sel_rows) == 1 else None
+        act_enable_ar = menu.addAction("Enable auto-record")
+        act_disable_ar = menu.addAction("Disable auto-record")
+        act_set_window = menu.addAction("Set schedule window for all selected...")
+        menu.addSeparator()
+        act_remove = menu.addAction("Remove selected")
+        chosen = menu.exec(self.monitor_table.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        entries = self.monitor.entries
+        targets = [entries[r] for r in sel_rows if 0 <= r < len(entries)]
+        if chosen == act_edit and sel_rows:
+            self._on_monitor_edit(sel_rows[0])
+            return
+        if chosen == act_enable_ar:
+            for e in targets:
+                e.auto_record = True
+            self._log(f"[MONITOR] Enabled auto-record on {len(targets)} channel(s).")
+        elif chosen == act_disable_ar:
+            for e in targets:
+                e.auto_record = False
+            self._log(f"[MONITOR] Disabled auto-record on {len(targets)} channel(s).")
+        elif chosen == act_set_window:
+            text, ok = QInputDialog.getText(
+                self, "Schedule window",
+                "Window as HH:MM-HH:MM (e.g. 20:00-23:00) or blank to clear:",
+                text="20:00-23:00",
+            )
+            if not ok:
+                return
+            text = text.strip()
+            if text and "-" in text:
+                try:
+                    start, end = text.split("-", 1)
+                    for e in targets:
+                        e.schedule_start_hhmm = start.strip()
+                        e.schedule_end_hhmm = end.strip()
+                except Exception:
+                    self._set_status("Could not parse window.", "error")
+                    return
+            else:
+                for e in targets:
+                    e.schedule_start_hhmm = ""
+                    e.schedule_end_hhmm = ""
+            self._log(f"[MONITOR] Updated schedule window for {len(targets)} channel(s).")
+        elif chosen == act_remove:
+            # Remove from the bottom up so indices stay valid.
+            for r in reversed(sel_rows):
+                if 0 <= r < len(entries):
+                    self.monitor.remove_channel(r)
+        self._refresh_monitor_table()
+        self._persist_config()
+
+    def _on_companion_toggled(self, checked):
+        """Settings toggle — restart the companion server in-place."""
+        self._config["companion_server_enabled"] = bool(checked)
+        self._persist_config()
+        self._maybe_start_companion_server()
+
+    # ── Browser companion local server ───────────────────────────────
+
+    def _maybe_start_companion_server(self):
+        """Start (or stop) the local companion HTTP server based on the
+        current Settings toggle. Called at launch and whenever the user
+        changes the setting."""
+        enabled = bool(self._config.get("companion_server_enabled", False))
+        running = self._companion_server is not None
+        if enabled and not running:
+            try:
+                srv = LocalCompanionServer()
+                srv.url_received.connect(self._on_companion_url)
+                srv.start()
+                self._companion_server = srv
+                self._log(
+                    f"[COMPANION] Listening on 127.0.0.1:{srv.port} "
+                    f"— token in Settings tab."
+                )
+                # Push the live port + token into the Settings UI so the
+                # user can see them immediately without restarting.
+                if hasattr(self, "companion_status_label"):
+                    self.companion_status_label.setText(
+                        f"Running on 127.0.0.1:{srv.port}"
+                    )
+                if hasattr(self, "companion_token_display"):
+                    self.companion_token_display.setText(srv.token)
+            except OSError as e:
+                self._log(f"[COMPANION] Could not start server: {e}")
+        elif not enabled and running:
+            try:
+                self._companion_server.stop()
+            except Exception:
+                pass
+            self._companion_server = None
+            if hasattr(self, "companion_status_label"):
+                self.companion_status_label.setText("Disabled")
+            if hasattr(self, "companion_token_display"):
+                self.companion_token_display.setText("")
+            self._log("[COMPANION] Server stopped.")
+
+    def _on_companion_url(self, url, action):
+        """The extension just POSTed a URL. Route it through the Fetch
+        path or queue it immediately depending on action."""
+        self._log(f"[COMPANION] Received {action.upper()} for {url[:80]}")
+        self._switch_tab(0)   # surface the Download tab so the user sees it
+        try:
+            self.url_input.setText(url)
+        except Exception:
+            pass
+        if action == "queue":
+            try:
+                self._queue_add(url, title="", platform="")
+                self._set_status(f"Queued via browser extension: {url[:80]}", "success")
+            except Exception as e:
+                self._log(f"[COMPANION] Queue failed: {e}")
+        else:
+            self._on_fetch()
+
+    # ── Auto-update checker ──────────────────────────────────────────
+
+    def _maybe_check_for_updates(self):
+        """Kick off the GitHub release check if the user has opted in.
+        Runs once per launch, on a short delay so the UI paints first."""
+        if not bool(self._config.get("check_for_updates", False)):
+            return
+        # Only meaningful in a packaged exe — in a source checkout the
+        # updater refuses the self-replace anyway. Skip the network call
+        # entirely so source-checkout users don't see a banner.
+        if not (getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")):
+            return
+        if getattr(self, "_update_check_worker", None) is not None:
+            return
+        worker = UpdateCheckWorker(VERSION)
+        worker.result.connect(self._on_update_check_result)
+        self._update_check_worker = worker
+        worker.start()
+
+    def _on_update_check_result(self, payload):
+        worker = getattr(self, "_update_check_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._update_check_worker = None
+        if not payload or not payload.get("available"):
+            return
+        tag = payload.get("tag", "")
+        if tag == self._config.get("dismissed_update_tag", ""):
+            return
+        self._latest_update_payload = payload
+        if hasattr(self, "update_banner_label"):
+            notes = (payload.get("notes") or "").splitlines()
+            first_note = next((ln for ln in notes if ln.strip()), "").strip()
+            if first_note:
+                first_note = first_note[:140] + ("…" if len(first_note) > 140 else "")
+            label = f"StreamKeep {tag} is available (you're on v{VERSION})"
+            if first_note:
+                label = f"{label} — {first_note}"
+            self.update_banner_label.setText(label)
+            self.update_banner.setVisible(True)
+
+    def _on_update_install(self):
+        payload = getattr(self, "_latest_update_payload", None) or {}
+        asset_url = payload.get("asset_url", "")
+        if not asset_url:
+            self._set_status("Update available but no Windows asset was attached.", "warning")
+            return
+        self.update_banner_install_btn.setEnabled(False)
+        self.update_banner_install_btn.setText("Downloading...")
+        worker = DownloadUpdateWorker(asset_url, payload.get("asset_size", 0))
+        worker.progress.connect(self._on_update_download_progress)
+        worker.done.connect(self._on_update_download_done)
+        self._update_download_worker = worker
+        worker.start()
+
+    def _on_update_download_progress(self, pct, status):
+        if hasattr(self, "update_banner_install_btn"):
+            self.update_banner_install_btn.setText(
+                f"Downloading {status}" if status else f"Downloading {pct}%"
+            )
+
+    def _on_update_download_done(self, ok, path_or_err):
+        worker = getattr(self, "_update_download_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._update_download_worker = None
+        if not ok:
+            self._log(f"[UPDATE] {path_or_err}")
+            self._set_status(f"Update failed: {path_or_err}", "error")
+            if hasattr(self, "update_banner_install_btn"):
+                self.update_banner_install_btn.setEnabled(True)
+                self.update_banner_install_btn.setText("Download & install")
+            return
+        # Download complete — confirm self-replace + relaunch.
+        from PyQt6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle("Install update")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(
+            "Update downloaded. StreamKeep will close, install the new "
+            "version, and relaunch itself. Your current download will "
+            "be interrupted.\n\nContinue?"
+        )
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            self._log("[UPDATE] User cancelled the install step.")
+            if hasattr(self, "update_banner_install_btn"):
+                self.update_banner_install_btn.setEnabled(True)
+                self.update_banner_install_btn.setText("Install now")
+            return
+        if arm_self_replace(path_or_err):
+            self._log("[UPDATE] Armed self-replace, quitting now.")
+            from PyQt6.QtWidgets import QApplication
+            QApplication.quit()
+        else:
+            self._set_status("Could not arm the update step. See log.", "error")
+
+    def _on_update_dismiss(self):
+        payload = getattr(self, "_latest_update_payload", None) or {}
+        self._config["dismissed_update_tag"] = payload.get("tag", "")
+        self._persist_config()
+        self.update_banner.setVisible(False)
 
     def _preflight_disk_space(self):
         """Show a confirm dialog when the estimated download size is more
@@ -3685,6 +4124,26 @@ class StreamKeep(QMainWindow):
             },
         )
         worker.start()
+        # Kick off live Twitch chat capture alongside the recording, if
+        # the user has opted in and the platform is Twitch. Kick + other
+        # platforms don't have a ready capture path yet.
+        if (bool(self._config.get("capture_live_chat", False))
+                and (getattr(info, "platform", "") or "").lower() == "twitch"):
+            try:
+                chat_channel = getattr(info, "channel", "") or channel_id
+                chat = ChatWorker(
+                    chat_channel, out_dir,
+                    render_ass=bool(self._config.get("render_chat_ass", True)),
+                )
+                chat.log.connect(self._log)
+                chat.message.connect(self._on_live_chat_message)
+                chat.done.connect(
+                    lambda cnt, ch=channel_id: self._on_live_chat_done(ch, cnt)
+                )
+                self._chat_workers[channel_id] = chat
+                chat.start()
+            except Exception as e:
+                self._log(f"[CHAT] Could not start chat capture: {e}")
         self._refresh_active_recordings_panel()
         self._set_status(
             f"Auto-record started for {channel_id}"
@@ -3692,6 +4151,26 @@ class StreamKeep(QMainWindow):
                if self._active_autorecord_count() > 1 else "."),
             "working",
         )
+
+    def _on_live_chat_message(self, nick, text):
+        """Append a line to the Download-tab chat dock. Kept lightweight
+        so a fast-moving stream doesn't hitch the UI."""
+        if not hasattr(self, "chat_log_view"):
+            return
+        if hasattr(self, "chat_dock") and not self.chat_dock.isVisible():
+            self.chat_dock.setVisible(True)
+        safe_nick = (nick or "")[:32]
+        safe_text = (text or "")[:500]
+        self.chat_log_view.append(f"<b>{safe_nick}</b>: {safe_text}")
+
+    def _on_live_chat_done(self, channel_id, count):
+        worker = self._chat_workers.pop(channel_id, None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(500)
+            except Exception:
+                pass
+        self._log(f"[CHAT] Capture for {channel_id} ended ({count} line(s))")
 
     def _on_auto_record_resolve_error(self, channel_id, err):
         resolver = self._autorecord_resolvers.pop(channel_id, None)
@@ -3739,6 +4218,15 @@ class StreamKeep(QMainWindow):
         if worker is not None and not worker.isRunning():
             try:
                 worker.wait(500)
+            except Exception:
+                pass
+        # Stop the paired chat capture (if any) — it flushes .jsonl and .ass
+        # sidecars on clean exit.
+        chat = self._chat_workers.pop(channel_id, None)
+        if chat is not None and chat.isRunning():
+            try:
+                chat.cancel()
+                chat.wait(2000)
             except Exception:
                 pass
         finished_entry = None
