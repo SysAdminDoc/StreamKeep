@@ -137,7 +137,7 @@
   Per-channel preset selector in `monitor_entry_dialog.py`.
   Apply by overwriting PostProcessor snapshot at download start.
 
-- [ ] **F8 — Chat-Spike Clip Markers** (Medium, ~150-200 lines)
+- [x] **F8 — Chat-Spike Clip Markers** (Medium, ~150-200 lines)
   Read `.chat.jsonl`, bucket messages by 10-sec windows, find spikes >2 std dev
   above rolling average. Render as colored tick markers on ClipDialog filmstrip.
   History context menu: "Show chat highlights" -> list of timestamps.
