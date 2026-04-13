@@ -526,6 +526,65 @@ def build_settings_tab(win):
     bw_row.addStretch(1)
     network_lay.addLayout(bw_row)
 
+    # Speed schedule (F51) — day/night/weekend tiers
+    sched_hint = QLabel(
+        "Speed schedule: set different bandwidth limits for day, night, "
+        "and weekends. Applied to new downloads only."
+    )
+    sched_hint.setObjectName("subtleText")
+    sched_hint.setWordWrap(True)
+    network_lay.addWidget(sched_hint)
+    win.sched_enable_check = QCheckBox("Enable speed schedule")
+    network_lay.addWidget(win.sched_enable_check)
+    sched_row = QHBoxLayout()
+    sched_row.setSpacing(8)
+    sched_row.addWidget(QLabel("Day:"))
+    win.sched_day_start = QSpinBox()
+    win.sched_day_start.setRange(0, 23)
+    win.sched_day_start.setSuffix(":00")
+    win.sched_day_start.setValue(8)
+    sched_row.addWidget(win.sched_day_start)
+    sched_row.addWidget(QLabel("-"))
+    win.sched_day_end = QSpinBox()
+    win.sched_day_end.setRange(0, 23)
+    win.sched_day_end.setSuffix(":00")
+    win.sched_day_end.setValue(23)
+    sched_row.addWidget(win.sched_day_end)
+    sched_row.addWidget(QLabel("Limit:"))
+    win.sched_day_limit = QLineEdit("2M")
+    win.sched_day_limit.setFixedWidth(80)
+    win.sched_day_limit.setPlaceholderText("2M")
+    sched_row.addWidget(win.sched_day_limit)
+    network_lay.addLayout(sched_row)
+
+    sched_row2 = QHBoxLayout()
+    sched_row2.setSpacing(8)
+    sched_row2.addWidget(QLabel("Night limit:"))
+    win.sched_night_limit = QLineEdit("")
+    win.sched_night_limit.setFixedWidth(80)
+    win.sched_night_limit.setPlaceholderText("(unlimited)")
+    sched_row2.addWidget(win.sched_night_limit)
+    sched_row2.addSpacing(12)
+    sched_row2.addWidget(QLabel("Weekend limit:"))
+    win.sched_weekend_limit = QLineEdit("")
+    win.sched_weekend_limit.setFixedWidth(80)
+    win.sched_weekend_limit.setPlaceholderText("(unlimited)")
+    sched_row2.addWidget(win.sched_weekend_limit)
+    sched_row2.addStretch(1)
+    network_lay.addLayout(sched_row2)
+
+    # Restore saved speed schedule
+    _saved_sched = win._config.get("speed_schedule", {})
+    if isinstance(_saved_sched, dict):
+        win.sched_enable_check.setChecked(bool(_saved_sched.get("enabled", False)))
+        win.sched_day_start.setValue(int(_saved_sched.get("day_start", 8) or 8))
+        win.sched_day_end.setValue(int(_saved_sched.get("day_end", 23) or 23))
+        win.sched_day_limit.setText(str(_saved_sched.get("day_limit", "2M") or ""))
+        win.sched_night_limit.setText(str(_saved_sched.get("night_limit", "") or ""))
+        win.sched_weekend_limit.setText(str(_saved_sched.get("weekend_limit", "") or ""))
+        from streamkeep.scheduler import configure as _sched_configure
+        _sched_configure(_saved_sched, win._config.get("rate_limit", ""))
+
     # Parallel connections per direct MP4
     par_row = QHBoxLayout()
     par_row.setSpacing(8)
