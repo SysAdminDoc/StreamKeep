@@ -277,8 +277,7 @@ class ChatRenderWorker(QThread):
                 proc.stdin.close()
             except OSError:
                 pass
-
-        proc.wait()
+            proc.wait()
         if proc.returncode != 0:
             stderr = ""
             try:
