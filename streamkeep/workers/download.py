@@ -39,6 +39,7 @@ class DownloadWorker(QThread):
         self.proxy = ""
         self.download_subs = False
         self.sponsorblock = False
+        self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
         # When > 0 and the segment is a live capture (duration <= 0), the
@@ -104,6 +105,8 @@ class DownloadWorker(QThread):
             ])
         if self.sponsorblock:
             cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
+        if self.download_sections:
+            cmd.extend(["--download-sections", self.download_sections])
         cmd.append(self.ytdlp_source)
 
         try:
