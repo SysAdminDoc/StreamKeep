@@ -4202,6 +4202,15 @@ class StreamKeep(QMainWindow):
         self._refresh_monitor_table()
         self._persist_config()
 
+    def _on_theme_changed(self, _idx):
+        """Apply theme switch instantly (F20)."""
+        from ..theme import apply_theme
+        from PyQt6.QtWidgets import QApplication
+        name = self.theme_combo.currentData() or "dark"
+        self._config["theme"] = name
+        apply_theme(name, app=QApplication.instance())
+        self._persist_config()
+
     def _on_companion_toggled(self, checked):
         """Settings toggle — restart the companion server in-place."""
         self._config["companion_server_enabled"] = bool(checked)
