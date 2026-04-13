@@ -74,6 +74,29 @@ def build_download_tab(win):
     hero_lay.addLayout(metrics_row)
     root.addWidget(hero)
 
+    # Update banner — shown only after a successful release-check when a
+    # newer version is available. Styled like the resume banner so users
+    # recognize it as a one-click actionable notice.
+    win.update_banner = QFrame()
+    win.update_banner.setObjectName("updateBanner")
+    win.update_banner.setVisible(False)
+    ub_lay = QHBoxLayout(win.update_banner)
+    ub_lay.setContentsMargins(16, 12, 16, 12)
+    ub_lay.setSpacing(12)
+    win.update_banner_label = QLabel("A newer release is available.")
+    win.update_banner_label.setWordWrap(True)
+    win.update_banner_label.setObjectName("updateBannerLabel")
+    ub_lay.addWidget(win.update_banner_label, 1)
+    win.update_banner_install_btn = QPushButton("Download & install")
+    win.update_banner_install_btn.setObjectName("primary")
+    win.update_banner_install_btn.clicked.connect(win._on_update_install)
+    ub_lay.addWidget(win.update_banner_install_btn)
+    win.update_banner_dismiss_btn = QPushButton("Dismiss")
+    win.update_banner_dismiss_btn.setObjectName("secondary")
+    win.update_banner_dismiss_btn.clicked.connect(win._on_update_dismiss)
+    ub_lay.addWidget(win.update_banner_dismiss_btn)
+    root.addWidget(win.update_banner)
+
     # Resume banner — shown only when startup scan finds orphan sidecars.
     win.resume_banner = QFrame()
     win.resume_banner.setObjectName("resumeBanner")
@@ -94,6 +117,23 @@ def build_download_tab(win):
     win.resume_banner_discard_btn.clicked.connect(win._on_resume_discard)
     rb_lay.addWidget(win.resume_banner_discard_btn)
     root.addWidget(win.resume_banner)
+
+    # Live-chat dock — hidden until the user enables live chat capture
+    # in Settings AND at least one Twitch auto-record is running.
+    win.chat_dock = QFrame()
+    win.chat_dock.setObjectName("card")
+    win.chat_dock.setVisible(False)
+    cd_lay = QVBoxLayout(win.chat_dock)
+    cd_lay.setContentsMargins(16, 12, 16, 12)
+    cd_lay.setSpacing(6)
+    chat_hdr = QLabel("Live chat")
+    chat_hdr.setObjectName("sectionTitle")
+    cd_lay.addWidget(chat_hdr)
+    win.chat_log_view = QTextEdit()
+    win.chat_log_view.setReadOnly(True)
+    win.chat_log_view.setFixedHeight(180)
+    cd_lay.addWidget(win.chat_log_view)
+    root.addWidget(win.chat_dock)
 
     url_card = QFrame()
     url_card.setObjectName("card")
