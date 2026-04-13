@@ -4867,26 +4867,35 @@ class StreamKeep(QMainWindow):
             ]
         self._history_view = ordered  # used by double-click handler
         self.history_table.setRowCount(len(ordered))
+        _dim_color = QColor(CAT["overlay0"])
+        _warn_prefix = "\u26a0 "  # ⚠
         for i, h in enumerate(ordered):
+            # Check if the recorded path still exists on disk (F14 orphan detection).
+            orphan = bool(h.path) and not os.path.isdir(h.path)
             # Column 0 = thumbnail cell (lazy-loaded).
             thumb_label = QLabel()
             thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             thumb_label.setStyleSheet(
                 "background-color: #181825; border-radius: 6px; color: #6c7086;"
             )
-            thumb_label.setText("…")
+            thumb_label.setText(_warn_prefix if orphan else "…")
             self.history_table.setCellWidget(i, 0, thumb_label)
             # Data columns 1..6
             for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path], start=1):
-                item = QTableWidgetItem(val)
+                display = val
+                if orphan and col == 6 and val:
+                    display = val + "  (missing)"
+                item = QTableWidgetItem(display)
                 if col in (1, 2, 4, 5):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if orphan:
+                    item.setForeground(_dim_color)
                 self.history_table.setItem(i, col, item)
-            # Queue a thumb request. Row key is the history-row identity
-            # (path + title) so scroll + re-filter reuses the cached pixmap.
-            media = self._first_media_file(h.path) if h.path else ""
-            if media:
-                self._history_thumb_loader.request((h.path, h.title), media)
+            # Queue a thumb request (skip orphans — no file to thumbnail).
+            if not orphan:
+                media = self._first_media_file(h.path) if h.path else ""
+                if media:
+                    self._history_thumb_loader.request((h.path, h.title), media)
         self._refresh_history_summary()
 
     def _first_media_file(self, dir_path):
@@ -4965,6 +4974,15 @@ class StreamKeep(QMainWindow):
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         remove_act = menu.addAction("Remove from History")
+        # Orphan cleanup (F14) — only show when orphans exist
+        orphan_count = sum(
+            1 for e in self._history if e.path and not os.path.isdir(e.path)
+        )
+        remove_missing_act = None
+        if orphan_count > 0:
+            remove_missing_act = menu.addAction(
+                f"Remove missing entries ({orphan_count})"
+            )
         chosen = menu.exec(table.viewport().mapToGlobal(pos))
         if chosen == open_act and h.path and os.path.isdir(h.path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
@@ -4984,6 +5002,18 @@ class StreamKeep(QMainWindow):
                 self._persist_config()
             except ValueError:
                 pass
+        elif remove_missing_act and chosen == remove_missing_act:
+            before = len(self._history)
+            self._history = [
+                e for e in self._history
+                if not e.path or os.path.isdir(e.path)
+            ]
+            removed = before - len(self._history)
+            self._refresh_history_table()
+            self._persist_config()
+            self._set_status(
+                f"Removed {removed} missing history entries.", "success"
+            )
 
     def _start_transcribe_for_dir(self, src_dir):
         """Pick the biggest video in the folder and launch TranscribeWorker."""
