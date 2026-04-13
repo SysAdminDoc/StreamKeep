@@ -23,11 +23,12 @@ from PyQt6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
-    QLineEdit, QProgressBar, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QProgressBar, QPushButton, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 from ..paths import _CREATE_NO_WINDOW
-from ..postprocess import ClipWorker, ThumbWorker, probe_duration
+from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
 
@@ -146,6 +147,34 @@ class ScrubberView(QGraphicsView):
             tick.setToolTip(f"Chat spike @ {r * 100:.1f}%")
             scene.addItem(tick)
             self._spike_items.append(tick)
+
+    def set_range_overlays(self, ranges_ratios, active_idx=0):
+        """Draw colored overlays for inactive ranges on the filmstrip."""
+        scene = self.scene()
+        for item in getattr(self, "_range_items", []):
+            scene.removeItem(item)
+        self._range_items = []
+        colors = [
+            QColor(137, 180, 250, 60),   # blue
+            QColor(203, 166, 247, 60),    # mauve
+            QColor(148, 226, 213, 60),    # teal
+            QColor(249, 226, 175, 60),    # yellow
+            QColor(245, 194, 231, 60),    # pink
+            QColor(166, 227, 161, 60),    # green
+        ]
+        for i, (sr, er) in enumerate(ranges_ratios):
+            if i == active_idx:
+                continue
+            color = colors[i % len(colors)]
+            x1 = sr * self._strip_width
+            x2 = er * self._strip_width
+            rect = QGraphicsRectItem(QRectF(x1, 0, max(0, x2 - x1), THUMB_H))
+            rect.setPen(QPen(Qt.PenStyle.NoPen))
+            rect.setBrush(QBrush(color))
+            rect.setZValue(3)
+            rect.setToolTip(f"Range {i + 1}")
+            scene.addItem(rect)
+            self._range_items.append(rect)
 
     def set_thumb(self, index, path):
         if not (0 <= index < len(self._thumb_items)):
@@ -451,6 +480,8 @@ class ClipDialog(QDialog):
         self._duration = probe_duration(source_path)
         if default_end is None:
             default_end = self._duration or 0.0
+        self._ranges = [(0.0, default_end)]
+        self._active_range_idx = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
@@ -521,6 +552,37 @@ class ClipDialog(QDialog):
         dur_col.addWidget(self.dur_label)
         range_row.addLayout(dur_col, 0)
         root.addLayout(range_row)
+
+        # Range list (F9 — multi-range highlight reel)
+        ranges_section = QHBoxLayout()
+        ranges_section.setSpacing(8)
+        self.range_list = QListWidget()
+        self.range_list.setFixedHeight(90)
+        self.range_list.setStyleSheet(
+            "QListWidget { background: #1e1e2e; border: 1px solid #313244; "
+            "border-radius: 6px; color: #cdd6f4; }"
+            "QListWidget::item:selected { background: #45475a; }"
+        )
+        self.range_list.currentRowChanged.connect(self._on_range_selected)
+        ranges_section.addWidget(self.range_list, 1)
+        range_btns = QVBoxLayout()
+        range_btns.setSpacing(4)
+        for symbol, tip, slot in [
+            ("+", "Add a new range after the current one", self._add_range),
+            ("\u2212", "Remove selected range", self._remove_range),
+            ("\u25b2", "Move range up", self._move_range_up),
+            ("\u25bc", "Move range down", self._move_range_down),
+        ]:
+            b = QPushButton(symbol)
+            b.setToolTip(tip)
+            b.setFixedWidth(32)
+            b.setObjectName("secondary")
+            b.clicked.connect(slot)
+            range_btns.addWidget(b)
+        range_btns.addStretch(1)
+        ranges_section.addLayout(range_btns)
+        root.addLayout(ranges_section)
+        self._refresh_range_list()
 
         # Mode
         mode_row = QHBoxLayout()
@@ -687,6 +749,10 @@ class ClipDialog(QDialog):
         self.start_input.blockSignals(False)
         self.end_input.blockSignals(False)
         self.dur_label.setText(format_hhmmss(max(0.0, e - s)))
+        if 0 <= self._active_range_idx < len(self._ranges):
+            self._ranges[self._active_range_idx] = (s, e)
+            self._refresh_range_list()
+            self._refresh_range_overlays()
 
     def _on_text_changed(self):
         if not self._duration:
@@ -703,6 +769,10 @@ class ClipDialog(QDialog):
             er = sr
         self.scrubber.set_handles(sr, er, emit=False)
         self.dur_label.setText(format_hhmmss(max(0.0, e - s)))
+        if 0 <= self._active_range_idx < len(self._ranges):
+            self._ranges[self._active_range_idx] = (s, e)
+            self._refresh_range_list()
+            self._refresh_range_overlays()
 
     # ── Misc ────────────────────────────────────────────────────
 
@@ -732,14 +802,10 @@ class ClipDialog(QDialog):
         self.reencode_check.setEnabled(not busy)
         self.codec_combo.setEnabled(not busy)
         self.scrubber.setEnabled(not busy)
+        self.range_list.setEnabled(not busy)
         self.cancel_btn.setText("Cancel" if busy else "Close")
 
     def _on_trim(self):
-        start_s = parse_hhmmss(self.start_input.text(), 0.0)
-        end_s = parse_hhmmss(self.end_input.text(), self._duration or 0.0)
-        if end_s <= start_s:
-            self._log_line("[ERROR] End must be greater than start.")
-            return
         out_path = self.out_input.text().strip()
         if not out_path:
             self._log_line("[ERROR] Output path is empty.")
@@ -750,6 +816,29 @@ class ClipDialog(QDialog):
         codec = "libx264"
         if self.reencode_check.isChecked():
             codec = self.codec_combo.currentData() or "libx264"
+        # Multi-range highlight reel
+        if len(self._ranges) > 1:
+            valid = [(s, e) for s, e in self._ranges if e > s]
+            if not valid:
+                self._log_line("[ERROR] No valid ranges to export.")
+                return
+            self._worker = HighlightWorker(
+                self.source_path, out_path, valid,
+                reencode=self.reencode_check.isChecked(),
+                video_codec=codec, audio_codec="aac",
+            )
+            self._worker.progress.connect(self._on_progress)
+            self._worker.log.connect(self._log_line)
+            self._worker.done.connect(self._on_done)
+            self._set_busy(True)
+            self._worker.start()
+            return
+        # Single range
+        start_s = parse_hhmmss(self.start_input.text(), 0.0)
+        end_s = parse_hhmmss(self.end_input.text(), self._duration or 0.0)
+        if end_s <= start_s:
+            self._log_line("[ERROR] End must be greater than start.")
+            return
         self._worker = ClipWorker(
             self.source_path,
             out_path,
@@ -775,6 +864,104 @@ class ClipDialog(QDialog):
             self._log_line(f"[DONE] Saved {out_path}")
         else:
             self._log_line("[DONE] Trim failed — see log above.")
+
+    # ── Range list (F9) ────────────────────────────────────────
+
+    def _add_range(self):
+        if not self._duration or self._duration <= 0:
+            return
+        # New range starts at the end of the active range
+        if self._ranges:
+            _, prev_end = self._ranges[self._active_range_idx]
+            new_start = min(prev_end, self._duration)
+            new_end = min(new_start + 30.0, self._duration)
+        else:
+            new_start = 0.0
+            new_end = min(30.0, self._duration)
+        if new_end <= new_start:
+            new_end = self._duration
+        if new_end <= new_start:
+            return
+        self._ranges.append((new_start, new_end))
+        self._active_range_idx = len(self._ranges) - 1
+        self._select_active_range()
+        self._refresh_range_list()
+        self._refresh_range_overlays()
+
+    def _remove_range(self):
+        if len(self._ranges) <= 1:
+            return
+        idx = self._active_range_idx
+        if 0 <= idx < len(self._ranges):
+            self._ranges.pop(idx)
+            self._active_range_idx = min(idx, len(self._ranges) - 1)
+            self._select_active_range()
+            self._refresh_range_list()
+            self._refresh_range_overlays()
+
+    def _move_range_up(self):
+        idx = self._active_range_idx
+        if idx <= 0 or idx >= len(self._ranges):
+            return
+        self._ranges[idx], self._ranges[idx - 1] = (
+            self._ranges[idx - 1], self._ranges[idx])
+        self._active_range_idx = idx - 1
+        self._refresh_range_list()
+        self._refresh_range_overlays()
+
+    def _move_range_down(self):
+        idx = self._active_range_idx
+        if idx < 0 or idx >= len(self._ranges) - 1:
+            return
+        self._ranges[idx], self._ranges[idx + 1] = (
+            self._ranges[idx + 1], self._ranges[idx])
+        self._active_range_idx = idx + 1
+        self._refresh_range_list()
+        self._refresh_range_overlays()
+
+    def _on_range_selected(self, row):
+        if row < 0 or row >= len(self._ranges):
+            return
+        self._active_range_idx = row
+        self._select_active_range()
+        self._refresh_range_overlays()
+
+    def _select_active_range(self):
+        if not self._ranges or self._active_range_idx >= len(self._ranges):
+            return
+        s, e = self._ranges[self._active_range_idx]
+        if self._duration and self._duration > 0:
+            sr = s / self._duration
+            er = e / self._duration
+            self.scrubber.set_handles(sr, er, emit=False)
+            self.waveform.set_selection(sr, er)
+        self.start_input.blockSignals(True)
+        self.end_input.blockSignals(True)
+        self.start_input.setText(format_hhmmss(s))
+        self.end_input.setText(format_hhmmss(e))
+        self.start_input.blockSignals(False)
+        self.end_input.blockSignals(False)
+        self.dur_label.setText(format_hhmmss(max(0.0, e - s)))
+
+    def _refresh_range_list(self):
+        self.range_list.blockSignals(True)
+        self.range_list.clear()
+        for i, (s, e) in enumerate(self._ranges):
+            dur = max(0.0, e - s)
+            label = (f"{i + 1}. {format_hhmmss(s)[:8]} \u2192 "
+                     f"{format_hhmmss(e)[:8]}  ({format_hhmmss(dur)[:8]})")
+            self.range_list.addItem(label)
+        self.range_list.setCurrentRow(self._active_range_idx)
+        self.range_list.blockSignals(False)
+        self.trim_btn.setText(
+            "Export Highlight Reel" if len(self._ranges) > 1 else "Trim")
+
+    def _refresh_range_overlays(self):
+        if not self._duration or self._duration <= 0:
+            return
+        ratios = [(s / self._duration, e / self._duration)
+                  for s, e in self._ranges]
+        self.scrubber.set_range_overlays(ratios, self._active_range_idx)
 
     def _on_close_or_cancel(self):
         if self._worker is not None and self._worker.isRunning():
