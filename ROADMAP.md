@@ -154,7 +154,7 @@
   ClipDialog: scrollable storyboard panel below filmstrip (click to jump).
   History right-click: "Generate storyboard".
 
-- [ ] **F31 — Social Clip Export (Vertical / Platform Presets)** (Medium, ~200-250 lines)
+- [x] **F31 — Social Clip Export (Vertical / Platform Presets)** (Medium, ~200-250 lines)
   *Extends ClipDialog from F9.*
   Platform dropdown: TikTok/Shorts/Reels/Twitter with auto-resolution.
   Draggable 9:16 crop rectangle on preview frame.
