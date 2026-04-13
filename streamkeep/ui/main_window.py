@@ -4016,6 +4016,90 @@ class StreamKeep(QMainWindow):
 
     # ── Monitor Actions ───────────────────────────────────────────────
 
+    # ── Import / Export Monitor Channels (F10) ──────────────────────
+
+    def _on_monitor_export(self):
+        """Export monitored channel list to a JSON file."""
+        if not self.monitor.entries:
+            self._set_status("No channels to export.", "warning")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Monitor Channels", "streamkeep_channels.json",
+            "JSON files (*.json)",
+        )
+        if not path:
+            return
+        cfg = {}
+        self.monitor.save_to_config(cfg)
+        data = cfg.get("monitor_channels", [])
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            self._log(f"[EXPORT] {len(data)} channels exported to {path}")
+            self._set_status(f"Exported {len(data)} channels to {os.path.basename(path)}", "success")
+        except OSError as e:
+            self._set_status(f"Export failed: {e}", "error")
+
+    def _on_monitor_import(self):
+        """Import monitored channels from a JSON file, skipping duplicates."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Monitor Channels", "",
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            self._set_status(f"Import failed: {e}", "error")
+            return
+        if not isinstance(data, list):
+            self._set_status("Invalid channel list — expected a JSON array.", "error")
+            return
+        existing_urls = {e.url for e in self.monitor.entries}
+        added = 0
+        skipped = 0
+        for ch in data:
+            if not isinstance(ch, dict) or "url" not in ch:
+                continue
+            if ch["url"] in existing_urls:
+                skipped += 1
+                continue
+            ok = self.monitor.add_channel(
+                ch["url"],
+                ch.get("interval", 120),
+                ch.get("auto_record", False),
+                ch.get("subscribe_vods", False),
+            )
+            if ok:
+                # Restore per-channel profile fields
+                for e in self.monitor.entries:
+                    if e.url == ch["url"]:
+                        e.override_output_dir = str(ch.get("override_output_dir", "") or "")
+                        e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
+                        e.override_filename_template = str(ch.get("override_filename_template", "") or "")
+                        e.schedule_start_hhmm = str(ch.get("schedule_start_hhmm", "") or "")
+                        e.schedule_end_hhmm = str(ch.get("schedule_end_hhmm", "") or "")
+                        try:
+                            e.schedule_days_mask = int(ch.get("schedule_days_mask", 0) or 0)
+                        except (TypeError, ValueError):
+                            e.schedule_days_mask = 0
+                        try:
+                            e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
+                        except (TypeError, ValueError):
+                            e.retention_keep_last = 0
+                        break
+                added += 1
+                existing_urls.add(ch["url"])
+        self._refresh_monitor_table()
+        self._persist_config()
+        self._log(f"[IMPORT] {added} added, {skipped} skipped (duplicate) from {path}")
+        self._set_status(
+            f"Imported {added} channels ({skipped} skipped as duplicates).",
+            "success" if added else "warning",
+        )
+
     def _on_monitor_add(self):
         url = self.monitor_url_input.text().strip()
         if not url:
