@@ -290,7 +290,7 @@
   Vanilla JS + CSS, no framework. Token auth on all endpoints.
   LAN-only by default; opt-in 0.0.0.0 binding with warning.
 
-- [ ] **F20 — Dark / Light Theme Toggle** (Medium, ~100-120 lines)
+- [x] **F20 — Dark / Light Theme Toggle** (Medium, ~100-120 lines)
   `theme.py`: `CAT_LATTE` dict + `build_stylesheet(palette)` function.
   Settings: theme combo (Dark / Light / System). Instant apply via
   `app.setStyleSheet()`. Audit `main_window.py` for hardcoded colors.

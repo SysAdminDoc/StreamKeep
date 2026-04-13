@@ -32,9 +32,9 @@ import subprocess
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from streamkeep import VERSION  # noqa: F401 — kept for `python StreamKeep.py --version` greps
+from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
 from streamkeep.paths import _CREATE_NO_WINDOW
-from streamkeep.theme import STYLESHEET
+from streamkeep.theme import apply_theme
 from streamkeep.crash_log import setup_crash_logging
 from streamkeep.ui.main_window import StreamKeep
 
@@ -46,7 +46,19 @@ def main():
     # ffmpeg error path). Create it first so every failure branch is safe.
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setStyleSheet(STYLESHEET)
+    # Apply saved theme (F20) — defaults to dark/Mocha
+    try:
+        import json
+        from streamkeep.paths import CONFIG_DIR
+        cfg_file = CONFIG_DIR / "config.json"
+        if cfg_file.exists():
+            with open(cfg_file, "r", encoding="utf-8") as _f:
+                saved_theme = json.load(_f).get("theme", "dark")
+        else:
+            saved_theme = "dark"
+    except Exception:
+        saved_theme = "dark"
+    apply_theme(saved_theme, app=app)
 
     ffmpeg_ok = False
     try:

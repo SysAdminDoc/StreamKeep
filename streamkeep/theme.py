@@ -1,11 +1,14 @@
-"""Premium midnight theme — CAT color palette + full Qt stylesheet.
+"""Theme system — Catppuccin Mocha (dark) + Latte (light) + System toggle.
 
-The stylesheet is built once at import time by interpolating the CAT
-dict into the QSS template. Both names are re-exported for consumers
-that need individual palette values (badge backgrounds, tray icon, etc).
+Palettes are dicts with the same keys. ``build_stylesheet(palette)``
+interpolates any palette into the QSS template. ``CAT`` always points
+to the active palette; ``STYLESHEET`` is the active QSS string.
+
+Consumer code that reads ``CAT["blue"]`` etc. continues to work — the
+dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
-CAT = {
+CAT_MOCHA = {
     "base": "#1e1e2e", "mantle": "#181825", "crust": "#11111b",
     "surface0": "#313244", "surface1": "#45475a", "surface2": "#585b70",
     "overlay0": "#6c7086", "overlay1": "#7f849c",
@@ -20,31 +23,71 @@ CAT = {
     "accentSoft": "#6ee7b7", "gold": "#f8d38a",
 }
 
-STYLESHEET = f"""
+CAT_LATTE = {
+    "base": "#eff1f5", "mantle": "#e6e9ef", "crust": "#dce0e8",
+    "surface0": "#ccd0da", "surface1": "#bcc0cc", "surface2": "#acb0be",
+    "overlay0": "#9ca0b0", "overlay1": "#8c8fa1",
+    "text": "#4c4f69", "subtext0": "#6c6f85", "subtext1": "#5c5f77",
+    "lavender": "#7287fd", "blue": "#1e66f5", "sapphire": "#209fb5",
+    "sky": "#04a5e5", "teal": "#179299", "green": "#40a02b",
+    "yellow": "#df8e1d", "peach": "#fe640b", "maroon": "#e64553",
+    "red": "#d20f39", "mauve": "#8839ef", "pink": "#ea76cb",
+    "flamingo": "#dd7878", "rosewater": "#dc8a78",
+    "panel": "#e6e9ef", "panelHi": "#dce0e8", "panelSoft": "#eff1f5",
+    "stroke": "#bcc0cc", "muted": "#6c6f85", "accent": "#1e66f5",
+    "accentSoft": "#40a02b", "gold": "#df8e1d",
+}
+
+# CAT is the "live" palette — mutated in-place so all ``CAT["x"]`` refs
+# across the app pick up theme changes without reimporting.
+CAT = dict(CAT_MOCHA)
+
+THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE}
+
+
+def _detect_system_theme():
+    """Return 'dark' or 'light' based on OS preference."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        )
+        val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        winreg.CloseKey(key)
+        return "light" if val == 1 else "dark"
+    except Exception:
+        return "dark"
+
+def build_stylesheet(p=None):
+    """Build the full QSS string from a palette dict."""
+    if p is None:
+        p = CAT
+    return f"""
 QMainWindow {{
-    background-color: {CAT['crust']};
+    background-color: {p['crust']};
 }}
 QWidget {{
-    color: {CAT['text']};
+    color: {p['text']};
     font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
     font-size: 13px;
 }}
 QWidget#chrome {{
-    background-color: {CAT['crust']};
+    background-color: {p['crust']};
 }}
 QFrame#heroCard {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {CAT['panelHi']},
-        stop: 0.58 {CAT['panel']},
-        stop: 1 {CAT['panelSoft']}
+        stop: 0 {p['panelHi']},
+        stop: 0.58 {p['panel']},
+        stop: 1 {p['panelSoft']}
     );
-    border: 1px solid {CAT['stroke']};
+    border: 1px solid {p['stroke']};
     border-radius: 22px;
 }}
 QFrame#card, QFrame#panel, QFrame#footerBar {{
-    background-color: {CAT['mantle']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['mantle']};
+    border: 1px solid {p['stroke']};
     border-radius: 18px;
 }}
 QFrame#activeRecordings {{
@@ -53,7 +96,7 @@ QFrame#activeRecordings {{
         stop: 0 rgba(166, 227, 161, 35),
         stop: 1 rgba(137, 180, 250, 25)
     );
-    border: 1px solid {CAT['green']};
+    border: 1px solid {p['green']};
     border-radius: 14px;
 }}
 QFrame#updateBanner {{
@@ -62,11 +105,11 @@ QFrame#updateBanner {{
         stop: 0 rgba(203, 166, 247, 50),
         stop: 1 rgba(137, 180, 250, 35)
     );
-    border: 1px solid {CAT['mauve']};
+    border: 1px solid {p['mauve']};
     border-radius: 14px;
 }}
 QLabel#updateBannerLabel {{
-    color: {CAT['text']};
+    color: {p['text']};
     font-weight: 600;
 }}
 QFrame#resumeBanner {{
@@ -75,212 +118,212 @@ QFrame#resumeBanner {{
         stop: 0 rgba(250, 179, 135, 45),
         stop: 1 rgba(137, 180, 250, 45)
     );
-    border: 1px solid {CAT['peach']};
+    border: 1px solid {p['peach']};
     border-radius: 14px;
 }}
 QLabel#resumeBannerLabel {{
-    color: {CAT['text']};
+    color: {p['text']};
     font-weight: 600;
 }}
 QFrame#subtleCard, QFrame#metricCard, QFrame#toolbar {{
-    background-color: {CAT['panelSoft']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
     border-radius: 16px;
 }}
 QLabel {{
-    color: {CAT['text']};
+    color: {p['text']};
     border: none;
 }}
 QLabel#title {{
     font-size: 28px;
     font-weight: 700;
-    color: {CAT['rosewater']};
+    color: {p['rosewater']};
 }}
 QLabel#subtitle {{
     font-size: 12px;
-    color: {CAT['muted']};
+    color: {p['muted']};
 }}
 QLabel#eyebrow {{
-    color: {CAT['accent']};
+    color: {p['accent']};
     font-size: 11px;
     font-weight: 700;
 }}
 QLabel#heroTitle {{
     font-size: 24px;
     font-weight: 700;
-    color: {CAT['rosewater']};
+    color: {p['rosewater']};
 }}
 QLabel#heroBody {{
     font-size: 13px;
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
 }}
 QLabel#sectionTitle {{
     font-size: 16px;
     font-weight: 700;
-    color: {CAT['rosewater']};
+    color: {p['rosewater']};
 }}
 QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint, QLabel#subtleText {{
-    color: {CAT['muted']};
+    color: {p['muted']};
     font-size: 12px;
 }}
 QLabel#fieldLabel {{
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
     font-size: 11px;
     font-weight: 700;
 }}
 QLabel#metricLabel {{
-    color: {CAT['muted']};
+    color: {p['muted']};
     font-size: 11px;
     font-weight: 700;
 }}
 QLabel#metricValue {{
-    color: {CAT['rosewater']};
+    color: {p['rosewater']};
     font-size: 18px;
     font-weight: 700;
 }}
 QLabel#metricSubvalue {{
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
     font-size: 12px;
 }}
 QLabel#statusLabel {{
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
     font-size: 12px;
 }}
 QLabel#streamInfo {{
     font-size: 12px;
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
     padding: 10px 12px;
-    background-color: {CAT['panelSoft']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
     border-radius: 12px;
 }}
 QLineEdit, QComboBox, QSpinBox {{
-    background-color: {CAT['surface0']};
-    color: {CAT['text']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
     border-radius: 12px;
     padding: 10px 12px;
     font-size: 13px;
-    selection-background-color: {CAT['surface2']};
+    selection-background-color: {p['surface2']};
 }}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
-    border-color: {CAT['accent']};
+    border-color: {p['accent']};
 }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
-    border: 1px solid {CAT['accent']};
+    border: 1px solid {p['accent']};
 }}
 QPushButton {{
-    background-color: {CAT['surface0']};
-    color: {CAT['text']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
     border-radius: 12px;
     padding: 10px 16px;
     font-weight: 600;
     font-size: 13px;
 }}
 QPushButton:hover {{
-    background-color: {CAT['surface1']};
-    border-color: {CAT['accent']};
+    background-color: {p['surface1']};
+    border-color: {p['accent']};
 }}
 QPushButton:pressed {{
-    background-color: {CAT['surface2']};
+    background-color: {p['surface2']};
 }}
 QPushButton:disabled {{
-    background-color: {CAT['surface0']};
-    color: {CAT['overlay0']};
-    border-color: {CAT['surface0']};
+    background-color: {p['surface0']};
+    color: {p['overlay0']};
+    border-color: {p['surface0']};
 }}
 QPushButton#primary {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {CAT['accentSoft']},
-        stop: 1 {CAT['green']}
+        stop: 0 {p['accentSoft']},
+        stop: 1 {p['green']}
     );
-    color: {CAT['crust']};
+    color: {p['crust']};
     border: none;
     padding: 10px 22px;
     font-size: 14px;
 }}
 QPushButton#primary:hover {{
-    background-color: {CAT['teal']};
+    background-color: {p['teal']};
 }}
 QPushButton#primary:disabled {{
-    background-color: {CAT['surface1']};
-    color: {CAT['overlay0']};
+    background-color: {p['surface1']};
+    color: {p['overlay0']};
 }}
 QPushButton#secondary {{
-    background-color: {CAT['panelSoft']};
-    color: {CAT['rosewater']};
+    background-color: {p['panelSoft']};
+    color: {p['rosewater']};
 }}
 QPushButton#ghost {{
     background-color: transparent;
-    color: {CAT['subtext1']};
+    color: {p['subtext1']};
 }}
 QPushButton#ghost:hover {{
-    background-color: {CAT['panelSoft']};
+    background-color: {p['panelSoft']};
 }}
 QPushButton#toggleAccent:checked {{
-    background-color: {CAT['accent']};
-    color: {CAT['crust']};
-    border-color: {CAT['accent']};
+    background-color: {p['accent']};
+    color: {p['crust']};
+    border-color: {p['accent']};
 }}
 QPushButton#danger {{
-    background-color: {CAT['red']};
-    color: {CAT['crust']};
+    background-color: {p['red']};
+    color: {p['crust']};
     border: none;
 }}
 QPushButton#danger:hover {{
-    background-color: {CAT['maroon']};
+    background-color: {p['maroon']};
 }}
 QComboBox::drop-down {{
     border: none;
     width: 24px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: {CAT['surface0']};
-    color: {CAT['text']};
-    selection-background-color: {CAT['surface2']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['surface0']};
+    color: {p['text']};
+    selection-background-color: {p['surface2']};
+    border: 1px solid {p['stroke']};
     border-radius: 10px;
 }}
 QTableWidget {{
-    background-color: {CAT['mantle']};
-    color: {CAT['text']};
-    alternate-background-color: {CAT['panelSoft']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['mantle']};
+    color: {p['text']};
+    alternate-background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
     border-radius: 16px;
     gridline-color: transparent;
-    selection-background-color: {CAT['panelHi']};
+    selection-background-color: {p['panelHi']};
     font-size: 13px;
     padding: 4px;
 }}
 QTableWidget::item {{
     padding: 10px 12px;
-    border-bottom: 1px solid {CAT['stroke']};
+    border-bottom: 1px solid {p['stroke']};
 }}
 QTableWidget::item:selected {{
-    background-color: {CAT['panelHi']};
+    background-color: {p['panelHi']};
 }}
 QHeaderView::section {{
-    background-color: {CAT['panelSoft']};
-    color: {CAT['muted']};
+    background-color: {p['panelSoft']};
+    color: {p['muted']};
     border: none;
-    border-bottom: 1px solid {CAT['stroke']};
+    border-bottom: 1px solid {p['stroke']};
     padding: 12px;
     font-weight: 700;
     font-size: 12px;
 }}
 QTextEdit#log {{
-    background-color: {CAT['crust']};
-    color: {CAT['subtext0']};
-    border: 1px solid {CAT['stroke']};
+    background-color: {p['crust']};
+    color: {p['subtext0']};
+    border: 1px solid {p['stroke']};
     border-radius: 16px;
     padding: 10px;
     font-family: 'Cascadia Code', 'Consolas', monospace;
     font-size: 11px;
 }}
 QProgressBar {{
-    background-color: {CAT['panelSoft']};
+    background-color: {p['panelSoft']};
     border: none;
     border-radius: 6px;
     height: 10px;
@@ -290,25 +333,25 @@ QProgressBar {{
 QProgressBar::chunk {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 0,
-        stop: 0 {CAT['accent']},
-        stop: 1 {CAT['green']}
+        stop: 0 {p['accent']},
+        stop: 1 {p['green']}
     );
     border-radius: 6px;
 }}
 QCheckBox {{
-    color: {CAT['text']};
+    color: {p['text']};
     spacing: 8px;
 }}
 QCheckBox::indicator {{
     width: 16px;
     height: 16px;
     border-radius: 4px;
-    border: 1px solid {CAT['stroke']};
-    background-color: {CAT['surface0']};
+    border: 1px solid {p['stroke']};
+    background-color: {p['surface0']};
 }}
 QCheckBox::indicator:checked {{
-    background-color: {CAT['accentSoft']};
-    border-color: {CAT['accentSoft']};
+    background-color: {p['accentSoft']};
+    border-color: {p['accentSoft']};
 }}
 QScrollBar:vertical {{
     background-color: transparent;
@@ -316,19 +359,42 @@ QScrollBar:vertical {{
     margin: 4px;
 }}
 QScrollBar::handle:vertical {{
-    background-color: {CAT['surface2']};
+    background-color: {p['surface2']};
     border-radius: 5px;
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background-color: {CAT['overlay0']};
+    background-color: {p['overlay0']};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
 }}
 QSplitter::handle {{
-    background-color: {CAT['stroke']};
+    background-color: {p['stroke']};
     height: 1px;
     margin: 6px 0;
 }}
 """
+
+
+def apply_theme(name, app=None):
+    """Switch the active theme. Updates CAT in-place and rebuilds STYLESHEET.
+
+    *name*: 'dark', 'light', or 'system'.
+    *app*: optional QApplication — if provided, calls ``app.setStyleSheet()``
+           for an instant theme switch without restart.
+    """
+    global STYLESHEET
+    if name == "system":
+        name = _detect_system_theme()
+    palette = THEMES.get(name, CAT_MOCHA)
+    CAT.clear()
+    CAT.update(palette)
+    STYLESHEET = build_stylesheet(CAT)
+    if app is not None:
+        app.setStyleSheet(STYLESHEET)
+    return STYLESHEET
+
+
+# Build initial stylesheet from default (Mocha) palette
+STYLESHEET = build_stylesheet(CAT)
