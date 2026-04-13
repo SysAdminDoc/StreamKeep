@@ -4104,6 +4104,9 @@ class StreamKeep(QMainWindow):
             menu.addSeparator()
             clear_act = menu.addAction("Clear all")
             clear_act.triggered.connect(self._on_clear_notifications)
+        menu.addSeparator()
+        log_act = menu.addAction("View full log\u2026")
+        log_act.triggered.connect(self._on_show_notification_log)
         self._notifications.mark_all_read()
         self._refresh_notif_badge()
         # Drop down from the button.
@@ -4113,6 +4116,11 @@ class StreamKeep(QMainWindow):
     def _on_clear_notifications(self):
         self._notifications.clear()
         self._refresh_notif_badge()
+
+    def _on_show_notification_log(self):
+        from .notification_log_dialog import NotificationLogDialog
+        dlg = NotificationLogDialog(self, self._notifications)
+        dlg.exec()
 
     def _choose_default_quality_index(self, qualities, platform):
         """Resolve the user's per-platform default to an index into the
