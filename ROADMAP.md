@@ -317,7 +317,7 @@
   `library.db`. Normalized tables, WAL mode, indexed queries. Config retains
   only user preferences. One-way migration with `.json.migrated` backup.
 
-- [ ] **F42 — CLI / Headless Mode** (Large, ~300-400 lines + ~200 engine extraction)
+- [x] **F42 — CLI / Headless Mode** (Large, ~300-400 lines + ~200 engine extraction) v4.25.1
   `StreamKeep.py --url URL --quality best --output ./` for single downloads.
   `--monitor` for headless auto-record. `--server` for REST API only.
   Extract shared engine from `main_window.py` into `streamkeep/engine.py`.
