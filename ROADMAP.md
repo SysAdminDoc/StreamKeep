@@ -412,7 +412,7 @@
   Download platform-provided CC/subtitles alongside video. Twitch captions,
   YouTube multi-language subs via yt-dlp `--write-subs`. Save as `.srt`/`.vtt`.
 
-- [ ] **F60 — Content Summary via LLM** (Medium, ~200-250 lines)
+- [x] **F60 — Content Summary via LLM** (Medium, ~200-250 lines) v4.28.3
   Feed transcript to ollama/Claude/OpenAI. Output `.summary.md` with
   overview, key topics, timestamped moments, participants. Chunked processing.
 
