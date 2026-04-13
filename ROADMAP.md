@@ -461,7 +461,7 @@
   S3/B2 (boto3 multipart), FTP/SFTP (paramiko), WebDAV (HTTP PUT).
   Per-destination naming template. Wire to FinalizeWorker completion.
 
-- [ ] **F69 — Clip Share via Local Web Gallery** (Small-Med, ~150-200 lines)
+- [x] **F69 — Clip Share via Local Web Gallery** (Small-Med, ~150-200 lines) v4.30.1
   Extend web server: `/share/{id}` HTML player, `/media/{id}` Range streaming,
   `/gallery` browsable grid. "Share on network" toggle per recording.
 
