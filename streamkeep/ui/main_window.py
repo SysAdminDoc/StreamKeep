@@ -2135,6 +2135,33 @@ class StreamKeep(QMainWindow):
             days = age // 86400
             label.setText(f"cookies.txt present ({days}d old — consider refreshing).")
 
+    def _on_save_account_tokens(self):
+        """Persist platform tokens to encrypted storage (F48)."""
+        from streamkeep.accounts import set_credential, credential_status
+        inputs = getattr(self, "_account_inputs", {})
+        saved = 0
+        for plat_key, (inp, status_label) in inputs.items():
+            val = inp.text().strip()
+            if val:
+                set_credential(plat_key, val)
+                inp.clear()
+                saved += 1
+            status_label.setText(credential_status(plat_key))
+        if saved:
+            self._set_status(f"Saved {saved} token(s).", "success")
+            self._log(f"[ACCOUNTS] Saved {saved} platform token(s)")
+
+    def _on_clear_account_tokens(self):
+        """Delete all stored platform tokens (F48)."""
+        from streamkeep.accounts import delete_credential, PLATFORMS, credential_status
+        inputs = getattr(self, "_account_inputs", {})
+        for plat_key in PLATFORMS:
+            delete_credential(plat_key)
+            if plat_key in inputs:
+                inputs[plat_key][0].clear()
+                inputs[plat_key][1].setText(credential_status(plat_key))
+        self._set_status("All platform tokens cleared.", "success")
+
     def _on_save_settings(self):
         self.output_input.setText(self.settings_output.text())
         # Apply browser cookies setting
