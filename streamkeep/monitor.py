@@ -264,6 +264,7 @@ class ChannelMonitor(QObject):
                 "schedule_days_mask": int(e.schedule_days_mask or 0),
                 "retention_keep_last": int(e.retention_keep_last or 0),
                 "filter_keywords": e.filter_keywords or "",
+                "override_pp_preset": e.override_pp_preset or "",
             }
             for e in self.entries
         ]
@@ -295,4 +296,5 @@ class ChannelMonitor(QObject):
                         except (TypeError, ValueError):
                             e.retention_keep_last = 0
                         e.filter_keywords = str(ch.get("filter_keywords", "") or "")
+                        e.override_pp_preset = str(ch.get("override_pp_preset", "") or "")
                         break
