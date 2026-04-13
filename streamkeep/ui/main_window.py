@@ -1229,9 +1229,22 @@ class StreamKeep(QMainWindow):
         if not hasattr(self, "vod_summary_label"):
             return
         total = len(self._vod_checks)
-        checked = sum(1 for cb in self._vod_checks if cb.isChecked())
-        if total:
-            self.vod_summary_label.setText(f"{checked} of {total} VOD(s) selected")
+        checked_indices = [i for i, cb in enumerate(self._vod_checks) if cb.isChecked()]
+        checked = len(checked_indices)
+        if total and checked:
+            # Sum duration of selected VODs
+            total_ms = 0
+            for i in checked_indices:
+                if i < len(self._vod_list):
+                    total_ms += self._vod_list[i].duration_ms or 0
+            dur_str = ""
+            if total_ms > 0:
+                secs = total_ms // 1000
+                h, m = divmod(secs // 60, 60)
+                dur_str = f" · {h}h {m}m" if h else f" · {m}m"
+            self.vod_summary_label.setText(f"{checked} of {total} selected{dur_str}")
+        elif total:
+            self.vod_summary_label.setText(f"0 of {total} selected")
         else:
             self.vod_summary_label.setText("Inspect a channel to browse available VODs.")
 
@@ -2860,7 +2873,7 @@ class StreamKeep(QMainWindow):
 
         for i, v in enumerate(vod_list):
             cb = QCheckBox()
-            cb.stateChanged.connect(lambda _state, self=self: self._refresh_vod_summary())
+            cb.stateChanged.connect(lambda _state, row=i: self._on_vod_cb_toggled(row))
             cb_widget = QWidget()
             cb_lay = QHBoxLayout(cb_widget)
             cb_lay.addWidget(cb)
@@ -2892,6 +2905,12 @@ class StreamKeep(QMainWindow):
             dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.vod_table.setItem(i, 4, dur_item)
 
+            views_str = f"{v.viewers:,}" if v.viewers else "—"
+            views_item = QTableWidgetItem(views_str)
+            views_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.vod_table.setItem(i, 5, views_item)
+
+        self._vod_last_checked_row = -1  # shift-click anchor
         self.vod_widget.setVisible(True)
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
@@ -2902,11 +2921,54 @@ class StreamKeep(QMainWindow):
             self.vod_load_more_btn.setText("Load More VODs")
         self._set_status(f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.", "success")
 
+    def _on_vod_cb_toggled(self, row):
+        """Handle a VOD checkbox toggle — supports shift-click range select."""
+        from PyQt6.QtWidgets import QApplication
+        modifiers = QApplication.keyboardModifiers()
+        anchor = getattr(self, "_vod_last_checked_row", -1)
+        if modifiers & Qt.KeyboardModifier.ShiftModifier and 0 <= anchor < len(self._vod_checks):
+            lo, hi = min(anchor, row), max(anchor, row)
+            target_state = self._vod_checks[row].isChecked()
+            for r in range(lo, hi + 1):
+                if r < len(self._vod_checks):
+                    self._vod_checks[r].blockSignals(True)
+                    self._vod_checks[r].setChecked(target_state)
+                    self._vod_checks[r].blockSignals(False)
+        self._vod_last_checked_row = row
+        self._refresh_vod_summary()
+
     def _on_vod_select_all(self, state):
         checked = state == Qt.CheckState.Checked.value
         for cb in self._vod_checks:
             cb.setChecked(checked)
         self._refresh_vod_summary()
+
+    def _on_vod_queue_selected(self):
+        """Add all checked VODs to the download queue."""
+        checked = [self._vod_list[i] for i, cb in enumerate(self._vod_checks) if cb.isChecked()]
+        if not checked:
+            self._set_status("Select at least one VOD to queue.", "warning")
+            return
+        added = 0
+        for vod in checked:
+            ok = self._queue_add(
+                vod.source,
+                title=vod.title,
+                platform=vod.platform,
+                vod_source=vod.source,
+                vod_platform=vod.platform,
+                vod_title=vod.title,
+                vod_channel=vod.channel,
+            )
+            if ok:
+                added += 1
+        self._log(f"[QUEUE] Added {added} of {len(checked)} checked VOD(s) to queue")
+        self._set_status(
+            f"Queued {added} VOD(s) for download." if added else "All selected VODs are already queued.",
+            "success" if added else "info",
+        )
+        if added:
+            self._advance_queue()
 
     def _on_vod_load_single(self):
         for i, cb in enumerate(self._vod_checks):
@@ -2960,7 +3022,7 @@ class StreamKeep(QMainWindow):
         self.vod_table.setRowCount(len(self._vod_list))
         for i, v in enumerate(new_vods, start=start_row):
             cb = QCheckBox()
-            cb.stateChanged.connect(lambda _state, self=self: self._refresh_vod_summary())
+            cb.stateChanged.connect(lambda _state, row=i: self._on_vod_cb_toggled(row))
             cb_widget = QWidget()
             cb_lay = QHBoxLayout(cb_widget)
             cb_lay.addWidget(cb)
@@ -2985,6 +3047,10 @@ class StreamKeep(QMainWindow):
             dur_item = QTableWidgetItem(v.duration if v.duration else "Live")
             dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.vod_table.setItem(i, 4, dur_item)
+            views_str = f"{v.viewers:,}" if v.viewers else "—"
+            views_item = QTableWidgetItem(views_str)
+            views_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.vod_table.setItem(i, 5, views_item)
         self._refresh_vod_summary()
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setVisible(bool(next_cursor))
