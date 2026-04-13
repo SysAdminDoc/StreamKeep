@@ -6498,6 +6498,8 @@ class StreamKeep(QMainWindow):
         chat_preview_act.setEnabled(has_chat)
         storyboard_act = menu.addAction("Generate storyboard")
         storyboard_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        highlight_act = menu.addAction("Generate highlights (AI)")
+        highlight_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         # Watch status + bookmarks (F38)
         watched_label = "Mark as unwatched" if getattr(h, "watched", False) else "Mark as watched"
@@ -6545,6 +6547,8 @@ class StreamKeep(QMainWindow):
             self._start_chat_render(h.path, preview_secs=60)
         elif chosen == storyboard_act and h.path:
             self._generate_storyboard(h.path)
+        elif chosen == highlight_act and h.path:
+            self._generate_highlights(h.path)
         elif chosen == watch_act:
             h.watched = not getattr(h, "watched", False)
             if h.watched:
@@ -7019,6 +7023,32 @@ class StreamKeep(QMainWindow):
             return
         viewer.start_all()
         viewer.exec()
+
+    def _generate_highlights(self, recording_dir):
+        """Run AI highlight detection on a recording (F57)."""
+        from streamkeep.intelligence.highlight import HighlightWorker
+        self._set_status("Analyzing for highlights...", "processing")
+        worker = HighlightWorker(recording_dir, top_n=10)
+        worker.log.connect(self._log)
+
+        def _on_done(results):
+            if not results:
+                self._set_status("No highlights found (needs chat/audio/scene data).", "warning")
+                return
+            lines = []
+            for start, end, score, reason in results:
+                h = int(start) // 3600
+                m = (int(start) % 3600) // 60
+                s = int(start) % 60
+                ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+                lines.append(f"  {ts} (score {score:.1f}) - {reason}")
+            self._log("[HIGHLIGHT] Top highlights:\n" + "\n".join(lines))
+            self._set_status(f"Found {len(results)} highlight(s). See log.", "success")
+            self._notify_center(f"Highlights: {len(results)} found", "info")
+
+        worker.done.connect(_on_done)
+        self._highlight_worker = worker
+        worker.start()
 
     # ── Metadata ──────────────────────────────────────────────────────
 
