@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QProgressBar, QPushButton, QScrollArea,
-    QTextEdit, QVBoxLayout, QWidget,
+    QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..paths import _CREATE_NO_WINDOW
@@ -36,6 +36,22 @@ THUMB_COUNT = 20
 THUMB_W = 120
 THUMB_H = 68     # 16:9-ish placeholder height when thumbs are missing
 STRIP_PAD = 6
+
+# Social clip export presets (F31)
+SOCIAL_PRESETS = [
+    ("", "Original (no crop)"),
+    ("tiktok", "TikTok \u2014 9:16, 1080\u00d71920, max 10m"),
+    ("shorts", "YouTube Shorts \u2014 9:16, 1080\u00d71920, max 60s"),
+    ("reels", "Instagram Reels \u2014 9:16, 1080\u00d71920, max 90s"),
+    ("twitter", "Twitter/X \u2014 16:9, 1920\u00d71080, max 2:20"),
+]
+SOCIAL_SPECS = {
+    "tiktok": {"w": 1080, "h": 1920, "max_secs": 600},
+    "shorts": {"w": 1080, "h": 1920, "max_secs": 60},
+    "reels":  {"w": 1080, "h": 1920, "max_secs": 90},
+    "twitter": {"w": 1920, "h": 1080, "max_secs": 140},
+}
+_VERTICAL_PRESETS = {"tiktok", "shorts", "reels"}
 
 
 def parse_hhmmss(text, fallback=0.0):
@@ -637,6 +653,32 @@ class ClipDialog(QDialog):
         mode_row.addStretch(1)
         root.addLayout(mode_row)
 
+        # Social platform preset (F31)
+        social_row = QHBoxLayout()
+        social_row.setSpacing(10)
+        social_row.addWidget(QLabel("Platform:"))
+        self.social_combo = QComboBox()
+        for key, label in SOCIAL_PRESETS:
+            self.social_combo.addItem(label, userData=key)
+        self.social_combo.currentIndexChanged.connect(self._on_social_changed)
+        social_row.addWidget(self.social_combo, 1)
+        self._crop_lbl = QLabel("Crop offset:")
+        self._crop_lbl.setVisible(False)
+        social_row.addWidget(self._crop_lbl)
+        self.crop_slider = QSlider(Qt.Orientation.Horizontal)
+        self.crop_slider.setRange(0, 100)
+        self.crop_slider.setValue(50)
+        self.crop_slider.setFixedWidth(120)
+        self.crop_slider.setVisible(False)
+        self.crop_slider.valueChanged.connect(self._refresh_crop_overlay)
+        social_row.addWidget(self.crop_slider)
+        self.crop_pct_label = QLabel("50%")
+        self.crop_pct_label.setFixedWidth(32)
+        self.crop_pct_label.setVisible(False)
+        social_row.addWidget(self.crop_pct_label)
+        root.addLayout(social_row)
+        self._last_preview_pix = None
+
         # Output path
         out_row = QHBoxLayout()
         out_row.setSpacing(8)
@@ -761,11 +803,13 @@ class ClipDialog(QDialog):
         pix = QPixmap(path)
         if pix.isNull():
             return
-        self.preview_label.setPixmap(pix.scaled(
+        scaled = pix.scaled(
             self.preview_label.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
-        ))
+        )
+        self._last_preview_pix = scaled
+        self.preview_label.setPixmap(self._apply_crop_overlay(scaled))
 
     # ── Scrubber <-> text field sync ────────────────────────────
 
@@ -824,6 +868,71 @@ class ClipDialog(QDialog):
     def _on_reencode_toggled(self, checked):
         self.codec_combo.setVisible(bool(checked))
 
+    # ── Social clip export (F31) ───────────────────────────────
+
+    def _on_social_changed(self, _idx):
+        key = self.social_combo.currentData()
+        is_vertical = key in _VERTICAL_PRESETS
+        for w in (self._crop_lbl, self.crop_slider, self.crop_pct_label):
+            w.setVisible(is_vertical)
+        if key:
+            self.reencode_check.setChecked(True)
+            self.reencode_check.setEnabled(False)
+        else:
+            self.reencode_check.setEnabled(True)
+        self._refresh_crop_overlay()
+
+    def _apply_crop_overlay(self, pix):
+        """Draw crop region overlay on QPixmap for vertical social presets."""
+        key = self.social_combo.currentData() if hasattr(self, "social_combo") else ""
+        if key not in _VERTICAL_PRESETS:
+            return pix
+        result = pix.copy()
+        p = QPainter(result)
+        crop_pct = self.crop_slider.value() / 100.0
+        sw = result.width()
+        sh = result.height()
+        crop_w = max(1, int(sh * 9 / 16))
+        crop_x = int(max(0, sw - crop_w) * crop_pct)
+        dim = QColor(0, 0, 0, 140)
+        if crop_x > 0:
+            p.fillRect(0, 0, crop_x, sh, dim)
+        right = crop_x + crop_w
+        if right < sw:
+            p.fillRect(right, 0, sw - right, sh, dim)
+        p.setPen(QPen(QColor(137, 180, 250), 2))
+        p.drawRect(crop_x, 0, crop_w - 1, sh - 1)
+        p.end()
+        return result
+
+    def _refresh_crop_overlay(self, _value=None):
+        self.crop_pct_label.setText(f"{self.crop_slider.value()}%")
+        if self._last_preview_pix and not self._last_preview_pix.isNull():
+            self.preview_label.setPixmap(
+                self._apply_crop_overlay(self._last_preview_pix))
+
+    def _build_social_vf(self):
+        """Return an ffmpeg -vf string for the selected social preset,
+        or empty string for Original."""
+        key = self.social_combo.currentData()
+        if not key:
+            return ""
+        spec = SOCIAL_SPECS.get(key)
+        if not spec:
+            return ""
+        if key in _VERTICAL_PRESETS:
+            pct = self.crop_slider.value() / 100.0
+            return (
+                f"crop=ih*9/16:ih:(iw-ih*9/16)*{pct:.2f}:0,"
+                f"scale={spec['w']}:{spec['h']}"
+            )
+        # Twitter / landscape — scale preserving aspect + pad
+        return (
+            f"scale={spec['w']}:{spec['h']}:"
+            f"force_original_aspect_ratio=decrease,"
+            f"pad={spec['w']}:{spec['h']}:(ow-iw)/2:(oh-ih)/2"
+        )
+
     def _log_line(self, msg):
         self.log_view.append(msg)
 
@@ -836,6 +945,8 @@ class ClipDialog(QDialog):
         self.codec_combo.setEnabled(not busy)
         self.scrubber.setEnabled(not busy)
         self.range_list.setEnabled(not busy)
+        self.social_combo.setEnabled(not busy)
+        self.crop_slider.setEnabled(not busy)
         self.cancel_btn.setText("Cancel" if busy else "Close")
 
     def _on_trim(self):
@@ -872,6 +983,7 @@ class ClipDialog(QDialog):
         if end_s <= start_s:
             self._log_line("[ERROR] End must be greater than start.")
             return
+        vf = self._build_social_vf()
         self._worker = ClipWorker(
             self.source_path,
             out_path,
@@ -880,6 +992,7 @@ class ClipDialog(QDialog):
             reencode=self.reencode_check.isChecked(),
             video_codec=codec,
             audio_codec="aac",
+            video_filter=vf,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log.connect(self._log_line)
