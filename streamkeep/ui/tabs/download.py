@@ -260,6 +260,15 @@ def build_download_tab(win):
     win.scan_btn.clicked.connect(win._on_scan_page)
     url_row.addWidget(win.scan_btn)
 
+    win.recover_btn = QPushButton("Recover VOD")
+    win.recover_btn.setObjectName("secondary")
+    win.recover_btn.setFixedWidth(120)
+    win.recover_btn.setToolTip(
+        "Attempt to recover deleted / expired Twitch VODs from CDN cache"
+    )
+    win.recover_btn.clicked.connect(win._on_recover_vod)
+    url_row.addWidget(win.recover_btn)
+
     win.clip_btn = QPushButton("Clipboard Watch")
     win.clip_btn.setObjectName("toggleAccent")
     win.clip_btn.setCheckable(True)
