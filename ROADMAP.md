@@ -438,7 +438,7 @@
   Track bytes transferred per session, persist daily totals. Status bar
   "Today: 12.4 GB". Optional daily/monthly cap with pause-queue action.
 
-- [ ] **F65 — Download Integrity Verification** (Small, ~80-100 lines)
+- [x] **F65 — Download Integrity Verification** (Small, ~80-100 lines) v4.29.2
   Post-download ffprobe: verify valid container, duration within 2% of
   expected, no truncation. Green/yellow/red badge on History rows.
 
