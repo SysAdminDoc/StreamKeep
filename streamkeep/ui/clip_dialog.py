@@ -129,6 +129,24 @@ class ScrubberView(QGraphicsView):
         scene.setSceneRect(0, 0, self._strip_width, THUMB_H + 2)
         self._refresh_handles()
 
+    def set_spike_markers(self, ratios):
+        """Draw colored tick marks at the given positions (0..1 ratios)."""
+        scene = self.scene()
+        # Remove old markers
+        for item in getattr(self, "_spike_items", []):
+            scene.removeItem(item)
+        self._spike_items = []
+        spike_color = QColor(250, 179, 135)  # CAT peach
+        for r in ratios:
+            x = r * self._strip_width
+            tick = QGraphicsRectItem(QRectF(x - 1, -4, 2, THUMB_H + 8))
+            tick.setPen(QPen(spike_color, 1))
+            tick.setBrush(QBrush(spike_color))
+            tick.setZValue(4)  # Below handles (5), above dims
+            tick.setToolTip(f"Chat spike @ {r * 100:.1f}%")
+            scene.addItem(tick)
+            self._spike_items.append(tick)
+
     def set_thumb(self, index, path):
         if not (0 <= index < len(self._thumb_items)):
             return
@@ -572,6 +590,7 @@ class ClipDialog(QDialog):
             self.waveform.set_selection(0.0, end_ratio)
             self._kick_off_thumbnails()
             self._kick_off_waveform()
+            self._load_chat_spikes()
 
     # ── Thumbnail + preview ─────────────────────────────────────
 
@@ -592,6 +611,32 @@ class ClipDialog(QDialog):
     def _on_waveform_ready(self, peaks):
         if peaks:
             self.waveform.set_peaks(peaks)
+
+    def _load_chat_spikes(self):
+        """Look for a chat.jsonl in the source directory and overlay spike
+        markers on the filmstrip if found."""
+        src_dir = os.path.dirname(self.source_path) or "."
+        jsonl = os.path.join(src_dir, "chat.jsonl")
+        if not os.path.isfile(jsonl) or not self._duration:
+            return
+        try:
+            from ..chat.spike_detect import detect_spikes
+            spikes = detect_spikes(jsonl)
+        except Exception:
+            return
+        if not spikes:
+            return
+        ratios = []
+        for sp in spikes:
+            t = sp.get("time", 0)
+            if self._duration > 0:
+                ratios.append(t / self._duration)
+        if ratios:
+            self.scrubber.set_spike_markers(ratios)
+            self._log_line(
+                f"[CHAT] Found {len(ratios)} chat spike(s) — "
+                f"peach markers on the filmstrip."
+            )
 
     def _on_waveform_seek(self, ratio):
         """Click/drag on waveform → move nearest scrubber handle + preview."""
