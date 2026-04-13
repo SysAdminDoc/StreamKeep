@@ -385,7 +385,7 @@
   2-4 mpv instances in a grid with shared transport. Sync seek/play/pause.
   Per-stream audio toggle and offset slider (±30s). History multi-select entry.
 
-- [ ] **F55 — Chapter & Bookmark Navigation Panel** (Small, ~100-120 lines)
+- [x] **F55 — Chapter & Bookmark Navigation Panel** (Small, ~100-120 lines) v4.27.3
   Sidebar listing chapters + bookmarks. Click to seek. "Add bookmark here"
   saves current position with label. Loads from metadata.json + HistoryEntry.
 
