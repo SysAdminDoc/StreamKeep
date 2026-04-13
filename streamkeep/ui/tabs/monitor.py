@@ -131,6 +131,23 @@ def build_monitor_tab(win):
     )
     win.monitor_summary_label.setObjectName("subtleText")
     manage_lay.addWidget(win.monitor_summary_label)
+
+    # Import/Export row (F10)
+    io_row = QHBoxLayout()
+    io_row.setSpacing(8)
+    export_btn = QPushButton("Export Channels...")
+    export_btn.setObjectName("secondary")
+    export_btn.setFixedWidth(140)
+    export_btn.clicked.connect(win._on_monitor_export)
+    io_row.addWidget(export_btn)
+    import_btn = QPushButton("Import Channels...")
+    import_btn.setObjectName("secondary")
+    import_btn.setFixedWidth(140)
+    import_btn.clicked.connect(win._on_monitor_import)
+    io_row.addWidget(import_btn)
+    io_row.addStretch(1)
+    manage_lay.addLayout(io_row)
+
     lay.addWidget(manage_card)
 
     table_card = QFrame()
