@@ -3084,6 +3084,29 @@ class StreamKeep(QMainWindow):
         idx = self.segment_combo.currentIndex()
         return self._segment_options[idx][1]
 
+    @staticmethod
+    def _parse_crop_secs(text):
+        """Parse a HH:MM:SS, MM:SS, or plain seconds string into total
+        seconds. Returns 0 if the text is empty or invalid."""
+        text = (text or "").strip()
+        if not text:
+            return 0
+        parts = text.split(":")
+        try:
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            return int(float(text))
+        except (ValueError, IndexError):
+            return 0
+
+    @staticmethod
+    def _fmt_crop_time(secs):
+        """Format seconds as HH:MM:SS for log output."""
+        s = int(secs)
+        return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
     def _is_audio_only(self):
         """Detect if the current stream is audio-only based on its qualities."""
         if not self.stream_info:
@@ -3283,6 +3306,17 @@ class StreamKeep(QMainWindow):
             or f"{self.stream_info.platform}_download"
         )
 
+        # Time-range crop (F21) — parse optional start/end bounds
+        crop_start = self._parse_crop_secs(
+            self.crop_start_input.text() if hasattr(self, "crop_start_input") else ""
+        )
+        crop_end = self._parse_crop_secs(
+            self.crop_end_input.text() if hasattr(self, "crop_end_input") else ""
+        )
+        if crop_end and crop_start and crop_end <= crop_start:
+            self._set_status("Time range end must be after start.", "warning")
+            return False
+
         seg_secs = self._get_segment_secs()
         single_segment = (is_live_capture or fmt_type in ("mp4", "ytdlp_direct")
                           or seg_secs == 0 or total_secs <= seg_secs)
@@ -3290,11 +3324,23 @@ class StreamKeep(QMainWindow):
         for i, cb in enumerate(self._segment_checks):
             if cb.isChecked():
                 if single_segment:
-                    segments.append((0, title_safe, 0, 0 if is_live_capture else int(total_secs)))
+                    seg_start = crop_start or 0
+                    seg_dur = (crop_end or (0 if is_live_capture else int(total_secs))) - seg_start
+                    segments.append((0, title_safe, seg_start, max(0, seg_dur)))
                     break
                 else:
                     start = i * seg_secs
                     end = min((i + 1) * seg_secs, total_secs)
+                    # Skip segments entirely outside the crop window
+                    if crop_end and start >= crop_end:
+                        continue
+                    if crop_start and end <= crop_start:
+                        continue
+                    # Clamp segment bounds to the crop window
+                    if crop_start and start < crop_start:
+                        start = crop_start
+                    if crop_end and end > crop_end:
+                        end = crop_end
                     label = f"{title_safe}_part{i + 1:02d}"
                     segments.append((i, label, start, int(end - start)))
 
@@ -3302,6 +3348,9 @@ class StreamKeep(QMainWindow):
             self._log("No segments selected.")
             self._set_status("Select at least one segment before downloading.", "warning")
             return False
+
+        if crop_start or crop_end:
+            self._log(f"[CROP] Time range: {self._fmt_crop_time(crop_start)} → {self._fmt_crop_time(crop_end or total_secs)}")
 
         # For non-channel content, user's output box is the base; folder template
         # adds a subfolder. For channel content the template already has
@@ -3356,6 +3405,11 @@ class StreamKeep(QMainWindow):
         self.download_worker.download_subs = YtDlpExtractor.download_subs
         self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
         self.download_worker.parallel_connections = self._parallel_connections
+        # Pass time-range crop to yt-dlp via --download-sections (F21)
+        if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
+            cs = self._fmt_crop_time(crop_start) if crop_start else "0:00:00"
+            ce = self._fmt_crop_time(crop_end) if crop_end else ""
+            self.download_worker.download_sections = f"*{cs}-{ce}" if ce else f"*{cs}-"
         if audio_url:
             self._log("Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
