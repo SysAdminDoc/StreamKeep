@@ -350,7 +350,7 @@ def detect_direct_media(url, log_fn=None):
         "audio/ogg": "mp4", "audio/flac": "mp4", "audio/wav": "mp4",
         "audio/x-wav": "mp4", "audio/aac": "mp4",
         "application/vnd.apple.mpegurl": "hls", "audio/mpegurl": "hls",
-        "application/x-mpegurl": "hls", "application/dash+xml": "hls",
+        "application/x-mpegurl": "hls", "application/dash+xml": "dash",
         "application/octet-stream": "mp4",
     }
     MEDIA_EXTS = {
@@ -372,7 +372,22 @@ def detect_direct_media(url, log_fn=None):
 
     ext = os.path.splitext(parsed.path)[1].lower()
     if ext in MEDIA_EXTS:
-        fmt = "hls" if ext in (".m3u8", ".mpd") else "mp4"
+        # DASH MPD manifest — parse into proper qualities (F50)
+        if ext == ".mpd":
+            from .dash import parse_mpd
+            if log_fn:
+                log_fn(f"DASH manifest detected: {url}")
+            qualities = parse_mpd(url, log_fn=log_fn)
+            if qualities:
+                info = StreamInfo(
+                    platform="Direct",
+                    url=url,
+                    title=parsed.path.split("/")[-1],
+                    channel=infer_channel(),
+                    qualities=qualities,
+                )
+                return info
+        fmt = "hls" if ext == ".m3u8" else "mp4"
         if log_fn:
             log_fn(f"Direct media URL detected by extension: {ext}")
         info = StreamInfo(
