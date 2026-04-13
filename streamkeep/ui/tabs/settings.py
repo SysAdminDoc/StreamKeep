@@ -8,9 +8,11 @@ converter buttons, import/export/save row.
 
 import subprocess
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QLineEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from ... import VERSION
@@ -756,6 +758,29 @@ def build_settings_tab(win):
         lambda text: _update_webhook_indicator(win, text))
     _update_webhook_indicator(win, win._webhook_url)
     card_lay.addWidget(hook_block)
+
+    # ── Event Hooks (F24) ─────────────────────────────────────────
+    from ...hooks import HOOK_EVENTS
+    evt_block, evt_lay = make_field_block(
+        "Event Hooks",
+        "Run shell commands on lifecycle events. Context is passed as "
+        "environment variables ($SK_TITLE, $SK_CHANNEL, $SK_PLATFORM, "
+        "$SK_PATH, $SK_URL, $SK_EVENT).",
+    )
+    hooks_cfg = win._config.get("hooks", {})
+    win.hooks_table = QTableWidget(len(HOOK_EVENTS), 2)
+    win.hooks_table.setHorizontalHeaderLabels(["Event", "Command"])
+    win.hooks_table.horizontalHeader().setStretchLastSection(True)
+    win.hooks_table.setColumnWidth(0, 180)
+    win.hooks_table.verticalHeader().setVisible(False)
+    for i, evt in enumerate(HOOK_EVENTS):
+        name_item = QTableWidgetItem(evt)
+        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        win.hooks_table.setItem(i, 0, name_item)
+        win.hooks_table.setItem(i, 1, QTableWidgetItem(hooks_cfg.get(evt, "")))
+    win.hooks_table.setFixedHeight(min(210, 30 * (len(HOOK_EVENTS) + 1)))
+    evt_lay.addWidget(win.hooks_table)
+    card_lay.addWidget(evt_block)
 
     # ── Duplicate detection ────────────────────────────────────────
     dup_block, dup_lay = make_field_block(

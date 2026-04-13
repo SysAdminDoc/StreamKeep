@@ -952,6 +952,13 @@ class StreamKeep(QMainWindow):
                        "details": details}
             self._fire_webhook_json(url, payload)
 
+    def _fire_hook(self, event, **context):
+        """Fire configured event hook, if any."""
+        hooks_cfg = self._config.get("hooks", {})
+        if hooks_cfg:
+            from ..hooks import fire_hook
+            fire_hook(event, context, hooks_cfg, log_fn=self._log)
+
     def _fire_webhook_json(self, url, payload):
         """Fire-and-forget JSON POST via curl."""
         try:
@@ -1977,6 +1984,15 @@ class StreamKeep(QMainWindow):
         self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
         # Apply webhook
         self._webhook_url = self.webhook_input.text().strip()
+        # Apply event hooks (F24)
+        if hasattr(self, "hooks_table"):
+            hooks = {}
+            for i in range(self.hooks_table.rowCount()):
+                evt = self.hooks_table.item(i, 0).text()
+                cmd = (self.hooks_table.item(i, 1).text() or "").strip()
+                if cmd:
+                    hooks[evt] = cmd
+            self._config["hooks"] = hooks
         # Apply duplicate detection
         self._check_duplicates = self.dup_check.isChecked()
         # Apply library/NFO + chat
@@ -3842,6 +3858,10 @@ class StreamKeep(QMainWindow):
                 self._notify("StreamKeep — Download complete", title[:80])
                 self._send_webhook("download complete", title,
                                    f"Segments: {self._completed_segments}")
+                self._fire_hook(
+                    "download_complete", title=title,
+                    path=out_dir,
+                    platform=active_info.platform if active_info else "")
             self._save_metadata(
                 out_dir,
                 q_name,
@@ -5132,6 +5152,7 @@ class StreamKeep(QMainWindow):
         """Called when a monitored channel goes live."""
         self._set_status(f"{channel_id} went live.", "warning")
         self._notify_center(f"{channel_id} is live", "warning")
+        self._fire_hook("channel_live", channel=channel_id)
         if self._try_start_auto_record(channel_id):
             return
         worker = getattr(self, "download_worker", None)
@@ -5473,6 +5494,7 @@ class StreamKeep(QMainWindow):
         title = info.title if info else item.get("title", "Download")
         self._log(f"[QUEUE] Complete: {title[:60]}")
         self._notify_center(f"Queue download complete: {title[:50]}", "success")
+        self._fire_hook("download_complete", title=title)
         # Save metadata + history entry
         q_name = ctx.get("q_name", "")
         self._save_metadata(out_dir, q_name, history_url=item.get("url", ""), info=info)
