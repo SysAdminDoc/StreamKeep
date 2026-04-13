@@ -446,7 +446,7 @@
   Log monitor poll transitions (live/offline) to DB. Per-channel insights:
   streams/week, avg duration, top game. Sparklines in Monitor tab.
 
-- [ ] **F67 — Storage Health Monitor & Disk Alerts** (Small, ~60-80 lines)
+- [x] **F67 — Storage Health Monitor & Disk Alerts** (Small, ~60-80 lines) v4.29.4
   30-second disk usage poll. Status bar indicator with color thresholds.
   Auto-pause queue on critical low space. Multi-drive support.
 
