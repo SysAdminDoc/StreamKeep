@@ -584,6 +584,15 @@ class StreamKeep(QMainWindow):
         PostProcessor.reencode_h265 = bool(cfg.get("pp_reencode_h265", False))
         PostProcessor.contact_sheet = bool(cfg.get("pp_contact_sheet", False))
         PostProcessor.split_by_chapter = bool(cfg.get("pp_split_by_chapter", False))
+        PostProcessor.remove_silence = bool(cfg.get("pp_remove_silence", False))
+        try:
+            PostProcessor.silence_noise_db = int(cfg.get("pp_silence_noise_db", -30))
+        except (TypeError, ValueError):
+            PostProcessor.silence_noise_db = -30
+        try:
+            PostProcessor.silence_min_duration = float(cfg.get("pp_silence_min_duration", 3.0))
+        except (TypeError, ValueError):
+            PostProcessor.silence_min_duration = 3.0
         # Converter
         PostProcessor.convert_video = bool(cfg.get("pp_convert_video", False))
         PostProcessor.convert_video_format = cfg.get("pp_convert_video_format") or "mp4"
@@ -708,6 +717,9 @@ class StreamKeep(QMainWindow):
         cfg["pp_reencode_h265"] = PostProcessor.reencode_h265
         cfg["pp_contact_sheet"] = PostProcessor.contact_sheet
         cfg["pp_split_by_chapter"] = PostProcessor.split_by_chapter
+        cfg["pp_remove_silence"] = PostProcessor.remove_silence
+        cfg["pp_silence_noise_db"] = PostProcessor.silence_noise_db
+        cfg["pp_silence_min_duration"] = PostProcessor.silence_min_duration
         cfg["pp_convert_video"] = PostProcessor.convert_video
         cfg["pp_convert_video_format"] = PostProcessor.convert_video_format
         cfg["pp_convert_video_codec"] = PostProcessor.convert_video_codec
@@ -1930,6 +1942,10 @@ class StreamKeep(QMainWindow):
         PostProcessor.reencode_h265 = self.pp_h265_check.isChecked()
         PostProcessor.contact_sheet = self.pp_contact_check.isChecked()
         PostProcessor.split_by_chapter = self.pp_split_check.isChecked()
+        if hasattr(self, "pp_silence_check"):
+            PostProcessor.remove_silence = self.pp_silence_check.isChecked()
+            PostProcessor.silence_noise_db = self.pp_silence_db_spin.value()
+            PostProcessor.silence_min_duration = float(self.pp_silence_dur_spin.value())
         # Converter settings
         PostProcessor.convert_video = self.pp_convert_video_check.isChecked()
         PostProcessor.convert_video_format = self.pp_convert_video_format.currentText()
@@ -5698,6 +5714,8 @@ class StreamKeep(QMainWindow):
         bundle_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         transcribe_act = menu.addAction("Transcribe (Whisper)...")
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        silence_act = menu.addAction("Remove silence...")
+        silence_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
@@ -5720,6 +5738,8 @@ class StreamKeep(QMainWindow):
             self._start_bundle_export(h.path)
         elif chosen == transcribe_act and h.path and os.path.isdir(h.path):
             self._start_transcribe_for_dir(h.path)
+        elif chosen == silence_act and h.path and os.path.isdir(h.path):
+            self._run_silence_removal_for_dir(h.path)
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
@@ -5756,6 +5776,28 @@ class StreamKeep(QMainWindow):
                 self.output_input.setText(parent)
         self._log(f"[RE-DOWNLOAD] {h.title or h.url[:80]}")
         self._on_fetch()
+
+    def _run_silence_removal_for_dir(self, src_dir):
+        """Run silence removal on the largest video in the folder."""
+        vids = []
+        try:
+            for f in os.listdir(src_dir):
+                ext = os.path.splitext(f)[1].lower()
+                if ext in (".mp4", ".mkv", ".webm", ".ts"):
+                    fp = os.path.join(src_dir, f)
+                    if ".nosilence" not in f and os.path.isfile(fp):
+                        vids.append((os.path.getsize(fp), fp))
+        except OSError:
+            pass
+        if not vids:
+            self._set_status("No video files found in folder.", "warning")
+            return
+        vids.sort(reverse=True)
+        src = vids[0][1]
+        self._log(f"[POST] Running silence removal on: {os.path.basename(src)}")
+        self._set_status("Removing silence — this may take a minute…", "working")
+        PostProcessor._run_silence_removal(src, self._log)
+        self._set_status("Silence removal complete.", "success")
 
     def _start_transcribe_for_dir(self, src_dir):
         """Pick the biggest video in the folder and launch TranscribeWorker."""

@@ -125,7 +125,7 @@
   -> QPainter fill. Cache as `.waveform.bin`. Sync cursor with filmstrip scrubber.
   Overlay silence regions as tinted bands.
 
-- [ ] **F26 — Silence / Dead Air Removal** (Small, ~80-100 lines)
+- [x] **F26 — Silence / Dead Air Removal** (Small, ~80-100 lines) ✓ v4.20.0
   New PostProcessor preset `remove_silence`. FFmpeg `silencedetect` filter ->
   parse timestamps -> build concat segment list skipping silence -> re-mux.
   Expose as Settings checkbox + History right-click action.
