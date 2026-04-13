@@ -874,49 +874,95 @@ class StreamKeep(QMainWindow):
             pass
 
     def _send_webhook(self, event, title, details=""):
-        """POST a webhook notification. Auto-detects Discord URLs and
-        formats as an embed; otherwise sends plain JSON."""
+        """POST a webhook notification. Auto-detects Discord, Slack,
+        Telegram, and ntfy URLs and formats the payload accordingly."""
         url = (self._webhook_url or "").strip()
         if not url:
             return
-        is_discord = "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url
         platform = self.stream_info.platform if self.stream_info else "unknown"
         src_url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
-        color_map = {"complete": 5763719, "failed": 15548997, "started": 3447003}
-        color = color_map.get(event, 5763719)
-        if is_discord:
+
+        if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
+            color_map = {"complete": 5763719, "failed": 15548997, "started": 3447003}
             payload = {
                 "username": "StreamKeep",
                 "embeds": [{
                     "title": f"StreamKeep: {event}",
                     "description": f"**{title[:200]}**",
-                    "color": color,
+                    "color": color_map.get(event, 5763719),
                     "fields": [
-                        {"name": "Platform", "value": platform or "—", "inline": True},
-                        {"name": "Source", "value": (src_url or "—")[:1000], "inline": False},
+                        {"name": "Platform", "value": platform or "\u2014", "inline": True},
+                        {"name": "Source", "value": (src_url or "\u2014")[:1000], "inline": False},
                     ] + ([{"name": "Details", "value": details[:1000]}] if details else []),
                     "footer": {"text": f"StreamKeep v{VERSION}"},
                 }],
             }
+            self._fire_webhook_json(url, payload)
+
+        elif "hooks.slack.com" in url:
+            blocks = [
+                {"type": "header", "text": {"type": "plain_text",
+                                            "text": f"StreamKeep: {event}"}},
+                {"type": "section", "text": {"type": "mrkdwn",
+                                             "text": f"*{title[:200]}*"}},
+            ]
+            if details:
+                blocks.append({"type": "context", "elements": [
+                    {"type": "mrkdwn", "text": details[:2000]}]})
+            blocks.append({"type": "context", "elements": [
+                {"type": "mrkdwn",
+                 "text": f"Platform: {platform} | v{VERSION}"}]})
+            payload = {"text": f"StreamKeep: {event} \u2014 {title}",
+                       "blocks": blocks}
+            self._fire_webhook_json(url, payload)
+
+        elif "api.telegram.org/bot" in url:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            qs = parse_qs(parsed.query)
+            chat_id = (qs.get("chat_id") or [""])[0]
+            base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            text = f"*StreamKeep: {event}*\n{title}"
+            if details:
+                text += f"\n_{details}_"
+            text += f"\n`{platform} | v{VERSION}`"
+            payload = {"chat_id": chat_id, "text": text,
+                       "parse_mode": "Markdown"}
+            self._fire_webhook_json(base_url, payload)
+
+        elif "ntfy.sh" in url or "/ntfy/" in url:
+            body = f"{title}\n{details}".strip() if details else title
+            try:
+                cmd = ["curl", "-s", "-X", "POST",
+                       "-H", f"Title: StreamKeep: {event}",
+                       "-H", "Priority: default",
+                       "-H", f"Tags: {platform}",
+                       "-d", body, "--max-time", "10", url]
+                subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=_CREATE_NO_WINDOW)
+            except Exception as e:
+                self._log(f"[WEBHOOK] Send failed: {e}")
+
         else:
-            payload = {
-                "app": "StreamKeep",
-                "version": VERSION,
-                "event": event,
-                "title": title,
-                "platform": platform,
-                "source": src_url,
-                "details": details,
-            }
-        # Fire-and-forget via curl — don't block the UI on webhook latency
+            payload = {"app": "StreamKeep", "version": VERSION,
+                       "event": event, "title": title,
+                       "platform": platform, "source": src_url,
+                       "details": details}
+            self._fire_webhook_json(url, payload)
+
+    def _fire_webhook_json(self, url, payload):
+        """Fire-and-forget JSON POST via curl."""
         try:
             cmd = ["curl", "-s", "-X", "POST",
                    "-H", "Content-Type: application/json",
                    "-d", json.dumps(payload),
-                   "--max-time", "10",
-                   url]
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=_CREATE_NO_WINDOW)
+                   "--max-time", "10", url]
+            subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_CREATE_NO_WINDOW)
         except Exception as e:
             self._log(f"[WEBHOOK] Send failed: {e}")
 

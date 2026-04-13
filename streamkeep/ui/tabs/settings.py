@@ -113,6 +113,29 @@ def _pp_apply_snapshot(snap, win=None):
         _setc(win.pp_convert_audio_check, PostProcessor.convert_audio)
 
 
+def _update_webhook_indicator(win, url):
+    """Show auto-detected webhook type below the URL input."""
+    url = (url or "").strip()
+    lbl = getattr(win, "_webhook_type_label", None)
+    if not lbl:
+        return
+    if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
+        lbl.setText("\u2714 Discord webhook detected")
+    elif "hooks.slack.com" in url:
+        lbl.setText("\u2714 Slack incoming webhook detected")
+    elif "api.telegram.org/bot" in url:
+        if "chat_id=" in url:
+            lbl.setText("\u2714 Telegram bot detected (chat_id found)")
+        else:
+            lbl.setText("\u26A0 Telegram \u2014 add ?chat_id=YOUR_ID to the URL")
+    elif "ntfy.sh" in url or "/ntfy/" in url:
+        lbl.setText("\u2714 ntfy push notification detected")
+    elif url:
+        lbl.setText("Generic JSON POST endpoint")
+    else:
+        lbl.setText("")
+
+
 def _get_user_presets(win):
     """Return the user-defined presets dict from config."""
     cfg = getattr(win, "_config", {})
@@ -726,6 +749,12 @@ def build_settings_tab(win):
         "https://discord.com/api/webhooks/... or any POST endpoint"
     )
     hook_lay.addWidget(win.webhook_input)
+    win._webhook_type_label = QLabel("")
+    win._webhook_type_label.setStyleSheet("color: #a6adc8;")
+    hook_lay.addWidget(win._webhook_type_label)
+    win.webhook_input.textChanged.connect(
+        lambda text: _update_webhook_indicator(win, text))
+    _update_webhook_indicator(win, win._webhook_url)
     card_lay.addWidget(hook_block)
 
     # ── Duplicate detection ────────────────────────────────────────
