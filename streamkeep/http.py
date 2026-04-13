@@ -132,8 +132,11 @@ def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
         "--connect-timeout", str(connect_timeout),
         "--max-time", str(max_time),
     ]
-    if NATIVE_PROXY:
-        cmd.extend(["-x", NATIVE_PROXY])
+    # Proxy: pool-based per-platform routing (F49), falls back to NATIVE_PROXY
+    from .proxy import resolve_proxy as _resolve_proxy
+    _proxy = _resolve_proxy(url) or NATIVE_PROXY
+    if _proxy:
+        cmd.extend(["-x", _proxy])
     # Inject cookies.txt if present (F47)
     from .cookies import cookies_file_path
     cpath = cookies_file_path()
