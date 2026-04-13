@@ -60,6 +60,38 @@ class HistoryEntry:
     watched: bool = False                  # playback status (F32/F38)
     watch_position_secs: float = 0.0       # resume position (F38)
     bookmarks: list = field(default_factory=list)  # [{name, secs}] (F38)
+    db_id: int = 0                         # SQLite row id (F41, 0=not persisted)
+
+    def to_dict(self):
+        """Serialize to a dict suitable for ``db.save_history_entry()``."""
+        return {
+            "date": self.date, "platform": self.platform,
+            "title": self.title, "channel": self.channel,
+            "quality": self.quality, "size": self.size,
+            "path": self.path, "url": self.url,
+            "favorite": self.favorite, "watched": self.watched,
+            "watch_position_secs": self.watch_position_secs,
+            "bookmarks": list(self.bookmarks or []),
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        """Deserialize from a dict (DB row or legacy JSON)."""
+        return cls(
+            date=str(d.get("date", "")),
+            platform=str(d.get("platform", "")),
+            title=str(d.get("title", "")),
+            channel=str(d.get("channel", "")),
+            quality=str(d.get("quality", "")),
+            size=str(d.get("size", "")),
+            path=str(d.get("path", "")),
+            url=str(d.get("url", "")),
+            favorite=bool(d.get("favorite", False)),
+            watched=bool(d.get("watched", False)),
+            watch_position_secs=float(d.get("watch_position_secs", 0) or 0),
+            bookmarks=list(d.get("bookmarks", []) or []),
+            db_id=int(d.get("id", 0) or 0),
+        )
 
 
 @dataclass
