@@ -21,6 +21,7 @@ from .thumb_worker import (
     probe_duration,
 )
 from .bundle_worker import BundleWorker
+from .scene_worker import SceneWorker, load_cached_scenes
 from .transcribe_worker import TranscribeWorker, is_available as whisper_available
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "detect_ffmpeg_encoders", "available_video_codec_keys",
     "video_codec_extra_args",
     "PostProcessor", "ConvertWorker", "ClipWorker", "HighlightWorker", "ThumbWorker",
-    "BundleWorker", "TranscribeWorker", "whisper_available",
+    "BundleWorker", "SceneWorker", "load_cached_scenes",
+    "TranscribeWorker", "whisper_available",
     "single_thumb_path", "strip_thumb_paths", "probe_duration",
 ]
