@@ -1983,6 +1983,10 @@ class StreamKeep(QMainWindow):
             }
         if hasattr(self, "whisper_model_combo"):
             self._config["whisper_model"] = str(self.whisper_model_combo.currentData() or "tiny")
+        if hasattr(self, "diarize_check"):
+            self._config["enable_diarization"] = bool(self.diarize_check.isChecked())
+        if hasattr(self, "hf_token_input"):
+            self._config["hf_token"] = self.hf_token_input.text().strip()
         if hasattr(self, "notif_sound_check"):
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
         # Apply bandwidth schedule rule
@@ -6294,7 +6298,11 @@ class StreamKeep(QMainWindow):
             self._set_status("No video file to transcribe in that folder.", "warning")
             return
         model = str(self._config.get("whisper_model", "tiny") or "tiny")
-        worker = TranscribeWorker(media, model_name=model)
+        worker = TranscribeWorker(
+            media, model_name=model,
+            enable_diarization=bool(self._config.get("enable_diarization")),
+            hf_token=str(self._config.get("hf_token", "") or ""),
+        )
         worker.progress.connect(self._on_transcribe_progress)
         worker.done.connect(self._on_transcribe_done)
         self._transcribe_worker = worker

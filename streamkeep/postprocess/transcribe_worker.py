@@ -1,11 +1,12 @@
 """TranscribeWorker — optional Whisper-based transcription + chapter
 inference for finished downloads.
 
-Prefers the `faster-whisper` pip package when importable (fast, good
-quality, CPU + CUDA). Falls back to a `whisper-cli` / `whisper.cpp` /
-`main` binary in PATH with the classic interface.
+Backend priority (F29):
+  1. WhisperX (word-level timestamps, optional speaker diarization)
+  2. faster-whisper (fast, good quality, CPU + CUDA)
+  3. whisper-cli / whisper.cpp / main binary in PATH
 
-When neither runtime is available, the worker emits a clear log message
+When no runtime is available, the worker emits a clear log message
 and exits — never silent failure.
 
 Outputs (next to the source media file):
@@ -28,8 +29,19 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..paths import _CREATE_NO_WINDOW
 
 
+def _whisperx_available():
+    """Check if WhisperX is importable."""
+    try:
+        __import__("whisperx")
+        return True
+    except ImportError:
+        return False
+
+
 def is_available():
     """Which Whisper runtime (if any) is usable right now."""
+    if _whisperx_available():
+        return "whisperx"
     try:
         import faster_whisper  # availability probe
     except ImportError:
@@ -71,12 +83,15 @@ class TranscribeWorker(QThread):
     done = pyqtSignal(bool, str)
 
     def __init__(self, media_path, *, model_name="tiny", language=None,
-                 silence_gap_secs=12.0):
+                 silence_gap_secs=12.0, enable_diarization=False,
+                 hf_token=""):
         super().__init__()
         self.media_path = media_path
         self.model_name = model_name
         self.language = language    # None = auto-detect
         self.silence_gap_secs = float(silence_gap_secs)
+        self.enable_diarization = bool(enable_diarization)
+        self.hf_token = hf_token or ""
         self._cancel = False
 
     def cancel(self):
@@ -95,7 +110,9 @@ class TranscribeWorker(QThread):
             )
             return
         try:
-            if runtime == "faster-whisper":
+            if runtime == "whisperx":
+                segments = self._run_whisperx()
+            elif runtime == "faster-whisper":
                 segments = self._run_faster_whisper()
             else:
                 segments = self._run_whisper_cpp(runtime)
@@ -138,6 +155,80 @@ class TranscribeWorker(QThread):
             })
             pct = min(99, int((seg.end / total) * 100))
             self.progress.emit(pct, f"{seg.end:.0f}s / {total:.0f}s")
+        return out
+
+    def _run_whisperx(self):
+        """WhisperX backend — word-level timestamps + optional diarization."""
+        import torch
+        import whisperx
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute = "float16" if device == "cuda" else "int8"
+        self.progress.emit(1, f"Loading WhisperX {self.model_name} on {device}...")
+        model = whisperx.load_model(
+            self.model_name, device, compute_type=compute,
+            language=self.language,
+        )
+        self.progress.emit(5, "Transcribing with VAD...")
+        audio = whisperx.load_audio(self.media_path)
+        result = model.transcribe(audio, batch_size=16)
+        if self._cancel:
+            return []
+
+        # Forced alignment for word-level timestamps
+        detected_lang = result.get("language") or self.language or "en"
+        self.progress.emit(50, "Aligning word timestamps...")
+        try:
+            align_model, align_meta = whisperx.load_align_model(
+                language_code=detected_lang, device=device,
+            )
+            result = whisperx.align(
+                result["segments"], align_model, align_meta,
+                audio, device, return_char_alignments=False,
+            )
+        except Exception:
+            pass  # alignment failed — keep segment-level timestamps
+        if self._cancel:
+            return []
+
+        # Optional speaker diarization
+        if self.enable_diarization and self.hf_token:
+            self.progress.emit(70, "Running speaker diarization...")
+            try:
+                diarize_model = whisperx.DiarizationPipeline(
+                    use_auth_token=self.hf_token, device=device,
+                )
+                diarize_segments = diarize_model(audio)
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+            except Exception:
+                pass  # diarization failed — continue without speakers
+
+        self.progress.emit(90, "Building output...")
+        segments = result.get("segments", [])
+        out = []
+        for seg in segments:
+            entry = {
+                "start": float(seg.get("start", 0)),
+                "end": float(seg.get("end", 0)),
+                "text": (seg.get("text") or "").strip(),
+            }
+            # Word-level details
+            words = seg.get("words", [])
+            if words:
+                entry["words"] = [
+                    {
+                        "word": w.get("word", ""),
+                        "start": float(w.get("start", 0)),
+                        "end": float(w.get("end", 0)),
+                    }
+                    for w in words
+                ]
+            # Speaker label from diarization
+            speaker = seg.get("speaker")
+            if speaker:
+                entry["speaker"] = speaker
+            if entry["text"]:
+                out.append(entry)
         return out
 
     def _run_whisper_cpp(self, binary):
@@ -193,19 +284,23 @@ class TranscribeWorker(QThread):
 
     def _write_outputs(self, base, segments):
         """Write .srt, .vtt, .json, and chapters.auto.txt."""
-        # .srt
+        # .srt — use word-level timestamps for tighter cues when available
         with open(base + ".srt", "w", encoding="utf-8") as f:
             for i, seg in enumerate(segments, start=1):
+                speaker = seg.get("speaker", "")
+                prefix = f"[{speaker}] " if speaker else ""
                 f.write(f"{i}\n")
                 f.write(f"{_format_srt_time(seg['start'])} --> {_format_srt_time(seg['end'])}\n")
-                f.write(f"{seg['text']}\n\n")
-        # .vtt
+                f.write(f"{prefix}{seg['text']}\n\n")
+        # .vtt — include speaker labels
         with open(base + ".vtt", "w", encoding="utf-8") as f:
             f.write("WEBVTT\n\n")
             for seg in segments:
+                speaker = seg.get("speaker", "")
+                prefix = f"<v {speaker}>" if speaker else ""
                 f.write(f"{_format_vtt_time(seg['start'])} --> {_format_vtt_time(seg['end'])}\n")
-                f.write(f"{seg['text']}\n\n")
-        # .json
+                f.write(f"{prefix}{seg['text']}\n\n")
+        # .json — full structure including words + speakers
         with open(base + ".transcript.json", "w", encoding="utf-8") as f:
             json.dump(segments, f, ensure_ascii=False, indent=2)
         # chapters.auto.txt — emit one chapter at every silence gap > threshold.
