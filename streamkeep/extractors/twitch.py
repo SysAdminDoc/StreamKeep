@@ -56,28 +56,33 @@ class TwitchExtractor(Extractor):
             return data["data"]["user"]["stream"]["type"] == "live"
         return False
 
-    def list_vods(self, url, log_fn=None):
+    def list_vods(self, url, log_fn=None, cursor=None):
         login = self.extract_channel_id(url)
         if not login or login.startswith("vod_"):
-            return []
-        self._log(log_fn, f"Fetching VODs for Twitch channel: {login}")
+            return [], None
+        page_label = f" (after {cursor[:12]}…)" if cursor else ""
+        self._log(log_fn, f"Fetching VODs for Twitch channel: {login}{page_label}")
 
+        after_clause = f', after: "{cursor}"' if cursor else ""
         data = self._gql(
             f'{{ user(login: "{login}") {{ displayName '
-            f'videos(first: 20, type: ARCHIVE, sort: TIME) {{ edges {{ node {{ '
+            f'videos(first: 20, type: ARCHIVE, sort: TIME{after_clause}) '
+            f'{{ edges {{ node {{ '
             f'id title createdAt lengthSeconds viewCount '
             f'previewThumbnailURL(width: 320, height: 180) '
-            f'}} }} }} }} }}'
+            f'}} cursor }} pageInfo {{ hasNextPage }} }} }} }}'
         )
         if not data:
             self._log(log_fn, "GraphQL request failed")
-            return []
+            return [], None
 
         user = data.get("data") or {}
         user = user.get("user") or {}
         videos = user.get("videos") or {}
         edges = videos.get("edges") or []
+        page_info = videos.get("pageInfo") or {}
         vods = []
+        last_cursor = None
         for edge in edges:
             if not isinstance(edge, dict):
                 continue
@@ -103,8 +108,10 @@ class TwitchExtractor(Extractor):
                 platform="Twitch",
                 channel=login,
             ))
+            last_cursor = edge.get("cursor")
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
-        return vods
+        next_cursor = last_cursor if page_info.get("hasNextPage") else None
+        return vods, next_cursor
 
     def _get_access_token(self, vod_id=None, channel=None, log_fn=None):
         """Get playback access token for a VOD or live channel."""
