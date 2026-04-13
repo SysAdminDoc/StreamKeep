@@ -151,6 +151,7 @@ class StreamKeep(QMainWindow):
         self._check_duplicates = True
         self._download_queue = []  # list of dicts: url, title, platform, status
         self._write_nfo = False
+        self._dl_overrides = {}  # Per-download settings overrides (F18)
         self._parallel_connections = 4  # Multi-connection splits per direct MP4
         self._recent_urls = []  # most-recent-first list of distinct URLs
         self._last_fetch_request = {
@@ -2507,7 +2508,17 @@ class StreamKeep(QMainWindow):
             "convert_audio_samplerate",
             "convert_delete_source",
         ]
-        return {k: getattr(PostProcessor, k) for k in keys}
+        snap = {k: getattr(PostProcessor, k) for k in keys}
+        # Apply per-download PP preset override (F18)
+        overrides = getattr(self, "_dl_overrides", {})
+        preset_name = overrides.get("pp_preset", "")
+        if preset_name:
+            from .tabs.settings import BUILTIN_PRESETS, _get_user_presets
+            all_presets = dict(BUILTIN_PRESETS)
+            all_presets.update(_get_user_presets(self))
+            if preset_name in all_presets:
+                snap.update(all_presets[preset_name])
+        return snap
 
     def _foreground_busy(self):
         if getattr(self, "_batch_active", False):
@@ -3592,11 +3603,17 @@ class StreamKeep(QMainWindow):
             self._set_status("Pick a quality before starting the download.", "warning")
             return False
 
+        # Per-download overrides (F18)
+        from .tabs.download import get_adv_overrides, _reset_adv_overrides
+        _dl_overrides = get_adv_overrides(self)
+
         # Render filename + folder from templates (templates can produce
         # nested paths like "{channel}/{date} - {title}")
         ctx = _build_template_context(self.stream_info)
-        folder_parts = _render_template(self._folder_template, ctx)
-        file_parts = _render_template(self._file_template, ctx)
+        _folder_tpl = _dl_overrides.get("folder_template") or self._folder_template
+        _file_tpl = _dl_overrides.get("file_template") or self._file_template
+        folder_parts = _render_template(_folder_tpl, ctx)
+        file_parts = _render_template(_file_tpl, ctx)
         title_safe = file_parts[-1] if file_parts else (
             _safe_filename(self.stream_info.title)
             or f"{self.stream_info.platform}_download"
@@ -3696,11 +3713,11 @@ class StreamKeep(QMainWindow):
         self.download_worker.ytdlp_source = ytdlp_source
         self.download_worker.ytdlp_format = ytdlp_format
         self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
-        self.download_worker.rate_limit = YtDlpExtractor.rate_limit
+        self.download_worker.rate_limit = _dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit
         self.download_worker.proxy = YtDlpExtractor.proxy
         self.download_worker.download_subs = YtDlpExtractor.download_subs
         self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
-        self.download_worker.parallel_connections = self._parallel_connections
+        self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
         if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
             cs = self._fmt_crop_time(crop_start) if crop_start else "0:00:00"
@@ -3716,6 +3733,11 @@ class StreamKeep(QMainWindow):
         self.download_worker.log.connect(self._log)
         self.download_worker.all_done.connect(self._on_all_done)
         self._attach_resume_to_worker(self.download_worker)
+        # Store overrides for postprocess snapshot merge (F18)
+        self._dl_overrides = _dl_overrides
+        if _dl_overrides:
+            self._log(f"[OVERRIDE] Per-download overrides active: {', '.join(_dl_overrides.keys())}")
+        _reset_adv_overrides(self)
         self.download_worker.start()
         return True
 

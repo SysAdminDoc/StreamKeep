@@ -1,16 +1,69 @@
 """Download tab — URL input, VOD picker, segments table, queue, log."""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QStringListModel
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QSplitter, QTableWidget, QTextEdit, QVBoxLayout,
-    QWidget,
+    QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
+    QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import QStringListModel
 
 from ...utils import default_output_dir as _default_output_dir
 from ..widgets import make_field_block, make_metric_card, path_label, style_table
+
+
+def _populate_adv_pp(win):
+    """Populate the per-download PP preset combo from settings presets."""
+    from .settings import BUILTIN_PRESETS, _get_user_presets
+    combo = win.adv_pp_combo
+    combo.blockSignals(True)
+    current = combo.currentData() or ""
+    combo.clear()
+    combo.addItem("(use global setting)", userData="")
+    for name in BUILTIN_PRESETS:
+        combo.addItem(f"★ {name}", userData=name)
+    for name in _get_user_presets(win):
+        combo.addItem(name, userData=name)
+    # Restore selection
+    for i in range(combo.count()):
+        if combo.itemData(i) == current:
+            combo.setCurrentIndex(i)
+            break
+    combo.blockSignals(False)
+
+
+def _reset_adv_overrides(win):
+    """Clear all per-download override fields."""
+    win.adv_pp_combo.setCurrentIndex(0)
+    win.adv_rate_input.clear()
+    win.adv_parallel_spin.setValue(0)
+    win.adv_folder_tpl_input.clear()
+    win.adv_file_tpl_input.clear()
+    win.adv_override_badge.setVisible(False)
+
+
+def get_adv_overrides(win):
+    """Return a dict of active per-download overrides (empty keys omitted).
+
+    Called from main_window._on_download() to merge into worker context.
+    """
+    overrides = {}
+    preset_name = win.adv_pp_combo.currentData() or ""
+    if preset_name:
+        overrides["pp_preset"] = preset_name
+    rate = win.adv_rate_input.text().strip()
+    if rate:
+        overrides["rate_limit"] = rate
+    par = win.adv_parallel_spin.value()
+    if par > 0:
+        overrides["parallel_connections"] = par
+    ftpl = win.adv_folder_tpl_input.text().strip()
+    if ftpl:
+        overrides["folder_template"] = ftpl
+    fitpl = win.adv_file_tpl_input.text().strip()
+    if fitpl:
+        overrides["file_template"] = fitpl
+    return overrides
 
 
 def build_download_tab(win):
@@ -377,6 +430,95 @@ def build_download_tab(win):
     controls_lay.setColumnStretch(0, 1)
     controls_lay.setColumnStretch(1, 1)
     root.addWidget(controls_card)
+
+    # ── Per-Download Settings Override (F18) ──────────────────────
+    adv_toggle_row = QHBoxLayout()
+    adv_toggle_row.setSpacing(6)
+    win.adv_toggle_btn = QPushButton("▸ Advanced per-download overrides")
+    win.adv_toggle_btn.setObjectName("ghost")
+    win.adv_toggle_btn.setCheckable(True)
+    win.adv_override_badge = QLabel("")
+    win.adv_override_badge.setStyleSheet(
+        "background:#fab387; color:#11111b; border-radius:8px; "
+        "font-size:10px; font-weight:bold; padding:2px 8px;"
+    )
+    win.adv_override_badge.setVisible(False)
+    adv_toggle_row.addWidget(win.adv_toggle_btn)
+    adv_toggle_row.addWidget(win.adv_override_badge)
+    adv_toggle_row.addStretch(1)
+    root.addLayout(adv_toggle_row)
+
+    win.adv_frame = QFrame()
+    win.adv_frame.setObjectName("subtleCard")
+    win.adv_frame.setVisible(False)
+    adv_lay = QGridLayout(win.adv_frame)
+    adv_lay.setContentsMargins(14, 14, 14, 14)
+    adv_lay.setHorizontalSpacing(12)
+    adv_lay.setVerticalSpacing(10)
+
+    # Override: post-processing preset
+    adv_lay.addWidget(QLabel("Post-process preset:"), 0, 0)
+    win.adv_pp_combo = QComboBox()
+    win.adv_pp_combo.addItem("(use global setting)", userData="")
+    adv_lay.addWidget(win.adv_pp_combo, 0, 1)
+
+    # Override: rate limit
+    adv_lay.addWidget(QLabel("Rate limit:"), 1, 0)
+    win.adv_rate_input = QLineEdit()
+    win.adv_rate_input.setPlaceholderText("e.g. 5M (blank = global)")
+    win.adv_rate_input.setFixedWidth(140)
+    adv_lay.addWidget(win.adv_rate_input, 1, 1)
+
+    # Override: parallel connections
+    adv_lay.addWidget(QLabel("Parallel connections:"), 2, 0)
+    win.adv_parallel_spin = QSpinBox()
+    win.adv_parallel_spin.setRange(0, 16)
+    win.adv_parallel_spin.setSpecialValueText("(global)")
+    win.adv_parallel_spin.setFixedWidth(80)
+    adv_lay.addWidget(win.adv_parallel_spin, 2, 1)
+
+    # Override: output folder template
+    adv_lay.addWidget(QLabel("Folder template:"), 3, 0)
+    win.adv_folder_tpl_input = QLineEdit()
+    win.adv_folder_tpl_input.setPlaceholderText("(blank = global template)")
+    adv_lay.addWidget(win.adv_folder_tpl_input, 3, 1)
+
+    # Override: file template
+    adv_lay.addWidget(QLabel("File template:"), 4, 0)
+    win.adv_file_tpl_input = QLineEdit()
+    win.adv_file_tpl_input.setPlaceholderText("(blank = global template)")
+    adv_lay.addWidget(win.adv_file_tpl_input, 4, 1)
+
+    # Reset button
+    adv_reset_btn = QPushButton("Reset overrides")
+    adv_reset_btn.setObjectName("ghost")
+    adv_reset_btn.setFixedWidth(130)
+    adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
+    adv_lay.addWidget(adv_reset_btn, 5, 1)
+
+    root.addWidget(win.adv_frame)
+
+    def _on_adv_toggle(checked):
+        win.adv_frame.setVisible(checked)
+        win.adv_toggle_btn.setText(
+            "▾ Advanced per-download overrides" if checked
+            else "▸ Advanced per-download overrides"
+        )
+    win.adv_toggle_btn.toggled.connect(_on_adv_toggle)
+
+    # Populate PP preset choices and wire badge updates
+    _populate_adv_pp(win)
+
+    def _update_adv_badge():
+        active = bool(get_adv_overrides(win))
+        win.adv_override_badge.setVisible(active)
+        win.adv_override_badge.setText("Overrides active" if active else "")
+
+    win.adv_pp_combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
+    win.adv_rate_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_parallel_spin.valueChanged.connect(lambda _: _update_adv_badge())
+    win.adv_folder_tpl_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_file_tpl_input.textChanged.connect(lambda _: _update_adv_badge())
 
     # Splitter: segments table + runtime log
     splitter = QSplitter(Qt.Orientation.Vertical)
