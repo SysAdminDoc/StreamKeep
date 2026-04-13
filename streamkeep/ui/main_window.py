@@ -959,6 +959,13 @@ class StreamKeep(QMainWindow):
             from ..hooks import fire_hook
             fire_hook(event, context, hooks_cfg, log_fn=self._log)
 
+    def _media_server_import(self, out_dir, info=None):
+        """Auto-import recording into media server library (F33)."""
+        ms_cfg = self._config.get("media_server", {})
+        if ms_cfg.get("enabled") and out_dir:
+            from ..integrations.media_server import import_to_media_server
+            import_to_media_server(ms_cfg, out_dir, info=info, log_fn=self._log)
+
     def _fire_webhook_json(self, url, payload):
         """Fire-and-forget JSON POST via curl."""
         try:
@@ -1998,6 +2005,17 @@ class StreamKeep(QMainWindow):
         # Apply library/NFO + chat
         self._write_nfo = self.nfo_check.isChecked()
         TwitchExtractor.download_chat_enabled = self.chat_check.isChecked()
+        # Apply media server auto-import (F33)
+        if hasattr(self, "ms_enable_check"):
+            from ..integrations.media_server import SERVER_TYPES
+            self._config["media_server"] = {
+                "enabled": self.ms_enable_check.isChecked(),
+                "server_type": SERVER_TYPES[self.ms_type_combo.currentIndex()],
+                "url": self.ms_url_input.text().strip(),
+                "token": self.ms_token_input.text().strip(),
+                "library_id": self.ms_library_id_input.text().strip(),
+                "library_path": self.ms_path_input.text().strip(),
+            }
         # Apply post-processing presets
         PostProcessor.extract_audio = self.pp_audio_check.isChecked()
         PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()
@@ -3868,6 +3886,7 @@ class StreamKeep(QMainWindow):
                 history_url=self._active_history_url,
                 info=active_info,
             )
+            self._media_server_import(out_dir, active_info)
             if self._queue_active_item is not None:
                 self._release_queue_item("done")
         self._persist_config()
@@ -5498,6 +5517,7 @@ class StreamKeep(QMainWindow):
         # Save metadata + history entry
         q_name = ctx.get("q_name", "")
         self._save_metadata(out_dir, q_name, history_url=item.get("url", ""), info=info)
+        self._media_server_import(out_dir, info)
         # Handle recurrence or mark done
         rec = (item.get("recurrence") or "").strip()
         if rec:
