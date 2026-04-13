@@ -326,33 +326,56 @@ class StreamKeep(QMainWindow):
 
     def dropEvent(self, event):
         mime = event.mimeData()
-        url = ""
+        _media_exts = VIDEO_EXTS | AUDIO_EXTS
+        # ── Collect URLs and local file paths from the drop ──────────
+        http_url = ""
+        local_file = ""
         if mime.hasUrls():
             for u in mime.urls():
-                s = u.toString()
-                if s.startswith("http"):
-                    url = s
-                    break
-                # Local file dropped → treat as direct media URL
                 if u.isLocalFile():
-                    url = u.toLocalFile()
-                    break
-        if not url and mime.hasText():
-            text = mime.text().strip()
-            if text.startswith("http") or os.path.exists(text):
-                url = text
-        if not url:
-            event.ignore()
+                    path = u.toLocalFile()
+                    if Path(path).suffix.lower() in _media_exts:
+                        local_file = path
+                        break
+                else:
+                    s = u.toString()
+                    if s.startswith("http"):
+                        http_url = s
+                        break
+        if not http_url and not local_file and mime.hasText():
+            text = mime.text().strip().splitlines()[0].strip() if mime.text().strip() else ""
+            if text.startswith("http") and len(text) <= 2048:
+                http_url = text
+            elif os.path.isfile(text) and Path(text).suffix.lower() in _media_exts:
+                local_file = text
+        # ── Route: local media file → Clip / Trim dialog ────────────
+        if local_file:
+            self._log(f"[DRAG] Opened local file: {local_file}")
+            from .clip_dialog import ClipDialog
+            dlg = ClipDialog(self, local_file)
+            dlg.exec()
+            event.acceptProposedAction()
             return
-        if "\n" in url or "\r" in url or len(url) > 2048:
-            self._set_status("Dropped content is not a valid URL.", "warning")
-            event.ignore()
+        # ── Route: HTTP(S) URL → fetch pipeline ─────────────────────
+        if http_url:
+            if "\n" in http_url or "\r" in http_url or len(http_url) > 2048:
+                self._set_status("Dropped content is not a valid URL.", "warning")
+                event.ignore()
+                return
+            self._log(f"[DRAG] Loaded URL: {http_url[:120]}")
+            self.url_input.setText(http_url)
+            self._switch_tab(0)
+            self._on_fetch()
+            event.acceptProposedAction()
             return
-        self._log(f"[DRAG] Loaded URL: {url[:100]}")
-        self.url_input.setText(url)
-        self._switch_tab(0)
-        self._on_fetch()
-        event.acceptProposedAction()
+        # ── Reject everything else ──────────────────────────────────
+        if mime.hasUrls():
+            exts = ", ".join(sorted(e.lstrip(".") for e in _media_exts)[:8]) + " ..."
+            self._set_status(
+                f"Dropped file is not a recognized media type ({exts}).",
+                "warning",
+            )
+        event.ignore()
 
     def _apply_config(self):
         cfg = self._config
