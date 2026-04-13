@@ -58,6 +58,8 @@ class HistoryEntry:
     url: str = ""
     favorite: bool = False                 # exempt from lifecycle cleanup (F32)
     watched: bool = False                  # playback status (F32/F38)
+    watch_position_secs: float = 0.0       # resume position (F38)
+    bookmarks: list = field(default_factory=list)  # [{name, secs}] (F38)
 
 
 @dataclass

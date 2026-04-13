@@ -688,6 +688,8 @@ class StreamKeep(QMainWindow):
                     url=str(h.get("url", "")),
                     favorite=bool(h.get("favorite", False)),
                     watched=bool(h.get("watched", False)),
+                    watch_position_secs=float(h.get("watch_position_secs", 0) or 0),
+                    bookmarks=list(h.get("bookmarks", []) or []),
                 )
                 self._history.append(entry)
             except Exception:
@@ -706,7 +708,9 @@ class StreamKeep(QMainWindow):
                            "quality": h.quality, "size": h.size, "path": h.path,
                            "url": h.url,
                            "favorite": bool(getattr(h, "favorite", False)),
-                           "watched": bool(getattr(h, "watched", False))}
+                           "watched": bool(getattr(h, "watched", False)),
+                           "watch_position_secs": float(getattr(h, "watch_position_secs", 0) or 0),
+                           "bookmarks": list(getattr(h, "bookmarks", []) or [])}
                          for h in self._history[-200:]]  # keep last 200
         cfg["folder_template"] = self._folder_template
         cfg["file_template"] = self._file_template
@@ -5901,7 +5905,17 @@ class StreamKeep(QMainWindow):
             thumb_label.setText(_warn_prefix if orphan else "…")
             self.history_table.setCellWidget(i, 0, thumb_label)
             # Data columns 1..6
-            for col, val in enumerate([h.date, h.platform, h.title, h.quality, h.size, h.path], start=1):
+            # Build title with watch/favorite indicators (F38)
+            title_display = h.title or ""
+            status_prefix = ""
+            if getattr(h, "favorite", False):
+                status_prefix += "\u2605 "  # ★
+            if getattr(h, "watched", False):
+                status_prefix += "\u2713 "  # ✓
+            elif getattr(h, "watch_position_secs", 0) > 0:
+                status_prefix += "\u25b6 "  # ▶
+            title_display = status_prefix + title_display
+            for col, val in enumerate([h.date, h.platform, title_display, h.quality, h.size, h.path], start=1):
                 display = val
                 if orphan and col == 6 and val:
                     display = val + "  (missing)"
@@ -5910,6 +5924,8 @@ class StreamKeep(QMainWindow):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if orphan:
                     item.setForeground(_dim_color)
+                elif getattr(h, "watched", False) and col == 3:
+                    item.setForeground(QColor(CAT["overlay0"]))
                 self.history_table.setItem(i, col, item)
             # Queue a thumb request (skip orphans — no file to thumbnail).
             if not orphan:
@@ -6004,6 +6020,13 @@ class StreamKeep(QMainWindow):
         storyboard_act = menu.addAction("Generate storyboard")
         storyboard_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
+        # Watch status + bookmarks (F38)
+        watched_label = "Mark as unwatched" if getattr(h, "watched", False) else "Mark as watched"
+        watch_act = menu.addAction(watched_label)
+        fav_label = "Remove from favorites" if getattr(h, "favorite", False) else "Add to favorites"
+        fav_act = menu.addAction(fav_label)
+        bookmark_act = menu.addAction("Add bookmark…")
+        menu.addSeparator()
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
         remove_act = menu.addAction("Remove from History")
@@ -6031,6 +6054,18 @@ class StreamKeep(QMainWindow):
             self._show_chat_highlights(h.path)
         elif chosen == storyboard_act and h.path:
             self._generate_storyboard(h.path)
+        elif chosen == watch_act:
+            h.watched = not getattr(h, "watched", False)
+            if h.watched:
+                h.watch_position_secs = 0.0
+            self._refresh_history_table()
+            self._persist_config()
+        elif chosen == fav_act:
+            h.favorite = not getattr(h, "favorite", False)
+            self._refresh_history_table()
+            self._persist_config()
+        elif chosen == bookmark_act:
+            self._add_bookmark_dialog(h)
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
@@ -6055,6 +6090,35 @@ class StreamKeep(QMainWindow):
             self._set_status(
                 f"Removed {removed} missing history entries.", "success"
             )
+
+    def _add_bookmark_dialog(self, h):
+        """Show a dialog to add a named timestamp bookmark to a recording (F38)."""
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLineEdit
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add Bookmark")
+        dlg.setMinimumWidth(340)
+        form = QFormLayout(dlg)
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("e.g. Funny moment")
+        form.addRow("Name:", name_input)
+        time_input = QLineEdit()
+        time_input.setPlaceholderText("HH:MM:SS")
+        form.addRow("Timestamp:", time_input)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = name_input.text().strip() or "Bookmark"
+        secs = self._parse_crop_secs(time_input.text().strip()) or 0
+        if not hasattr(h, "bookmarks") or h.bookmarks is None:
+            h.bookmarks = []
+        h.bookmarks.append({"name": name, "secs": secs})
+        self._persist_config()
+        self._log(f"[BOOKMARK] Added '{name}' at {time_input.text().strip()} to {h.title[:40]}")
 
     def _redownload_from_history(self, h):
         """Pre-fill the Download tab from a HistoryEntry and trigger fetch."""
