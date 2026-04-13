@@ -1,0 +1,12 @@
+
+inside
+metadata)
+mimetypes
+Pillow
+PyQt6
+streamkeep
+the
+urllib.error
+urllib.parse
+urllib.request
+xml.etree.ElementTree
