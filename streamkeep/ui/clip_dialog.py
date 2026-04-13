@@ -507,7 +507,7 @@ class ClipDialog(QDialog):
 
         head = QLabel(
             f"<b>Source:</b> {os.path.basename(source_path)}"
-            f"<br><span style='color:#a6adc8'>Duration: "
+            f"<br><span style='color:{CAT['subtext0']}'>Duration: "
             f"{fmt_duration(self._duration) if self._duration else 'unknown'}</span>"
         )
         head.setWordWrap(True)
