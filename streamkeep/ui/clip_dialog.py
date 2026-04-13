@@ -23,8 +23,8 @@ from PyQt6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QProgressBar, QPushButton, QTextEdit,
-    QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QProgressBar, QPushButton, QScrollArea,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..paths import _CREATE_NO_WINDOW
@@ -477,6 +477,7 @@ class ClipDialog(QDialog):
         self._thumb_worker = None
         self._preview_worker = None
         self._waveform_worker = None
+        self._scene_worker = None
         self._duration = probe_duration(source_path)
         if default_end is None:
             default_end = self._duration or 0.0
@@ -526,6 +527,37 @@ class ClipDialog(QDialog):
         self.waveform.seek_requested.connect(self._on_waveform_seek)
         self.scrubber.handles_changed.connect(self.waveform.set_selection)
         root.addWidget(self.waveform)
+
+        # Storyboard panel (F30) — click a scene thumbnail to jump
+        story_bar = QHBoxLayout()
+        story_bar.setSpacing(6)
+        self._story_scroll = QScrollArea()
+        self._story_scroll.setFixedHeight(76)
+        self._story_scroll.setWidgetResizable(True)
+        self._story_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._story_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._story_scroll.setStyleSheet(
+            "QScrollArea { background: #181825; border: 1px solid #313244; "
+            "border-radius: 6px; }")
+        self._story_widget = QWidget()
+        self._story_lay = QHBoxLayout(self._story_widget)
+        self._story_lay.setContentsMargins(4, 2, 4, 2)
+        self._story_lay.setSpacing(4)
+        self._story_placeholder = QLabel("No storyboard")
+        self._story_placeholder.setStyleSheet("color: #6c7086;")
+        self._story_lay.addWidget(self._story_placeholder)
+        self._story_lay.addStretch(1)
+        self._story_scroll.setWidget(self._story_widget)
+        story_bar.addWidget(self._story_scroll, 1)
+        gen_btn = QPushButton("Detect scenes")
+        gen_btn.setObjectName("secondary")
+        gen_btn.setToolTip("Run scene detection (requires scenedetect)")
+        gen_btn.setFixedWidth(100)
+        gen_btn.clicked.connect(self._generate_storyboard)
+        story_bar.addWidget(gen_btn)
+        root.addLayout(story_bar)
 
         # In / Out text fields (kept so power users can type exact times)
         range_row = QHBoxLayout()
@@ -653,6 +685,7 @@ class ClipDialog(QDialog):
             self._kick_off_thumbnails()
             self._kick_off_waveform()
             self._load_chat_spikes()
+            self._load_storyboard_cache()
 
     # ── Thumbnail + preview ─────────────────────────────────────
 
@@ -865,6 +898,69 @@ class ClipDialog(QDialog):
         else:
             self._log_line("[DONE] Trim failed — see log above.")
 
+    # ── Storyboard (F30) ─────────────────────────────────────
+
+    def _load_storyboard_cache(self):
+        from ..postprocess.scene_worker import load_cached_scenes
+        scenes = load_cached_scenes(self.source_path)
+        if scenes:
+            self._populate_storyboard(scenes)
+
+    def _generate_storyboard(self):
+        from ..postprocess.scene_worker import SceneWorker
+        self._scene_worker = SceneWorker(self.source_path)
+        self._scene_worker.log.connect(self._log_line)
+        self._scene_worker.scenes_ready.connect(self._on_scenes_ready)
+        self._scene_worker.start()
+        self._log_line("[SCENE] Starting scene detection\u2026")
+
+    def _on_scenes_ready(self, scenes):
+        if scenes:
+            self._populate_storyboard(scenes)
+
+    def _populate_storyboard(self, scenes):
+        while self._story_lay.count():
+            item = self._story_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for sc in scenes:
+            t = sc.get("time", 0)
+            thumb_path = sc.get("thumb", "")
+            if not os.path.isfile(str(thumb_path)):
+                continue
+            frame = QWidget()
+            col = QVBoxLayout(frame)
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(1)
+            img = QLabel()
+            pix = QPixmap(thumb_path)
+            if not pix.isNull():
+                img.setPixmap(pix.scaled(
+                    100, 56, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+            img.setCursor(Qt.CursorShape.PointingHandCursor)
+            img.setToolTip(f"Jump to {format_hhmmss(t)[:8]}")
+            img.mousePressEvent = lambda ev, ts=t: self._on_story_click(ts)
+            col.addWidget(img)
+            lbl = QLabel(format_hhmmss(t)[:8])
+            lbl.setStyleSheet("color: #a6adc8; font-size: 10px;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            col.addWidget(lbl)
+            self._story_lay.addWidget(frame)
+        self._story_lay.addStretch(1)
+
+    def _on_story_click(self, timestamp):
+        if not self._duration or self._duration <= 0:
+            return
+        ratio = timestamp / self._duration
+        sr = self.scrubber._start_ratio
+        er = self.scrubber._end_ratio
+        if abs(ratio - sr) <= abs(ratio - er):
+            self.scrubber.set_handles(ratio, er)
+        else:
+            self.scrubber.set_handles(sr, ratio)
+        self.scrubber.preview_requested.emit(ratio)
+
     # ── Range list (F9) ────────────────────────────────────────
 
     def _add_range(self):
@@ -973,7 +1069,7 @@ class ClipDialog(QDialog):
 
     def reject(self):
         for w in (self._worker, self._thumb_worker, self._preview_worker,
-                  self._waveform_worker):
+                  self._waveform_worker, self._scene_worker):
             try:
                 if w is not None and w.isRunning():
                     w.cancel() if hasattr(w, "cancel") else None
