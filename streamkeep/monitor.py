@@ -248,14 +248,34 @@ class ChannelMonitor(QObject):
                             e.archive_ids.append(vs)
                     break
 
+    def _entry_to_dict(self, e):
+        return {
+            "url": e.url, "interval_secs": e.interval_secs,
+            "platform": e.platform, "channel_id": e.channel_id,
+            "auto_record": e.auto_record,
+            "subscribe_vods": e.subscribe_vods,
+            "archive_ids": list(e.archive_ids),
+            "override_output_dir": e.override_output_dir or "",
+            "override_quality_pref": e.override_quality_pref or "",
+            "override_filename_template": e.override_filename_template or "",
+            "schedule_start_hhmm": e.schedule_start_hhmm or "",
+            "schedule_end_hhmm": e.schedule_end_hhmm or "",
+            "schedule_days_mask": int(e.schedule_days_mask or 0),
+            "retention_keep_last": int(e.retention_keep_last or 0),
+            "filter_keywords": e.filter_keywords or "",
+            "override_pp_preset": e.override_pp_preset or "",
+            "auto_upgrade": bool(e.auto_upgrade),
+            "min_upgrade_quality": e.min_upgrade_quality or "",
+        }
+
     def save_to_config(self, cfg):
+        # Legacy format for export and backward compat; also persists to DB.
         cfg["monitor_channels"] = [
             {
                 "url": e.url, "interval": e.interval_secs,
                 "auto_record": e.auto_record,
                 "subscribe_vods": e.subscribe_vods,
                 "archive_ids": list(e.archive_ids),
-                # Per-channel profile overrides (v4.14.0).
                 "override_output_dir": e.override_output_dir or "",
                 "override_quality_pref": e.override_quality_pref or "",
                 "override_filename_template": e.override_filename_template or "",
@@ -271,34 +291,49 @@ class ChannelMonitor(QObject):
             for e in self.entries
         ]
 
+    def save_to_db(self):
+        """Persist all monitor entries to SQLite (F41)."""
+        from . import db
+        db.save_all_monitor_channels([self._entry_to_dict(e) for e in self.entries])
+
+    def load_from_db(self):
+        """Load monitor entries from SQLite (F41)."""
+        from . import db
+        for ch in db.load_monitor_channels():
+            self._load_channel_dict(ch)
+
     def load_from_config(self, cfg):
         for ch in cfg.get("monitor_channels", []):
-            ok = self.add_channel(
-                ch["url"], ch.get("interval", 120),
-                ch.get("auto_record", False),
-                ch.get("subscribe_vods", False),
-            )
-            if ok:
-                archive_ids = ch.get("archive_ids", [])
-                for e in self.entries:
-                    if e.url == ch["url"]:
-                        if isinstance(archive_ids, list):
-                            e.archive_ids = [str(x) for x in archive_ids if x]
-                        e.override_output_dir = str(ch.get("override_output_dir", "") or "")
-                        e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
-                        e.override_filename_template = str(ch.get("override_filename_template", "") or "")
-                        e.schedule_start_hhmm = str(ch.get("schedule_start_hhmm", "") or "")
-                        e.schedule_end_hhmm = str(ch.get("schedule_end_hhmm", "") or "")
-                        try:
-                            e.schedule_days_mask = int(ch.get("schedule_days_mask", 0) or 0)
-                        except (TypeError, ValueError):
-                            e.schedule_days_mask = 0
-                        try:
-                            e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
-                        except (TypeError, ValueError):
-                            e.retention_keep_last = 0
-                        e.filter_keywords = str(ch.get("filter_keywords", "") or "")
-                        e.override_pp_preset = str(ch.get("override_pp_preset", "") or "")
-                        e.auto_upgrade = bool(ch.get("auto_upgrade", False))
-                        e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
-                        break
+            self._load_channel_dict(ch)
+
+    def _load_channel_dict(self, ch):
+        ok = self.add_channel(
+            ch.get("url", ""),
+            ch.get("interval_secs", ch.get("interval", 120)),
+            ch.get("auto_record", False),
+            ch.get("subscribe_vods", False),
+        )
+        if ok:
+            archive_ids = ch.get("archive_ids", [])
+            for e in self.entries:
+                if e.url == ch.get("url", ""):
+                    if isinstance(archive_ids, list):
+                        e.archive_ids = [str(x) for x in archive_ids if x]
+                    e.override_output_dir = str(ch.get("override_output_dir", "") or "")
+                    e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
+                    e.override_filename_template = str(ch.get("override_filename_template", "") or "")
+                    e.schedule_start_hhmm = str(ch.get("schedule_start_hhmm", "") or "")
+                    e.schedule_end_hhmm = str(ch.get("schedule_end_hhmm", "") or "")
+                    try:
+                        e.schedule_days_mask = int(ch.get("schedule_days_mask", 0) or 0)
+                    except (TypeError, ValueError):
+                        e.schedule_days_mask = 0
+                    try:
+                        e.retention_keep_last = int(ch.get("retention_keep_last", 0) or 0)
+                    except (TypeError, ValueError):
+                        e.retention_keep_last = 0
+                    e.filter_keywords = str(ch.get("filter_keywords", "") or "")
+                    e.override_pp_preset = str(ch.get("override_pp_preset", "") or "")
+                    e.auto_upgrade = bool(ch.get("auto_upgrade", False))
+                    e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
+                    break

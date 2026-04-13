@@ -6,7 +6,7 @@
 - curl for API/playlist fetching
 - yt-dlp as optional fallback extractor
 
-## Package Layout (v4.11.0 — modularized)
+## Package Layout (v4.25.0)
 
 ```
 StreamKeep.py                    59 lines  — launcher only
@@ -15,7 +15,8 @@ streamkeep/
   bootstrap.py                          — dependency auto-install
   crash_log.py                          — global exception handler
   paths.py                              — CONFIG_DIR, _CREATE_NO_WINDOW
-  config.py                             — load/save config.json
+  config.py                             — load/save config.json (preferences only)
+  db.py                                 — SQLite library.db (history, monitor, queue)
   theme.py                              — CAT palette + QSS stylesheet
   models.py                             — QualityInfo/StreamInfo/VODInfo/HistoryEntry/MonitorEntry
   utils.py                              — fmt_*, safe_filename, default_output_dir, template rendering, cookie scan
@@ -77,6 +78,16 @@ No build step. ffmpeg must be in PATH. PyQt6 and yt-dlp auto-installed.
 - **Config persistence**: JSON at `%APPDATA%\StreamKeep\config.json` — saves output dir, segment pref, history, monitor channels
 
 ## Version History
+- v4.25.0 — **Wave 2 Phase 8: SQLite Library Database Migration (F41).**
+  - New `streamkeep/db.py` module — SQLite `library.db` at `%APPDATA%\StreamKeep\` with WAL journal, `check_same_thread=False`. Tables: `history` (13 columns, indexed on platform/channel/date/url), `monitor_channels` (18 columns, unique on url), `download_queue` (position-ordered JSON blobs). Schema versioned via `PRAGMA user_version`.
+  - **One-time migration**: on first launch, reads `history`, `monitor_channels`, and `download_queue` from `config.json`, inserts into SQLite, strips keys from JSON config (which now retains only user preferences/UI state). If DB already has data, migration is skipped. Backup of old config via existing `.json.bak` rotation.
+  - **History**: no 200-entry cap — all entries stored in DB. New entries written immediately via `save_history_entry()`. Updates (favorite, watched, bookmarks, path) written incrementally via `update_history_entry()`. Deletes (single, bulk, clear, lifecycle cleanup, orphan removal) all route through `delete_history_entries()`.
+  - **Monitor**: `ChannelMonitor.save_to_db()` / `load_from_db()` methods. Loaded from DB first, falls back to config for pre-migration installs. `save_all_monitor_channels()` replaces all rows atomically.
+  - **Queue**: `save_queue()` / `load_queue()` replace the config-based persistence.
+  - **HistoryEntry**: added `db_id` field (0 = not persisted) + `to_dict()` / `from_dict()` methods.
+  - **Rename dialog**: path updates persisted to DB via `update_history_entry()`.
+  - All writes serialized behind `threading.Lock`. Reads are lock-free (WAL mode).
+  - Verified: `py_compile` + `pyflakes` clean. Headless smoke covers init, CRUD (insert/load/update/delete), migration (strips keys, preserves preferences), `HistoryEntry` round-trip, count, clear.
 - v4.17.0 — **Round-4 pack: Kick chat, share bundles, Whisper, per-platform quality, Notifications Center.**
   1. **Kick live chat (Pusher WS)** — new `streamkeep/chat/kick_ws.py` `KickChatReader`. Resolves the chatroom id via `GET /api/v2/channels/{slug}`, connects to `wss://ws-{cluster}.pusher.com/app/{key}`, subscribes `chatrooms.<id>.v2`, parses `App\\Events\\ChatMessageEvent` envelopes into the same `{ts, nick, message, ...}` shape `ChatWorker` already consumes. Hard-coded Pusher app-key + cluster with an HTML-scrape fallback so rotations aren't fatal. `ChatWorker` now dispatches on `platform` so auto-record on Twitch or Kick captures chat; other platforms fall through silently. Depends on `websocket-client` (added to `bootstrap.py` optional list + the CI build step); missing dep = clear log message, never silent failure.
   2. **Share-archive export bundle** — new `streamkeep/postprocess/bundle_worker.py` `BundleWorker`. Walks a recording folder, keeps only media + sidecars (mp4, mkv, json, nfo, ass, srt, vtt, txt, jsonl, images), skips dot-prefixed caches (`.streamkeep_thumb.jpg`, `.streamkeep_resume.json`). Writes a `.zip` with `zipfile.ZIP_DEFLATED compresslevel=1` (already-compressed video barely re-compresses, so this just packages fast). `allowZip64=True` so >4 GB bundles work. Path-traversal guard via `_safe_relpath` — refuses any file whose resolved path escapes the recording root. Entry points: right-click in History or Storage → **Export share bundle (.zip)...**, default file name is `<folder>.zip` next to the recording dir.

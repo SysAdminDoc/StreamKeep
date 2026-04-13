@@ -95,6 +95,7 @@ from streamkeep.postprocess import (
 )
 from streamkeep.monitor import ChannelMonitor, entry_in_schedule_window
 from streamkeep.clipboard import ClipboardMonitor
+from streamkeep import db as _db
 
 # Legacy NATIVE_PROXY compatibility — some UI code below assigns this.
 NATIVE_PROXY = ""
@@ -212,7 +213,11 @@ class StreamKeep(QMainWindow):
         self.monitor.channel_went_live.connect(self._on_channel_live)
         self.monitor.new_vods_found.connect(self._on_new_vods_found)
         self.monitor.log.connect(self._log)
-        self.monitor.load_from_config(self._config)
+        # Load monitor channels from DB first; fall back to config for
+        # pre-migration installs (F41).
+        self.monitor.load_from_db()
+        if not self.monitor.entries:
+            self.monitor.load_from_config(self._config)
         self.clipboard_monitor = ClipboardMonitor()
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
@@ -359,13 +364,19 @@ class StreamKeep(QMainWindow):
                 reverse=True,
             )
             view = getattr(self, "_history_view", list(reversed(self._history)))
+            db_ids_to_delete = []
             for row in sel:
                 if 0 <= row < len(view):
                     try:
-                        real = self._history.index(view[row])
+                        h = view[row]
+                        real = self._history.index(h)
                         self._history.pop(real)
+                        if getattr(h, "db_id", 0):
+                            db_ids_to_delete.append(h.db_id)
                     except ValueError:
                         pass
+            if db_ids_to_delete:
+                _db.delete_history_entries(db_ids_to_delete)
             if sel:
                 self._refresh_history_table()
                 self._persist_config()
@@ -646,9 +657,15 @@ class StreamKeep(QMainWindow):
                 self.pp_convert_audio_samplerate.setCurrentIndex(
                     sr_items.index(PostProcessor.convert_audio_samplerate))
             self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
-        # Restore queue
+        # ── SQLite library init + migration (F41) ──
+        _db.init_db()
+        migrated = _db.migrate_from_config(cfg)
+        if migrated:
+            _save_config(cfg)
+            self._log("[DB] Migrated history/monitor/queue from config.json to library.db")
+        # Restore queue from DB
         queue_items = []
-        for q in cfg.get("download_queue", []):
+        for q in _db.load_queue():
             normalized = self._normalize_queue_item(q)
             if normalized is not None:
                 queue_items.append(normalized)
@@ -673,24 +690,10 @@ class StreamKeep(QMainWindow):
             self.bw_start_spin.setValue(self._bandwidth_rule["start_hour"])
             self.bw_end_spin.setValue(self._bandwidth_rule["end_hour"])
             self.bw_limit_input.setText(self._bandwidth_rule["limit"])
-        for h in cfg.get("history", []):
-            if not isinstance(h, dict):
-                continue
+        # Restore history from DB (F41)
+        for h in _db.load_history():
             try:
-                entry = HistoryEntry(
-                    date=str(h.get("date", "")),
-                    platform=str(h.get("platform", "")),
-                    title=str(h.get("title", "")),
-                    channel=str(h.get("channel", "")),
-                    quality=str(h.get("quality", "")),
-                    size=str(h.get("size", "")),
-                    path=str(h.get("path", "")),
-                    url=str(h.get("url", "")),
-                    favorite=bool(h.get("favorite", False)),
-                    watched=bool(h.get("watched", False)),
-                    watch_position_secs=float(h.get("watch_position_secs", 0) or 0),
-                    bookmarks=list(h.get("bookmarks", []) or []),
-                )
+                entry = HistoryEntry.from_dict(h)
                 self._history.append(entry)
             except Exception:
                 continue
@@ -706,20 +709,16 @@ class StreamKeep(QMainWindow):
         cfg = self._config
         cfg["output_dir"] = self.output_input.text().strip()
         cfg["segment_idx"] = self.segment_combo.currentIndex()
-        cfg["history"] = [{"date": h.date, "platform": h.platform, "title": h.title,
-                           "channel": h.channel,
-                           "quality": h.quality, "size": h.size, "path": h.path,
-                           "url": h.url,
-                           "favorite": bool(getattr(h, "favorite", False)),
-                           "watched": bool(getattr(h, "watched", False)),
-                           "watch_position_secs": float(getattr(h, "watch_position_secs", 0) or 0),
-                           "bookmarks": list(getattr(h, "bookmarks", []) or [])}
-                         for h in self._history[-200:]]  # keep last 200
+        # History is persisted to SQLite (F41) — not saved to config.json.
+        # Per-entry updates (favorite, watched, bookmarks, path) are written
+        # incrementally via _db.update_history_entry(); full list save is only
+        # needed on clear/bulk-delete.
         cfg["folder_template"] = self._folder_template
         cfg["file_template"] = self._file_template
         cfg["webhook_url"] = self._webhook_url
         cfg["check_duplicates"] = self._check_duplicates
-        cfg["download_queue"] = list(self._download_queue)
+        # Queue is persisted to SQLite (F41)
+        _db.save_queue(list(self._download_queue))
         cfg["write_nfo"] = self._write_nfo
         cfg["parallel_connections"] = self._parallel_connections
         cfg["max_concurrent_downloads"] = self._max_concurrent_downloads
@@ -746,6 +745,8 @@ class StreamKeep(QMainWindow):
         cfg["recent_urls"] = list(self._recent_urls)
         cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
         self.monitor.save_to_config(cfg)
+        # Persist monitor channels + queue to SQLite (F41)
+        self.monitor.save_to_db()
         _save_config(cfg)
 
     def _schedule_persist_config(self, delay_ms=500):
@@ -1877,7 +1878,11 @@ class StreamKeep(QMainWindow):
         # Clear mutable state that _apply_config appends to
         self._history.clear()
         self.monitor.entries.clear()
-        self.monitor.load_from_config(new_cfg)
+        # If the imported config has monitor_channels, migrate and load
+        _db.migrate_from_config(new_cfg)
+        self.monitor.load_from_db()
+        if not self.monitor.entries:
+            self.monitor.load_from_config(new_cfg)
         # Re-apply config to all UI elements
         self._apply_config()
         # Refresh derived views
@@ -4342,8 +4347,12 @@ class StreamKeep(QMainWindow):
             if removed:
                 removed_entries = {id(h) for h, _reason in removals
                                    if not os.path.isdir(getattr(h, "path", "") or "")}
+                db_ids = [h.db_id for h, _r in removals
+                          if id(h) in removed_entries and getattr(h, "db_id", 0)]
                 self._history = [h for h in self._history
                                  if id(h) not in removed_entries]
+                if db_ids:
+                    _db.delete_history_entries(db_ids)
                 self._refresh_history_table()
             self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
             self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
@@ -4358,11 +4367,14 @@ class StreamKeep(QMainWindow):
         if removals:
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:
-                # Remove orphan HistoryEntry objects whose dirs were recycled
                 removed_entries = {id(h) for h, _reason in removals
                                    if not os.path.isdir(getattr(h, "path", "") or "")}
+                db_ids = [h.db_id for h, _r in removals
+                          if id(h) in removed_entries and getattr(h, "db_id", 0)]
                 self._history = [h for h in self._history
                                  if id(h) not in removed_entries]
+                if db_ids:
+                    _db.delete_history_entries(db_ids)
                 self._refresh_history_table()
                 self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
 
@@ -5992,6 +6004,8 @@ class StreamKeep(QMainWindow):
             channel=self._infer_history_channel(url=url, platform=platform, channel=channel),
             quality=quality, size=size, path=path, url=url,
         )
+        # Persist to SQLite immediately (F41)
+        entry.db_id = _db.save_history_entry(entry.to_dict())
         self._history.append(entry)
         self._refresh_history_table()
         self._schedule_persist_config()
@@ -6131,6 +6145,7 @@ class StreamKeep(QMainWindow):
 
     def _on_clear_history(self):
         self._history.clear()
+        _db.clear_history()
         self._refresh_history_table()
         self._persist_config()
         self._set_status("Download history cleared.", "success")
@@ -6215,10 +6230,17 @@ class StreamKeep(QMainWindow):
             h.watched = not getattr(h, "watched", False)
             if h.watched:
                 h.watch_position_secs = 0.0
+            if getattr(h, "db_id", 0):
+                _db.update_history_entry(h.db_id, {
+                    "watched": h.watched,
+                    "watch_position_secs": h.watch_position_secs,
+                })
             self._refresh_history_table()
             self._persist_config()
         elif chosen == fav_act:
             h.favorite = not getattr(h, "favorite", False)
+            if getattr(h, "db_id", 0):
+                _db.update_history_entry(h.db_id, {"favorite": h.favorite})
             self._refresh_history_table()
             self._persist_config()
         elif chosen == bookmark_act:
@@ -6232,21 +6254,25 @@ class StreamKeep(QMainWindow):
             self._redownload_from_history(h)
         elif chosen == remove_act:
             try:
-                # `_history_view` is most-recent-first; map back to the
-                # underlying list index (which is chronological).
                 real = self._history.index(h)
                 self._history.pop(real)
+                if getattr(h, "db_id", 0):
+                    _db.delete_history_entries([h.db_id])
                 self._refresh_history_table()
                 self._persist_config()
             except ValueError:
                 pass
         elif remove_missing_act and chosen == remove_missing_act:
+            orphans = [e for e in self._history if e.path and not os.path.isdir(e.path)]
+            orphan_db_ids = [e.db_id for e in orphans if getattr(e, "db_id", 0)]
             before = len(self._history)
             self._history = [
                 e for e in self._history
                 if not e.path or os.path.isdir(e.path)
             ]
             removed = before - len(self._history)
+            if orphan_db_ids:
+                _db.delete_history_entries(orphan_db_ids)
             self._refresh_history_table()
             self._persist_config()
             self._set_status(
@@ -6279,6 +6305,8 @@ class StreamKeep(QMainWindow):
         if not hasattr(h, "bookmarks") or h.bookmarks is None:
             h.bookmarks = []
         h.bookmarks.append({"name": name, "secs": secs})
+        if getattr(h, "db_id", 0):
+            _db.update_history_entry(h.db_id, {"bookmarks": h.bookmarks})
         self._persist_config()
         self._log(f"[BOOKMARK] Added '{name}' at {time_input.text().strip()} to {h.title[:40]}")
 

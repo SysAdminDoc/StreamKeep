@@ -176,6 +176,9 @@ class RenameDialog(QDialog):
                 os.rename(e.path, new_path)
                 undo_log.append({"old": e.path, "new": new_path})
                 e.path = new_path
+                if getattr(e, "db_id", 0):
+                    from streamkeep import db as _db
+                    _db.update_history_entry(e.db_id, {"path": new_path})
                 renamed += 1
             except OSError:
                 continue
