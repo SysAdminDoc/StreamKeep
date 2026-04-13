@@ -13,7 +13,7 @@ class FetchWorker(QThread):
     """Resolves URLs using the extractor system."""
 
     finished = pyqtSignal(object)        # StreamInfo
-    vods_found = pyqtSignal(list, str)   # list[VODInfo], platform_name
+    vods_found = pyqtSignal(list, str, object)  # list[VODInfo], platform_name, next_cursor
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
@@ -86,11 +86,11 @@ class FetchWorker(QThread):
                         self.log.emit("[LIVE CHECK] Live source detected but resolve failed; falling back to VOD lookup.")
 
                 if ext.supports_vod_listing():
-                    vods = ext.list_vods(self.url, log_fn=self.log.emit)
+                    vods, next_cursor = ext.list_vods(self.url, log_fn=self.log.emit)
                     if self._interrupted():
                         return
                     if len(vods) > 1:
-                        self.vods_found.emit(vods, ext.NAME)
+                        self.vods_found.emit(vods, ext.NAME, next_cursor)
                         return
                     elif len(vods) == 1:
                         self.log.emit(f"Auto-selecting only VOD: {vods[0].title}")
@@ -109,11 +109,11 @@ class FetchWorker(QThread):
                 else:
                     # Maybe there were VODs but none to auto-select
                     if ext.supports_vod_listing():
-                        vods = ext.list_vods(self.url, log_fn=self.log.emit)
+                        vods, next_cursor = ext.list_vods(self.url, log_fn=self.log.emit)
                         if self._interrupted():
                             return
                         if vods:
-                            self.vods_found.emit(vods, ext.NAME)
+                            self.vods_found.emit(vods, ext.NAME, next_cursor)
                             return
                     self.error.emit("Failed to resolve stream URL")
 
@@ -166,3 +166,37 @@ class FetchWorker(QThread):
             title=getattr(vod, "title", ""),
             channel=getattr(vod, "channel", ""),
         )
+
+
+class VodPageWorker(QThread):
+    """Fetches the next page of VODs for a channel (pagination)."""
+
+    page_ready = pyqtSignal(list, object)  # list[VODInfo], next_cursor
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
+
+    def __init__(self, url, cursor):
+        super().__init__()
+        self.url = url.strip()
+        self.cursor = cursor
+
+    def _interrupted(self):
+        return self.isInterruptionRequested()
+
+    def run(self):
+        try:
+            from ..http import http_interruptible
+            with http_interruptible(self._interrupted):
+                ext = Extractor.detect(self.url)
+                if not ext or not ext.supports_vod_listing():
+                    self.error.emit("Extractor does not support VOD listing")
+                    return
+                vods, next_cursor = ext.list_vods(
+                    self.url, log_fn=self.log.emit, cursor=self.cursor,
+                )
+                if self._interrupted():
+                    return
+                self.page_ready.emit(vods, next_cursor)
+        except Exception as e:
+            if not self._interrupted():
+                self.error.emit(str(e))

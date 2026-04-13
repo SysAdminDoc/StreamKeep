@@ -49,19 +49,21 @@ class KickExtractor(Extractor):
             return ls.get("playback_url") is not None
         return None
 
-    def list_vods(self, url, log_fn=None):
+    def list_vods(self, url, log_fn=None, cursor=None):
         slug = self.extract_channel_id(url)
         if not slug:
-            return []
-        self._log(log_fn, f"Fetching VODs for Kick channel: {slug}")
+            return [], None
+        page = int(cursor) if cursor else 1
+        self._log(log_fn, f"Fetching VODs for Kick channel: {slug} (page {page})")
 
+        api_url = f"https://kick.com/api/v2/channels/{slug}/videos?page={page}"
         data = curl_json(
-            f"https://kick.com/api/v2/channels/{slug}/videos",
+            api_url,
             headers={"User-Agent": CURL_UA, "Accept": "application/json"},
         )
         if not data or not isinstance(data, list):
             self._log(log_fn, "No VODs found or API error")
-            return []
+            return [], None
 
         vods = []
         for v in data:
@@ -88,7 +90,8 @@ class KickExtractor(Extractor):
                 channel=slug,
             ))
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
-        return vods
+        next_cursor = str(page + 1) if len(vods) >= 20 else None
+        return vods, next_cursor
 
     def resolve(self, url, log_fn=None):
         """Resolve Kick m3u8 URL to StreamInfo."""

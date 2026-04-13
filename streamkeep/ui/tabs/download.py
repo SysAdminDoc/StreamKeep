@@ -275,6 +275,12 @@ def build_download_tab(win):
     vod_main_lay.addWidget(win.vod_table)
 
     vod_btn_row = QHBoxLayout()
+    win.vod_load_more_btn = QPushButton("Load More VODs")
+    win.vod_load_more_btn.setObjectName("ghost")
+    win.vod_load_more_btn.setToolTip("Fetch the next page of VODs from the platform API")
+    win.vod_load_more_btn.clicked.connect(win._on_vod_load_more)
+    win.vod_load_more_btn.setVisible(False)
+    vod_btn_row.addWidget(win.vod_load_more_btn)
     vod_btn_row.addStretch(1)
     win.vod_load_btn = QPushButton("Load Selected")
     win.vod_load_btn.setObjectName("secondary")
