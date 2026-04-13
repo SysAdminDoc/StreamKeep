@@ -27,6 +27,7 @@ from ...theme import CAT
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
     default_output_dir as _default_output_dir,
+    render_template as _render_template,
 )
 from ..widgets import make_field_block, make_metric_card
 
@@ -497,6 +498,55 @@ def build_settings_tab(win):
     win.file_template_input.setPlaceholderText(DEFAULT_FILE_TEMPLATE)
     file_row.addWidget(win.file_template_input, 1)
     tpl_lay.addLayout(file_row)
+
+    # ── Live preview (F12) ────────────────────────────────────────
+    _sample_ctx = {
+        "title": "Just Chatting Marathon",
+        "channel": "xQc",
+        "platform": "twitch",
+        "date": "2026-04-12",
+        "year": "2026",
+        "month": "04",
+        "day": "12",
+        "id": "v2098765432",
+        "quality": "1080p60",
+        "ext": "mp4",
+    }
+    preview_row = QHBoxLayout()
+    preview_row.setSpacing(8)
+    plabel = QLabel("Preview:")
+    plabel.setFixedWidth(100)
+    plabel.setStyleSheet(f"color: {CAT['subtext0']};")
+    preview_row.addWidget(plabel)
+    win._template_preview = QLabel()
+    win._template_preview.setStyleSheet(
+        f"color: {CAT['green']}; font-family: monospace; font-size: 12px;"
+    )
+    win._template_preview.setWordWrap(True)
+    preview_row.addWidget(win._template_preview, 1)
+    tpl_lay.addLayout(preview_row)
+
+    def _update_template_preview():
+        folder_tpl = win.folder_template_input.text().strip() or DEFAULT_FOLDER_TEMPLATE
+        file_tpl = win.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
+        try:
+            folder_parts = _render_template(folder_tpl, _sample_ctx)
+            file_parts = _render_template(file_tpl, _sample_ctx)
+            path = "/".join(folder_parts + file_parts) + ".mp4"
+            win._template_preview.setText(path)
+            win._template_preview.setStyleSheet(
+                f"color: {CAT['green']}; font-family: monospace; font-size: 12px;"
+            )
+        except Exception:
+            win._template_preview.setText("Invalid template")
+            win._template_preview.setStyleSheet(
+                f"color: {CAT['red']}; font-family: monospace; font-size: 12px;"
+            )
+
+    win.folder_template_input.textChanged.connect(lambda: _update_template_preview())
+    win.file_template_input.textChanged.connect(lambda: _update_template_preview())
+    _update_template_preview()
+
     card_lay.addWidget(tpl_block)
 
     # ── Webhook ────────────────────────────────────────────────────
