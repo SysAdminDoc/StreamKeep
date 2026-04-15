@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from PyQt6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QRect
 from PyQt6.QtGui import QColor, QPainter
@@ -172,8 +172,31 @@ def build_analytics_tab(win):
     """Build the Analytics tab widget."""
     page = QWidget()
     lay = QVBoxLayout(page)
-    lay.setContentsMargins(16, 12, 16, 12)
-    lay.setSpacing(12)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(14)
+
+    hero = QFrame()
+    hero.setObjectName("heroCard")
+    hero_lay = QVBoxLayout(hero)
+    hero_lay.setContentsMargins(18, 18, 18, 18)
+    hero_lay.setSpacing(14)
+
+    hero_copy = QVBoxLayout()
+    hero_copy.setSpacing(4)
+    kicker = QLabel("Analytics")
+    kicker.setObjectName("eyebrow")
+    title = QLabel("See how your archive grows across channels and platforms")
+    title.setObjectName("heroTitle")
+    title.setWordWrap(True)
+    body = QLabel(
+        "Track download volume, storage growth, and the channels you capture most often across the selected date range."
+    )
+    body.setObjectName("heroBody")
+    body.setWordWrap(True)
+    hero_copy.addWidget(kicker)
+    hero_copy.addWidget(title)
+    hero_copy.addWidget(body)
+    hero_lay.addLayout(hero_copy)
 
     # Metric cards row
     cards_row = QHBoxLayout()
@@ -190,33 +213,84 @@ def build_analytics_tab(win):
     win.analytics_plat_card, win.analytics_plat_val, _ = make_metric_card(
         "Top Platform", "-", "by count")
     cards_row.addWidget(win.analytics_plat_card)
-    lay.addLayout(cards_row)
+    hero_lay.addLayout(cards_row)
+    lay.addWidget(hero)
 
     # Date range filter
-    filter_row = QHBoxLayout()
-    filter_row.setSpacing(8)
-    filter_row.addWidget(QLabel("Range:"))
+    filter_card = QFrame()
+    filter_card.setObjectName("toolbar")
+    filter_row = QHBoxLayout(filter_card)
+    filter_row.setContentsMargins(14, 12, 14, 12)
+    filter_row.setSpacing(10)
+    filter_copy = QVBoxLayout()
+    filter_copy.setSpacing(2)
+    filter_title = QLabel("Focus Range")
+    filter_title.setObjectName("fieldLabel")
+    filter_hint = QLabel("Switch between recent activity and long-term archive trends.")
+    filter_hint.setObjectName("subtleText")
+    filter_hint.setWordWrap(True)
+    filter_copy.addWidget(filter_title)
+    filter_copy.addWidget(filter_hint)
+    filter_row.addLayout(filter_copy, 1)
     win.analytics_range = QComboBox()
     win.analytics_range.addItems(["All Time", "Last 7 Days", "Last 30 Days", "Last 90 Days", "This Year"])
     win.analytics_range.currentIndexChanged.connect(lambda: _refresh_analytics(win))
-    win.analytics_range.setFixedWidth(140)
+    win.analytics_range.setMinimumWidth(170)
     filter_row.addWidget(win.analytics_range)
-    filter_row.addStretch(1)
-    lay.addLayout(filter_row)
+    lay.addWidget(filter_card)
 
     # Charts row
     charts_row = QHBoxLayout()
     charts_row.setSpacing(12)
+    daily_card = QFrame()
+    daily_card.setObjectName("card")
+    daily_lay = QVBoxLayout(daily_card)
+    daily_lay.setContentsMargins(18, 18, 18, 18)
+    daily_lay.setSpacing(10)
+    daily_title = QLabel("Capture Volume")
+    daily_title.setObjectName("sectionTitle")
+    daily_hint = QLabel("Downloads per day within the selected range.")
+    daily_hint.setObjectName("sectionBody")
+    daily_lay.addWidget(daily_title)
+    daily_lay.addWidget(daily_hint)
     win.analytics_daily_chart = BarChartWidget()
-    charts_row.addWidget(win.analytics_daily_chart, 2)
+    daily_lay.addWidget(win.analytics_daily_chart)
+    charts_row.addWidget(daily_card, 2)
+
+    platform_card = QFrame()
+    platform_card.setObjectName("card")
+    platform_lay = QVBoxLayout(platform_card)
+    platform_lay.setContentsMargins(18, 18, 18, 18)
+    platform_lay.setSpacing(10)
+    platform_title = QLabel("Platform Mix")
+    platform_title.setObjectName("sectionTitle")
+    platform_hint = QLabel("Share of downloads by source platform.")
+    platform_hint.setObjectName("sectionBody")
+    platform_hint.setWordWrap(True)
+    platform_lay.addWidget(platform_title)
+    platform_lay.addWidget(platform_hint)
     win.analytics_platform_chart = DonutChartWidget()
-    charts_row.addWidget(win.analytics_platform_chart, 1)
+    platform_lay.addWidget(win.analytics_platform_chart)
+    charts_row.addWidget(platform_card, 1)
     lay.addLayout(charts_row)
 
     # Top channels
+    channels_card = QFrame()
+    channels_card.setObjectName("card")
+    channels_lay = QVBoxLayout(channels_card)
+    channels_lay.setContentsMargins(18, 18, 18, 18)
+    channels_lay.setSpacing(10)
+    channels_title = QLabel("Top Channels")
+    channels_title.setObjectName("sectionTitle")
+    channels_hint = QLabel("Who appears most often in the active date range.")
+    channels_hint.setObjectName("sectionBody")
+    channels_hint.setWordWrap(True)
+    channels_lay.addWidget(channels_title)
+    channels_lay.addWidget(channels_hint)
     win.analytics_channels_chart = HBarChartWidget()
     win.analytics_channels_chart.setMinimumHeight(160)
-    lay.addWidget(win.analytics_channels_chart)
+    channels_lay.addWidget(win.analytics_channels_chart)
+    lay.addWidget(channels_card)
 
     lay.addStretch(1)
     return page
