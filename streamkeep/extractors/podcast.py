@@ -1,5 +1,6 @@
 """Podcast RSS — parses RSS/XML feeds for episode listing."""
 
+import html
 import re
 import urllib.parse
 
@@ -48,7 +49,7 @@ class PodcastRSSExtractor(Extractor):
             title_m = re.search(
                 r'<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>', item
             )
-            title = title_m.group(1).strip() if title_m else "Untitled"
+            title = html.unescape(title_m.group(1).strip()) if title_m else "Untitled"
 
             date_m = re.search(r'<pubDate>(.*?)</pubDate>', item)
             date = date_m.group(1).strip() if date_m else ""

@@ -11,7 +11,7 @@ import os
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .codecs import VIDEO_EXTS, AUDIO_EXTS
-from .processor import PostProcessor
+from .processor import PostProcessor, PP_LOCK
 
 
 class ConvertWorker(QThread):
@@ -46,7 +46,9 @@ class ConvertWorker(QThread):
         total = len(self.files)
         successes = 0
         failures = 0
-        # Pin PostProcessor to our snapshot; restore after
+        # Guard PostProcessor class-level state with a lock so concurrent
+        # ConvertWorker / FinalizeWorker threads don't clobber each other.
+        PP_LOCK.acquire()
         orig = {
             "convert_video_format": PostProcessor.convert_video_format,
             "convert_video_codec": PostProcessor.convert_video_codec,
@@ -111,6 +113,7 @@ class ConvertWorker(QThread):
         finally:
             for k, v in orig.items():
                 setattr(PostProcessor, k, v)
+            PP_LOCK.release()
 
         if not self._cancel:
             self.progress.emit(total, total, "")

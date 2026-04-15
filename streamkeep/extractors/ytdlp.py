@@ -57,7 +57,7 @@ class YtDlpExtractor(Extractor):
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
-        cmd.append(url)
+        cmd.extend(["--", url])
         return cmd
 
     _AUTH_ERRORS = [
@@ -74,7 +74,7 @@ class YtDlpExtractor(Extractor):
         """Attempt yt-dlp extraction with a specific browser's cookies.
         Returns (data_dict, None) or (None, error_str)."""
         cmd = ["yt-dlp", "--dump-json", "--no-download",
-               "--cookies-from-browser", browser_name, url]
+               "--cookies-from-browser", browser_name, "--", url]
         try:
             result = run_capture_interruptible(cmd, timeout=60)
             if result.interrupted:
@@ -313,7 +313,7 @@ class YtDlpExtractor(Extractor):
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
-        cmd.append(url)
+        cmd.extend(["--", url])
         try:
             result = run_capture_interruptible(cmd, timeout=60)
             if result.interrupted or result.returncode != 0:

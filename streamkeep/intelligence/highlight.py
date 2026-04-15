@@ -7,10 +7,10 @@ highlight moments as ``(start, end, score, reason)`` tuples.
 All analysis is local — no cloud APIs needed.
 """
 
+import array
 import json
 import math
 import os
-import struct
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -40,30 +40,26 @@ def _load_audio_peaks(recording_dir, bucket_secs=30):
     try:
         with open(waveform, "rb") as f:
             data = f.read()
-        # Waveform is int16 peaks, 8000 samples/sec
+        # Waveform is int16 peaks, 8000 samples/sec — use array for fast bulk decode
         sample_rate = 8000
         samples_per_bucket = sample_rate * bucket_secs
-        n_samples = len(data) // 2
+        samples = array.array("h")
+        samples.frombytes(data[:len(data) - len(data) % 2])
+        n_samples = len(samples)
         peaks = {}
         for bucket_idx in range(n_samples // samples_per_bucket):
-            start = bucket_idx * samples_per_bucket * 2
-            end = start + samples_per_bucket * 2
-            chunk = data[start:end]
-            # RMS energy of the chunk
-            total = 0.0
-            count = 0
-            for i in range(0, len(chunk) - 1, 2):
-                val = struct.unpack("<h", chunk[i:i+2])[0]
-                total += val * val
-                count += 1
-            rms = math.sqrt(total / max(count, 1))
+            lo = bucket_idx * samples_per_bucket
+            hi = lo + samples_per_bucket
+            chunk = samples[lo:hi]
+            total = sum(v * v for v in chunk)
+            rms = math.sqrt(total / max(len(chunk), 1))
             peaks[bucket_idx] = rms
         # Normalize to 0-1
         max_rms = max(peaks.values()) if peaks else 1.0
         if max_rms > 0:
             peaks = {k: v / max_rms for k, v in peaks.items()}
         return peaks
-    except (OSError, struct.error):
+    except (OSError, ValueError):
         return {}
 
 
