@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import CAT
+from .widgets import style_table
 
 
 class _RecoverWorker(QThread):
@@ -97,6 +98,7 @@ class RecoverDialog(QDialog):
 
         # Status
         self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
         root.addWidget(self.status_label)
 
         # Results table
@@ -110,6 +112,7 @@ class RecoverDialog(QDialog):
         self.table.setColumnWidth(0, 160)
         self.table.setColumnWidth(1, 140)
         self.table.setColumnWidth(2, 100)
+        style_table(self.table)
         root.addWidget(self.table, 1)
 
         # Bottom row

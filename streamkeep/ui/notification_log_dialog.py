@@ -4,10 +4,14 @@ Reads the persistent ``notifications.jsonl`` via ``NotificationCenter.load_histo
 and presents them in a table with severity filtering and free-text search.
 """
 
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
+
+from ..theme import CAT
+from .widgets import style_table
 
 
 class NotificationLogDialog(QDialog):
@@ -23,18 +27,26 @@ class NotificationLogDialog(QDialog):
         self._filtered = list(self._entries)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        title = QLabel("Notification Log")
+        title.setObjectName("sectionTitle")
+        root.addWidget(title)
 
         # Filter bar
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
-        filter_row.addWidget(QLabel("Filter:"))
+        level_lbl = QLabel("Level")
+        level_lbl.setObjectName("fieldLabel")
+        filter_row.addWidget(level_lbl)
         self.level_combo = QComboBox()
         self.level_combo.addItems(["All", "Info", "Success", "Warning", "Error"])
         self.level_combo.currentIndexChanged.connect(self._apply_filter)
         filter_row.addWidget(self.level_combo)
-        filter_row.addWidget(QLabel("Search:"))
+        search_lbl = QLabel("Search")
+        search_lbl.setObjectName("fieldLabel")
+        filter_row.addWidget(search_lbl)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search messages\u2026")
         self.search_input.textChanged.connect(self._apply_filter)
@@ -52,11 +64,13 @@ class NotificationLogDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 160)
         self.table.setColumnWidth(1, 70)
+        style_table(self.table, row_height=36)
         root.addWidget(self.table)
 
         # Count + buttons
         btn_row = QHBoxLayout()
         self.count_label = QLabel()
+        self.count_label.setObjectName("statusLabel")
         btn_row.addWidget(self.count_label)
         btn_row.addStretch(1)
         export_btn = QPushButton("Export\u2026")
@@ -83,10 +97,22 @@ class NotificationLogDialog(QDialog):
                 continue
             self._filtered.append(e)
 
+        _LEVEL_COLORS = {
+            "success": CAT["green"],
+            "warning": CAT["yellow"],
+            "error":   CAT["red"],
+            "info":    CAT["subtext1"],
+        }
         self.table.setRowCount(len(self._filtered))
         for i, e in enumerate(reversed(self._filtered)):
-            self.table.setItem(i, 0, QTableWidgetItem(e.get("ts", "")))
-            self.table.setItem(i, 1, QTableWidgetItem(e.get("level", "info")))
+            level = e.get("level", "info")
+            color = QColor(_LEVEL_COLORS.get(level, CAT["subtext1"]))
+            ts_item = QTableWidgetItem(e.get("ts", ""))
+            ts_item.setForeground(QColor(CAT["muted"]))
+            self.table.setItem(i, 0, ts_item)
+            level_item = QTableWidgetItem(level.capitalize())
+            level_item.setForeground(color)
+            self.table.setItem(i, 1, level_item)
             self.table.setItem(i, 2, QTableWidgetItem(e.get("text", "")))
 
         self.count_label.setText(

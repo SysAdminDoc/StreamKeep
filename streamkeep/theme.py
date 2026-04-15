@@ -99,7 +99,12 @@ def build_stylesheet(p=None):
         p = CAT
     return f"""
 QMainWindow {{
-    background-color: {p['crust']};
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['crust']},
+        stop: 0.55 {p['mantle']},
+        stop: 1 {p['base']}
+    );
 }}
 QWidget {{
     color: {p['text']};
@@ -107,22 +112,52 @@ QWidget {{
     font-size: 13px;
 }}
 QWidget#chrome {{
-    background-color: {p['crust']};
+    background-color: transparent;
+}}
+QAbstractScrollArea#chrome,
+QAbstractScrollArea#chrome > QWidget#chrome {{
+    background-color: transparent;
+    border: none;
+}}
+QFrame#shellCard {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['panelHi']},
+        stop: 0.5 {p['panel']},
+        stop: 1 {p['panelSoft']}
+    );
+    border: 1px solid {p['stroke']};
+    border-radius: 26px;
+}}
+QFrame#shellMetaCard {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(137, 180, 250, 34),
+        stop: 0.55 rgba(116, 199, 236, 22),
+        stop: 1 rgba(166, 227, 161, 12)
+    );
+    border: 1px solid {p['stroke']};
+    border-radius: 20px;
 }}
 QFrame#heroCard {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {p['panelHi']},
-        stop: 0.58 {p['panel']},
+        stop: 0 rgba(137, 180, 250, 18),
+        stop: 0.22 {p['panelHi']},
+        stop: 0.62 {p['panel']},
         stop: 1 {p['panelSoft']}
     );
     border: 1px solid {p['stroke']};
-    border-radius: 22px;
+    border-radius: 24px;
 }}
 QFrame#card, QFrame#panel, QFrame#footerBar {{
-    background-color: {p['mantle']};
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['mantle']},
+        stop: 1 {p['panelSoft']}
+    );
     border: 1px solid {p['stroke']};
-    border-radius: 18px;
+    border-radius: 20px;
 }}
 QFrame#activeRecordings {{
     background-color: qlineargradient(
@@ -160,21 +195,38 @@ QLabel#resumeBannerLabel {{
     font-weight: 600;
 }}
 QFrame#subtleCard, QFrame#metricCard, QFrame#toolbar {{
-    background-color: {p['panelSoft']};
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['panelSoft']},
+        stop: 1 {p['panel']}
+    );
     border: 1px solid {p['stroke']};
-    border-radius: 16px;
+    border-radius: 18px;
 }}
 QLabel {{
     color: {p['text']};
     border: none;
 }}
 QLabel#title {{
-    font-size: 28px;
+    font-size: 30px;
     font-weight: 700;
     color: {p['rosewater']};
 }}
 QLabel#subtitle {{
     font-size: 12px;
+    color: {p['muted']};
+}}
+QLabel#shellStatValue {{
+    font-size: 17px;
+    font-weight: 700;
+    color: {p['rosewater']};
+}}
+QLabel#shellStatBody {{
+    font-size: 12px;
+    color: {p['subtext1']};
+}}
+QLabel#shellStatMeta {{
+    font-size: 11px;
     color: {p['muted']};
 }}
 QLabel#eyebrow {{
@@ -227,7 +279,7 @@ QLabel#streamInfo {{
     font-size: 12px;
     color: {p['subtext1']};
     padding: 10px 12px;
-    background-color: {p['panelSoft']};
+    background-color: rgba(137, 180, 250, 16);
     border: 1px solid {p['stroke']};
     border-radius: 12px;
 }}
@@ -235,22 +287,29 @@ QLineEdit, QComboBox, QSpinBox {{
     background-color: {p['surface0']};
     color: {p['text']};
     border: 1px solid {p['stroke']};
-    border-radius: 12px;
-    padding: 10px 12px;
+    border-radius: 14px;
+    padding: 11px 12px;
     font-size: 13px;
-    selection-background-color: {p['surface2']};
+    selection-background-color: {p['accent']};
+    selection-color: #081120;
+}}
+QLineEdit#shellSearch, QLineEdit#globalSearch {{
+    background-color: {p['base']};
+    border-radius: 15px;
+    padding: 12px 14px;
 }}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
     border-color: {p['accent']};
 }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
     border: 1px solid {p['accent']};
+    background-color: {p['base']};
 }}
 QPushButton {{
     background-color: {p['surface0']};
     color: {p['text']};
     border: 1px solid {p['stroke']};
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 10px 16px;
     font-weight: 600;
     font-size: 13px;
@@ -270,41 +329,46 @@ QPushButton:disabled {{
 QPushButton#primary {{
     background-color: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {p['accentSoft']},
-        stop: 1 {p['green']}
+        stop: 0 {p['accent']},
+        stop: 1 {p['sky']}
     );
-    color: {p['crust']};
-    border: none;
-    padding: 10px 22px;
+    color: #081120;
+    border: 1px solid rgba(255, 255, 255, 35);
+    padding: 11px 22px;
     font-size: 14px;
 }}
 QPushButton#primary:hover {{
-    background-color: {p['teal']};
+    background-color: {p['sky']};
 }}
 QPushButton#primary:disabled {{
     background-color: {p['surface1']};
     color: {p['overlay0']};
 }}
 QPushButton#secondary {{
-    background-color: {p['panelSoft']};
-    color: {p['rosewater']};
+    background-color: {p['panel']};
+    color: {p['text']};
 }}
 QPushButton#ghost {{
     background-color: transparent;
     color: {p['subtext1']};
+    border: 1px solid transparent;
 }}
 QPushButton#ghost:hover {{
-    background-color: {p['panelSoft']};
+    background-color: {p['panel']};
+    border-color: {p['stroke']};
+}}
+QPushButton#toggleAccent {{
+    background-color: {p['panel']};
 }}
 QPushButton#toggleAccent:checked {{
     background-color: {p['accent']};
-    color: {p['crust']};
+    color: #081120;
     border-color: {p['accent']};
 }}
 QPushButton#danger {{
     background-color: {p['red']};
-    color: {p['crust']};
-    border: none;
+    color: #081120;
+    border: 1px solid rgba(255, 255, 255, 24);
 }}
 QPushButton#danger:hover {{
     background-color: {p['maroon']};
@@ -316,18 +380,19 @@ QComboBox::drop-down {{
 QComboBox QAbstractItemView {{
     background-color: {p['surface0']};
     color: {p['text']};
-    selection-background-color: {p['surface2']};
+    selection-background-color: {p['panelHi']};
     border: 1px solid {p['stroke']};
     border-radius: 10px;
 }}
 QTableWidget {{
-    background-color: {p['mantle']};
+    background-color: {p['panel']};
     color: {p['text']};
     alternate-background-color: {p['panelSoft']};
     border: 1px solid {p['stroke']};
-    border-radius: 16px;
+    border-radius: 18px;
     gridline-color: transparent;
     selection-background-color: {p['panelHi']};
+    selection-color: {p['text']};
     font-size: 13px;
     padding: 4px;
 }}
@@ -347,22 +412,68 @@ QHeaderView::section {{
     font-weight: 700;
     font-size: 12px;
 }}
-QTextEdit#log {{
-    background-color: {p['crust']};
-    color: {p['subtext0']};
+QTextEdit, QPlainTextEdit {{
+    background-color: {p['panel']};
+    color: {p['text']};
     border: 1px solid {p['stroke']};
     border-radius: 16px;
     padding: 10px;
+    selection-background-color: {p['panelHi']};
+    selection-color: {p['text']};
+}}
+QTextEdit#log {{
+    background-color: {p['crust']};
+    color: {p['subtext0']};
     font-family: 'Cascadia Code', 'Consolas', monospace;
     font-size: 11px;
 }}
+QListWidget, QListWidget#globalResults {{
+    background-color: {p['mantle']};
+    border: 1px solid {p['stroke']};
+    border-radius: 18px;
+    padding: 6px;
+    outline: none;
+}}
+QListWidget::item {{
+    padding: 10px 12px;
+    border-radius: 12px;
+}}
+QListWidget::item:hover {{
+    background-color: {p['panel']};
+}}
+QListWidget::item:selected {{
+    background-color: {p['panelHi']};
+    color: {p['text']};
+}}
+QMenu {{
+    background-color: {p['mantle']};
+    border: 1px solid {p['stroke']};
+    border-radius: 14px;
+    padding: 8px;
+}}
+QMenu::item {{
+    padding: 8px 12px;
+    border-radius: 10px;
+}}
+QMenu::item:selected {{
+    background-color: {p['panelHi']};
+    color: {p['text']};
+}}
+QToolTip {{
+    background-color: {p['panel']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
+    padding: 6px 8px;
+    border-radius: 8px;
+}}
 QProgressBar {{
     background-color: {p['panelSoft']};
-    border: none;
-    border-radius: 6px;
-    height: 10px;
+    border: 1px solid {p['stroke']};
+    border-radius: 999px;
+    height: 12px;
     text-align: center;
     color: transparent;
+    padding: 1px;
 }}
 QProgressBar::chunk {{
     background-color: qlineargradient(
@@ -370,7 +481,7 @@ QProgressBar::chunk {{
         stop: 0 {p['accent']},
         stop: 1 {p['green']}
     );
-    border-radius: 6px;
+    border-radius: 999px;
 }}
 QCheckBox {{
     color: {p['text']};
@@ -402,6 +513,22 @@ QScrollBar::handle:vertical:hover {{
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
+}}
+QScrollBar:horizontal {{
+    background-color: transparent;
+    height: 10px;
+    margin: 4px;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {p['surface2']};
+    border-radius: 5px;
+    min-width: 30px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {p['overlay0']};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0px;
 }}
 QSplitter::handle {{
     background-color: {p['stroke']};

@@ -55,27 +55,35 @@ def TAB_STYLE():
     """Build tab stylesheet from the live CAT dict (theme-safe)."""
     return f"""
 QPushButton#tab {{
-    background-color: {CAT['panelSoft']};
-    color: {CAT['muted']};
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {CAT['panelSoft']},
+        stop: 1 {CAT['panel']}
+    );
+    color: {CAT['subtext1']};
     border: 1px solid {CAT['stroke']};
-    padding: 10px 18px;
+    padding: 11px 18px;
     font-weight: 600;
     font-size: 13px;
-    border-radius: 999px;
+    border-radius: 14px;
 }}
 QPushButton#tab:hover {{
     color: {CAT['text']};
     border-color: {CAT['accent']};
-    background-color: {CAT['panel']};
+    background-color: {CAT['panelHi']};
 }}
 QPushButton#tabActive {{
-    background-color: {CAT['accent']};
-    color: {CAT['crust']};
-    border: 1px solid {CAT['accent']};
-    padding: 10px 18px;
-    font-weight: 600;
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {CAT['accent']},
+        stop: 1 {CAT['sky']}
+    );
+    color: #081120;
+    border: 1px solid rgba(255, 255, 255, 40);
+    padding: 11px 18px;
+    font-weight: 700;
     font-size: 13px;
-    border-radius: 999px;
+    border-radius: 14px;
 }}
 """
 
@@ -98,10 +106,10 @@ def make_metric_card(label_text, value_text="--", sub_text=""):
     """Build a dashboard metric card. Returns (card, value_label, sub_label)."""
     card = QFrame()
     card.setObjectName("metricCard")
-    card.setMinimumHeight(92)
+    card.setMinimumHeight(102)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(14, 12, 14, 12)
-    lay.setSpacing(4)
+    lay.setContentsMargins(16, 14, 16, 14)
+    lay.setSpacing(6)
 
     label = QLabel(label_text)
     label.setObjectName("metricLabel")
@@ -145,11 +153,15 @@ def make_field_block(title, hint=""):
 def wrap_scroll_page(page):
     """Wrap a page widget in a QScrollArea with styled chrome."""
     page.setObjectName("chrome")
+    page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll = QScrollArea()
+    scroll.setObjectName("chrome")
+    scroll.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     scroll.viewport().setObjectName("chrome")
+    scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll.setWidget(page)
     return scroll
 

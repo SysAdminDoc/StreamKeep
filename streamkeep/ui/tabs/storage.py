@@ -42,7 +42,7 @@ class _SparklineWidget(QWidget):
         rng = hi - lo or 1
         n = len(self._data)
         step = w / max(1, n - 1)
-        pen_color = QColor("#89b4fa")
+        pen_color = QColor(CAT["accent"])
         p.setPen(pen_color)
         for i in range(n - 1):
             x1 = int(i * step)
@@ -58,6 +58,7 @@ def _apply_storage_filter(win):
     plat = win.storage_platform_filter.currentText()
     chan = win.storage_channel_filter.currentText()
     groups = getattr(win, "_storage_groups", [])
+    visible = 0
     for i, g in enumerate(groups):
         show = True
         if plat != "All" and g.platform != plat:
@@ -65,6 +66,15 @@ def _apply_storage_filter(win):
         if chan != "All" and g.channel != chan:
             show = False
         win.storage_table.setRowHidden(i, not show)
+        if show:
+            visible += 1
+    if hasattr(win, "storage_filter_summary"):
+        summary = f"{visible} folder group(s) shown"
+        if plat != "All" or chan != "All":
+            summary += f" • {plat} • {chan}"
+        else:
+            summary += " • all sources"
+        win.storage_filter_summary.setText(summary)
 
 
 def build_storage_tab(win):
@@ -142,28 +152,57 @@ def build_storage_tab(win):
     # ── Filter row (F13) ────────────────────────────────────────────
     filter_card = QFrame()
     filter_card.setObjectName("card")
-    filt_lay = QHBoxLayout(filter_card)
-    filt_lay.setContentsMargins(18, 10, 18, 10)
+    filter_wrap = QVBoxLayout(filter_card)
+    filter_wrap.setContentsMargins(18, 14, 18, 14)
+    filter_wrap.setSpacing(10)
+    filter_copy = QVBoxLayout()
+    filter_copy.setSpacing(4)
+    filter_title = QLabel("Refine the Archive")
+    filter_title.setObjectName("sectionTitle")
+    filter_body = QLabel("Filter by platform or channel, then clear back to the full archive in one click.")
+    filter_body.setObjectName("sectionBody")
+    filter_body.setWordWrap(True)
+    filter_copy.addWidget(filter_title)
+    filter_copy.addWidget(filter_body)
+    filter_wrap.addLayout(filter_copy)
+    filt_lay = QHBoxLayout()
     filt_lay.setSpacing(10)
-    filt_lay.addWidget(QLabel("Platform:"))
+    plat_label = QLabel("Platform")
+    plat_label.setObjectName("fieldLabel")
+    filt_lay.addWidget(plat_label)
     win.storage_platform_filter = QComboBox()
     win.storage_platform_filter.addItem("All")
     win.storage_platform_filter.setMinimumWidth(120)
     win.storage_platform_filter.currentIndexChanged.connect(
         lambda _: _apply_storage_filter(win))
     filt_lay.addWidget(win.storage_platform_filter)
-    filt_lay.addWidget(QLabel("Channel:"))
+    chan_label = QLabel("Channel")
+    chan_label.setObjectName("fieldLabel")
+    filt_lay.addWidget(chan_label)
     win.storage_channel_filter = QComboBox()
     win.storage_channel_filter.addItem("All")
     win.storage_channel_filter.setMinimumWidth(160)
     win.storage_channel_filter.currentIndexChanged.connect(
         lambda _: _apply_storage_filter(win))
     filt_lay.addWidget(win.storage_channel_filter)
+    clear_filters_btn = QPushButton("Clear Filters")
+    clear_filters_btn.setObjectName("ghost")
+    clear_filters_btn.clicked.connect(
+        lambda: (
+            win.storage_platform_filter.setCurrentIndex(0),
+            win.storage_channel_filter.setCurrentIndex(0),
+        )
+    )
+    filt_lay.addWidget(clear_filters_btn)
     filt_lay.addStretch(1)
     # Sparkline widget (F13)
     win.storage_sparkline = _SparklineWidget()
     win.storage_sparkline.setFixedSize(120, 30)
     filt_lay.addWidget(win.storage_sparkline)
+    filter_wrap.addLayout(filt_lay)
+    win.storage_filter_summary = QLabel("0 folder group(s) shown • all sources")
+    win.storage_filter_summary.setObjectName("subtleText")
+    filter_wrap.addWidget(win.storage_filter_summary)
     lay.addWidget(filter_card)
 
     # Table
@@ -306,6 +345,7 @@ def populate_storage_table(win, scan):
             win._storage_thumb_loader.request(g.dir_path, media.path)
     win.storage_empty_label.setVisible(len(scan.groups) == 0)
     win.storage_delete_btn.setEnabled(False)
+    _apply_storage_filter(win)
 
 
 def prompt_confirm_delete(parent, group_count, total_size, sample_paths):

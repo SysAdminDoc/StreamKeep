@@ -208,6 +208,10 @@ def build_settings_tab(win):
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(14)
+    current_theme = str(win._config.get("theme", "dark") or "dark")
+    theme_display = {"dark": "Dark", "light": "Light", "system": "System"}.get(
+        current_theme, "Dark"
+    )
 
     # ── Hero ────────────────────────────────────────────────────────
     hero = QFrame()
@@ -242,6 +246,26 @@ def build_settings_tab(win):
     settings_meta.setObjectName("sectionBody")
     settings_meta.setWordWrap(True)
     hero_lay.addWidget(settings_meta)
+
+    settings_metrics = QHBoxLayout()
+    settings_metrics.setSpacing(12)
+    theme_card, win.settings_theme_value, win.settings_theme_sub = make_metric_card(
+        "Appearance", theme_display, "Catppuccin-based desktop theme"
+    )
+    config_card, _, _ = make_metric_card(
+        "Config",
+        CONFIG_FILE.name,
+        str(CONFIG_FILE.parent),
+    )
+    secrets_card, _, _ = make_metric_card(
+        "Secrets",
+        "Protected",
+        "Tokens stay local with Windows DPAPI",
+    )
+    settings_metrics.addWidget(theme_card)
+    settings_metrics.addWidget(config_card, 1)
+    settings_metrics.addWidget(secrets_card)
+    hero_lay.addLayout(settings_metrics)
     lay.addWidget(hero)
 
     # ── Card body ───────────────────────────────────────────────────
@@ -252,20 +276,31 @@ def build_settings_tab(win):
     card_lay.setSpacing(14)
 
     # Theme selector (F20)
-    theme_row = QHBoxLayout()
-    theme_row.setSpacing(8)
-    theme_row.addWidget(QLabel("<b>Theme:</b>"))
+    theme_bar = QFrame()
+    theme_bar.setObjectName("toolbar")
+    theme_row = QHBoxLayout(theme_bar)
+    theme_row.setContentsMargins(14, 12, 14, 12)
+    theme_row.setSpacing(10)
+    theme_copy = QVBoxLayout()
+    theme_copy.setSpacing(2)
+    theme_title = QLabel("Appearance")
+    theme_title.setObjectName("fieldLabel")
+    theme_hint = QLabel("Choose the desktop theme StreamKeep should apply instantly.")
+    theme_hint.setObjectName("subtleText")
+    theme_hint.setWordWrap(True)
+    theme_copy.addWidget(theme_title)
+    theme_copy.addWidget(theme_hint)
+    theme_row.addLayout(theme_copy, 1)
     win.theme_combo = QComboBox()
     win.theme_combo.addItem("Dark (Catppuccin Mocha)", "dark")
     win.theme_combo.addItem("Light (Catppuccin Latte)", "light")
     win.theme_combo.addItem("System", "system")
-    current_theme = str(win._config.get("theme", "dark") or "dark")
     idx = max(0, win.theme_combo.findData(current_theme))
     win.theme_combo.setCurrentIndex(idx)
     win.theme_combo.currentIndexChanged.connect(win._on_theme_changed)
+    win.theme_combo.setMinimumWidth(210)
     theme_row.addWidget(win.theme_combo)
-    theme_row.addStretch(1)
-    card_lay.addLayout(theme_row)
+    card_lay.addWidget(theme_bar)
 
     # Default Output + Toolchain (side by side)
     sections_top = QHBoxLayout()
@@ -277,6 +312,7 @@ def build_settings_tab(win):
     output_row = QHBoxLayout()
     output_row.setSpacing(8)
     win.settings_output = QLineEdit(str(_default_output_dir()))
+    win.settings_output.setClearButtonEnabled(True)
     output_row.addWidget(win.settings_output, 1)
     browse = QPushButton("Browse")
     browse.setObjectName("secondary")
@@ -345,6 +381,7 @@ def build_settings_tab(win):
     row_cookiefile.setSpacing(8)
     win.cookies_file_input = QLineEdit()
     win.cookies_file_input.setPlaceholderText("Path to cookies.txt (Netscape format)")
+    win.cookies_file_input.setClearButtonEnabled(True)
     row_cookiefile.addWidget(win.cookies_file_input, 1)
     browse_cookies = QPushButton("Browse")
     browse_cookies.setObjectName("secondary")
@@ -449,6 +486,7 @@ def build_settings_tab(win):
     rate_row.addWidget(rate_label)
     win.rate_limit_input = QLineEdit()
     win.rate_limit_input.setPlaceholderText("e.g. 500K or 2M (leave blank for unlimited)")
+    win.rate_limit_input.setClearButtonEnabled(True)
     rate_row.addWidget(win.rate_limit_input, 1)
     network_lay.addLayout(rate_row)
 
@@ -459,6 +497,7 @@ def build_settings_tab(win):
     proxy_row.addWidget(proxy_label)
     win.proxy_input = QLineEdit()
     win.proxy_input.setPlaceholderText("e.g. socks5://127.0.0.1:1080 or http://proxy:8080")
+    win.proxy_input.setClearButtonEnabled(True)
     proxy_row.addWidget(win.proxy_input, 1)
     network_lay.addLayout(proxy_row)
 
@@ -521,6 +560,7 @@ def build_settings_tab(win):
     bw_row.addWidget(QLabel("Limit:"))
     win.bw_limit_input = QLineEdit(win._bandwidth_rule["limit"])
     win.bw_limit_input.setPlaceholderText("500K")
+    win.bw_limit_input.setClearButtonEnabled(True)
     win.bw_limit_input.setFixedWidth(100)
     bw_row.addWidget(win.bw_limit_input)
     bw_row.addStretch(1)
@@ -554,6 +594,7 @@ def build_settings_tab(win):
     win.sched_day_limit = QLineEdit("2M")
     win.sched_day_limit.setFixedWidth(80)
     win.sched_day_limit.setPlaceholderText("2M")
+    win.sched_day_limit.setClearButtonEnabled(True)
     sched_row.addWidget(win.sched_day_limit)
     network_lay.addLayout(sched_row)
 
@@ -563,12 +604,14 @@ def build_settings_tab(win):
     win.sched_night_limit = QLineEdit("")
     win.sched_night_limit.setFixedWidth(80)
     win.sched_night_limit.setPlaceholderText("(unlimited)")
+    win.sched_night_limit.setClearButtonEnabled(True)
     sched_row2.addWidget(win.sched_night_limit)
     sched_row2.addSpacing(12)
     sched_row2.addWidget(QLabel("Weekend limit:"))
     win.sched_weekend_limit = QLineEdit("")
     win.sched_weekend_limit.setFixedWidth(80)
     win.sched_weekend_limit.setPlaceholderText("(unlimited)")
+    win.sched_weekend_limit.setClearButtonEnabled(True)
     sched_row2.addWidget(win.sched_weekend_limit)
     sched_row2.addStretch(1)
     network_lay.addLayout(sched_row2)

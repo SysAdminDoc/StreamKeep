@@ -96,7 +96,8 @@ def build_monitor_tab(win):
         "Channel URL", "Paste the channel link you want StreamKeep to poll."
     )
     win.monitor_url_input = QLineEdit()
-    win.monitor_url_input.setPlaceholderText("Channel URL (kick.com/user, twitch.tv/user)")
+    win.monitor_url_input.setPlaceholderText("Channel URL (kick.com/user, twitch.tv/user)…")
+    win.monitor_url_input.setClearButtonEnabled(True)
     url_block_lay.addWidget(win.monitor_url_input)
     controls_row.addWidget(url_block, 1)
 
@@ -132,21 +133,39 @@ def build_monitor_tab(win):
     win.monitor_summary_label.setObjectName("subtleText")
     manage_lay.addWidget(win.monitor_summary_label)
 
-    # Import/Export row (F10)
-    io_row = QHBoxLayout()
-    io_row.setSpacing(8)
-    export_btn = QPushButton("Export Channels...")
-    export_btn.setObjectName("secondary")
-    export_btn.setFixedWidth(140)
-    export_btn.clicked.connect(win._on_monitor_export)
-    io_row.addWidget(export_btn)
-    import_btn = QPushButton("Import Channels...")
+    tools_bar = QFrame()
+    tools_bar.setObjectName("toolbar")
+    tools_lay = QHBoxLayout(tools_bar)
+    tools_lay.setContentsMargins(14, 12, 14, 12)
+    tools_lay.setSpacing(10)
+    tools_copy = QVBoxLayout()
+    tools_copy.setSpacing(3)
+    tools_title = QLabel("Watch List Tools")
+    tools_title.setObjectName("fieldLabel")
+    tools_hint = QLabel(
+        "Import or export a saved list, or switch into calendar mode when you want schedule context."
+    )
+    tools_hint.setObjectName("subtleText")
+    tools_hint.setWordWrap(True)
+    tools_copy.addWidget(tools_title)
+    tools_copy.addWidget(tools_hint)
+    tools_lay.addLayout(tools_copy, 1)
+    import_btn = QPushButton("Import Watch List…")
     import_btn.setObjectName("secondary")
-    import_btn.setFixedWidth(140)
+    import_btn.setFixedWidth(156)
     import_btn.clicked.connect(win._on_monitor_import)
-    io_row.addWidget(import_btn)
-    io_row.addStretch(1)
-    manage_lay.addLayout(io_row)
+    tools_lay.addWidget(import_btn)
+    export_btn = QPushButton("Export Watch List…")
+    export_btn.setObjectName("secondary")
+    export_btn.setFixedWidth(156)
+    export_btn.clicked.connect(win._on_monitor_export)
+    tools_lay.addWidget(export_btn)
+    win.monitor_view_toggle = QPushButton("Show Calendar")
+    win.monitor_view_toggle.setObjectName("toggleAccent")
+    win.monitor_view_toggle.setFixedWidth(148)
+    win.monitor_view_toggle.setCheckable(True)
+    tools_lay.addWidget(win.monitor_view_toggle)
+    manage_lay.addWidget(tools_bar)
 
     lay.addWidget(manage_card)
 
@@ -160,14 +179,14 @@ def build_monitor_tab(win):
     table_header.setSpacing(4)
     table_title = QLabel("Watch List")
     table_title.setObjectName("sectionTitle")
-    table_hint = QLabel(
+    win.monitor_table_hint = QLabel(
         "Entries refresh automatically and can trigger auto-recording "
         "when a stream goes live."
     )
-    table_hint.setObjectName("sectionBody")
-    table_hint.setWordWrap(True)
+    win.monitor_table_hint.setObjectName("sectionBody")
+    win.monitor_table_hint.setWordWrap(True)
     table_header.addWidget(table_title)
-    table_header.addWidget(table_hint)
+    table_header.addWidget(win.monitor_table_hint)
     table_lay.addLayout(table_header)
 
     win.monitor_table = QTableWidget()
@@ -213,28 +232,18 @@ def build_monitor_tab(win):
     win._schedule_cal_card = cal_card
     lay.addWidget(cal_card, 1)
 
-    # View toggle: List | Calendar
-    toggle_row = QHBoxLayout()
-    toggle_row.setSpacing(8)
-    toggle_row.addStretch(1)
-    win.monitor_view_toggle = QPushButton("Show Calendar")
-    win.monitor_view_toggle.setObjectName("secondary")
-    win.monitor_view_toggle.setFixedWidth(140)
-    win.monitor_view_toggle.setCheckable(True)
-
     def _on_view_toggle(checked):
         table_card.setVisible(not checked)
         cal_card.setVisible(checked)
         win.monitor_view_toggle.setText(
-            "Show List" if checked else "Show Calendar"
+            "Show Watch List" if checked else "Show Calendar"
         )
         if checked:
             cache = win._config.get("schedules", {})
             win.schedule_calendar.set_cache(cache)
+        win._refresh_monitor_summary()
 
     win.monitor_view_toggle.toggled.connect(_on_view_toggle)
-    toggle_row.addWidget(win.monitor_view_toggle)
-    lay.addLayout(toggle_row)
 
     win._refresh_monitor_summary()
     return page
