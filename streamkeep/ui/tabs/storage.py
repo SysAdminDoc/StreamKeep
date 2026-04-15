@@ -10,13 +10,13 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
-from ..widgets import make_metric_card, style_table
+from ..widgets import ask_premium_confirmation, make_metric_card, style_table
 
 
 class _SparklineWidget(QWidget):
@@ -350,21 +350,27 @@ def populate_storage_table(win, scan):
 
 def prompt_confirm_delete(parent, group_count, total_size, sample_paths):
     """Confirmation dialog for bulk recycle-bin delete."""
-    sample = "\n".join(
-        f"  • {os.path.basename(p)}" for p in sample_paths[:5]
+    details = "\n".join(
+        f"- {os.path.basename(p) or p}" for p in sample_paths[:5]
     )
-    more = ""
     if len(sample_paths) > 5:
-        more = f"\n  …and {len(sample_paths) - 5} more"
-    msg = (
-        f"Move {group_count} recording folder(s) — totalling {fmt_size(total_size)} — "
-        f"to the system Recycle Bin?\n\n{sample}{more}\n\n"
-        "You can restore from the Recycle Bin later."
+        details += f"\n- ...and {len(sample_paths) - 5} more"
+    return ask_premium_confirmation(
+        parent,
+        title="Recycle selected recordings?",
+        body=(
+            f"Move {group_count} recording folder(s) totalling {fmt_size(total_size)} "
+            "to the system Recycle Bin."
+        ),
+        eyebrow="STORAGE",
+        badge_text="Reversible",
+        tone="warning",
+        summary_title="Nothing will be permanently deleted inside StreamKeep.",
+        summary_body="You can still restore the folders later from the system Recycle Bin.",
+        details_title="Selected folders",
+        details_body=details,
+        primary_label="Move to Recycle Bin",
+        secondary_label="Cancel",
+        default_action="secondary",
+        min_width=620,
     )
-    box = QMessageBox(parent)
-    box.setWindowTitle("Recycle recordings")
-    box.setText(msg)
-    box.setIcon(QMessageBox.Icon.Warning)
-    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-    box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-    return box.exec() == QMessageBox.StandardButton.Yes

@@ -21,6 +21,16 @@ DEFAULT_POLICY = {
 }
 
 
+def _normalize_path(path):
+    path = str(path or "").strip()
+    if not path:
+        return ""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
 def _dir_size_bytes(path):
     """Total size in bytes of all files in *path* (non-recursive top-level)."""
     total = 0
@@ -34,6 +44,16 @@ def _dir_size_bytes(path):
     except OSError:
         pass
     return total
+
+
+def removal_real_paths(removals):
+    """Return the normalized real paths represented by a cleanup list."""
+    paths = set()
+    for h, _reason in removals or []:
+        real_path = _normalize_path(getattr(h, "path", "") or "")
+        if real_path:
+            paths.add(real_path)
+    return paths
 
 
 def evaluate_cleanup(history, policy, output_dirs=None):
@@ -52,45 +72,70 @@ def evaluate_cleanup(history, policy, output_dirs=None):
     max_gb = float(policy.get("max_total_gb", 0) or 0)
     delete_watched = bool(policy.get("delete_watched"))
     fav_exempt = bool(policy.get("favorites_exempt", True))
+    output_dirs = {_normalize_path(p) for p in (output_dirs or []) if p}
 
-    candidates = []
+    candidates_by_path = {}
     total_bytes = 0
 
     for h in history:
         path = getattr(h, "path", "") or ""
-        if output_dirs and path not in output_dirs:
+        if not path:
             continue
-        if fav_exempt and getattr(h, "favorite", False):
+        real_path = _normalize_path(path)
+        if not real_path:
             continue
-        entry_bytes = 0
-        if path and os.path.isdir(path):
-            entry_bytes = _dir_size_bytes(path)
-        total_bytes += entry_bytes
-        candidates.append((h, entry_bytes))
+        if output_dirs and real_path not in output_dirs:
+            continue
+        candidate = candidates_by_path.get(real_path)
+        if candidate is None:
+            entry_bytes = _dir_size_bytes(path) if os.path.isdir(path) else 0
+            candidate = {
+                "entry": h,
+                "path": path,
+                "real_path": real_path,
+                "size": entry_bytes,
+                "favorite": False,
+                "watched": False,
+            }
+            candidates_by_path[real_path] = candidate
+            total_bytes += entry_bytes
+        candidate["favorite"] = candidate["favorite"] or bool(getattr(h, "favorite", False))
+        candidate["watched"] = candidate["watched"] or bool(getattr(h, "watched", False))
+
+    candidates = []
+    for candidate in candidates_by_path.values():
+        if fav_exempt and candidate["favorite"]:
+            continue
+        candidates.append(candidate)
 
     to_remove = []
+    scheduled_paths = set()
 
     # Rule 1: max age
     if max_days > 0:
         cutoff = now - max_days * 86400
-        for h, _ in candidates:
-            path = getattr(h, "path", "") or ""
+        for candidate in candidates:
+            h = candidate["entry"]
+            path = candidate["path"]
+            real_path = candidate["real_path"]
             if not path or not os.path.isdir(path):
                 continue
             try:
                 mtime = os.path.getmtime(path)
             except OSError:
                 continue
-            if mtime < cutoff:
+            if mtime < cutoff and real_path not in scheduled_paths:
                 to_remove.append((h, f"older than {max_days} days"))
+                scheduled_paths.add(real_path)
 
     # Rule 2: delete watched
     if delete_watched:
-        for h, _ in candidates:
-            if getattr(h, "watched", False):
-                already = any(r[0] is h for r in to_remove)
-                if not already:
-                    to_remove.append((h, "watched"))
+        for candidate in candidates:
+            h = candidate["entry"]
+            real_path = candidate["real_path"]
+            if candidate["watched"] and real_path not in scheduled_paths:
+                to_remove.append((h, "watched"))
+                scheduled_paths.add(real_path)
 
     # Rule 3: max total size — remove oldest watched first, then oldest
     if max_gb > 0:
@@ -99,21 +144,26 @@ def evaluate_cleanup(history, policy, output_dirs=None):
             excess = total_bytes - max_bytes
             # Sort candidates by oldest mtime first
             sized = []
-            for h, sz in candidates:
-                if any(r[0] is h for r in to_remove):
+            for candidate in candidates:
+                h = candidate["entry"]
+                sz = candidate["size"]
+                real_path = candidate["real_path"]
+                if real_path in scheduled_paths:
                     continue  # already slated
-                path = getattr(h, "path", "") or ""
+                path = candidate["path"]
                 try:
                     mtime = os.path.getmtime(path) if path else 0
                 except OSError:
                     mtime = 0
-                sized.append((mtime, h, sz))
-            sized.sort()  # oldest first
+                watched_rank = 0 if candidate["watched"] else 1
+                sized.append((watched_rank, mtime, h, sz, real_path))
+            sized.sort()  # watched first, then oldest first
             freed = 0
-            for _mt, h, sz in sized:
+            for _watched_rank, _mt, h, sz, real_path in sized:
                 if freed >= excess:
                     break
                 to_remove.append((h, f"storage exceeds {max_gb:.0f} GB"))
+                scheduled_paths.add(real_path)
                 freed += sz
 
     return to_remove
@@ -136,10 +186,15 @@ def execute_cleanup(removals, log_fn=None):
         return 0
 
     removed = 0
+    seen_paths = set()
     for h, reason in removals:
         path = getattr(h, "path", "") or ""
         if not path or not os.path.isdir(path):
             continue
+        real_path = _normalize_path(path)
+        if real_path in seen_paths:
+            continue
+        seen_paths.add(real_path)
         try:
             _send2trash(path)
             removed += 1
