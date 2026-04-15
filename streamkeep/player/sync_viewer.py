@@ -177,12 +177,14 @@ class SyncViewer(QDialog):
 
     def _relayout_grid(self):
         """Arrange player widgets in a grid based on count."""
-        # Clear existing
+        # Remove items from the grid without destroying them — the MpvWidget
+        # instances inside the cards are still alive in self._slots and must
+        # not be deleted.
         while self._grid.count():
             item = self._grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
-                widget.deleteLater()
+                widget.setParent(None)
 
         n = len(self._slots)
         if n <= 1:

@@ -5571,9 +5571,14 @@ class StreamKeep(QMainWindow):
     def _on_refresh_schedules(self):
         """Refresh stream schedules in a background thread (F39 audit fix)."""
         import threading
+        from PyQt6.QtCore import QTimer
 
         if hasattr(self, "schedule_calendar"):
             self.schedule_calendar.set_refreshing(True)
+
+        # Thread-safe log shim: marshal _log calls back to the GUI thread.
+        def _safe_log(msg, _self=self):
+            QTimer.singleShot(0, lambda: _self._log(msg))
 
         def _bg():
             from ..schedule import refresh_schedules
@@ -5581,13 +5586,11 @@ class StreamKeep(QMainWindow):
             error = ""
             try:
                 cache = refresh_schedules(
-                    list(self.monitor.entries), cache, log_fn=self._log,
+                    list(self.monitor.entries), cache, log_fn=_safe_log,
                 )
             except Exception as exc:
                 error = str(exc)
-                self._log(f"[SCHEDULE] Schedule refresh failed: {exc}")
-            # Marshal result back to the main thread via QTimer.singleShot
-            from PyQt6.QtCore import QTimer
+                _safe_log(f"[SCHEDULE] Schedule refresh failed: {exc}")
             QTimer.singleShot(0, lambda: self._apply_schedule_cache(cache, error))
 
         threading.Thread(target=_bg, daemon=True).start()
@@ -6570,7 +6573,7 @@ class StreamKeep(QMainWindow):
         # Use a dedicated FetchWorker that doesn't share the foreground UI state
         url = item.get("vod_source") or item["url"]
         fetch = FetchWorker(url)
-        fetch.done.connect(
+        fetch.finished.connect(
             lambda info, it=item: self._on_queue_fetch_done(it, info)
         )
         fetch.error.connect(
@@ -6633,9 +6636,16 @@ class StreamKeep(QMainWindow):
         active_count = self._active_queue_download_count() + 1
         if rl and active_count > 1:
             try:
-                rl_bytes = int(rl.replace("M", "000000").replace("K", "000").replace("k", "000"))
-                shared = max(100000, rl_bytes // active_count)
-                rl = str(shared)
+                import re as _re
+                # Parse yt-dlp rate limit format: number + optional suffix
+                m = _re.match(r'^([\d.]+)\s*([KkMmGg])?', str(rl))
+                if m:
+                    val = float(m.group(1))
+                    suffix = (m.group(2) or "").upper()
+                    multiplier = {"K": 1_000, "M": 1_000_000, "G": 1_000_000_000}.get(suffix, 1)
+                    rl_bytes = int(val * multiplier)
+                    shared = max(100_000, rl_bytes // active_count)
+                    rl = str(shared)
             except (ValueError, AttributeError):
                 pass
         worker.rate_limit = rl
@@ -6660,7 +6670,13 @@ class StreamKeep(QMainWindow):
     def _on_queue_fetch_error(self, item, err):
         """Handle fetch error for a concurrent queue item."""
         item_id = id(item)
-        self._queue_fetch_workers.pop(item_id, None)
+        fw = self._queue_fetch_workers.pop(item_id, None)
+        # Join the thread to prevent resource leaks (mirrors _on_queue_fetch_done)
+        if fw:
+            try:
+                fw.wait(500)
+            except Exception:
+                pass
         self._set_queue_item_status(item, "failed", str(err)[:120])
         self._log(f"[QUEUE] Fetch error for {item.get('title', '')[:60]}: {err}")
         self._advance_queue()

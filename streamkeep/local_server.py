@@ -99,7 +99,18 @@ def _build_handler(expected_token, signals, state_provider=None):
             return hmac.compare_digest(hdr[7:].strip(), expected_token)
 
         def _cors(self):
-            self.send_header("Access-Control-Allow-Origin", "*")
+            # Restrict CORS to the requesting localhost origin rather than
+            # allowing every website to call the API.
+            origin = self.headers.get("Origin", "")
+            allowed = origin if origin and (
+                origin.startswith("http://localhost") or
+                origin.startswith("http://127.0.0.1") or
+                origin.startswith("https://localhost") or
+                origin.startswith("https://127.0.0.1") or
+                origin.startswith("chrome-extension://")
+            ) else "http://localhost"
+            self.send_header("Access-Control-Allow-Origin", allowed)
+            self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers", "Content-Type, Authorization"

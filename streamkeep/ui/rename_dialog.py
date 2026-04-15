@@ -38,7 +38,9 @@ def _safe_name(s, max_len=120):
         return ""
     bad = '<>:"/\\|?*'
     out = "".join(c if c not in bad else "_" for c in s.strip())[:max_len]
-    return out.rstrip(". ")
+    out = out.rstrip(". ")
+    # Prevent empty results — fall back to underscores
+    return out if out else "_"
 
 
 def _resolve_template(template, meta, seq):

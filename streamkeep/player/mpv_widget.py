@@ -99,9 +99,11 @@ class MpvWidget(QWidget):
             return False
         self._file_path = file_path
         try:
-            self._mpv.play(file_path)
             if start_secs and start_secs > 0:
                 self._mpv.start = str(start_secs)
+            else:
+                self._mpv.start = ""
+            self._mpv.play(file_path)
             self.file_loaded.emit()
             return True
         except Exception:
@@ -193,7 +195,7 @@ class MpvWidget(QWidget):
         try:
             # mpv superequalizer: 10 bands, we map 5 to the most useful ones
             # Bands 0-1 (bass), 2-3 (lo-mid), 4-5 (mid), 6-7 (hi-mid), 8-9 (treble)
-            af_str = (
+            self._eq_af = (
                 f"superequalizer="
                 f"1={bands[0]}:2={bands[0]}:"
                 f"3={bands[1]}:4={bands[1]}:"
@@ -201,7 +203,7 @@ class MpvWidget(QWidget):
                 f"7={bands[3]}:8={bands[3]}:"
                 f"9={bands[4]}:10={bands[4]}"
             )
-            self._mpv.af = af_str
+            self._apply_audio_filters()
         except Exception:
             pass
 
@@ -210,7 +212,24 @@ class MpvWidget(QWidget):
         if not self._mpv:
             return
         try:
-            self._mpv.af = "dynaudnorm" if enabled else ""
+            self._norm_af = "dynaudnorm" if enabled else ""
+            self._apply_audio_filters()
+        except Exception:
+            pass
+
+    def _apply_audio_filters(self):
+        """Compose EQ + normalize filters into a single af chain."""
+        if not self._mpv:
+            return
+        parts = []
+        eq = getattr(self, "_eq_af", "")
+        norm = getattr(self, "_norm_af", "")
+        if eq:
+            parts.append(eq)
+        if norm:
+            parts.append(norm)
+        try:
+            self._mpv.af = ",".join(parts) if parts else ""
         except Exception:
             pass
 

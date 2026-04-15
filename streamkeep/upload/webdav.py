@@ -30,7 +30,12 @@ class WebDAVDestination(UploadDestination):
             return False, "File not found"
 
         filename = os.path.basename(file_path)
-        target = f"{base_url}/{remote_dir}/{filename}" if remote_dir else f"{base_url}/{filename}"
+        # Sanitize remote_dir: reject path traversal sequences
+        remote_parts = [p for p in remote_dir.split("/") if p and p != ".."]
+        remote_dir = "/".join(remote_parts)
+        # URL-encode the filename to handle spaces/special characters
+        safe_name = urllib.parse.quote(filename, safe="")
+        target = f"{base_url}/{remote_dir}/{safe_name}" if remote_dir else f"{base_url}/{safe_name}"
 
         try:
             file_size = os.path.getsize(file_path)
