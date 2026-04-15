@@ -132,16 +132,10 @@ def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
         "--connect-timeout", str(connect_timeout),
         "--max-time", str(max_time),
     ]
-    # Proxy: pool-based per-platform routing (F49), falls back to NATIVE_PROXY
-    from .proxy import resolve_proxy as _resolve_proxy
-    _proxy = _resolve_proxy(url) or NATIVE_PROXY
+    _proxy = _resolve_proxy(url)
     if _proxy:
         cmd.extend(["-x", _proxy])
-    # Inject cookies.txt if present (F47)
-    from .cookies import cookies_file_path
-    cpath = cookies_file_path()
-    if cpath:
-        cmd.extend(["--cookie", cpath])
+    _append_cookie_args(cmd)
     if method and method.upper() != "GET":
         cmd.extend(["-X", method.upper()])
     if body is not None:
@@ -150,6 +144,22 @@ def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
     return cmd
+
+
+def _resolve_proxy(url):
+    """Resolve the best proxy for a URL, honoring the pool then fallback."""
+    from .proxy import resolve_proxy as _resolve_proxy_for_url
+
+    return _resolve_proxy_for_url(url) or NATIVE_PROXY
+
+
+def _append_cookie_args(cmd):
+    """Add cookies.txt to a curl command if one is available."""
+    from .cookies import cookies_file_path
+
+    cpath = cookies_file_path()
+    if cpath:
+        cmd.extend(["--cookie", cpath])
 
 
 def curl(url, headers=None, timeout=30):
@@ -197,8 +207,10 @@ def http_head(url, timeout=20):
         "--connect-timeout", str(connect_timeout),
         "--max-time", str(max(1, int(timeout or 20))),
     ]
-    if NATIVE_PROXY:
-        cmd.extend(["-x", NATIVE_PROXY])
+    _proxy = _resolve_proxy(url)
+    if _proxy:
+        cmd.extend(["-x", _proxy])
+    _append_cookie_args(cmd)
     cmd.append(url)
     try:
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
@@ -218,6 +230,38 @@ def http_head(url, timeout=20):
         return (status, size, accepts)
     except Exception:
         return (0, 0, False)
+
+
+def http_probe(url, headers=None, timeout=20):
+    """Probe a URL and return response metadata.
+
+    Returns ``{"status": int, "content_type": str, "final_url": str}``
+    or an empty dict on failure.
+    """
+    cmd = _build_curl_cmd(url, headers=headers, timeout=timeout)
+    cmd[1:1] = ["-I", "-w", r"\n%{content_type}\n%{url_effective}\n"]
+    try:
+        result = run_capture_interruptible(cmd, timeout=timeout + 2)
+        if result.returncode != 0:
+            return {}
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return {}
+        content_type = lines[-2].split(";", 1)[0].strip().lower()
+        final_url = lines[-1]
+        status = 0
+        for line in lines:
+            if line.startswith("HTTP/"):
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    status = int(parts[1])
+        return {
+            "status": status,
+            "content_type": content_type,
+            "final_url": final_url or url,
+        }
+    except Exception:
+        return {}
 
 
 def parallel_http_download(url, outfile, connections=4, progress_cb=None,
@@ -276,8 +320,9 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             "-r", f"{start}-{end}",
             "-o", part,
         ]
-        if NATIVE_PROXY:
-            cmd.extend(["-x", NATIVE_PROXY])
+        if proxy_url:
+            cmd.extend(["-x", proxy_url])
+        _append_cookie_args(cmd)
         cmd.append(url)
         proc = None
         try:
@@ -329,6 +374,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                     pass
 
     threads = []
+    proxy_url = _resolve_proxy(url)
     for i, start, end in ranges:
         t = threading.Thread(target=worker, args=(i, start, end), daemon=True)
         t.start()

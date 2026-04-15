@@ -28,6 +28,11 @@ class _ServerSignals(QObject):
     url_received = pyqtSignal(str, str)   # url, action ("fetch" | "queue")
 
 
+class _CompanionHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 class LocalCompanionServer:
     """Wraps a ThreadingHTTPServer bound to 127.0.0.1 (or 0.0.0.0) on a
     random port.
@@ -52,8 +57,10 @@ class LocalCompanionServer:
         self._bind_addr = "0.0.0.0" if bind_lan else "127.0.0.1"
 
     def start(self):
+        if self._httpd is not None:
+            self.stop()
         handler_cls = _build_handler(self.token, self._signals, self.state_provider)
-        self._httpd = ThreadingHTTPServer((self._bind_addr, 0), handler_cls)
+        self._httpd = _CompanionHTTPServer((self._bind_addr, 0), handler_cls)
         self.port = self._httpd.server_address[1]
         self._thread = Thread(
             target=self._httpd.serve_forever,
@@ -76,6 +83,7 @@ class LocalCompanionServer:
             except RuntimeError:
                 pass
         self._thread = None
+        self.port = 0
 
 
 def _build_handler(expected_token, signals, state_provider=None):
@@ -109,7 +117,7 @@ def _build_handler(expected_token, signals, state_provider=None):
         def _read_body(self, max_bytes=1_048_576):
             try:
                 length = int(self.headers.get("Content-Length", 0) or 0)
-                if length > max_bytes:
+                if length <= 0 or length > max_bytes:
                     return {}
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 return json.loads(raw) if raw else {}

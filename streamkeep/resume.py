@@ -13,6 +13,7 @@ segment list has shifted shape we fall back to a full restart.
 """
 
 import json
+import math
 import os
 from dataclasses import asdict
 from datetime import datetime
@@ -20,10 +21,94 @@ from datetime import datetime
 from .models import ResumeState
 
 SIDECAR_NAME = ".streamkeep_resume.json"
+MAX_SIDECAR_BYTES = 1024 * 1024
+MAX_SEGMENTS = 100000
 
 
 def _sidecar_path(output_dir):
     return os.path.join(output_dir, SIDECAR_NAME)
+
+
+def _normalize_output_dir(output_dir):
+    path = str(output_dir or "").strip()
+    if not path:
+        return ""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
+def _sanitize_timestamp(value):
+    return str(value or "")[:64]
+
+
+def _sanitize_text(value, max_len=2048):
+    return str(value or "")[:max_len]
+
+
+def _sanitize_segments(value):
+    if not isinstance(value, (list, tuple)):
+        return []
+    cleaned = []
+    for seg in value[:MAX_SEGMENTS]:
+        if not isinstance(seg, (list, tuple)) or len(seg) < 4:
+            continue
+        try:
+            idx = int(seg[0])
+            start = float(seg[2])
+            duration = float(seg[3])
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or not math.isfinite(start) or not math.isfinite(duration) or duration < 0:
+            continue
+        cleaned.append([idx, _sanitize_text(seg[1], max_len=256), start, duration])
+    return cleaned
+
+
+def _sanitize_completed(value):
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    cleaned = []
+    seen = set()
+    for item in value:
+        try:
+            idx = int(item)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx in seen:
+            continue
+        seen.add(idx)
+        cleaned.append(idx)
+    return cleaned
+
+
+def _sanitize_resume_payload(data, output_dir):
+    if not isinstance(data, dict):
+        return None
+    try:
+        version = int(data.get("version", 1) or 1)
+    except (TypeError, ValueError):
+        version = 1
+    return {
+        "version": version,
+        "created_at": _sanitize_timestamp(data.get("created_at", "")),
+        "updated_at": _sanitize_timestamp(data.get("updated_at", "")),
+        "source_url": _sanitize_text(data.get("source_url", "")),
+        "platform": _sanitize_text(data.get("platform", ""), max_len=128),
+        "title": _sanitize_text(data.get("title", ""), max_len=512),
+        "channel": _sanitize_text(data.get("channel", ""), max_len=256),
+        "playlist_url": _sanitize_text(data.get("playlist_url", "")),
+        "format_type": _sanitize_text(data.get("format_type", "hls"), max_len=32) or "hls",
+        "audio_url": _sanitize_text(data.get("audio_url", "")),
+        "ytdlp_source": _sanitize_text(data.get("ytdlp_source", "")),
+        "ytdlp_format": _sanitize_text(data.get("ytdlp_format", ""), max_len=128),
+        "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
+        "segments": _sanitize_segments(data.get("segments", [])),
+        "completed": _sanitize_completed(data.get("completed", [])),
+        "output_dir": _normalize_output_dir(output_dir),
+        "expected_outfile": _sanitize_text(data.get("expected_outfile", "")),
+    }
 
 
 def save_resume_state(state):
@@ -34,6 +119,7 @@ def save_resume_state(state):
     download."""
     if not state or not state.output_dir:
         return
+    state.output_dir = _normalize_output_dir(state.output_dir)
     try:
         os.makedirs(state.output_dir, exist_ok=True)
     except OSError:
@@ -68,22 +154,23 @@ def load_resume_state(output_dir):
     """Read a sidecar. Returns a ResumeState or None."""
     if not output_dir:
         return None
-    path = _sidecar_path(output_dir)
+    normalized_output_dir = _normalize_output_dir(output_dir)
+    path = _sidecar_path(normalized_output_dir)
     if not os.path.exists(path):
         return None
     try:
+        if os.path.getsize(path) > MAX_SIDECAR_BYTES:
+            return None
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict):
+    clean = _sanitize_resume_payload(data, normalized_output_dir)
+    if clean is None:
         return None
-    # Ignore unknown keys (forward compat); fill defaults for missing ones.
-    fields = set(ResumeState.__dataclass_fields__.keys())
-    clean = {k: v for k, v in data.items() if k in fields}
     try:
         return ResumeState(**clean)
-    except TypeError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -91,7 +178,7 @@ def clear_resume_state(output_dir):
     """Delete the sidecar. Safe to call if none exists."""
     if not output_dir:
         return
-    path = _sidecar_path(output_dir)
+    path = _sidecar_path(_normalize_output_dir(output_dir))
     try:
         if os.path.exists(path):
             os.remove(path)
@@ -164,9 +251,13 @@ def remaining_segments(state):
             continue
         try:
             idx = int(seg[0])
+            start = float(seg[2])
+            duration = float(seg[3])
         except (TypeError, ValueError):
+            continue
+        if not math.isfinite(start) or not math.isfinite(duration) or duration < 0:
             continue
         if idx in done:
             continue
-        out.append((idx, str(seg[1]), float(seg[2]), float(seg[3])))
+        out.append((idx, str(seg[1]), start, duration))
     return out

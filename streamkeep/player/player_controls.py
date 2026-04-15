@@ -34,21 +34,23 @@ class PlayerControls(QWidget):
         super().__init__(parent)
         self._duration = 0.0
         self._seeking = False
+        self.setObjectName("playerTransportBar")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setContentsMargins(14, 12, 14, 12)
+        outer.setSpacing(8)
 
         # Row 1: main transport
         lay = QHBoxLayout()
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
         outer.addLayout(lay)
 
         # Play/Pause
         self.play_btn = QPushButton("||")
         self.play_btn.setFixedWidth(36)
-        self.play_btn.setObjectName("secondary")
+        self.play_btn.setObjectName("primary")
+        self.play_btn.setToolTip("Play or pause the current recording")
         self.play_btn.clicked.connect(self.toggle_pause.emit)
         lay.addWidget(self.play_btn)
 
@@ -56,11 +58,13 @@ class PlayerControls(QWidget):
         stop_btn = QPushButton("[]")
         stop_btn.setFixedWidth(36)
         stop_btn.setObjectName("secondary")
+        stop_btn.setToolTip("Stop playback")
         stop_btn.clicked.connect(self.stop_requested.emit)
         lay.addWidget(stop_btn)
 
         # Time label (current)
         self.time_label = QLabel("0:00")
+        self.time_label.setObjectName("playerMeta")
         self.time_label.setFixedWidth(60)
         self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(self.time_label)
@@ -75,11 +79,13 @@ class PlayerControls(QWidget):
 
         # Duration label
         self.dur_label = QLabel("0:00")
+        self.dur_label.setObjectName("playerMeta")
         self.dur_label.setFixedWidth(60)
         lay.addWidget(self.dur_label)
 
         # Volume
         vol_label = QLabel("Vol")
+        vol_label.setObjectName("playerTinyLabel")
         vol_label.setFixedWidth(24)
         lay.addWidget(vol_label)
         self.vol_slider = QSlider(Qt.Orientation.Horizontal)
@@ -112,7 +118,7 @@ class PlayerControls(QWidget):
         # PiP (F53)
         pip_btn = QPushButton("PiP")
         pip_btn.setFixedWidth(36)
-        pip_btn.setObjectName("secondary")
+        pip_btn.setObjectName("ghost")
         pip_btn.setToolTip("Picture-in-Picture mini player")
         pip_btn.clicked.connect(self.pip_requested.emit)
         lay.addWidget(pip_btn)
@@ -120,16 +126,18 @@ class PlayerControls(QWidget):
         # Fullscreen
         fs_btn = QPushButton("[ ]")
         fs_btn.setFixedWidth(36)
-        fs_btn.setObjectName("secondary")
+        fs_btn.setObjectName("ghost")
         fs_btn.setToolTip("Toggle fullscreen")
         fs_btn.clicked.connect(self.fullscreen_requested.emit)
         lay.addWidget(fs_btn)
 
         # Row 2: EQ + audio toggles (F56)
         eq_row = QHBoxLayout()
-        eq_row.setContentsMargins(8, 0, 8, 2)
+        eq_row.setContentsMargins(0, 0, 0, 0)
         eq_row.setSpacing(6)
-        eq_row.addWidget(QLabel("EQ:"))
+        eq_label = QLabel("EQ")
+        eq_label.setObjectName("playerTinyLabel")
+        eq_row.addWidget(eq_label)
         self._eq_sliders = []
         _EQ_BANDS = ["Bass", "Lo-Mid", "Mid", "Hi-Mid", "Treble"]
         for band_name in _EQ_BANDS:

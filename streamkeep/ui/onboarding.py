@@ -1,13 +1,4 @@
-"""First-Run Onboarding Wizard — multi-step setup on first launch (F76).
-
-Steps:
-  1. Welcome + ffmpeg detection
-  2. Output directory selection
-  3. Theme preference (dark/light)
-  4. Done — mark first_run_complete
-
-Skippable at any step via "Skip All" button.
-"""
+"""First-run onboarding wizard — polished multi-step setup for new users."""
 
 import subprocess
 
@@ -16,38 +7,71 @@ from PyQt6.QtWidgets import (
     QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from ..theme import CAT
 from ..paths import _CREATE_NO_WINDOW
 from ..utils import default_output_dir
+from .widgets import (
+    make_dialog_hero,
+    make_dialog_section,
+    make_status_banner,
+    update_status_banner,
+)
 
 
 class OnboardingWizard(QDialog):
     """Multi-step first-run setup wizard."""
 
+    _STEP_TITLES = [
+        "Welcome",
+        "Save location",
+        "Appearance",
+        "Ready to go",
+    ]
+
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
         self.setWindowTitle("Welcome to StreamKeep")
-        self.setFixedSize(560, 400)
+        self.setFixedSize(640, 500)
+        self.setModal(True)
         self._config = config or {}
-        self._output_dir = ""
+        self._output_dir = str(default_output_dir())
         self._theme = "dark"
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 16)
+        layout.setContentsMargins(20, 20, 20, 18)
         layout.setSpacing(12)
+
+        hero, _, _, self._hero_badge = make_dialog_hero(
+            "Set up StreamKeep in a minute",
+            "Pick where recordings go, choose how the app should look, "
+            "and confirm the essentials before you start downloading.",
+            eyebrow="FIRST RUN",
+            badge_text="4-step setup",
+        )
+        layout.addWidget(hero)
+
+        step_row = QHBoxLayout()
+        step_row.setContentsMargins(2, 0, 2, 0)
+        step_row.setSpacing(8)
+        self._step_label = QLabel("")
+        self._step_label.setObjectName("fieldLabel")
+        step_row.addWidget(self._step_label)
+        step_row.addStretch(1)
+        self._step_meta = QLabel("")
+        self._step_meta.setObjectName("fieldHint")
+        step_row.addWidget(self._step_meta)
+        layout.addLayout(step_row)
 
         self._stack = QStackedWidget()
         layout.addWidget(self._stack, 1)
 
-        # Build pages
         self._stack.addWidget(self._page_welcome())
         self._stack.addWidget(self._page_output())
         self._stack.addWidget(self._page_theme())
         self._stack.addWidget(self._page_done())
 
-        # Navigation buttons
         nav = QHBoxLayout()
-        self._skip_btn = QPushButton("Skip All")
+        nav.setSpacing(8)
+        self._skip_btn = QPushButton("Skip setup")
         self._skip_btn.setObjectName("ghost")
         self._skip_btn.clicked.connect(self._skip_all)
         nav.addWidget(self._skip_btn)
@@ -55,104 +79,236 @@ class OnboardingWizard(QDialog):
         self._back_btn = QPushButton("Back")
         self._back_btn.setObjectName("secondary")
         self._back_btn.clicked.connect(self._go_back)
-        self._back_btn.setEnabled(False)
         nav.addWidget(self._back_btn)
-        self._next_btn = QPushButton("Next")
+        self._next_btn = QPushButton("Continue")
         self._next_btn.setObjectName("primary")
         self._next_btn.clicked.connect(self._go_next)
         nav.addWidget(self._next_btn)
         layout.addLayout(nav)
 
+        self._check_ffmpeg()
+        self._update_summary()
+        self._update_nav()
+
     def _page_welcome(self):
         page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setSpacing(12)
-        title = QLabel("Welcome to StreamKeep")
-        title.setObjectName("heroTitle")
-        lay.addWidget(title)
-        lay.addWidget(QLabel(
-            "StreamKeep is a multi-platform stream and VOD downloader.\n\n"
-            "This wizard will help you get set up in a few steps."
-        ))
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
 
-        # FFmpeg check
-        self._ffmpeg_label = QLabel("Checking for ffmpeg...")
-        lay.addWidget(self._ffmpeg_label)
-        self._check_ffmpeg()
+        section, content = make_dialog_section(
+            "System readiness",
+            "StreamKeep works best with ffmpeg available in PATH. "
+            "If it is missing, the app can still open but downloads will not start yet.",
+        )
+        self._ffmpeg_banner, self._ffmpeg_title, self._ffmpeg_body = make_status_banner()
+        content.addWidget(self._ffmpeg_banner)
 
-        lay.addStretch(1)
+        checklist, checklist_content = make_dialog_section(
+            "What this setup covers",
+            "These defaults can all be changed later in Settings.",
+        )
+        for line in [
+            "Choose a default recording folder.",
+            "Pick dark, light, or follow-system appearance.",
+            "Start with safe, clean defaults and skip the rest for now.",
+        ]:
+            item = QLabel(f"• {line}")
+            item.setObjectName("sectionBody")
+            item.setWordWrap(True)
+            checklist_content.addWidget(item)
+
+        outer.addWidget(section)
+        outer.addWidget(checklist)
+        outer.addStretch(1)
         return page
 
     def _page_output(self):
         page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setSpacing(12)
-        lay.addWidget(QLabel("Where should StreamKeep save recordings?"))
-        self._output_dir = default_output_dir()
-        self._output_label = QLabel(self._output_dir)
-        self._output_label.setWordWrap(True)
-        self._output_label.setStyleSheet(
-            f"background: {CAT['surface0']}; padding: 10px 12px; "
-            f"border-radius: 14px; border: 1px solid {CAT['stroke']};"
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
+
+        section, content = make_dialog_section(
+            "Default recording folder",
+            "This becomes the starting point for downloads, monitoring, and saved metadata.",
         )
-        lay.addWidget(self._output_label)
-        browse_btn = QPushButton("Choose Folder...")
+        self._output_banner, self._output_title, self._output_body = make_status_banner()
+        content.addWidget(self._output_banner)
+
+        browse_row = QHBoxLayout()
+        browse_row.setSpacing(8)
+        browse_btn = QPushButton("Choose folder…")
+        browse_btn.setObjectName("primary")
         browse_btn.clicked.connect(self._browse_output)
-        lay.addWidget(browse_btn)
-        lay.addStretch(1)
+        browse_row.addWidget(browse_btn)
+        reset_btn = QPushButton("Use recommended folder")
+        reset_btn.setObjectName("secondary")
+        reset_btn.clicked.connect(self._reset_output)
+        browse_row.addWidget(reset_btn)
+        browse_row.addStretch(1)
+        content.addLayout(browse_row)
+
+        note = QLabel(
+            "Tip: keeping recordings under one root makes storage cleanup, "
+            "history, and auto-record profiles much easier to manage."
+        )
+        note.setObjectName("fieldHint")
+        note.setWordWrap(True)
+        content.addWidget(note)
+
+        outer.addWidget(section)
+        outer.addStretch(1)
         return page
 
     def _page_theme(self):
         page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setSpacing(12)
-        lay.addWidget(QLabel("Choose your theme:"))
-        self._dark_radio = QRadioButton("Dark (Catppuccin Mocha)")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
+
+        section, content = make_dialog_section(
+            "Appearance",
+            "Choose the default look for the app. You can switch themes any time without restarting.",
+        )
+        self._theme_banner, self._theme_title, self._theme_body = make_status_banner()
+        content.addWidget(self._theme_banner)
+
+        self._dark_radio = QRadioButton("Dark — richer contrast and a focused, cinematic workspace")
         self._dark_radio.setChecked(True)
-        self._light_radio = QRadioButton("Light (Catppuccin Latte)")
-        self._system_radio = QRadioButton("Follow system")
-        lay.addWidget(self._dark_radio)
-        lay.addWidget(self._light_radio)
-        lay.addWidget(self._system_radio)
-        lay.addStretch(1)
+        self._light_radio = QRadioButton("Light — brighter surfaces and cleaner daytime readability")
+        self._system_radio = QRadioButton("Follow system — stay in sync with your OS preference")
+        for radio in (self._dark_radio, self._light_radio, self._system_radio):
+            radio.toggled.connect(self._update_summary)
+            content.addWidget(radio)
+
+        outer.addWidget(section)
+        outer.addStretch(1)
         return page
 
     def _page_done(self):
         page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setSpacing(12)
-        done_title = QLabel("You're all set!")
-        done_title.setObjectName("sectionTitle")
-        lay.addWidget(done_title)
-        lay.addWidget(QLabel(
-            "StreamKeep is ready to use.\n\n"
-            "Paste a URL in the Download tab to get started, or add\n"
-            "channels in the Monitor tab for automatic recording."
-        ))
-        lay.addStretch(1)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
+
+        section, content = make_dialog_section(
+            "Ready to start",
+            "You can paste a stream URL right away, or set up monitor profiles for automatic recording later.",
+        )
+        self._done_banner, self._done_title, self._done_body = make_status_banner()
+        content.addWidget(self._done_banner)
+
+        next_steps = QLabel(
+            "Good next steps:\n"
+            "• Paste a URL in Download to test your setup.\n"
+            "• Open Monitor to track channels automatically.\n"
+            "• Visit Settings if you want cookies, proxies, or file templates."
+        )
+        next_steps.setObjectName("sectionBody")
+        next_steps.setWordWrap(True)
+        content.addWidget(next_steps)
+
+        outer.addWidget(section)
+        outer.addStretch(1)
         return page
 
     def _check_ffmpeg(self):
+        message = (
+            "ffmpeg was found. Downloads, trimming, and verification are ready to use."
+        )
+        tone = "success"
+        title = "System tools look good"
         try:
             r = subprocess.run(
-                ["ffmpeg", "-version"], capture_output=True, timeout=5,
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                timeout=5,
                 creationflags=_CREATE_NO_WINDOW,
             )
-            if r.returncode == 0:
-                self._ffmpeg_label.setText("ffmpeg found.")
-                self._ffmpeg_label.setStyleSheet(f"color: {CAT['green']};")
-            else:
-                self._ffmpeg_label.setText("ffmpeg not found. Please install it and add to PATH.")
-                self._ffmpeg_label.setStyleSheet(f"color: {CAT['red']};")
+            if r.returncode != 0:
+                raise OSError("ffmpeg returned a non-zero exit code")
         except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
-            self._ffmpeg_label.setText("ffmpeg not found. Please install it and add to PATH.")
-            self._ffmpeg_label.setStyleSheet(f"color: {CAT['red']};")
+            tone = "warning"
+            title = "ffmpeg is still missing"
+            message = (
+                "Install ffmpeg and add it to PATH before starting downloads. "
+                "You can finish setup now and fix this later from Settings."
+            )
+        update_status_banner(
+            self._ffmpeg_banner,
+            self._ffmpeg_title,
+            self._ffmpeg_body,
+            title=title,
+            body=message,
+            tone=tone,
+        )
 
     def _browse_output(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Output Folder", self._output_dir)
-        if d:
-            self._output_dir = d
-            self._output_label.setText(d)
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            "Select output folder",
+            self._output_dir,
+        )
+        if chosen:
+            self._output_dir = chosen
+            self._update_summary()
+
+    def _reset_output(self):
+        self._output_dir = str(default_output_dir())
+        self._update_summary()
+
+    def _update_summary(self):
+        if self._light_radio.isChecked() if hasattr(self, "_light_radio") else False:
+            self._theme = "light"
+            theme_title = "Light theme selected"
+            theme_body = "Bright surfaces with softer contrast for daytime use."
+        elif self._system_radio.isChecked() if hasattr(self, "_system_radio") else False:
+            self._theme = "system"
+            theme_title = "Following system theme"
+            theme_body = "StreamKeep will follow your OS appearance preference."
+        else:
+            self._theme = "dark"
+            theme_title = "Dark theme selected"
+            theme_body = "A calmer, higher-contrast workspace tuned for media-heavy workflows."
+
+        if hasattr(self, "_output_banner"):
+            update_status_banner(
+                self._output_banner,
+                self._output_title,
+                self._output_body,
+                title="Recordings will be saved here",
+                body=self._output_dir,
+                tone="info",
+            )
+        if hasattr(self, "_theme_banner"):
+            update_status_banner(
+                self._theme_banner,
+                self._theme_title,
+                self._theme_body,
+                title=theme_title,
+                body=theme_body,
+                tone="info",
+            )
+        if hasattr(self, "_done_banner"):
+            update_status_banner(
+                self._done_banner,
+                self._done_title,
+                self._done_body,
+                title="Setup summary",
+                body=f"Theme: {self._theme} • Output folder: {self._output_dir}",
+                tone="success",
+            )
+
+    def _update_nav(self):
+        idx = self._stack.currentIndex()
+        total = self._stack.count()
+        self._step_label.setText(f"Step {idx + 1} of {total}")
+        self._step_meta.setText(self._STEP_TITLES[idx])
+        self._back_btn.setEnabled(idx > 0)
+        self._next_btn.setText("Finish setup" if idx == total - 1 else "Continue")
+        self._hero_badge.setText(f"{idx + 1}/{total}")
+        self._hero_badge.setVisible(True)
 
     def _go_next(self):
         idx = self._stack.currentIndex()
@@ -160,34 +316,23 @@ class OnboardingWizard(QDialog):
             self._finish()
             return
         self._stack.setCurrentIndex(idx + 1)
-        self._back_btn.setEnabled(True)
-        if idx + 1 == self._stack.count() - 1:
-            self._next_btn.setText("Finish")
+        self._update_summary()
+        self._update_nav()
 
     def _go_back(self):
         idx = self._stack.currentIndex()
-        if idx > 0:
-            self._stack.setCurrentIndex(idx - 1)
-            self._next_btn.setText("Next")
-        if idx - 1 == 0:
-            self._back_btn.setEnabled(False)
+        if idx <= 0:
+            return
+        self._stack.setCurrentIndex(idx - 1)
+        self._update_nav()
 
     def _skip_all(self):
         self._config["first_run_complete"] = True
         self.accept()
 
     def _finish(self):
-        # Apply settings
         self._config["output_dir"] = self._output_dir
-        if self._light_radio.isChecked():
-            self._config["theme"] = "light"
-            self._theme = "light"
-        elif self._system_radio.isChecked():
-            self._config["theme"] = "system"
-            self._theme = "system"
-        else:
-            self._config["theme"] = "dark"
-            self._theme = "dark"
+        self._config["theme"] = self._theme
         self._config["first_run_complete"] = True
         self.accept()
 

@@ -106,6 +106,14 @@ QMainWindow {{
         stop: 1 {p['base']}
     );
 }}
+QDialog {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['crust']},
+        stop: 0.45 {p['mantle']},
+        stop: 1 {p['base']}
+    );
+}}
 QWidget {{
     color: {p['text']};
     font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
@@ -203,9 +211,82 @@ QFrame#subtleCard, QFrame#metricCard, QFrame#toolbar {{
     border: 1px solid {p['stroke']};
     border-radius: 18px;
 }}
+QFrame#dialogHero {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(137, 180, 250, 24),
+        stop: 0.28 {p['panelHi']},
+        stop: 0.72 {p['panel']},
+        stop: 1 {p['panelSoft']}
+    );
+    border: 1px solid {p['stroke']};
+    border-radius: 22px;
+}}
+QFrame#dialogSection {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['panelSoft']},
+        stop: 1 {p['panel']}
+    );
+    border: 1px solid {p['stroke']};
+    border-radius: 18px;
+}}
+QFrame#dialogStatus {{
+    background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
+    border-radius: 16px;
+}}
+QFrame#dialogStatus[tone="info"] {{
+    border-color: {p['accent']};
+}}
+QFrame#dialogStatus[tone="success"] {{
+    border-color: {p['green']};
+}}
+QFrame#dialogStatus[tone="warning"] {{
+    border-color: {p['yellow']};
+}}
+QFrame#dialogStatus[tone="error"] {{
+    border-color: {p['red']};
+}}
+QFrame#emptyStateCard {{
+    background-color: {p['panelSoft']};
+    border: 1px dashed {p['stroke']};
+    border-radius: 18px;
+}}
+QFrame#playerMetaBar, QFrame#playerSidebar, QFrame#playerTransportBar,
+QFrame#playerSlotCard, QFrame#playerPipShell, QFrame#playerPipTitleBar {{
+    background-color: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 {p['panelSoft']},
+        stop: 1 {p['panel']}
+    );
+    border: 1px solid {p['stroke']};
+    border-radius: 18px;
+}}
+QFrame#playerVideoCanvas {{
+    background-color: {p['crust']};
+    border: 1px solid {p['surface1']};
+    border-radius: 22px;
+}}
 QLabel {{
     color: {p['text']};
     border: none;
+}}
+QLabel#dialogEyebrow {{
+    color: {p['accent']};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+}}
+QLabel#dialogTitle {{
+    font-size: 24px;
+    font-weight: 700;
+    color: {p['rosewater']};
+}}
+QLabel#dialogBody {{
+    color: {p['subtext1']};
+    font-size: 13px;
+    line-height: 1.35;
 }}
 QLabel#title {{
     font-size: 30px;
@@ -275,6 +356,75 @@ QLabel#statusLabel {{
     color: {p['subtext1']};
     font-size: 12px;
 }}
+QLabel#statusTitle {{
+    color: {p['text']};
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel#statusBody {{
+    color: {p['subtext1']};
+    font-size: 12px;
+}}
+QLabel#emptyStateTitle {{
+    color: {p['rosewater']};
+    font-size: 16px;
+    font-weight: 700;
+}}
+QLabel#emptyStateBody {{
+    color: {p['muted']};
+    font-size: 12px;
+}}
+QLabel#playerKicker {{
+    color: {p['accent']};
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+QLabel#playerTitle {{
+    color: {p['rosewater']};
+    font-size: 18px;
+    font-weight: 700;
+}}
+QLabel#playerMeta {{
+    color: {p['subtext1']};
+    font-size: 12px;
+}}
+QLabel#playerHint, QLabel#playerTinyLabel {{
+    color: {p['muted']};
+    font-size: 11px;
+}}
+QLabel#playerSectionTitle {{
+    color: {p['text']};
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel#playerMiniTitle {{
+    color: {p['text']};
+    font-size: 12px;
+    font-weight: 700;
+}}
+QLabel#playerMiniMeta {{
+    color: {p['muted']};
+    font-size: 10px;
+}}
+QLabel#playerBadgeMuted {{
+    color: {p['subtext1']};
+    background-color: rgba(203, 166, 247, 18);
+    border: 1px solid {p['stroke']};
+    border-radius: 999px;
+    padding: 3px 9px;
+    font-size: 10px;
+    font-weight: 700;
+}}
+QLabel#pillBadge {{
+    color: {p['accent']};
+    background-color: rgba(137, 180, 250, 18);
+    border: 1px solid {p['stroke']};
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+}}
 QLabel#streamInfo {{
     font-size: 12px;
     color: {p['subtext1']};
@@ -283,7 +433,7 @@ QLabel#streamInfo {{
     border: 1px solid {p['stroke']};
     border-radius: 12px;
 }}
-QLineEdit, QComboBox, QSpinBox {{
+QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
     background-color: {p['surface0']};
     color: {p['text']};
     border: 1px solid {p['stroke']};
@@ -298,10 +448,10 @@ QLineEdit#shellSearch, QLineEdit#globalSearch {{
     border-radius: 15px;
     padding: 12px 14px;
 }}
-QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QTimeEdit:hover, QDateEdit:hover {{
     border-color: {p['accent']};
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus, QDateEdit:focus {{
     border: 1px solid {p['accent']};
     background-color: {p['base']};
 }}
@@ -320,6 +470,9 @@ QPushButton:hover {{
 }}
 QPushButton:pressed {{
     background-color: {p['surface2']};
+}}
+QPushButton:focus {{
+    border-color: {p['accent']};
 }}
 QPushButton:disabled {{
     background-color: {p['surface0']};
@@ -445,6 +598,22 @@ QListWidget::item:selected {{
     background-color: {p['panelHi']};
     color: {p['text']};
 }}
+QListWidget#playerChapterList {{
+    background-color: {p['mantle']};
+    border: 1px solid {p['stroke']};
+    border-radius: 16px;
+    padding: 8px;
+}}
+QListWidget#playerChapterList::item {{
+    padding: 8px 10px;
+    border-radius: 10px;
+}}
+QListWidget#playerChapterList::item:hover {{
+    background-color: {p['panel']};
+}}
+QListWidget#playerChapterList::item:selected {{
+    background-color: {p['panelHi']};
+}}
 QMenu {{
     background-color: {p['mantle']};
     border: 1px solid {p['stroke']};
@@ -497,6 +666,21 @@ QCheckBox::indicator {{
 QCheckBox::indicator:checked {{
     background-color: {p['accentSoft']};
     border-color: {p['accentSoft']};
+}}
+QRadioButton {{
+    color: {p['text']};
+    spacing: 8px;
+}}
+QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 1px solid {p['stroke']};
+    background-color: {p['surface0']};
+}}
+QRadioButton::indicator:checked {{
+    background-color: {p['accent']};
+    border-color: {p['accent']};
 }}
 QScrollBar:vertical {{
     background-color: transparent;

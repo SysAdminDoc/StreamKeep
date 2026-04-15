@@ -31,6 +31,13 @@ RELEASES_URL = "https://api.github.com/repos/SysAdminDoc/StreamKeep/releases/lat
 USER_AGENT = "StreamKeep-updater"
 
 
+def _coerce_nonnegative_int(value, default=0):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return max(0, int(default or 0))
+
+
 def _parse_semver(s):
     """Parse 'v4.15.0' / '4.15.0-rc1' into (4, 15, 0) ignoring any
     pre-release tail. Returns (0, 0, 0) on anything unparseable — the
@@ -113,7 +120,7 @@ class DownloadUpdateWorker(QThread):
     def __init__(self, asset_url, expected_size):
         super().__init__()
         self.asset_url = asset_url
-        self.expected_size = int(expected_size or 0)
+        self.expected_size = _coerce_nonnegative_int(expected_size)
         self._cancel = False
 
     def cancel(self):
@@ -130,28 +137,30 @@ class DownloadUpdateWorker(QThread):
         if not exe_path or not os.path.exists(exe_path):
             self.done.emit(False, "Running executable path not found.")
             return
+        if not str(self.asset_url or "").strip():
+            self.done.emit(False, "Update asset URL was missing.")
+            return
         frozen = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
         if not frozen:
             self.done.emit(False, "Auto-update only supported for the packaged exe.")
             return
         new_path = exe_path + ".new"
+        cancelled = False
         try:
             req = urllib.request.Request(
                 self.asset_url,
                 headers={"User-Agent": USER_AGENT},
             )
             with urllib.request.urlopen(req, timeout=30) as resp, open(new_path, "wb") as out:
-                total = self.expected_size or int(resp.headers.get("Content-Length", 0) or 0)
+                total = self.expected_size or _coerce_nonnegative_int(
+                    resp.headers.get("Content-Length", 0)
+                )
                 written = 0
                 chunk = 64 * 1024
                 while True:
                     if self._cancel:
-                        try:
-                            os.remove(new_path)
-                        except OSError:
-                            pass
-                        self.done.emit(False, "Download cancelled.")
-                        return
+                        cancelled = True
+                        break
                     buf = resp.read(chunk)
                     if not buf:
                         break
@@ -170,6 +179,14 @@ class DownloadUpdateWorker(QThread):
             except OSError:
                 pass
             self.done.emit(False, f"Download failed: {e}")
+            return
+        if cancelled:
+            try:
+                if os.path.exists(new_path):
+                    os.remove(new_path)
+            except OSError:
+                pass
+            self.done.emit(False, "Download cancelled.")
             return
         # Size sanity check — if GitHub served an HTML error page we'd
         # otherwise install a corrupt binary.
