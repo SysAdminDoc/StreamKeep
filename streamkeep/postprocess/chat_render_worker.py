@@ -249,13 +249,18 @@ class ChatRenderWorker(QThread):
                     # Draw message text in white
                     msg_x = 6 + int(nick_w)
                     max_text_w = self.width - msg_x - 6
-                    # Truncate if too long
+                    # Truncate if too long (binary search instead of char-by-char)
                     display_text = text
                     try:
-                        while draw.textlength(display_text, font=font) > max_text_w and len(display_text) > 1:
-                            display_text = display_text[:-1]
-                        if display_text != text:
-                            display_text = display_text[:-1] + "…"
+                        if draw.textlength(text, font=font) > max_text_w:
+                            lo, hi = 0, len(text)
+                            while lo < hi:
+                                mid = (lo + hi + 1) // 2
+                                if draw.textlength(text[:mid], font=font) <= max_text_w:
+                                    lo = mid
+                                else:
+                                    hi = mid - 1
+                            display_text = text[:max(lo - 1, 0)] + "…" if lo < len(text) else text
                     except (TypeError, AttributeError):
                         display_text = text[:int(max_text_w / (self.font_size * 0.6))]
                     draw.text((msg_x, y), display_text, fill=(205, 214, 244), font=font)

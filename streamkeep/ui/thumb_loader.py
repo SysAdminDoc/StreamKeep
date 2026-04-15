@@ -10,12 +10,14 @@ PreviewLoader (F46): generates 5-frame hover previews cached as a
 """
 
 import os
-from collections import deque
+from collections import OrderedDict, deque
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
 from ..postprocess import ThumbWorker, single_thumb_path
+
+_PREVIEW_CACHE_MAX = 32
 
 
 class ThumbLoader(QObject):
@@ -113,7 +115,7 @@ class PreviewLoader(QObject):
         self._timer.setInterval(200)
         self._timer.timeout.connect(self._next_frame)
         self._worker = None
-        self._cache = {}          # media_path -> list[QPixmap]
+        self._cache = OrderedDict()  # media_path -> list[QPixmap], LRU-capped
 
     def start_preview(self, row_key, media_path):
         """Begin animating frames for *media_path*. If cached, starts
@@ -123,8 +125,9 @@ class PreviewLoader(QObject):
             return
         self._active_key = row_key
 
-        # Check in-memory cache
+        # Check in-memory cache (LRU: move to end on hit)
         if media_path in self._cache:
+            self._cache.move_to_end(media_path)
             self._frames = self._cache[media_path]
             self._frame_idx = 0
             self._timer.start()
@@ -136,6 +139,8 @@ class PreviewLoader(QObject):
             frames = self._split_sprite(cache_path)
             if frames:
                 self._cache[media_path] = frames
+                while len(self._cache) > _PREVIEW_CACHE_MAX:
+                    self._cache.popitem(last=False)
                 self._frames = frames
                 self._frame_idx = 0
                 self._timer.start()
@@ -168,6 +173,8 @@ class PreviewLoader(QObject):
                     pixmaps.append(p)
             if pixmaps:
                 self._cache[_media] = pixmaps
+                while len(self._cache) > _PREVIEW_CACHE_MAX:
+                    self._cache.popitem(last=False)
                 self._frames = pixmaps
                 self._frame_idx = 0
                 self._timer.start()

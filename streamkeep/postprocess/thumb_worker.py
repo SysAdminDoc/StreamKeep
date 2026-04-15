@@ -38,10 +38,13 @@ def _file_signature(path, count):
 
 def single_thumb_path(src_path):
     """Deterministic path for a single-thumb cache entry. Returns None if
-    the source is missing / unreadable."""
+    the source is missing / unreadable. Includes a hash of the source
+    filename so multiple videos in the same directory don't collide."""
     if not src_path or not os.path.exists(src_path):
         return None
-    return os.path.join(os.path.dirname(src_path), SINGLE_CACHE_NAME)
+    name = os.path.basename(src_path)
+    sig = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return os.path.join(os.path.dirname(src_path), f".streamkeep_thumb_{sig}.jpg")
 
 
 def strip_thumb_paths(src_path, count):
