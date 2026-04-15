@@ -221,11 +221,12 @@ class PlayerPanel(QDialog):
         self._player_media_layout.insertWidget(0, self.mpv, 1)
         self.mpv.show()
         self.header_badge.setText(self._header_summary)
+        # Always restore panel visibility — whether closed via X or Expand
+        self.show()
 
     def _on_pip_expand(self):
         """User wants to return from PiP to full player."""
         self._on_pip_closed()
-        self.show()
         self.raise_()
 
     def closeEvent(self, event):

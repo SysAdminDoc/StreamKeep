@@ -15,10 +15,12 @@ import base64
 import json
 import sqlite3
 import sys
+import threading
 
 from .paths import CONFIG_DIR
 
 DB_PATH = CONFIG_DIR / "library.db"
+_WRITE_LOCK = threading.Lock()
 
 
 # ── Encryption helpers ──────────────────────────────────────────────
@@ -125,27 +127,29 @@ def set_credential(platform, value):
     """Store an encrypted credential for *platform*."""
     _ensure_table()
     enc = _encrypt(value)
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
-    try:
-        db.execute(
-            "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
-            "ON CONFLICT(platform) DO UPDATE SET credential=excluded.credential",
-            (platform, enc, "{}"),
-        )
-        db.commit()
-    finally:
-        db.close()
+    with _WRITE_LOCK:
+        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        try:
+            db.execute(
+                "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
+                "ON CONFLICT(platform) DO UPDATE SET credential=excluded.credential",
+                (platform, enc, "{}"),
+            )
+            db.commit()
+        finally:
+            db.close()
 
 
 def delete_credential(platform):
     """Remove the credential for *platform*."""
     _ensure_table()
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
-    try:
-        db.execute("DELETE FROM accounts WHERE platform=?", (platform,))
-        db.commit()
-    finally:
-        db.close()
+    with _WRITE_LOCK:
+        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        try:
+            db.execute("DELETE FROM accounts WHERE platform=?", (platform,))
+            db.commit()
+        finally:
+            db.close()
 
 
 def list_platforms():
@@ -181,16 +185,17 @@ def set_extra(platform, data):
     """Store extra JSON data alongside a credential."""
     _ensure_table()
     payload = json.dumps(data, ensure_ascii=False)
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
-    try:
-        db.execute(
-            "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
-            "ON CONFLICT(platform) DO UPDATE SET extra=excluded.extra",
-            (platform, "", payload),
-        )
-        db.commit()
-    finally:
-        db.close()
+    with _WRITE_LOCK:
+        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        try:
+            db.execute(
+                "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
+                "ON CONFLICT(platform) DO UPDATE SET extra=excluded.extra",
+                (platform, "", payload),
+            )
+            db.commit()
+        finally:
+            db.close()
 
 
 # ── Platform-specific helpers ───────────────────────────────────────

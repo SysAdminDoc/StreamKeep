@@ -357,15 +357,20 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             if proc.returncode != 0:
                 err = ""
                 try:
-                    # Non-blocking read; stderr is still open after Popen exits
-                    err = (proc.stderr.read() or "").strip()[:120]
+                    raw = proc.stderr.read() or b""
+                    # stderr is bytes when text=True is not passed
+                    err = (raw.decode("utf-8", errors="replace")
+                           if isinstance(raw, bytes) else raw).strip()[:120]
                 except Exception:
                     pass
-                errors.append(f"part {i}: curl exit {proc.returncode} {err}")
+                with lock:
+                    errors.append(f"part {i}: curl exit {proc.returncode} {err}")
         except FileNotFoundError:
-            errors.append("curl not in PATH")
+            with lock:
+                errors.append("curl not in PATH")
         except Exception as e:
-            errors.append(f"part {i}: {e}")
+            with lock:
+                errors.append(f"part {i}: {e}")
         finally:
             if proc is not None and proc.stderr is not None:
                 try:
@@ -454,6 +459,12 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
     except Exception as e:
         if log_fn:
             log_fn(f"[PARALLEL] concat failed: {e}")
+        # Remove the partially-written output file as well as the parts
+        try:
+            if os.path.exists(outfile):
+                os.remove(outfile)
+        except OSError:
+            pass
         _cleanup_parts()
         return False
 
