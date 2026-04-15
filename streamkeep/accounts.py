@@ -128,8 +128,9 @@ def set_credential(platform, value):
     db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
     try:
         db.execute(
-            "INSERT OR REPLACE INTO accounts (platform, credential) VALUES (?,?)",
-            (platform, enc),
+            "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
+            "ON CONFLICT(platform) DO UPDATE SET credential=excluded.credential",
+            (platform, enc, "{}"),
         )
         db.commit()
     finally:
@@ -179,11 +180,13 @@ def get_extra(platform):
 def set_extra(platform, data):
     """Store extra JSON data alongside a credential."""
     _ensure_table()
+    payload = json.dumps(data, ensure_ascii=False)
     db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
     try:
         db.execute(
-            "UPDATE accounts SET extra=? WHERE platform=?",
-            (json.dumps(data, ensure_ascii=False), platform),
+            "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
+            "ON CONFLICT(platform) DO UPDATE SET extra=excluded.extra",
+            (platform, "", payload),
         )
         db.commit()
     finally:

@@ -24,6 +24,14 @@ STATUS_WARN = "warning"
 STATUS_FAIL = "failed"
 
 
+def _parse_numeric_probe_value(value, cast):
+    try:
+        parsed = cast(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
 def verify_media(media_path, expected_duration=0):
     """Verify a media file's integrity via ffprobe.
 
@@ -62,8 +70,10 @@ def verify_media(media_path, expected_duration=0):
     except (json.JSONDecodeError, ValueError):
         return STATUS_FAIL, "ffprobe returned invalid JSON"
 
-    actual_duration = float(fmt.get("duration", 0) or 0)
-    nb_streams = int(fmt.get("nb_streams", 0) or 0)
+    actual_duration = _parse_numeric_probe_value(fmt.get("duration", 0), float)
+    nb_streams = _parse_numeric_probe_value(fmt.get("nb_streams", 0), int)
+    if actual_duration is None or nb_streams is None:
+        return STATUS_FAIL, "ffprobe returned invalid numeric metadata"
 
     # Check for corruption signatures
     if actual_duration <= 0:

@@ -32,6 +32,12 @@ from ..theme import CAT
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
+from .widgets import (
+    make_dialog_hero,
+    make_dialog_section,
+    make_status_banner,
+    update_status_banner,
+)
 
 THUMB_COUNT = 20
 THUMB_W = 120
@@ -487,7 +493,7 @@ class ClipDialog(QDialog):
     def __init__(self, parent, source_path, *, default_end=None):
         super().__init__(parent)
         self.setWindowTitle("Trim / Clip")
-        self.setMinimumWidth(720)
+        self.setMinimumSize(920, 860)
         self.setModal(True)
         self.source_path = source_path
         self._worker = None
@@ -505,13 +511,34 @@ class ClipDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
 
-        head = QLabel(
-            f"<b>Source:</b> {os.path.basename(source_path)}"
-            f"<br><span style='color:{CAT['subtext0']}'>Duration: "
-            f"{fmt_duration(self._duration) if self._duration else 'unknown'}</span>"
+        hero, _, _, self._hero_badge = make_dialog_hero(
+            "Trim, package, and export moments cleanly",
+            "Set in and out points visually, build highlight reels from multiple ranges, and export in the format that best fits the destination.",
+            eyebrow="CLIP STUDIO",
+            badge_text="Single clip",
         )
-        head.setWordWrap(True)
-        root.addWidget(head)
+        root.addWidget(hero)
+
+        self._status_banner, self._status_title, self._status_body = make_status_banner()
+        root.addWidget(self._status_banner)
+
+        source_card, source_content = make_dialog_section(
+            "Source media",
+            "Work from the current recording without touching the original file.",
+        )
+        self._source_meta = QLabel(
+            f"<b>File</b>: {os.path.basename(source_path)}"
+            f"<br><b>Duration</b>: {fmt_duration(self._duration) if self._duration else 'Unknown'}"
+        )
+        self._source_meta.setObjectName("fieldHint")
+        self._source_meta.setWordWrap(True)
+        source_content.addWidget(self._source_meta)
+        root.addWidget(source_card)
+
+        timeline_card, timeline_content = make_dialog_section(
+            "Timeline and preview",
+            "Drag the handles or click the waveform to refine your clip visually before export.",
+        )
 
         # Filmstrip + preview row
         strip_row = QHBoxLayout()
@@ -537,13 +564,13 @@ class ClipDialog(QDialog):
         self.preview_time_label.setStyleSheet(f"color: {CAT['subtext0']};")
         preview_col.addWidget(self.preview_time_label)
         strip_row.addLayout(preview_col, 0)
-        root.addLayout(strip_row)
+        timeline_content.addLayout(strip_row)
 
         # Audio waveform strip (F34) — sits below filmstrip
         self.waveform = WaveformWidget()
         self.waveform.seek_requested.connect(self._on_waveform_seek)
         self.scrubber.handles_changed.connect(self.waveform.set_selection)
-        root.addWidget(self.waveform)
+        timeline_content.addWidget(self.waveform)
 
         # Storyboard panel (F30) — click a scene thumbnail to jump
         story_bar = QHBoxLayout()
@@ -562,8 +589,11 @@ class ClipDialog(QDialog):
         self._story_lay = QHBoxLayout(self._story_widget)
         self._story_lay.setContentsMargins(4, 2, 4, 2)
         self._story_lay.setSpacing(4)
-        self._story_placeholder = QLabel("No storyboard")
-        self._story_placeholder.setStyleSheet(f"color: {CAT['overlay0']};")
+        self._story_placeholder = QLabel(
+            "No storyboard yet. Detect scenes to create quick jump points."
+        )
+        self._story_placeholder.setObjectName("fieldHint")
+        self._story_placeholder.setWordWrap(True)
         self._story_lay.addWidget(self._story_placeholder)
         self._story_lay.addStretch(1)
         self._story_scroll.setWidget(self._story_widget)
@@ -574,7 +604,13 @@ class ClipDialog(QDialog):
         gen_btn.setFixedWidth(100)
         gen_btn.clicked.connect(self._generate_storyboard)
         story_bar.addWidget(gen_btn)
-        root.addLayout(story_bar)
+        timeline_content.addLayout(story_bar)
+        root.addWidget(timeline_card)
+
+        ranges_card, ranges_content = make_dialog_section(
+            "Ranges",
+            "Use one range for a clean trim, or stack multiple ranges to export a highlight reel.",
+        )
 
         # In / Out text fields (kept so power users can type exact times)
         range_row = QHBoxLayout()
@@ -600,20 +636,15 @@ class ClipDialog(QDialog):
         self.dur_label.setStyleSheet(f"color: {CAT['green']}; font-weight: 600;")
         dur_col.addWidget(self.dur_label)
         range_row.addLayout(dur_col, 0)
-        root.addLayout(range_row)
+        ranges_content.addLayout(range_row)
 
         # Range list (F9 — multi-range highlight reel)
-        ranges_section = QHBoxLayout()
-        ranges_section.setSpacing(8)
+        ranges_toolbar = QHBoxLayout()
+        ranges_toolbar.setSpacing(8)
         self.range_list = QListWidget()
         self.range_list.setFixedHeight(90)
-        self.range_list.setStyleSheet(
-            f"QListWidget {{ background: {CAT['base']}; border: 1px solid {CAT['surface0']}; "
-            f"border-radius: 6px; color: {CAT['text']}; }}"
-            f"QListWidget::item:selected {{ background: {CAT['surface1']}; }}"
-        )
         self.range_list.currentRowChanged.connect(self._on_range_selected)
-        ranges_section.addWidget(self.range_list, 1)
+        ranges_toolbar.addWidget(self.range_list, 1)
         range_btns = QVBoxLayout()
         range_btns.setSpacing(4)
         for symbol, tip, slot in [
@@ -629,9 +660,15 @@ class ClipDialog(QDialog):
             b.clicked.connect(slot)
             range_btns.addWidget(b)
         range_btns.addStretch(1)
-        ranges_section.addLayout(range_btns)
-        root.addLayout(ranges_section)
+        ranges_toolbar.addLayout(range_btns)
+        ranges_content.addLayout(ranges_toolbar)
+        root.addWidget(ranges_card)
         self._refresh_range_list()
+
+        export_card, export_content = make_dialog_section(
+            "Export settings",
+            "Choose accuracy, framing, and destination before saving the final clip.",
+        )
 
         # Mode
         mode_row = QHBoxLayout()
@@ -645,14 +682,14 @@ class ClipDialog(QDialog):
         self.reencode_check.toggled.connect(self._on_reencode_toggled)
         mode_row.addWidget(self.reencode_check)
         self.codec_combo = QComboBox()
-        for key, label in VIDEO_CODECS:
+        for key, label in VIDEO_CODECS.items():
             if key == "copy":
                 continue
             self.codec_combo.addItem(label, userData=key)
         self.codec_combo.setVisible(False)
         mode_row.addWidget(self.codec_combo)
         mode_row.addStretch(1)
-        root.addLayout(mode_row)
+        export_content.addLayout(mode_row)
 
         # Social platform preset (F31)
         social_row = QHBoxLayout()
@@ -677,7 +714,7 @@ class ClipDialog(QDialog):
         self.crop_pct_label.setFixedWidth(32)
         self.crop_pct_label.setVisible(False)
         social_row.addWidget(self.crop_pct_label)
-        root.addLayout(social_row)
+        export_content.addLayout(social_row)
         self._last_preview_pix = None
 
         # Output path
@@ -685,22 +722,26 @@ class ClipDialog(QDialog):
         out_row.setSpacing(8)
         out_row.addWidget(QLabel("Output:"))
         self.out_input = QLineEdit(self._default_output_path(source_path))
+        self.out_input.setClearButtonEnabled(True)
         out_row.addWidget(self.out_input, 1)
         browse_btn = QPushButton("Browse...")
         browse_btn.setObjectName("secondary")
         browse_btn.clicked.connect(self._on_browse)
         out_row.addWidget(browse_btn)
-        root.addLayout(out_row)
+        export_content.addLayout(out_row)
 
         # Progress + log
         self.progress = QProgressBar()
         self.progress.setValue(0)
-        root.addWidget(self.progress)
+        export_content.addWidget(self.progress)
 
         self.log_view = QTextEdit()
+        self.log_view.setObjectName("log")
         self.log_view.setReadOnly(True)
         self.log_view.setFixedHeight(110)
-        root.addWidget(self.log_view)
+        self.log_view.setPlaceholderText("Export progress and ffmpeg messages appear here.")
+        export_content.addWidget(self.log_view)
+        root.addWidget(export_card)
 
         # Buttons
         btn_row = QHBoxLayout()
@@ -709,13 +750,18 @@ class ClipDialog(QDialog):
         self.cancel_btn.setObjectName("secondary")
         self.cancel_btn.clicked.connect(self._on_close_or_cancel)
         btn_row.addWidget(self.cancel_btn)
-        self.trim_btn = QPushButton("Trim")
+        self.trim_btn = QPushButton("Export clip")
         self.trim_btn.setObjectName("primary")
         self.trim_btn.clicked.connect(self._on_trim)
         btn_row.addWidget(self.trim_btn)
         root.addLayout(btn_row)
 
         if not self._duration:
+            self._set_status(
+                "Duration could not be read",
+                "Manual start and end entry still works, but the visual scrubber may be limited until ffprobe is available.",
+                tone="warning",
+            )
             self._log_line(
                 "[WARN] ffprobe could not determine duration. Scrubber "
                 "disabled; enter values manually."
@@ -729,6 +775,7 @@ class ClipDialog(QDialog):
             self._kick_off_waveform()
             self._load_chat_spikes()
             self._load_storyboard_cache()
+            self._refresh_status_summary()
 
     # ── Thumbnail + preview ─────────────────────────────────────
 
@@ -854,6 +901,45 @@ class ClipDialog(QDialog):
 
     # ── Misc ────────────────────────────────────────────────────
 
+    def _set_status(self, title, body, *, tone="info"):
+        update_status_banner(
+            self._status_banner,
+            self._status_title,
+            self._status_body,
+            title=title,
+            body=body,
+            tone=tone,
+        )
+
+    def _refresh_status_summary(self):
+        if not all(
+            hasattr(self, name)
+            for name in ("reencode_check", "social_combo", "out_input", "_hero_badge")
+        ):
+            return
+        range_count = len(self._ranges)
+        export_mode = "highlight reel" if range_count > 1 else "clip"
+        accuracy = (
+            "frame-accurate re-encode"
+            if self.reencode_check.isChecked()
+            else "fast stream copy"
+        )
+        framing = self.social_combo.currentText()
+        if not (self.social_combo.currentData() or ""):
+            framing = "Original framing"
+        output_name = (
+            os.path.basename(self.out_input.text().strip())
+            if self.out_input.text().strip()
+            else "No output file chosen yet"
+        )
+
+        self._hero_badge.setText("Highlight reel" if range_count > 1 else "Single clip")
+        self._set_status(
+            f"Ready to export a {export_mode}",
+            f"{range_count} range(s) selected, using {accuracy}. Framing: {framing}. Output: {output_name}.",
+            tone="info",
+        )
+
     def _default_output_path(self, source_path):
         base, ext = os.path.splitext(source_path)
         return f"{base}.clip{ext}"
@@ -865,9 +951,12 @@ class ClipDialog(QDialog):
         )
         if path:
             self.out_input.setText(path)
+            self._refresh_status_summary()
 
     def _on_reencode_toggled(self, checked):
         self.codec_combo.setVisible(bool(checked))
+        if not (self.social_combo.currentData() or ""):
+            self._refresh_status_summary()
 
     # ── Social clip export (F31) ───────────────────────────────
 
@@ -882,6 +971,7 @@ class ClipDialog(QDialog):
         else:
             self.reencode_check.setEnabled(True)
         self._refresh_crop_overlay()
+        self._refresh_status_summary()
 
     def _apply_crop_overlay(self, pix):
         """Draw crop region overlay on QPixmap for vertical social presets."""
@@ -949,13 +1039,30 @@ class ClipDialog(QDialog):
         self.social_combo.setEnabled(not busy)
         self.crop_slider.setEnabled(not busy)
         self.cancel_btn.setText("Cancel" if busy else "Close")
+        if busy:
+            mode = "highlight reel" if len(self._ranges) > 1 else "clip"
+            self._set_status(
+                f"Exporting {mode}",
+                "StreamKeep is processing the selected range and will keep logging progress below.",
+                tone="info",
+            )
 
     def _on_trim(self):
         out_path = self.out_input.text().strip()
         if not out_path:
+            self._set_status(
+                "Choose an output path",
+                "Pick where the exported clip should be saved before starting the job.",
+                tone="error",
+            )
             self._log_line("[ERROR] Output path is empty.")
             return
         if os.path.abspath(out_path) == os.path.abspath(self.source_path):
+            self._set_status(
+                "Output path conflicts with the source",
+                "Choose a different filename so the original recording stays untouched.",
+                tone="error",
+            )
             self._log_line("[ERROR] Output cannot overwrite the source file.")
             return
         codec = "libx264"
@@ -965,6 +1072,11 @@ class ClipDialog(QDialog):
         if len(self._ranges) > 1:
             valid = [(s, e) for s, e in self._ranges if e > s]
             if not valid:
+                self._set_status(
+                    "No valid ranges to export",
+                    "Add at least one range with an end time later than its start time.",
+                    tone="error",
+                )
                 self._log_line("[ERROR] No valid ranges to export.")
                 return
             self._worker = HighlightWorker(
@@ -982,6 +1094,11 @@ class ClipDialog(QDialog):
         start_s = parse_hhmmss(self.start_input.text(), 0.0)
         end_s = parse_hhmmss(self.end_input.text(), self._duration or 0.0)
         if end_s <= start_s:
+            self._set_status(
+                "End time needs to be later than start time",
+                "Adjust the in and out points so the clip has a positive duration.",
+                tone="error",
+            )
             self._log_line("[ERROR] End must be greater than start.")
             return
         vf = self._build_social_vf()
@@ -1008,8 +1125,18 @@ class ClipDialog(QDialog):
         self._set_busy(False)
         self.progress.setValue(100 if ok else 0)
         if ok:
+            self._set_status(
+                "Export complete",
+                f"Saved the finished clip to {out_path}.",
+                tone="success",
+            )
             self._log_line(f"[DONE] Saved {out_path}")
         else:
+            self._set_status(
+                "Export failed",
+                "StreamKeep could not finish the clip. The log below should point to the next fix.",
+                tone="error",
+            )
             self._log_line("[DONE] Trim failed — see log above.")
 
     # ── Storyboard (F30) ─────────────────────────────────────
@@ -1026,6 +1153,11 @@ class ClipDialog(QDialog):
         self._scene_worker.log.connect(self._log_line)
         self._scene_worker.scenes_ready.connect(self._on_scenes_ready)
         self._scene_worker.start()
+        self._set_status(
+            "Detecting scenes",
+            "StreamKeep is scanning for scene changes so you can jump through the recording faster.",
+            tone="info",
+        )
         self._log_line("[SCENE] Starting scene detection\u2026")
 
     def _on_scenes_ready(self, scenes):
@@ -1062,6 +1194,12 @@ class ClipDialog(QDialog):
             col.addWidget(lbl)
             self._story_lay.addWidget(frame)
         self._story_lay.addStretch(1)
+        if scenes:
+            self._set_status(
+                "Storyboard ready",
+                f"Detected {len(scenes)} scene marker(s). Click any frame to jump the nearest handle.",
+                tone="success",
+            )
 
     def _on_story_click(self, timestamp):
         if not self._duration or self._duration <= 0:
@@ -1163,8 +1301,10 @@ class ClipDialog(QDialog):
             self.range_list.addItem(label)
         self.range_list.setCurrentRow(self._active_range_idx)
         self.range_list.blockSignals(False)
-        self.trim_btn.setText(
-            "Export Highlight Reel" if len(self._ranges) > 1 else "Trim")
+        if hasattr(self, "trim_btn"):
+            self.trim_btn.setText(
+                "Export Highlight Reel" if len(self._ranges) > 1 else "Export Clip")
+        self._refresh_status_summary()
 
     def _refresh_range_overlays(self):
         if not self._duration or self._duration <= 0:
@@ -1178,6 +1318,11 @@ class ClipDialog(QDialog):
             self._worker.cancel()
             self._worker.wait(2000)
             self._set_busy(False)
+            self._set_status(
+                "Export canceled",
+                "The current clip job was stopped before completion.",
+                tone="warning",
+            )
             return
         self.accept()
 

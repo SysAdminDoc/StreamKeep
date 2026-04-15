@@ -17,12 +17,23 @@ _LOG_LOCK = threading.Lock()
 
 
 def load_config():
-    """Load the config JSON. Returns {} on any error."""
-    try:
-        if CONFIG_FILE.exists():
-            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    """Load the config JSON.
+
+    Falls back to the last-known-good ``config.json.bak`` if the primary
+    file is missing or corrupted. Returns ``{}`` on any unrecoverable error.
+    """
+    for candidate in (
+        CONFIG_FILE,
+        CONFIG_FILE.with_suffix(".json.bak"),
+    ):
+        try:
+            if not candidate.exists():
+                continue
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
     return {}
 
 

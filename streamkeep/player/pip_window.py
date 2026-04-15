@@ -11,10 +11,8 @@ Usage (from PlayerPanel)::
     # When closed, mpv_widget is re-parented back to the PlayerPanel
 """
 
-from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal
-
-from ..theme import CAT
 
 
 class PiPWindow(QWidget):
@@ -37,61 +35,62 @@ class PiPWindow(QWidget):
         self._original_parent = mpv_widget.parent()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # Title bar
-        title_bar = QWidget()
-        title_bar.setFixedHeight(28)
-        title_bar.setStyleSheet(
-            f"background: {CAT['mantle']}; border-bottom: 1px solid {CAT['surface0']};"
-        )
+        shell = QFrame()
+        shell.setObjectName("playerPipShell")
+        shell_lay = QVBoxLayout(shell)
+        shell_lay.setContentsMargins(10, 10, 10, 10)
+        shell_lay.setSpacing(10)
+        layout.addWidget(shell, 1)
+
+        title_bar = QFrame()
+        title_bar.setObjectName("playerPipTitleBar")
         tb_lay = QHBoxLayout(title_bar)
-        tb_lay.setContentsMargins(8, 0, 4, 0)
-        tb_lay.setSpacing(4)
+        tb_lay.setContentsMargins(10, 8, 10, 8)
+        tb_lay.setSpacing(6)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(1)
+        kicker = QLabel("PLAYER")
+        kicker.setObjectName("playerKicker")
+        title_col.addWidget(kicker)
+        title = QLabel("Picture-in-picture")
+        title.setObjectName("playerMiniTitle")
+        title_col.addWidget(title)
+        hint = QLabel("Always on top")
+        hint.setObjectName("playerMiniMeta")
+        title_col.addWidget(hint)
+        tb_lay.addLayout(title_col, 1)
 
         play_btn = QPushButton("||")
         play_btn.setFixedSize(24, 20)
-        play_btn.setStyleSheet(
-            f"background: {CAT['surface0']}; color: {CAT['text']}; "
-            f"border: none; border-radius: 3px; font-size: 10px;"
-        )
+        play_btn.setObjectName("secondary")
         play_btn.clicked.connect(self._toggle_pause)
         tb_lay.addWidget(play_btn)
         self._play_btn = play_btn
 
-        tb_lay.addStretch(1)
-
         expand_btn = QPushButton("[ ]")
         expand_btn.setFixedSize(24, 20)
         expand_btn.setToolTip("Return to full player")
-        expand_btn.setStyleSheet(
-            f"background: {CAT['surface0']}; color: {CAT['text']}; "
-            f"border: none; border-radius: 3px; font-size: 10px;"
-        )
+        expand_btn.setObjectName("ghost")
         expand_btn.clicked.connect(self._on_expand)
         tb_lay.addWidget(expand_btn)
 
         close_btn = QPushButton("x")
         close_btn.setFixedSize(24, 20)
-        close_btn.setStyleSheet(
-            f"background: {CAT['red']}; color: {CAT['base']}; "
-            f"border: none; border-radius: 3px; font-weight: bold; font-size: 10px;"
-        )
+        close_btn.setObjectName("danger")
         close_btn.clicked.connect(self.close)
         tb_lay.addWidget(close_btn)
 
-        layout.addWidget(title_bar)
+        shell_lay.addWidget(title_bar)
 
         # Re-parent the mpv widget into this window
         mpv_widget.setParent(self)
-        layout.addWidget(mpv_widget, 1)
+        shell_lay.addWidget(mpv_widget, 1)
         mpv_widget.show()
-
-        self.setStyleSheet(
-            f"background: {CAT['base']}; "
-            f"border: 2px solid {CAT['surface1']}; border-radius: 6px;"
-        )
 
     def _toggle_pause(self):
         if self._mpv:

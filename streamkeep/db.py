@@ -417,10 +417,12 @@ def migrate_from_config(cfg):
     db = _connect(readonly=True)
     try:
         existing_history = db.execute("SELECT COUNT(*) FROM history").fetchone()[0]
+        existing_channels = db.execute("SELECT COUNT(*) FROM monitor_channels").fetchone()[0]
+        existing_queue = db.execute("SELECT COUNT(*) FROM download_queue").fetchone()[0]
     finally:
         db.close()
 
-    if existing_history > 0:
+    if existing_history > 0 or existing_channels > 0 or existing_queue > 0:
         # DB already has data — don't re-migrate.  Strip keys from config.
         for k in ("history", "monitor_channels", "download_queue"):
             cfg.pop(k, None)

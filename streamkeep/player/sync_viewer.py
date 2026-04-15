@@ -14,12 +14,17 @@ Usage::
 import os
 
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+    QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QTimer
 
-from ..theme import CAT
+from ..ui.widgets import (
+    make_dialog_hero,
+    make_empty_state,
+    make_status_banner,
+    update_status_banner,
+)
 from .mpv_widget import MpvWidget, is_mpv_available
 
 
@@ -47,7 +52,6 @@ class SyncViewer(QDialog):
         self.setWindowTitle("StreamKeep — Multi-Stream Sync Viewer")
         self.setMinimumSize(900, 560)
         self.resize(1200, 720)
-        self.setStyleSheet(f"background: {CAT['base']};")
 
         self._slots = []          # list of _StreamSlot
         self._duration = 0.0
@@ -55,34 +59,55 @@ class SyncViewer(QDialog):
         self._audio_slot = 0      # index of the slot that plays audio
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
+
+        hero, _, _, self._hero_badge = make_dialog_hero(
+            "Multi-stream sync viewer",
+            "Compare 2-4 recordings side by side, keep one stream on audio, and nudge offsets until moments line up cleanly.",
+            eyebrow="PLAYER",
+            badge_text="Waiting",
+        )
+        root.addWidget(hero)
+
+        self._status_banner, self._status_title, self._status_body = make_status_banner()
+        root.addWidget(self._status_banner)
 
         # Video grid
+        self._grid_shell = QFrame()
+        self._grid_shell.setObjectName("playerVideoCanvas")
+        grid_shell_lay = QVBoxLayout(self._grid_shell)
+        grid_shell_lay.setContentsMargins(12, 12, 12, 12)
+        grid_shell_lay.setSpacing(10)
         self._grid_widget = QWidget()
         self._grid = QGridLayout(self._grid_widget)
-        self._grid.setContentsMargins(2, 2, 2, 2)
-        self._grid.setSpacing(2)
-        root.addWidget(self._grid_widget, 1)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setSpacing(10)
+        self._empty_card, _, _ = make_empty_state(
+            "Add recordings to compare",
+            "The sync viewer shines with multiple POVs. Once streams are added, playback stays locked to one shared transport bar.",
+        )
+        grid_shell_lay.addWidget(self._empty_card)
+        grid_shell_lay.addWidget(self._grid_widget, 1)
+        root.addWidget(self._grid_shell, 1)
 
         # Transport bar
-        transport = QWidget()
-        transport.setFixedHeight(52)
-        transport.setStyleSheet(f"background: {CAT['mantle']};")
+        transport = QFrame()
+        transport.setObjectName("playerTransportBar")
         tlay = QHBoxLayout(transport)
-        tlay.setContentsMargins(12, 4, 12, 4)
+        tlay.setContentsMargins(16, 12, 16, 12)
         tlay.setSpacing(8)
 
         self._play_btn = QPushButton("||")
         self._play_btn.setFixedWidth(36)
-        self._play_btn.setObjectName("secondary")
+        self._play_btn.setObjectName("primary")
         self._play_btn.clicked.connect(self._toggle_pause)
         tlay.addWidget(self._play_btn)
 
         self._time_label = QLabel("0:00")
+        self._time_label.setObjectName("playerMeta")
         self._time_label.setFixedWidth(60)
         self._time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._time_label.setStyleSheet(f"color: {CAT['text']};")
         tlay.addWidget(self._time_label)
 
         self._seek_slider = QSlider(Qt.Orientation.Horizontal)
@@ -91,11 +116,13 @@ class SyncViewer(QDialog):
         tlay.addWidget(self._seek_slider, 1)
 
         self._dur_label = QLabel("0:00")
+        self._dur_label.setObjectName("playerMeta")
         self._dur_label.setFixedWidth(60)
-        self._dur_label.setStyleSheet(f"color: {CAT['text']};")
         tlay.addWidget(self._dur_label)
 
-        tlay.addWidget(QLabel("Audio:"))
+        audio_lbl = QLabel("Audio")
+        audio_lbl.setObjectName("playerTinyLabel")
+        tlay.addWidget(audio_lbl)
         self._audio_combo = QComboBox()
         self._audio_combo.setFixedWidth(120)
         self._audio_combo.currentIndexChanged.connect(self._on_audio_switch)
@@ -107,6 +134,7 @@ class SyncViewer(QDialog):
         self._poll = QTimer(self)
         self._poll.setInterval(250)
         self._poll.timeout.connect(self._poll_position)
+        self._refresh_chrome()
 
     def add_stream(self, file_path, label=""):
         """Add a stream to the viewer. Max 4 streams."""
@@ -129,6 +157,7 @@ class SyncViewer(QDialog):
         self._audio_combo.blockSignals(True)
         self._audio_combo.addItem(slot.label[:20])
         self._audio_combo.blockSignals(False)
+        self._refresh_chrome()
 
     def start_all(self):
         """Begin playback on all streams."""
@@ -144,12 +173,16 @@ class SyncViewer(QDialog):
         # Get duration from first stream
         if self._slots:
             self._slots[0].widget.duration_changed.connect(self._on_duration)
+        self._refresh_chrome()
 
     def _relayout_grid(self):
         """Arrange player widgets in a grid based on count."""
         # Clear existing
         while self._grid.count():
-            self._grid.takeAt(0)
+            item = self._grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
 
         n = len(self._slots)
         if n <= 1:
@@ -160,27 +193,41 @@ class SyncViewer(QDialog):
             cols = 2
 
         for i, slot in enumerate(self._slots):
-            container = QVBoxLayout()
+            card = QFrame()
+            card.setObjectName("playerSlotCard")
+            container = QVBoxLayout(card)
+            container.setContentsMargins(10, 10, 10, 10)
+            container.setSpacing(8)
+            head_row = QHBoxLayout()
+            head_row.setContentsMargins(0, 0, 0, 0)
+            head_row.setSpacing(8)
+            title_col = QVBoxLayout()
+            title_col.setSpacing(2)
             label = QLabel(slot.label)
-            label.setFixedHeight(20)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet(
-                f"color: {CAT['text']}; background: {CAT['mantle']}; "
-                f"font-size: 11px; border-radius: 2px;"
-            )
-            container.addWidget(label)
+            label.setObjectName("playerMiniTitle")
+            label.setWordWrap(True)
+            title_col.addWidget(label)
+            meta = QLabel(os.path.basename(slot.file_path))
+            meta.setObjectName("playerMiniMeta")
+            meta.setWordWrap(True)
+            title_col.addWidget(meta)
+            head_row.addLayout(title_col, 1)
+            badge = QLabel("Audio" if i == self._audio_slot else "Silent")
+            badge.setObjectName("playerBadgeMuted")
+            head_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+            container.addLayout(head_row)
             container.addWidget(slot.widget, 1)
 
             # Offset control
             offset_row = QHBoxLayout()
             offset_row.setSpacing(4)
             offset_label = QLabel("Offset:")
-            offset_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 10px;")
+            offset_label.setObjectName("playerTinyLabel")
             offset_row.addWidget(offset_label)
             spin = QSpinBox()
             spin.setRange(-30, 30)
             spin.setSuffix("s")
-            spin.setValue(0)
+            spin.setValue(int(slot.offset_secs))
             spin.setFixedWidth(70)
             idx = i  # capture
             spin.valueChanged.connect(lambda v, si=idx: self._set_offset(si, v))
@@ -189,7 +236,45 @@ class SyncViewer(QDialog):
             container.addLayout(offset_row)
 
             row, col = divmod(i, cols)
-            self._grid.addLayout(container, row, col)
+            self._grid.addWidget(card, row, col)
+        self._refresh_chrome()
+
+    def _refresh_chrome(self):
+        count = len(self._slots)
+        self._hero_badge.setText(f"{count} stream(s)" if count else "Waiting")
+        self._hero_badge.setVisible(True)
+        self._grid_widget.setVisible(bool(count))
+        self._empty_card.setVisible(not bool(count))
+        self._audio_combo.setEnabled(count > 1)
+        self._play_btn.setEnabled(bool(count))
+        self._seek_slider.setEnabled(bool(count))
+        if not count:
+            update_status_banner(
+                self._status_banner,
+                self._status_title,
+                self._status_body,
+                title="Ready for a side-by-side session",
+                body="Add two or more recordings to compare reactions, timing, or multiple points of view on the same moment.",
+                tone="info",
+            )
+        elif count == 1:
+            update_status_banner(
+                self._status_banner,
+                self._status_title,
+                self._status_body,
+                title="One stream loaded",
+                body="Add at least one more recording to make sync comparison useful.",
+                tone="warning",
+            )
+        else:
+            update_status_banner(
+                self._status_banner,
+                self._status_title,
+                self._status_body,
+                title="Sync viewer ready",
+                body="Use the shared transport below, pick one audio stream, and adjust offsets until the moments line up.",
+                tone="success" if not self._paused else "info",
+            )
 
     def _toggle_pause(self):
         self._paused = not self._paused
@@ -200,6 +285,7 @@ class SyncViewer(QDialog):
                 except Exception:
                     pass
         self._play_btn.setText(">" if self._paused else "||")
+        self._refresh_chrome()
 
     def _on_seek(self):
         if self._duration <= 0:
@@ -216,6 +302,7 @@ class SyncViewer(QDialog):
         self._audio_slot = idx
         for i, slot in enumerate(self._slots):
             slot.widget.volume = 100 if i == idx else 0
+        self._relayout_grid()
 
     def _on_duration(self, secs):
         self._duration = secs

@@ -9,12 +9,12 @@ import json
 import os
 
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
+    QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from ..theme import CAT
+from ..ui.widgets import ask_premium_text_input
 
 
 def _fmt_time(secs):
@@ -31,29 +31,47 @@ class ChapterPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(220)
-        self.setStyleSheet(f"background: {CAT['mantle']}; border-left: 1px solid {CAT['surface0']};")
+        self.setFixedWidth(260)
 
         self._entries = []   # list of (label, secs, kind)  kind = "chapter" | "bookmark"
         self._current_pos = 0.0
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
+        shell = QFrame()
+        shell.setObjectName("playerSidebar")
+        shell_lay = QVBoxLayout(shell)
+        shell_lay.setContentsMargins(14, 14, 14, 14)
+        shell_lay.setSpacing(10)
+        layout.addWidget(shell)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        kicker = QLabel("PLAYER")
+        kicker.setObjectName("playerKicker")
+        title_col.addWidget(kicker)
         header = QLabel("Chapters & Bookmarks")
-        header.setStyleSheet(f"color: {CAT['text']}; font-weight: bold; font-size: 12px;")
-        layout.addWidget(header)
+        header.setObjectName("playerSectionTitle")
+        title_col.addWidget(header)
+        self._summary_label = QLabel("Jump to sections or save your own markers.")
+        self._summary_label.setObjectName("playerHint")
+        self._summary_label.setWordWrap(True)
+        title_col.addWidget(self._summary_label)
+        header_row.addLayout(title_col, 1)
+        self._count_badge = QLabel("0 saved")
+        self._count_badge.setObjectName("playerBadgeMuted")
+        header_row.addWidget(self._count_badge, 0, Qt.AlignmentFlag.AlignTop)
+        shell_lay.addLayout(header_row)
 
         self._list = QListWidget()
-        self._list.setStyleSheet(
-            f"QListWidget {{ background: {CAT['base']}; color: {CAT['text']}; "
-            f"border: 1px solid {CAT['surface0']}; border-radius: 4px; }}"
-            f"QListWidget::item {{ padding: 4px; }}"
-            f"QListWidget::item:selected {{ background: {CAT['surface1']}; }}"
-        )
+        self._list.setObjectName("playerChapterList")
         self._list.itemClicked.connect(self._on_item_click)
-        layout.addWidget(self._list, 1)
+        shell_lay.addWidget(self._list, 1)
 
         # Add bookmark button
         btn_row = QHBoxLayout()
@@ -62,7 +80,14 @@ class ChapterPanel(QWidget):
         add_btn.clicked.connect(self._on_add_bookmark)
         btn_row.addWidget(add_btn)
         btn_row.addStretch(1)
-        layout.addLayout(btn_row)
+        shell_lay.addLayout(btn_row)
+
+        footer = QLabel(
+            "Tip: click any entry to seek instantly, or save a bookmark at the current playback time."
+        )
+        footer.setObjectName("playerTinyLabel")
+        footer.setWordWrap(True)
+        shell_lay.addWidget(footer)
 
     def load_chapters(self, recording_dir, mpv_chapters=None, bookmarks=None):
         """Load chapters from all sources and populate the list.
@@ -133,10 +158,34 @@ class ChapterPanel(QWidget):
             if kind == "bookmark":
                 item.setForeground(Qt.GlobalColor.cyan)
             self._list.addItem(item)
+        if not self._entries:
+            self._show_empty_placeholder()
+        self._refresh_summary()
 
     def set_position(self, secs):
         """Highlight the current chapter based on playback position."""
         self._current_pos = secs
+
+    def _show_empty_placeholder(self):
+        item = QListWidgetItem("No chapters or bookmarks yet. Add a bookmark to save this moment.")
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.setForeground(Qt.GlobalColor.gray)
+        self._list.addItem(item)
+
+    def _refresh_summary(self):
+        bookmarks = sum(1 for _label, _secs, kind in self._entries if kind == "bookmark")
+        chapters = sum(1 for _label, _secs, kind in self._entries if kind == "chapter")
+        total = len(self._entries)
+        if total:
+            self._count_badge.setText(f"{total} saved")
+            self._summary_label.setText(
+                f"{chapters} chapter(s) and {bookmarks} bookmark(s) are ready to jump through."
+            )
+        else:
+            self._count_badge.setText("Waiting")
+            self._summary_label.setText(
+                "Load a recording with embedded chapters or save bookmarks while you watch."
+            )
 
     def _on_item_click(self, item):
         secs = item.data(Qt.ItemDataRole.UserRole)
@@ -144,18 +193,37 @@ class ChapterPanel(QWidget):
             self.seek_requested.emit(float(secs))
 
     def _on_add_bookmark(self):
-        name, ok = QInputDialog.getText(
-            self, "Add Bookmark",
-            f"Bookmark name (at {_fmt_time(self._current_pos)}):",
+        name, ok = ask_premium_text_input(
+            self,
+            title="Add a bookmark",
+            body="Save the current playback position so you can jump back to this moment later.",
+            eyebrow="PLAYER",
+            badge_text="Bookmark",
+            tone="info",
+            summary_title=f"Bookmarking {_fmt_time(self._current_pos)}.",
+            summary_body="Use a short label you will recognize in the chapter list.",
+            field_label="Bookmark name",
+            field_hint="Examples: Intro, Best moment, Final reaction.",
+            placeholder="Favorite moment",
+            primary_label="Save bookmark",
+            secondary_label="Cancel",
+            validator=lambda value: (bool((value or "").strip()), "Enter a bookmark name."),
         )
-        if ok and name:
-            self.bookmark_added.emit(name.strip(), self._current_pos)
-            # Add to list immediately
-            self._entries.append((name.strip(), self._current_pos, "bookmark"))
-            item = QListWidgetItem(f"[B] {_fmt_time(self._current_pos)}  {name.strip()}")
-            item.setData(Qt.ItemDataRole.UserRole, self._current_pos)
-            item.setForeground(Qt.GlobalColor.cyan)
+        if not ok:
+            return
+        self.bookmark_added.emit(name.strip(), self._current_pos)
+        # Add to list immediately
+        self._entries.append((name.strip(), self._current_pos, "bookmark"))
+        self._entries.sort(key=lambda e: e[1])
+        self._list.clear()
+        for label, secs, kind in self._entries:
+            prefix = "[B] " if kind == "bookmark" else ""
+            item = QListWidgetItem(f"{prefix}{_fmt_time(secs)}  {label}")
+            item.setData(Qt.ItemDataRole.UserRole, secs)
+            if kind == "bookmark":
+                item.setForeground(Qt.GlobalColor.cyan)
             self._list.addItem(item)
+        self._refresh_summary()
 
 
 def _parse_ts(text):

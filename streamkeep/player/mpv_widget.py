@@ -48,7 +48,9 @@ class MpvWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeWidget, False)
+        native_guard = getattr(Qt.WidgetAttribute, "WA_DontCreateNativeWidget", None)
+        if native_guard is not None:
+            self.setAttribute(native_guard, False)
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.setMinimumSize(320, 180)
         self.setStyleSheet("background: #000;")

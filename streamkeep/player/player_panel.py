@@ -8,11 +8,10 @@ metadata display (title, channel, duration).
 import os
 
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from ..theme import CAT
 from .mpv_widget import MpvWidget
 from .player_controls import PlayerControls
 from .chapter_panel import ChapterPanel
@@ -37,46 +36,66 @@ class PlayerPanel(QDialog):
         self.setWindowTitle("StreamKeep Player")
         self.setMinimumSize(800, 520)
         self.resize(960, 600)
-        self.setStyleSheet(f"background: {CAT['base']};")
 
         self._history_entry = None
         self.last_position = 0.0
+        self._header_summary = "Embedded playback"
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
 
         # Metadata bar
-        meta_bar = QWidget()
-        meta_bar.setFixedHeight(36)
-        meta_bar.setStyleSheet(f"background: {CAT['mantle']};")
+        meta_bar = QFrame()
+        meta_bar.setObjectName("playerMetaBar")
         meta_lay = QHBoxLayout(meta_bar)
-        meta_lay.setContentsMargins(12, 4, 12, 4)
-        self.title_label = QLabel("")
-        self.title_label.setStyleSheet(f"color: {CAT['text']}; font-weight: bold;")
-        meta_lay.addWidget(self.title_label, 1)
+        meta_lay.setContentsMargins(16, 14, 16, 14)
+        meta_lay.setSpacing(12)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        kicker = QLabel("PLAYER")
+        kicker.setObjectName("playerKicker")
+        title_col.addWidget(kicker)
+        self.title_label = QLabel("Choose a recording to start playback")
+        self.title_label.setObjectName("playerTitle")
+        self.title_label.setWordWrap(True)
+        title_col.addWidget(self.title_label)
         self.channel_label = QLabel("")
-        self.channel_label.setStyleSheet(f"color: {CAT['subtext0']};")
-        meta_lay.addWidget(self.channel_label)
+        self.channel_label.setObjectName("playerMeta")
+        self.channel_label.setWordWrap(True)
+        title_col.addWidget(self.channel_label)
+        self.hint_label = QLabel(
+            "Space pauses, arrow keys nudge playback, and bookmarks stay attached to the recording."
+        )
+        self.hint_label.setObjectName("playerHint")
+        self.hint_label.setWordWrap(True)
+        title_col.addWidget(self.hint_label)
+        meta_lay.addLayout(title_col, 1)
+        self.header_badge = QLabel("Embedded playback")
+        self.header_badge.setObjectName("playerBadgeMuted")
+        meta_lay.addWidget(self.header_badge, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(meta_bar)
 
         # MPV widget + chapter panel (F55) in a horizontal split
-        from PyQt6.QtWidgets import QHBoxLayout as _HBox
-        player_row = _HBox()
-        player_row.setContentsMargins(0, 0, 0, 0)
-        player_row.setSpacing(0)
+        media_shell = QFrame()
+        media_shell.setObjectName("playerVideoCanvas")
+        media_shell_lay = QVBoxLayout(media_shell)
+        media_shell_lay.setContentsMargins(12, 12, 12, 12)
+        media_shell_lay.setSpacing(12)
+        self._player_media_layout = QHBoxLayout()
+        self._player_media_layout.setContentsMargins(0, 0, 0, 0)
+        self._player_media_layout.setSpacing(12)
         self.mpv = MpvWidget(self)
-        player_row.addWidget(self.mpv, 1)
+        self._player_media_layout.addWidget(self.mpv, 1)
         self.chapter_panel = ChapterPanel(self)
         self.chapter_panel.seek_requested.connect(self.mpv.seek)
         self.chapter_panel.bookmark_added.connect(self._on_bookmark_added)
-        player_row.addWidget(self.chapter_panel)
-        layout.addLayout(player_row, 1)
+        self._player_media_layout.addWidget(self.chapter_panel)
+        media_shell_lay.addLayout(self._player_media_layout, 1)
+        layout.addWidget(media_shell, 1)
 
         # Transport controls
         self.controls = PlayerControls(self)
-        self.controls.setFixedHeight(48)
-        self.controls.setStyleSheet(f"background: {CAT['mantle']};")
         layout.addWidget(self.controls)
 
         # Wire controls -> mpv
@@ -107,7 +126,14 @@ class PlayerPanel(QDialog):
         """Open a media file in the player."""
         self._history_entry = history_entry
         self.title_label.setText(title or os.path.basename(file_path))
-        self.channel_label.setText(channel)
+        details = []
+        if channel:
+            details.append(channel)
+        if file_path:
+            details.append(os.path.basename(file_path))
+        self.channel_label.setText(" • ".join(details))
+        self._header_summary = "Ready to play"
+        self.header_badge.setText(self._header_summary)
         self.mpv.play(file_path, start_secs=start_secs)
 
     def _toggle_pause(self):
@@ -143,6 +169,13 @@ class PlayerPanel(QDialog):
             mpv_chapters=self.mpv.chapter_list,
             bookmarks=bookmarks,
         )
+        chapter_total = len(self.mpv.chapter_list or [])
+        bookmark_total = len(bookmarks)
+        if chapter_total or bookmark_total:
+            self._header_summary = f"{chapter_total} chapter(s) • {bookmark_total} bookmark(s)"
+        else:
+            self._header_summary = "Bookmark-ready"
+        self.header_badge.setText(self._header_summary)
 
     def _on_bookmark_added(self, name, secs):
         """Persist a new bookmark to the history entry (F55)."""
@@ -175,6 +208,7 @@ class PlayerPanel(QDialog):
         self._pip_window.closed.connect(self._on_pip_closed)
         self._pip_window.expand_requested.connect(self._on_pip_expand)
         self._pip_window.show()
+        self.header_badge.setText("PiP active")
         # Hide the main player dialog while PiP is active
         self.hide()
 
@@ -182,9 +216,11 @@ class PlayerPanel(QDialog):
         """PiP was dismissed — re-parent mpv back and show the panel."""
         if self._pip_window:
             self._pip_window = None
-        # Re-insert mpv widget into our layout
-        self.layout().insertWidget(1, self.mpv, 1)
+        # Re-insert mpv widget into its original media row instead of the
+        # top-level dialog layout.
+        self._player_media_layout.insertWidget(0, self.mpv, 1)
         self.mpv.show()
+        self.header_badge.setText(self._header_summary)
 
     def _on_pip_expand(self):
         """User wants to return from PiP to full player."""

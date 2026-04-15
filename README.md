@@ -65,7 +65,7 @@ A multi-platform desktop GUI tool for downloading VODs and live streams with nat
 
 ### History & Settings
 - **Download history** — persistent log of all completed downloads, double-click to open folder
-- **Config persistence** — output directory, segment preference, history, and monitor channels saved to `%APPDATA%\StreamKeep\config.json`
+- **Config persistence** — UI/preferences live in `%APPDATA%\StreamKeep\config.json`, while history, monitor channels, and queue are stored in `%APPDATA%\StreamKeep\library.db`
 - **Settings tab** — shows ffmpeg/yt-dlp versions, configure default output directory
 
 ## Requirements
@@ -78,7 +78,17 @@ A multi-platform desktop GUI tool for downloading VODs and live streams with nat
 ## Usage
 
 ```bash
+pip install -r requirements.txt
+```
+
+```bash
 python StreamKeep.py
+```
+
+## Validation
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### Quick Start

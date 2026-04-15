@@ -21,7 +21,6 @@ Plugin types (detected by what the module imports/subclasses):
 Plugins run in the same process — no sandbox. Trust-based, like yt-dlp.
 """
 
-import importlib
 import importlib.util
 import json
 import os
@@ -92,10 +91,11 @@ def load_plugin(plugin_info, log_fn=None):
     if not plugin_path or not os.path.isdir(plugin_path):
         return False
 
-    # Add the plugin's parent to sys.path so imports work
+    # Add the plugin's parent to sys.path at the end so we don't let
+    # community plugins shadow app or stdlib modules process-wide.
     parent = os.path.dirname(plugin_path)
     if parent not in sys.path:
-        sys.path.insert(0, parent)
+        sys.path.append(parent)
 
     module_name = os.path.basename(plugin_path)
     try:
@@ -170,8 +170,10 @@ def set_plugin_enabled(plugin_id, enabled):
                 meta = json.load(f)
             if meta.get("id", entry) == plugin_id:
                 meta["enabled"] = bool(enabled)
-                with open(manifest_path, "w", encoding="utf-8") as f:
+                tmp_path = manifest_path.with_suffix(".json.tmp")
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(meta, f, indent=2)
+                os.replace(tmp_path, manifest_path)
                 return True
         except (OSError, json.JSONDecodeError):
             continue

@@ -16,6 +16,7 @@ Pool entries are persisted in ``config["proxy_pool"]`` as a list of dicts::
 An empty ``platforms`` list means "all platforms" (global fallback).
 """
 
+import os
 import re
 import subprocess
 
@@ -41,7 +42,11 @@ def set_pool(entries):
     _pool = [
         {
             "url": str(e.get("url", "")),
-            "platforms": list(e.get("platforms", []) or []),
+            "platforms": [
+                str(p).strip().lower()
+                for p in (e.get("platforms", []) or [])
+                if str(p).strip()
+            ],
             "enabled": bool(e.get("enabled", True)),
             "label": str(e.get("label", "")),
             "last_health_ms": int(e.get("last_health_ms", -1)),
@@ -106,8 +111,10 @@ def health_check(proxy_url, test_url="https://httpbin.org/ip", timeout=10):
     Returns ``(ok, latency_ms)`` — latency is round-trip in milliseconds,
     or -1 on failure.
     """
+    if not proxy_url:
+        return False, -1
     cmd = [
-        "curl", "-s", "-o", "/dev/null", "-w", "%{time_total}",
+        "curl", "-s", "-o", os.devnull, "-w", "%{time_total}",
         "-x", proxy_url,
         "--connect-timeout", str(min(timeout, 10)),
         "--max-time", str(timeout),

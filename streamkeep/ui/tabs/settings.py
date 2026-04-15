@@ -10,8 +10,8 @@ import subprocess
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -31,7 +31,15 @@ from ...utils import (
     default_output_dir as _default_output_dir,
     render_template as _render_template,
 )
-from ..widgets import make_field_block, make_metric_card
+from ..widgets import (
+    ask_premium_confirmation,
+    ask_premium_text_input,
+    make_dialog_section,
+    make_field_block,
+    make_metric_card,
+    make_status_banner,
+    show_premium_message,
+)
 
 
 BUILTIN_PRESETS = {
@@ -175,13 +183,54 @@ def _on_pp_preset_selected(win):
 
 def _on_pp_preset_save(win):
     """Save current PP state as a named preset."""
-    name, ok = QInputDialog.getText(win, "Save Preset", "Preset name:")
-    if not ok or not name.strip():
+    name, ok = ask_premium_text_input(
+        win,
+        title="Save post-processing preset",
+        body=(
+            "Capture the current conversion, cleanup, and archive settings so "
+            "you can reuse them later without rebuilding the whole stack."
+        ),
+        eyebrow="POST-PROCESSING",
+        badge_text="Preset",
+        tone="info",
+        summary_title="Built-in presets stay read-only",
+        summary_body="Saved presets capture the current post-processing toggles exactly as shown below.",
+        field_label="Preset name",
+        field_hint="Use a short label that will still make sense when it appears in the preset picker.",
+        placeholder="Weekend archive",
+        primary_label="Save preset",
+        secondary_label="Cancel",
+        validator=lambda value: (bool((value or "").strip()), "Enter a preset name."),
+    )
+    if not ok:
         return
-    name = name.strip()
     if name in BUILTIN_PRESETS:
-        return  # Don't overwrite built-ins
+        show_premium_message(
+            win,
+            title="Built-in presets are locked",
+            body="Pick a different name if you want to save your current adjustments as a reusable custom preset.",
+            eyebrow="POST-PROCESSING",
+            badge_text="Preset",
+            tone="warning",
+            summary_title="Archive Quality, Quick Share, and Raw — No Processing stay unchanged.",
+            primary_label="Close",
+        )
+        return
     presets = _get_user_presets(win)
+    if name in presets and not ask_premium_confirmation(
+        win,
+        title="Replace the existing preset?",
+        body="Saving again will update this preset with the current post-processing settings.",
+        eyebrow="POST-PROCESSING",
+        badge_text="Overwrite",
+        tone="warning",
+        summary_title=f"\"{name}\" already exists.",
+        summary_body="Replace it only if these are the settings you want the picker to load next time.",
+        primary_label="Replace preset",
+        secondary_label="Cancel",
+        default_action="secondary",
+    ):
+        return
     presets[name] = _pp_snapshot()
     _save_user_presets(win, presets)
     _populate_pp_presets(win)
@@ -848,6 +897,10 @@ def build_settings_tab(win):
     network_lay.addLayout(chat_row)
 
     # Browser companion local server (v4.16.0)
+    companion_panel, companion_panel_lay = make_dialog_section(
+        "Browser Companion",
+        "Send URLs from the extension with one click, or open the lightweight web remote for queue and status checks. Keep LAN access off unless another device truly needs it.",
+    )
     comp_row = QHBoxLayout()
     comp_row.setSpacing(8)
     win.companion_check = QCheckBox("Enable browser-extension companion (local server)")
@@ -866,17 +919,59 @@ def build_settings_tab(win):
         "Bind to 0.0.0.0 instead of 127.0.0.1 — allows access from other "
         "devices on your network. The Web Remote UI is available at / in a browser."
     )
+    win.companion_lan_check.toggled.connect(win._on_companion_scope_toggled)
     comp_row.addWidget(win.companion_lan_check)
     comp_row.addStretch(1)
-    network_lay.addLayout(comp_row)
+    companion_panel_lay.addLayout(comp_row)
 
-    comp_status_row = QHBoxLayout()
-    comp_status_row.setSpacing(8)
-    comp_status_row.addWidget(QLabel("Server:"))
-    win.companion_status_label = QLabel("Disabled")
-    win.companion_status_label.setStyleSheet(f"color: {CAT['subtext0']};")
-    comp_status_row.addWidget(win.companion_status_label, 1)
-    network_lay.addLayout(comp_status_row)
+    win.companion_status_banner, win.companion_status_title, win.companion_status_body = (
+        make_status_banner()
+    )
+    companion_panel_lay.addWidget(win.companion_status_banner)
+
+    companion_metrics = QHBoxLayout()
+    companion_metrics.setSpacing(10)
+    scope_card, win.companion_scope_value, win.companion_scope_sub = make_metric_card(
+        "Access scope",
+        "Local only",
+        "Recommended default",
+    )
+    remote_card, win.companion_remote_value, win.companion_remote_sub = make_metric_card(
+        "Web remote",
+        "Off",
+        "Enable the companion to expose a local control page",
+    )
+    token_card, win.companion_token_value, win.companion_token_sub = make_metric_card(
+        "Pairing token",
+        "Waiting",
+        "Generated fresh on each launch",
+    )
+    companion_metrics.addWidget(scope_card)
+    companion_metrics.addWidget(remote_card)
+    companion_metrics.addWidget(token_card)
+    companion_panel_lay.addLayout(companion_metrics)
+
+    endpoint_row = QHBoxLayout()
+    endpoint_row.setSpacing(8)
+    endpoint_row.addWidget(QLabel("Web remote:"))
+    win.companion_url_display = QLineEdit("")
+    win.companion_url_display.setReadOnly(True)
+    win.companion_url_display.setPlaceholderText("Enable the companion server to expose a local URL")
+    win.companion_url_display.setToolTip(
+        "Open this on the same PC for a lightweight queue and status view."
+    )
+    endpoint_row.addWidget(win.companion_url_display, 1)
+    win.companion_copy_url_btn = QPushButton("Copy")
+    win.companion_copy_url_btn.setObjectName("secondary")
+    win.companion_copy_url_btn.setFixedWidth(74)
+    win.companion_copy_url_btn.clicked.connect(win._on_copy_companion_url)
+    endpoint_row.addWidget(win.companion_copy_url_btn)
+    win.companion_open_url_btn = QPushButton("Open")
+    win.companion_open_url_btn.setObjectName("secondary")
+    win.companion_open_url_btn.setFixedWidth(82)
+    win.companion_open_url_btn.clicked.connect(win._on_open_companion_remote)
+    endpoint_row.addWidget(win.companion_open_url_btn)
+    companion_panel_lay.addLayout(endpoint_row)
 
     comp_token_row = QHBoxLayout()
     comp_token_row.setSpacing(8)
@@ -889,7 +984,20 @@ def build_settings_tab(win):
         "Regenerated on each launch — never stored on disk."
     )
     comp_token_row.addWidget(win.companion_token_display, 1)
-    network_lay.addLayout(comp_token_row)
+    win.companion_copy_token_btn = QPushButton("Copy token")
+    win.companion_copy_token_btn.setObjectName("secondary")
+    win.companion_copy_token_btn.setFixedWidth(108)
+    win.companion_copy_token_btn.clicked.connect(win._on_copy_companion_token)
+    comp_token_row.addWidget(win.companion_copy_token_btn)
+    companion_panel_lay.addLayout(comp_token_row)
+
+    companion_hint = QLabel(
+        "The token rotates every launch and is never stored on disk. If LAN access is on, share it only with devices you trust."
+    )
+    companion_hint.setObjectName("subtleText")
+    companion_hint.setWordWrap(True)
+    companion_panel_lay.addWidget(companion_hint)
+    network_lay.addWidget(companion_panel)
 
     # Notifications sound cue (v4.17.0)
     notif_row = QHBoxLayout()
@@ -929,6 +1037,8 @@ def build_settings_tab(win):
         win.proxy_input.setText(saved_proxy)
         YtDlpExtractor.proxy = saved_proxy
         set_native_proxy(saved_proxy)
+    if hasattr(win, "_refresh_companion_ui"):
+        win._refresh_companion_ui()
 
     card_lay.addWidget(network_block)
 

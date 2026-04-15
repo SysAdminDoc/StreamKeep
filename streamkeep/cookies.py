@@ -141,9 +141,12 @@ def _write_cookies(cookie_list, source):
         if not domain:
             continue
 
-        name = c.get("name", "")
-        value = c.get("value", "")
-        path = c.get("path", "/") or "/"
+        domain = _sanitize_cookie_field(domain)
+        name = _sanitize_cookie_field(c.get("name", ""))
+        value = _sanitize_cookie_field(c.get("value", ""))
+        path = _sanitize_cookie_field(c.get("path", "/") or "/")
+        if not domain or not name:
+            continue
         expires = int(c.get("expires", 0) or 0)
         secure = "TRUE" if c.get("secure", False) else "FALSE"
 
@@ -161,3 +164,14 @@ def _write_cookies(cookie_list, source):
         return False, f"Failed to write cookies: {e}"
 
     return True, f"Exported {count} cookie(s) from {source}."
+
+
+def _sanitize_cookie_field(value):
+    """Strip control characters that would corrupt Netscape cookie rows."""
+    cleaned = (
+        str(value or "")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("\t", " ")
+    )
+    return " ".join(cleaned.split())

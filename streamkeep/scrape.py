@@ -12,7 +12,7 @@ import sys
 import urllib.parse
 
 from . import CURL_UA
-from .http import curl, http_interrupted, run_capture_interruptible
+from .http import curl, http_interrupted, http_probe, run_capture_interruptible
 from .models import QualityInfo, StreamInfo
 
 
@@ -361,8 +361,8 @@ def detect_direct_media(url, log_fn=None):
 
     parsed = urllib.parse.urlparse(url)
 
-    def infer_channel():
-        parts = [p for p in parsed.path.strip("/").split("/") if p]
+    def infer_channel(parsed_url):
+        parts = [p for p in parsed_url.path.strip("/").split("/") if p]
         if len(parts) < 2:
             return ""
         lead = parts[0].strip()
@@ -383,7 +383,7 @@ def detect_direct_media(url, log_fn=None):
                     platform="Direct",
                     url=url,
                     title=parsed.path.split("/")[-1],
-                    channel=infer_channel(),
+                    channel=infer_channel(parsed),
                     qualities=qualities,
                 )
                 return info
@@ -394,37 +394,60 @@ def detect_direct_media(url, log_fn=None):
             platform="Direct",
             url=url,
             title=parsed.path.split("/")[-1],
-            channel=infer_channel(),
+            channel=infer_channel(parsed),
         )
         info.qualities.append(QualityInfo(name=f"direct ({ext})", url=url, format_type=fmt))
         return info
 
     try:
-        cmd = [
-            "curl", "-sI", "-L",
-            "--connect-timeout", "5",
-            "--max-time", "10",
-            "-w", "%{content_type}\\n%{url_effective}\\n%{size_download}",
-            "-H", f"User-Agent: {CURL_UA}", url,
-        ]
-        result = run_capture_interruptible(cmd, timeout=12)
-        if result.returncode == 0:
-            lines = result.stdout.strip().split("\n")
-            ct = lines[0].split(";")[0].strip().lower() if lines else ""
-            if ct in MEDIA_TYPES:
-                fmt = MEDIA_TYPES[ct]
+        probe = http_probe(url, headers={"User-Agent": CURL_UA}, timeout=10)
+        ct = probe.get("content_type", "")
+        final_url = probe.get("final_url") or url
+        final_parsed = urllib.parse.urlparse(final_url)
+        final_ext = os.path.splitext(final_parsed.path)[1].lower()
+        if final_ext in MEDIA_EXTS:
+            if final_ext == ".mpd":
+                from .dash import parse_mpd
                 if log_fn:
-                    log_fn(f"Direct media URL detected: {ct}")
-                info = StreamInfo(
-                    platform="Direct",
-                    url=url,
-                    title=parsed.path.split("/")[-1],
-                    channel=infer_channel(),
-                )
-                info.qualities.append(
-                    QualityInfo(name=f"direct ({ct})", url=url, format_type=fmt)
-                )
-                return info
+                    log_fn(f"DASH manifest detected after probe redirect: {final_url}")
+                qualities = parse_mpd(final_url, log_fn=log_fn)
+                if qualities:
+                    return StreamInfo(
+                        platform="Direct",
+                        url=final_url,
+                        title=os.path.basename(final_parsed.path) or parsed.path.split("/")[-1],
+                        channel=infer_channel(final_parsed) or infer_channel(parsed),
+                        qualities=qualities,
+                    )
+            fmt = "hls" if final_ext == ".m3u8" else "mp4"
+            if log_fn:
+                log_fn(f"Direct media URL detected after probe redirect: {final_ext}")
+            info = StreamInfo(
+                platform="Direct",
+                url=final_url,
+                title=os.path.basename(final_parsed.path) or parsed.path.split("/")[-1],
+                channel=infer_channel(final_parsed) or infer_channel(parsed),
+            )
+            info.qualities.append(
+                QualityInfo(name=f"direct ({final_ext})", url=final_url, format_type=fmt)
+            )
+            return info
+
+        if ct in MEDIA_TYPES:
+            fmt = MEDIA_TYPES[ct]
+            title = os.path.basename(final_parsed.path) or parsed.path.split("/")[-1]
+            if log_fn:
+                log_fn(f"Direct media URL detected: {ct}")
+            info = StreamInfo(
+                platform="Direct",
+                url=final_url,
+                title=title,
+                channel=infer_channel(final_parsed) or infer_channel(parsed),
+            )
+            info.qualities.append(
+                QualityInfo(name=f"direct ({ct})", url=final_url, format_type=fmt)
+            )
+            return info
     except Exception:
         pass
 

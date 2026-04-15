@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidgetItem, QProgressBar,
     QFileDialog, QFrame, QStackedWidget, QSystemTrayIcon,
-    QInputDialog, QCheckBox, QMenu, QAbstractItemView,
+    QCheckBox, QMenu, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import (
@@ -110,9 +110,13 @@ NATIVE_PROXY = ""
 from .widgets import (
     PLATFORM_BADGES,
     TAB_STYLE,
+    ask_premium_confirmation,
+    ask_premium_text_input,
     path_label as _path_label,
     make_metric_card,
     make_field_block,
+    show_premium_message,
+    update_status_banner,
     wrap_scroll_page,
     style_table,
     set_metric,
@@ -192,6 +196,7 @@ class StreamKeep(QMainWindow):
         self._autorecord_contexts = {}      # channel_id -> dict (out_dir, info, q_name, history_url)
         self._chat_workers = {}              # channel_id -> ChatWorker (live capture)
         self._companion_server = None        # LocalCompanionServer instance
+        self._companion_last_error = ""
         self._notifications = NotificationCenter(capacity=50)
         self._parallel_autorecords = 2      # cap; overridden from config below
         self._chunk_long_captures = False
@@ -225,6 +230,7 @@ class StreamKeep(QMainWindow):
         self._config_save_timer.setSingleShot(True)
         self._config_save_timer.timeout.connect(self._persist_config)
         self._apply_config()
+        self._refresh_companion_ui()
         self._init_tray_icon()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
@@ -825,65 +831,108 @@ class StreamKeep(QMainWindow):
             tip += " — " + ", ".join(parts)
         self._tray_icon.setToolTip(tip)
 
+    def _present_main_window(self, tab_idx=None):
+        """Reveal the main window and optionally switch to a specific tab."""
+        self.showNormal()
+        if tab_idx is not None:
+            self._switch_tab(tab_idx)
+        self.activateWindow()
+        self.raise_()
+
     def _build_tray_context_menu(self):
-        """Build the tray icon right-click dropdown with live channels,
-        active downloads, recent notifications, and Quit."""
+        """Build the tray icon right-click dropdown with actionable sections."""
         menu = QMenu(self)
-        # Live channels
+        action_map = {}
         live_entries = [e for e in self.monitor.entries if e.last_status == "live"]
-        if live_entries:
-            header = menu.addAction("Live Channels")
-            header.setEnabled(False)
-            for e in live_entries[:8]:
-                label = f"  \u25cf {e.channel_id} ({e.platform})"
-                menu.addAction(label)
-            menu.addSeparator()
-        # Active downloads
         dl_lines = []
         if self.download_worker and self.download_worker.isRunning():
             done = getattr(self, "_completed_segments", 0)
             total = getattr(self, "_total_segments", 0)
             info = getattr(self, "_active_stream_info", None)
             name = info.title[:40] if info and info.title else "Download"
-            pct_str = f"{done}/{total}" if total else "..."
-            dl_lines.append(f"  {name} — {pct_str}")
+            pct_str = f"{done}/{total}" if total else "Working"
+            dl_lines.append(f"{name} | {pct_str}")
         for ch_id, w in self._autorecord_workers.items():
             if w.isRunning():
-                dl_lines.append(f"  Auto: {ch_id}")
+                dl_lines.append(f"Auto-record | {ch_id}")
+        recent = self._notifications.items()[:5]
+        unread = getattr(self._notifications, "unread", 0)
+
+        title_act = menu.addAction(f"StreamKeep v{VERSION}")
+        title_act.setEnabled(False)
+        summary_act = menu.addAction(
+            f"{len(live_entries)} live | {len(dl_lines)} active | {unread} unread"
+        )
+        summary_act.setEnabled(False)
+        menu.addSeparator()
+
+        open_downloads = menu.addAction("Open Downloads")
+        action_map[open_downloads] = ("tab", 0)
+        open_monitor = menu.addAction("Open Monitor")
+        action_map[open_monitor] = ("tab", 1)
+        open_history = menu.addAction("Open Archive")
+        action_map[open_history] = ("tab", 2)
+        open_alerts = menu.addAction("Open Alert Log")
+        action_map[open_alerts] = ("alerts", None)
+        if self._companion_local_url():
+            open_remote = menu.addAction("Open Web Remote")
+            action_map[open_remote] = ("remote", None)
+        menu.addSeparator()
+
+        if live_entries:
+            header = menu.addAction("Live Now")
+            header.setEnabled(False)
+            for e in live_entries[:8]:
+                action = menu.addAction(f"{e.channel_id} | {e.platform}")
+                action_map[action] = ("tab", 1)
+            menu.addSeparator()
+
         if dl_lines:
-            header = menu.addAction("Active Downloads")
+            header = menu.addAction("Active Captures")
             header.setEnabled(False)
             for line in dl_lines[:5]:
-                menu.addAction(line)
+                action = menu.addAction(line)
+                action_map[action] = ("tab", 0)
             menu.addSeparator()
-        # Recent notifications
-        recent = self._notifications.items()[:5]
+
         if recent:
-            header = menu.addAction("Recent Notifications")
+            header = menu.addAction("Recent Alerts")
             header.setEnabled(False)
             for item in recent:
                 ts = item.get("time", "")
                 text = item.get("text", "")[:50]
-                menu.addAction(f"  {ts} {text}")
+                action = menu.addAction(f"{ts} | {text}")
+                action_map[action] = ("alerts", None)
             menu.addSeparator()
-        # Show / Quit
+
         show_act = menu.addAction("Show StreamKeep")
+        action_map[show_act] = ("show", None)
         quit_act = menu.addAction("Quit")
-        return menu, show_act, quit_act
+        action_map[quit_act] = ("quit", None)
+        return menu, action_map
 
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self.showNormal()
-            self.activateWindow()
-            self.raise_()
+            self._present_main_window()
         elif reason == QSystemTrayIcon.ActivationReason.Context:
-            menu, show_act, quit_act = self._build_tray_context_menu()
+            menu, action_map = self._build_tray_context_menu()
             chosen = menu.exec(self._tray_icon.geometry().bottomLeft())
-            if chosen == show_act:
-                self.showNormal()
-                self.activateWindow()
-                self.raise_()
-            elif chosen == quit_act:
+            if chosen is None:
+                return
+            action = action_map.get(chosen)
+            if not action:
+                return
+            kind, value = action
+            if kind == "tab":
+                self._present_main_window(value)
+            elif kind == "alerts":
+                self._present_main_window()
+                self._on_show_notification_log()
+            elif kind == "remote":
+                self._on_open_companion_remote()
+            elif kind == "show":
+                self._present_main_window()
+            elif kind == "quit":
                 self.close()
 
     def _notify(self, title, message, icon=QSystemTrayIcon.MessageIcon.Information):
@@ -1990,15 +2039,36 @@ class StreamKeep(QMainWindow):
         vod_platform = str(req.get("vod_platform", "") or "")
         vod_title = str(req.get("vod_title", "") or "")
         vod_channel = str(req.get("vod_channel", "") or "")
-        # Ask for an offset in minutes — simple numeric input
-        offset_min, ok = QInputDialog.getInt(
+
+        def _validate_offset(value):
+            try:
+                minutes = int(value)
+            except (TypeError, ValueError):
+                return False, "Enter a whole number of minutes."
+            if not 1 <= minutes <= 60 * 24 * 30:
+                return False, "Choose a delay between 1 minute and 30 days."
+            return True, ""
+
+        offset_text, ok = ask_premium_text_input(
             self,
-            "Schedule Download",
-            "Start in how many minutes? (use 60 for 1 hour, 1440 for 1 day)",
-            value=60, min=1, max=60 * 24 * 30,
+            title="Schedule this download",
+            body="Delay the next capture so it starts later without leaving the queue unmanaged.",
+            eyebrow="DOWNLOAD",
+            badge_text="Scheduled",
+            tone="info",
+            summary_title="Use minutes for the delay.",
+            summary_body="Examples: 60 for one hour, 180 for three hours, or 1440 for one day.",
+            field_label="Start delay (minutes)",
+            field_hint="The item will stay queued until its scheduled start time arrives.",
+            placeholder="60",
+            text="60",
+            primary_label="Schedule download",
+            secondary_label="Cancel",
+            validator=_validate_offset,
         )
         if not ok:
             return
+        offset_min = int(offset_text)
         start_at = (datetime.now() + timedelta(minutes=offset_min)).replace(microsecond=0)
         title = ""
         platform = ""
@@ -2441,6 +2511,19 @@ class StreamKeep(QMainWindow):
         if hasattr(self, "chunk_length_spin"):
             self._chunk_length_secs = int(self.chunk_length_spin.value())
             self._config["chunk_length_secs"] = self._chunk_length_secs
+        if hasattr(self, "companion_check"):
+            prev_enabled = bool(self._config.get("companion_server_enabled", False))
+            prev_bind_lan = bool(self._config.get("companion_bind_lan", False))
+            new_enabled = bool(self.companion_check.isChecked())
+            new_bind_lan = bool(self.companion_lan_check.isChecked())
+            self._config["companion_server_enabled"] = new_enabled
+            self._config["companion_bind_lan"] = new_bind_lan
+            if new_enabled != prev_enabled or new_bind_lan != prev_bind_lan:
+                self._maybe_start_companion_server(
+                    force_restart=prev_enabled and new_enabled and new_bind_lan != prev_bind_lan
+                )
+            else:
+                self._refresh_companion_ui()
         if hasattr(self, "update_check_check"):
             self._config["check_for_updates"] = bool(self.update_check_check.isChecked())
         if hasattr(self, "capture_chat_check"):
@@ -3410,22 +3493,29 @@ class StreamKeep(QMainWindow):
             )
             # Advisory dialog — non-blocking for queue/batch, shown for manual fetches
             if not self._queue_autostart:
-                from PyQt6.QtWidgets import QMessageBox
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Possible Duplicate")
-                msg.setIcon(QMessageBox.Icon.Warning)
-                msg.setText(
-                    f"You may already have this recording:\n\n"
-                    f"  \"{dup.title}\"\n"
-                    f"  Downloaded {dup.date}  |  {dup.quality}  |  {dup.size}\n"
-                    f"  {dup.path}\n\n"
-                    f"Download anyway?"
+                details = (
+                    f"Title: {dup.title}\n"
+                    f"Downloaded: {dup.date}\n"
+                    f"Quality: {dup.quality}\n"
+                    f"Size: {dup.size}\n"
+                    f"Location: {dup.path}"
                 )
-                msg.setStandardButtons(
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-                if msg.exec() == QMessageBox.StandardButton.No:
+                if not ask_premium_confirmation(
+                    self,
+                    title="Possible duplicate found",
+                    body="StreamKeep found a recording in your library that closely matches what you are about to download.",
+                    eyebrow="DOWNLOAD",
+                    badge_text="Potential match",
+                    tone="warning",
+                    summary_title="Downloading again may waste storage and clutter history.",
+                    summary_body="Continue only if you intentionally want another copy or a better variant.",
+                    details_title="Existing recording",
+                    details_body=details,
+                    primary_label="Download anyway",
+                    secondary_label="Skip download",
+                    default_action="secondary",
+                    min_width=640,
+                ):
                     self._set_status("Download skipped — duplicate detected.", "idle")
                     return
         elif info.is_live or info.total_secs <= 0:
@@ -4557,14 +4647,37 @@ class StreamKeep(QMainWindow):
         elif chosen == weekly:
             new_rec = "weekly"
         elif chosen == custom:
-            text, ok = QInputDialog.getText(
-                self, "Weekday mask",
-                "Enter comma-separated days (mon,tue,wed,thu,fri,sat,sun):",
+            valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+            def _validate_mask(value):
+                tokens = [tok.strip().lower() for tok in (value or "").split(",") if tok.strip()]
+                if not tokens:
+                    return False, "Enter at least one weekday code."
+                invalid = [tok for tok in tokens if tok not in valid_days]
+                if invalid:
+                    return False, "Use day codes like mon,tue,wed,thu,fri,sat,sun."
+                return True, ""
+
+            text, ok = ask_premium_text_input(
+                self,
+                title="Repeat on specific weekdays",
+                body="Use a weekday mask when a queued item should recur only on selected days.",
+                eyebrow="QUEUE",
+                badge_text="Recurrence",
+                tone="info",
+                summary_title="Comma-separated short codes are supported.",
+                summary_body="Example: mon,wed,fri. Use one-shot or weekly if the item should not use a custom mask.",
+                field_label="Weekday mask",
+                field_hint="Supported values: mon, tue, wed, thu, fri, sat, sun.",
                 text=item.get("recurrence", "") or "mon,wed,fri",
+                primary_label="Save recurrence",
+                secondary_label="Cancel",
+                validator=_validate_mask,
             )
             if not ok:
                 return
-            new_rec = text.strip().lower()
+            tokens = [tok.strip().lower() for tok in text.split(",") if tok.strip()]
+            new_rec = ",".join(tokens)
         item["recurrence"] = new_rec
         if new_rec:
             item["note"] = f"recurring ({new_rec})"
@@ -4631,10 +4744,37 @@ class StreamKeep(QMainWindow):
                 e.auto_record = False
             self._log(f"[MONITOR] Disabled auto-record on {len(targets)} channel(s).")
         elif chosen == act_set_window:
-            text, ok = QInputDialog.getText(
-                self, "Schedule window",
-                "Window as HH:MM-HH:MM (e.g. 20:00-23:00) or blank to clear:",
+            def _validate_window(value):
+                text = (value or "").strip()
+                if not text:
+                    return True, ""
+                if not re.fullmatch(r"\d{2}:\d{2}-\d{2}:\d{2}", text):
+                    return False, "Use HH:MM-HH:MM, for example 20:00-23:00."
+                start, end = text.split("-", 1)
+                for label, raw in (("start", start), ("end", end)):
+                    try:
+                        hour, minute = [int(part) for part in raw.split(":", 1)]
+                    except (TypeError, ValueError):
+                        return False, f"The {label} time is not valid."
+                    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                        return False, f"The {label} time must stay within 00:00-23:59."
+                return True, ""
+
+            text, ok = ask_premium_text_input(
+                self,
+                title="Set a shared schedule window",
+                body="Limit the selected channels to a specific recording window in your local time zone.",
+                eyebrow="MONITOR",
+                badge_text="Schedule",
+                tone="info",
+                summary_title=f"Updating {len(targets)} selected channel(s).",
+                summary_body="Leave the field blank to clear the window for every selected profile.",
+                field_label="Schedule window",
+                field_hint="Format: HH:MM-HH:MM. Example: 20:00-23:00.",
                 text="20:00-23:00",
+                primary_label="Apply window",
+                secondary_label="Cancel",
+                validator=_validate_window,
             )
             if not ok:
                 return
@@ -4694,12 +4834,167 @@ class StreamKeep(QMainWindow):
         self._persist_config()
 
     def _on_companion_toggled(self, checked):
-        """Settings toggle — restart the companion server in-place."""
+        """Settings toggle — start or stop the companion server in-place."""
         self._config["companion_server_enabled"] = bool(checked)
         if hasattr(self, "companion_lan_check"):
             self._config["companion_bind_lan"] = bool(self.companion_lan_check.isChecked())
         self._persist_config()
         self._maybe_start_companion_server()
+        if checked:
+            if self._companion_server is not None:
+                self._set_status("Browser companion ready for one-click capture.", "success")
+            else:
+                self._set_status("Browser companion could not start. Review the Settings panel for details.", "warning")
+        else:
+            self._set_status("Browser companion disabled.", "idle")
+
+    def _on_companion_scope_toggled(self, checked):
+        """Persist LAN scope changes and restart the server if needed."""
+        self._config["companion_bind_lan"] = bool(checked)
+        self._persist_config()
+        if bool(self._config.get("companion_server_enabled", False)):
+            self._maybe_start_companion_server(force_restart=self._companion_server is not None)
+            if checked:
+                self._set_status("Browser companion restarted with LAN access enabled.", "warning")
+            else:
+                self._set_status("Browser companion returned to local-only access.", "success")
+        else:
+            self._refresh_companion_ui()
+            self._set_status("Browser companion access scope saved.", "success")
+
+    def _copy_text_to_clipboard(self, text, label):
+        value = str(text or "").strip()
+        if not value:
+            self._set_status(f"{label} is not available yet.", "warning")
+            return
+        try:
+            from PyQt6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                raise RuntimeError("Clipboard unavailable")
+            clipboard.setText(value)
+            self._set_status(f"{label} copied to clipboard.", "success")
+        except Exception as e:
+            self._log(f"[CLIPBOARD] Could not copy {label.lower()}: {e}")
+            self._set_status(f"Could not copy {label.lower()}.", "error")
+
+    def _companion_local_url(self):
+        srv = getattr(self, "_companion_server", None)
+        port = int(getattr(srv, "port", 0) or 0) if srv is not None else 0
+        if port <= 0:
+            return ""
+        return f"http://127.0.0.1:{port}/"
+
+    def _refresh_companion_ui(self):
+        """Update the Browser Companion settings panel from live state."""
+        enabled = bool(self._config.get("companion_server_enabled", False))
+        bind_lan = bool(self._config.get("companion_bind_lan", False))
+        srv = getattr(self, "_companion_server", None)
+        running = srv is not None and int(getattr(srv, "port", 0) or 0) > 0
+        local_url = self._companion_local_url()
+        token = str(getattr(srv, "token", "") or "") if running else ""
+        error_text = str(getattr(self, "_companion_last_error", "") or "")
+
+        if hasattr(self, "companion_check"):
+            self.companion_check.blockSignals(True)
+            self.companion_check.setChecked(enabled)
+            self.companion_check.blockSignals(False)
+        if hasattr(self, "companion_lan_check"):
+            self.companion_lan_check.blockSignals(True)
+            self.companion_lan_check.setChecked(bind_lan)
+            self.companion_lan_check.blockSignals(False)
+
+        if running and bind_lan:
+            banner_title = "LAN access is enabled"
+            banner_body = (
+                "The companion is live on this PC and other devices on your network can connect if they know the token."
+            )
+            banner_tone = "warning"
+        elif running:
+            banner_title = "Ready for one-click capture"
+            banner_body = (
+                "The browser extension can hand URLs to StreamKeep on this PC, and the local web remote is ready."
+            )
+            banner_tone = "success"
+        elif enabled and error_text:
+            banner_title = "Companion could not start"
+            banner_body = error_text
+            banner_tone = "error"
+        elif enabled:
+            banner_title = "Starting the local receiver"
+            banner_body = "StreamKeep is preparing a token-protected local endpoint for the extension and web remote."
+            banner_tone = "info"
+        else:
+            banner_title = "Companion is off"
+            banner_body = "Enable it when you want browser handoff or the lightweight local web remote."
+            banner_tone = "info"
+
+        if hasattr(self, "companion_status_banner"):
+            update_status_banner(
+                self.companion_status_banner,
+                self.companion_status_title,
+                self.companion_status_body,
+                title=banner_title,
+                body=banner_body,
+                tone=banner_tone,
+            )
+
+        if hasattr(self, "companion_scope_value"):
+            self.companion_scope_value.setText("LAN enabled" if bind_lan else "Local only")
+            self.companion_scope_sub.setText(
+                "Other trusted devices can reach the server"
+                if bind_lan else
+                "Only this PC can reach the companion"
+            )
+        if hasattr(self, "companion_remote_value"):
+            if running:
+                self.companion_remote_value.setText("Ready")
+                self.companion_remote_sub.setText(local_url)
+            elif enabled and error_text:
+                self.companion_remote_value.setText("Error")
+                self.companion_remote_sub.setText(error_text[:72])
+            elif enabled:
+                self.companion_remote_value.setText("Starting")
+                self.companion_remote_sub.setText("Waiting for the local listener")
+            else:
+                self.companion_remote_value.setText("Off")
+                self.companion_remote_sub.setText("Enable the companion to expose a local URL")
+        if hasattr(self, "companion_token_value"):
+            if token:
+                self.companion_token_value.setText("Ready")
+                self.companion_token_sub.setText("Rotates on every app launch")
+            elif enabled:
+                self.companion_token_value.setText("Pending")
+                self.companion_token_sub.setText("Generated after the server starts")
+            else:
+                self.companion_token_value.setText("Waiting")
+                self.companion_token_sub.setText("Generated only while the companion is on")
+
+        if hasattr(self, "companion_url_display"):
+            self.companion_url_display.setText(local_url)
+        if hasattr(self, "companion_open_url_btn"):
+            self.companion_open_url_btn.setEnabled(bool(local_url))
+        if hasattr(self, "companion_copy_url_btn"):
+            self.companion_copy_url_btn.setEnabled(bool(local_url))
+        if hasattr(self, "companion_token_display"):
+            self.companion_token_display.setText(token)
+        if hasattr(self, "companion_copy_token_btn"):
+            self.companion_copy_token_btn.setEnabled(bool(token))
+
+    def _on_copy_companion_url(self):
+        self._copy_text_to_clipboard(self._companion_local_url(), "Browser companion URL")
+
+    def _on_copy_companion_token(self):
+        text = self.companion_token_display.text() if hasattr(self, "companion_token_display") else ""
+        self._copy_text_to_clipboard(text, "Pairing token")
+
+    def _on_open_companion_remote(self):
+        url = self._companion_local_url()
+        if not url:
+            self._set_status("Browser companion web remote is not available yet.", "warning")
+            return
+        QDesktopServices.openUrl(QUrl(url))
+        self._set_status("Opened the browser companion web remote.", "success")
 
     # ── Notifications Center ─────────────────────────────────────────
 
@@ -4768,14 +5063,24 @@ class StreamKeep(QMainWindow):
 
     def _on_lifecycle_preview(self):
         """Show a preview of what the lifecycle cleanup would remove."""
-        from ..lifecycle import evaluate_cleanup, execute_cleanup
+        from ..lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
         policy = self._config.get("lifecycle", {})
         if not policy.get("enabled"):
             policy = dict(policy, enabled=True)  # preview even if disabled
         removals = evaluate_cleanup(self._history, policy)
         if not removals:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Cleanup Preview", "No recordings match the current cleanup rules.")
+            show_premium_message(
+                self,
+                title="No recordings match the current cleanup rules",
+                body="The current lifecycle policy would not recycle anything right now.",
+                eyebrow="LIFECYCLE",
+                badge_text="Preview",
+                tone="info",
+                summary_title="Nothing needs attention.",
+                summary_body="Try widening the cleanup rules or revisit this preview after more recordings accumulate.",
+                primary_label="Close",
+                min_width=560,
+            )
             return
         # Build preview text
         total_size = 0
@@ -4794,37 +5099,59 @@ class StreamKeep(QMainWindow):
             total_size += sz
             sz_mb = sz / (1024 * 1024)
             lines.append(f"  {title[:50]}  ({sz_mb:.1f} MB) — {reason}")
-        msg = (
-            f"The current policy would recycle {len(removals)} recording(s) "
-            f"({total_size / (1024 ** 3):.2f} GB):\n\n"
-            + "\n".join(lines[:30])
-        )
+        detail_text = "\n".join(lines[:30])
         if len(lines) > 30:
-            msg += f"\n  … and {len(lines) - 30} more"
-        msg += "\n\nProceed? (Files go to recycle bin.)"
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self, "Cleanup Preview", msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+            detail_text += f"\n  … and {len(lines) - 30} more"
+        if ask_premium_confirmation(
+            self,
+            title="Review lifecycle cleanup",
+            body="These recordings match the current cleanup policy and would be moved to the Recycle Bin.",
+            eyebrow="LIFECYCLE",
+            badge_text="Preview",
+            tone="warning",
+            summary_title=f"{len(removals)} recording(s) matched, using about {total_size / (1024 ** 3):.2f} GB.",
+            summary_body="Files stay recoverable through the Recycle Bin if you need to bring something back.",
+            details_title="Matched recordings",
+            details_body=detail_text,
+            primary_label="Recycle matches",
+            secondary_label="Keep everything",
+            default_action="secondary",
+            min_width=720,
+            min_height=520,
+            details_monospaced=True,
+        ):
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:
-                removed_entries = {id(h) for h, _reason in removals
-                                   if not os.path.isdir(getattr(h, "path", "") or "")}
-                db_ids = [h.db_id for h, _r in removals
-                          if id(h) in removed_entries and getattr(h, "db_id", 0)]
-                self._history = [h for h in self._history
-                                 if id(h) not in removed_entries]
-                if db_ids:
-                    _db.delete_history_entries(db_ids)
-                self._refresh_history_table()
+                removed_paths = {
+                    real_path for real_path in removal_real_paths(removals)
+                    if not os.path.isdir(real_path)
+                }
+                self._remove_history_for_paths(removed_paths)
             self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
             self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
 
+    def _remove_history_for_paths(self, real_paths):
+        """Remove all history rows that point at any recycled recording path."""
+        real_paths = {os.path.realpath(path) for path in (real_paths or set()) if path}
+        if not real_paths:
+            return
+
+        def _entry_real_path(entry):
+            path = getattr(entry, "path", "") or ""
+            return os.path.realpath(path) if path else ""
+
+        db_ids = [
+            h.db_id for h in self._history
+            if getattr(h, "db_id", 0) and _entry_real_path(h) in real_paths
+        ]
+        self._history = [h for h in self._history if _entry_real_path(h) not in real_paths]
+        if db_ids:
+            _db.delete_history_entries(db_ids)
+        self._refresh_history_table()
+
     def _run_lifecycle_cleanup(self):
         """Run lifecycle cleanup silently after a download completes."""
-        from ..lifecycle import evaluate_cleanup, execute_cleanup
+        from ..lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
         policy = self._config.get("lifecycle", {})
         if not policy or not policy.get("enabled"):
             return
@@ -4832,15 +5159,11 @@ class StreamKeep(QMainWindow):
         if removals:
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:
-                removed_entries = {id(h) for h, _reason in removals
-                                   if not os.path.isdir(getattr(h, "path", "") or "")}
-                db_ids = [h.db_id for h, _r in removals
-                          if id(h) in removed_entries and getattr(h, "db_id", 0)]
-                self._history = [h for h in self._history
-                                 if id(h) not in removed_entries]
-                if db_ids:
-                    _db.delete_history_entries(db_ids)
-                self._refresh_history_table()
+                removed_paths = {
+                    real_path for real_path in removal_real_paths(removals)
+                    if not os.path.isdir(real_path)
+                }
+                self._remove_history_for_paths(removed_paths)
                 self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
 
     def _choose_default_quality_index(self, qualities, platform):
@@ -4876,45 +5199,51 @@ class StreamKeep(QMainWindow):
 
     # ── Browser companion local server ───────────────────────────────
 
-    def _maybe_start_companion_server(self):
+    def _maybe_start_companion_server(self, force_restart=False):
         """Start (or stop) the local companion HTTP server based on the
         current Settings toggle. Called at launch and whenever the user
         changes the setting."""
         enabled = bool(self._config.get("companion_server_enabled", False))
+        bind_lan = bool(self._config.get("companion_bind_lan", False))
+        desired_bind = "0.0.0.0" if bind_lan else "127.0.0.1"
         running = self._companion_server is not None
+        if running and getattr(self._companion_server, "_bind_addr", "") != desired_bind:
+            force_restart = True
+        if force_restart and running:
+            try:
+                self._companion_server.stop()
+            except Exception:
+                pass
+            self._companion_server = None
+            running = False
         if enabled and not running:
             try:
-                bind_lan = bool(self._config.get("companion_bind_lan", False))
                 srv = LocalCompanionServer(bind_lan=bind_lan)
                 srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)
                 srv.start()
                 self._companion_server = srv
+                self._companion_last_error = ""
                 self._log(
                     f"[COMPANION] Listening on 127.0.0.1:{srv.port} "
                     f"— token in Settings tab."
                 )
-                # Push the live port + token into the Settings UI so the
-                # user can see them immediately without restarting.
-                if hasattr(self, "companion_status_label"):
-                    self.companion_status_label.setText(
-                        f"Running on 127.0.0.1:{srv.port}"
-                    )
-                if hasattr(self, "companion_token_display"):
-                    self.companion_token_display.setText(srv.token)
             except OSError as e:
+                self._companion_last_error = str(e)
                 self._log(f"[COMPANION] Could not start server: {e}")
+        elif enabled and running:
+            self._companion_last_error = ""
         elif not enabled and running:
             try:
                 self._companion_server.stop()
             except Exception:
                 pass
             self._companion_server = None
-            if hasattr(self, "companion_status_label"):
-                self.companion_status_label.setText("Disabled")
-            if hasattr(self, "companion_token_display"):
-                self.companion_token_display.setText("")
+            self._companion_last_error = ""
             self._log("[COMPANION] Server stopped.")
+        elif not enabled:
+            self._companion_last_error = ""
+        self._refresh_companion_ui()
 
     def _api_state_snapshot(self):
         """Return a dict snapshot of app state for the REST API (F37).
@@ -4965,15 +5294,18 @@ class StreamKeep(QMainWindow):
         """The extension just POSTed a URL. Route it through the Fetch
         path or queue it immediately depending on action."""
         self._log(f"[COMPANION] Received {action.upper()} for {url[:80]}")
-        self._switch_tab(0)   # surface the Download tab so the user sees it
+        self._present_main_window(0)
         try:
             self.url_input.setText(url)
         except Exception:
             pass
         if action == "queue":
             try:
-                self._queue_add(url, title="", platform="")
-                self._set_status(f"Queued via browser extension: {url[:80]}", "success")
+                added = self._queue_add(url, title="", platform="")
+                if added:
+                    self._set_status(f"Queued via browser extension: {url[:80]}", "success")
+                else:
+                    self._set_status("That browser handoff is already in the queue.", "warning")
             except Exception as e:
                 self._log(f"[COMPANION] Queue failed: {e}")
         else:
@@ -5060,20 +5392,26 @@ class StreamKeep(QMainWindow):
                 self.update_banner_install_btn.setText("Download & install")
             return
         # Download complete — confirm self-replace + relaunch.
-        from PyQt6.QtWidgets import QMessageBox
-        box = QMessageBox(self)
-        box.setWindowTitle("Install update")
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText(
-            "Update downloaded. StreamKeep will close, install the new "
-            "version, and relaunch itself. Your current download will "
-            "be interrupted.\n\nContinue?"
-        )
-        box.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
-        )
-        box.setDefaultButton(QMessageBox.StandardButton.Yes)
-        if box.exec() != QMessageBox.StandardButton.Yes:
+        if not ask_premium_confirmation(
+            self,
+            title="Install the downloaded update?",
+            body="StreamKeep will close, swap in the new version, and relaunch itself automatically.",
+            eyebrow="UPDATER",
+            badge_text="Restart required",
+            tone="warning",
+            summary_title="Any active download or recording will be interrupted.",
+            summary_body="Install now when you are ready for the app to restart itself.",
+            details_title="What happens next",
+            details_body=(
+                "1. StreamKeep closes.\n"
+                "2. The downloaded build replaces the current executable.\n"
+                "3. StreamKeep relaunches itself."
+            ),
+            primary_label="Install and relaunch",
+            secondary_label="Not now",
+            default_action="secondary",
+            min_width=620,
+        ):
             self._log("[UPDATE] User cancelled the install step.")
             if hasattr(self, "update_banner_install_btn"):
                 self.update_banner_install_btn.setEnabled(True)
@@ -5108,20 +5446,29 @@ class StreamKeep(QMainWindow):
                 return True
             if estimate <= free * 0.8:
                 return True
-            from PyQt6.QtWidgets import QMessageBox
-            box = QMessageBox(self)
-            box.setWindowTitle("Disk space warning")
-            box.setIcon(QMessageBox.Icon.Warning)
-            box.setText(
-                f"This download could need about {_fmt_size(estimate)}, "
-                f"but only {_fmt_size(free)} is free on the output drive.\n\n"
-                "Continue anyway?"
+            return ask_premium_confirmation(
+                self,
+                title="Low free space on the output drive",
+                body=(
+                    f"This download may need about {_fmt_size(estimate)}, but only "
+                    f"{_fmt_size(free)} is currently free in the output location."
+                ),
+                eyebrow="PREFLIGHT",
+                badge_text="Capacity risk",
+                tone="warning",
+                summary_title="Continuing could leave you with a partial or failed download.",
+                summary_body="Free up space first if you want the safest path.",
+                details_title="Capacity estimate",
+                details_body=(
+                    f"Estimated download size: {_fmt_size(estimate)}\n"
+                    f"Free space available: {_fmt_size(free)}\n"
+                    f"Output folder: {out_dir}"
+                ),
+                primary_label="Continue anyway",
+                secondary_label="Cancel",
+                default_action="secondary",
+                min_width=620,
             )
-            box.setStandardButtons(
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
-            )
-            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-            return box.exec() == QMessageBox.StandardButton.Yes
         except Exception as e:
             self._log(f"[PREFLIGHT] disk-space check failed: {e}")
             return True
@@ -5225,41 +5572,118 @@ class StreamKeep(QMainWindow):
         """Refresh stream schedules in a background thread (F39 audit fix)."""
         import threading
 
+        if hasattr(self, "schedule_calendar"):
+            self.schedule_calendar.set_refreshing(True)
+
         def _bg():
             from ..schedule import refresh_schedules
             cache = dict(self._config.get("schedules", {}))
-            cache = refresh_schedules(
-                list(self.monitor.entries), cache, log_fn=self._log,
-            )
+            error = ""
+            try:
+                cache = refresh_schedules(
+                    list(self.monitor.entries), cache, log_fn=self._log,
+                )
+            except Exception as exc:
+                error = str(exc)
+                self._log(f"[SCHEDULE] Schedule refresh failed: {exc}")
             # Marshal result back to the main thread via QTimer.singleShot
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._apply_schedule_cache(cache))
+            QTimer.singleShot(0, lambda: self._apply_schedule_cache(cache, error))
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _apply_schedule_cache(self, cache):
+    def _apply_schedule_cache(self, cache, error=""):
         """Apply refreshed schedule cache on the main thread."""
         self._config["schedules"] = cache
         if hasattr(self, "schedule_calendar"):
+            if error:
+                self.schedule_calendar.set_refresh_error(error)
+            else:
+                self.schedule_calendar.set_refreshing(False)
             self.schedule_calendar.set_cache(cache)
+        if error:
+            self._set_status("Schedule refresh failed. See log for details.", "error")
+            return
         self._log("[SCHEDULE] Schedule refresh complete.")
+        self._set_status("Schedule cache refreshed.", "success")
 
     def _on_schedule_block_clicked(self, seg):
         """Handle click on a calendar schedule block (F39)."""
         channel = seg.get("channel", "")
         title = seg.get("title", "")
         cat = seg.get("category", "")
-        start = seg.get("start_iso", "")[:16].replace("T", " ")
-        from PyQt6.QtWidgets import QMessageBox
-        msg = (
-            f"Channel: {channel}\n"
-            f"Title: {title}\n"
-        )
+        start_dt = None
+        end_dt = None
+        start_iso = seg.get("start_iso", "")
+        end_iso = seg.get("end_iso", "")
+        try:
+            if start_iso:
+                start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone()
+        except (TypeError, ValueError):
+            start_dt = None
+        try:
+            if end_iso:
+                end_dt = datetime.fromisoformat(end_iso.replace("Z", "+00:00")).astimezone()
+        except (TypeError, ValueError):
+            end_dt = None
+        lines = []
+        if channel:
+            lines.append(f"Channel: {channel}")
+        if start_dt:
+            start_text = start_dt.strftime("%a, %b %d at %I:%M %p").replace(" 0", " ")
+            lines.append(f"Starts: {start_text}")
+        if end_dt:
+            end_text = end_dt.strftime("%I:%M %p").replace(" 0", " ")
+            lines.append(f"Ends: {end_text}")
         if cat:
-            msg += f"Category: {cat}\n"
-        msg += f"Starts: {start}\n\n"
-        msg += "Auto-record is configured per-channel in the Monitor entry profile."
-        QMessageBox.information(self, "Scheduled Stream", msg)
+            lines.append(f"Category: {cat}")
+        lines.append("")
+        lines.append("Open the channel profile if you want to adjust auto-record rules or retention for this stream.")
+        box.setInformativeText("\n".join(lines))
+
+        open_profile_btn = None
+        entry_idx = next(
+            (
+                idx
+                for idx, entry in enumerate(self.monitor.entries)
+                if (getattr(entry, "channel_id", "") or "").lower() == channel.lower()
+            ),
+            -1,
+        )
+        if entry_idx >= 0:
+            open_profile = ask_premium_confirmation(
+                self,
+                title=title or channel or "Scheduled stream",
+                body="This stream is in the cached Twitch schedule for one of your monitored channels.",
+                eyebrow="SCHEDULE",
+                badge_text="Monitored channel",
+                tone="info",
+                summary_title="Open the channel profile if you want to adjust auto-record rules or retention.",
+                summary_body="Schedule blocks are informational until you decide how that channel should behave.",
+                details_title="Scheduled stream details",
+                details_body="\n".join(lines),
+                primary_label="Open Channel Profile",
+                secondary_label="Close",
+                default_action="secondary",
+                min_width=620,
+            )
+            if open_profile:
+                self._on_monitor_edit(entry_idx)
+        else:
+            show_premium_message(
+                self,
+                title=title or channel or "Scheduled stream",
+                body="This stream is in the cached Twitch schedule, but it is not linked to an editable monitored profile right now.",
+                eyebrow="SCHEDULE",
+                badge_text="Schedule detail",
+                tone="info",
+                summary_title="Schedule windows are shown in your local timezone.",
+                summary_body="Add the channel to your watch list if you want to configure auto-record behavior from here.",
+                details_title="Scheduled stream details",
+                details_body="\n".join(lines),
+                primary_label="Close",
+                min_width=620,
+            )
 
     def _on_monitor_add(self):
         url = self.monitor_url_input.text().strip()

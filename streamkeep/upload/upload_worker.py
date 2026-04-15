@@ -26,12 +26,15 @@ class UploadWorker(QThread):
             self.done.emit(False, f"Unknown adapter: {self._adapter_name}")
             return
 
-        dest = cls(self._config)
-        self.log.emit(f"[UPLOAD] Starting {self._adapter_name}: {self._file_path}")
+        try:
+            dest = cls(self._config)
+            self.log.emit(f"[UPLOAD] Starting {self._adapter_name}: {self._file_path}")
 
-        def _progress(sent, total):
-            self.progress.emit(sent, total)
+            def _progress(sent, total):
+                self.progress.emit(sent, total)
 
-        ok, msg = dest.upload(self._file_path, self._metadata, progress_cb=_progress)
+            ok, msg = dest.upload(self._file_path, self._metadata, progress_cb=_progress)
+        except Exception as e:
+            ok, msg = False, f"{self._adapter_name} upload crashed: {e}"
         self.log.emit(f"[UPLOAD] {'OK' if ok else 'FAIL'}: {msg}")
         self.done.emit(ok, msg)

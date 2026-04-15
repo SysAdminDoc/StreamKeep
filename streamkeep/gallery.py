@@ -90,6 +90,7 @@ def render_share_html(share_id, base_url=""):
         return "<h1>Not Found</h1>"
     title = info.get("title", "Untitled")
     channel = info.get("channel", "")
+    media_type = mimetypes.guess_type(info.get("media", ""))[0] or "video/mp4"
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{_esc(title)} - StreamKeep</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -104,7 +105,7 @@ a {{ color: {CAT['blue']}; }}
 <h1>{_esc(title)}</h1>
 <h2>{_esc(channel)}</h2>
 <video controls preload="metadata">
-<source src="{base_url}/media/{share_id}" type="video/mp4">
+<source src="{base_url}/media/{share_id}" type="{_esc(media_type)}">
 </video>
 </body></html>"""
 
@@ -131,9 +132,27 @@ def serve_media_range(media_path, range_header=None):
     content_type = mimetypes.guess_type(media_path)[0] or "video/mp4"
 
     if range_header and range_header.startswith("bytes="):
-        ranges = range_header[6:].split("-")
-        start = int(ranges[0]) if ranges[0] else 0
-        end = int(ranges[1]) if len(ranges) > 1 and ranges[1] else file_size - 1
+        try:
+            ranges = range_header[6:].split("-", 1)
+            if not ranges or len(ranges) != 2:
+                raise ValueError("invalid range")
+            if not ranges[0]:
+                suffix_len = int(ranges[1])
+                if suffix_len <= 0:
+                    raise ValueError("invalid suffix range")
+                start = max(file_size - suffix_len, 0)
+                end = file_size - 1
+            else:
+                start = int(ranges[0])
+                end = int(ranges[1]) if ranges[1] else file_size - 1
+            if start < 0 or start >= file_size or end < start:
+                raise ValueError("range out of bounds")
+        except (TypeError, ValueError):
+            return None, 416, {
+                "Content-Range": f"bytes */{file_size}",
+                "Accept-Ranges": "bytes",
+            }
+
         end = min(end, file_size - 1)
         length = end - start + 1
 
@@ -161,4 +180,11 @@ def serve_media_range(media_path, range_header=None):
 
 def _esc(s):
     """Basic HTML escape."""
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
