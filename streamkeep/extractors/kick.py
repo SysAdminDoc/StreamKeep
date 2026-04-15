@@ -113,7 +113,7 @@ class KickExtractor(Extractor):
                     if not info.duration_str:
                         info.duration_str = "Live"
                 return info
-        vods = self.list_vods(url, log_fn)
+        vods, _ = self.list_vods(url, log_fn)
         if len(vods) == 1:
             return self._resolve_m3u8(
                 vods[0].source,

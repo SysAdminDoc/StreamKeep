@@ -12,10 +12,11 @@ chat would need an OAuth flow we don't ship yet.
 import random
 import re
 import socket
+import ssl
 import time
 
 SERVER = "irc.chat.twitch.tv"
-PORT = 6667
+PORT = 6697
 
 
 # IRCv3 tag-bearing line pattern:
@@ -54,7 +55,9 @@ class TwitchIRCReader:
 
     def connect(self):
         nick = f"justinfan{random.randint(10000, 99999)}"
-        sock = socket.create_connection((SERVER, PORT), timeout=self.timeout)
+        raw = socket.create_connection((SERVER, PORT), timeout=self.timeout)
+        ctx = ssl.create_default_context()
+        sock = ctx.wrap_socket(raw, server_hostname=SERVER)
         sock.settimeout(1.0)   # short timeout so we can poll should_cancel
         sock.sendall(b"CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
         sock.sendall(b"PASS SCHMOOPIIE\r\n")   # anonymous password

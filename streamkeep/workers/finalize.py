@@ -2,18 +2,14 @@
 
 import os
 import re
-import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..extractors import TwitchExtractor
 from ..metadata import MetadataSaver
 from ..postprocess import PostProcessor
+from ..postprocess.processor import PP_LOCK as _PP_LOCK
 from ..utils import fmt_size
-
-# Guard concurrent FinalizeWorker threads from clobbering each other's
-# PostProcessor class-level settings.
-_PP_LOCK = threading.Lock()
 
 
 class FinalizeWorker(QThread):

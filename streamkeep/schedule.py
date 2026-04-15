@@ -6,10 +6,13 @@ is needed.  Schedule data is cached per-channel in ``config["schedules"]``.
 """
 
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
 from .http import curl_post_json
+
+_SAFE_LOGIN = re.compile(r'^[a-zA-Z0-9_]{1,50}$')
 
 _TWITCH_GQL = "https://gql.twitch.tv/gql"
 _TWITCH_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
@@ -21,6 +24,11 @@ def fetch_twitch_schedule(channel_login, log_fn=None):
 
     Returns a list of dicts: ``[{title, start_iso, end_iso, category, channel}]``
     """
+    if not _SAFE_LOGIN.match(channel_login):
+        if log_fn:
+            log_fn(f"[SCHEDULE] Invalid channel login: {channel_login!r}")
+        return []
+
     query = """
     {
       user(login: "%s") {

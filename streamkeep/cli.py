@@ -77,10 +77,11 @@ def _run_download(args):
     _print_line(f"Quality: {quality_pref}")
     _print_line("")
 
-    state = {"phase": "fetch", "info": None, "exit_code": 0}
+    state = {"phase": "fetch", "info": None, "exit_code": 0, "fw": None, "dw": None}
 
     # ── Fetch ──
     fw = FetchWorker(args.url)
+    state["fw"] = fw  # prevent GC while event loop runs
 
     def on_fetch_done(info):
         state["info"] = info
@@ -118,7 +119,7 @@ def _run_download(args):
         dw.ytdlp_format = qi.ytdlp_format
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
-        state["dw"] = dw
+        state["dw"] = dw  # prevent GC while event loop runs
 
         dw.progress.connect(lambda si, pct, txt: _print_progress(
             f"[{pct:3d}%] {txt}"
@@ -142,7 +143,13 @@ def _run_download(args):
     _print_line("Fetching...")
     fw.start()
 
-    sys.exit(app.exec() or state["exit_code"])
+    ret = app.exec() or state["exit_code"]
+    # Wait for any in-flight workers to finish before exit
+    for key in ("fw", "dw"):
+        w = state.get(key)
+        if w is not None and w.isRunning():
+            w.wait(3000)
+    sys.exit(ret)
 
 
 def _on_download_done(state, app, output_dir):

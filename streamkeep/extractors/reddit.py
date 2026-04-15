@@ -1,6 +1,7 @@
 """Reddit — JSON API extractor (DASH + fallback MP4)."""
 
 import re
+import urllib.parse
 
 from ..http import curl, curl_json
 from ..models import QualityInfo, StreamInfo
@@ -37,7 +38,11 @@ class RedditExtractor(Extractor):
                 if m:
                     url = "https://www." + m.group(0)
 
-        json_url = url.rstrip("/") + ".json"
+        parsed = urllib.parse.urlsplit(url.rstrip("/"))
+        json_url = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path + ".json",
+             parsed.query, parsed.fragment)
+        )
         data = curl_json(json_url, headers={"User-Agent": "StreamKeep/2.0"})
         if not data or not isinstance(data, list) or len(data) == 0:
             self._log(log_fn, "Failed to fetch Reddit post data")

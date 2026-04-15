@@ -6,6 +6,7 @@ split, and the full format/codec/scale/fps converter for video and audio.
 
 import os
 import subprocess
+import threading
 
 from ..paths import _CREATE_NO_WINDOW
 from ..utils import safe_filename
@@ -15,6 +16,10 @@ from .codecs import (
     VIDEO_EXTS, AUDIO_EXTS,
     video_codec_extra_args,
 )
+
+# Lock that guards PostProcessor class-level state from concurrent mutation
+# by FinalizeWorker and ConvertWorker threads.
+PP_LOCK = threading.Lock()
 
 
 class PostProcessor:

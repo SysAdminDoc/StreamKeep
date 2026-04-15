@@ -19,7 +19,7 @@ import re
 import urllib.request
 import urllib.error
 
-from ..models import StreamInfo
+from ..models import QualityInfo, StreamInfo
 
 
 # Known Twitch CDN domains — Twitch rotates these periodically.
@@ -110,7 +110,9 @@ def _unix_timestamp_variants(date_str):
     ts_list = []
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            dt = datetime.datetime.strptime(date_str, fmt)
+            dt = datetime.datetime.strptime(date_str, fmt).replace(
+                tzinfo=datetime.timezone.utc
+            )
             base = int(dt.timestamp())
             # Try the exact time and +/- 1 hour in 10-minute increments
             for offset in range(-3600, 3600 + 1, 600):
@@ -162,7 +164,10 @@ def recover_channel_vods(channel, year, month, log_fn=None, progress_fn=None):
                     channel=channel,
                     title=f"Recovered VOD — {s.get('date_str', 'unknown date')}",
                     url=urls[0],
-                    qualities=[{"label": "recovered", "url": u} for u in urls],
+                    qualities=[
+                        QualityInfo(name="recovered", url=u, format_type="hls")
+                        for u in urls
+                    ],
                 )
                 results.append(info)
                 break  # Found a working timestamp for this stream

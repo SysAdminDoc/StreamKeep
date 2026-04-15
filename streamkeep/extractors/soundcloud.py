@@ -65,8 +65,19 @@ class SoundCloudExtractor(Extractor):
             f"url={urllib.parse.quote(url, safe='')}&client_id={cid}"
         )
         if not data or not isinstance(data, dict):
-            self._log(log_fn, "Failed to resolve SoundCloud URL")
-            return None
+            # client_id may have gone stale — clear and retry once
+            if SoundCloudExtractor._client_id:
+                self._log(log_fn, "SoundCloud resolve failed — refreshing client_id...")
+                SoundCloudExtractor._client_id = None
+                cid = self._get_client_id(log_fn)
+                if cid:
+                    data = curl_json(
+                        f"https://api-v2.soundcloud.com/resolve?"
+                        f"url={urllib.parse.quote(url, safe='')}&client_id={cid}"
+                    )
+            if not data or not isinstance(data, dict):
+                self._log(log_fn, "Failed to resolve SoundCloud URL")
+                return None
 
         info = StreamInfo(
             platform="SoundCloud",
