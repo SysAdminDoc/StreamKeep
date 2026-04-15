@@ -170,7 +170,8 @@ class FTPDestination(UploadDestination):
         if not remote_dir:
             return "/"
         is_absolute = remote_dir.startswith("/")
-        parts = [part for part in remote_dir.split("/") if part]
+        # Filter empty parts AND ".." to prevent path traversal
+        parts = [part for part in remote_dir.split("/") if part and part != ".."]
         if not parts:
             return "/"
         normalized = "/".join(parts)

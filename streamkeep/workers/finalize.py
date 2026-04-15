@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -9,6 +10,10 @@ from ..extractors import TwitchExtractor
 from ..metadata import MetadataSaver
 from ..postprocess import PostProcessor
 from ..utils import fmt_size
+
+# Guard concurrent FinalizeWorker threads from clobbering each other's
+# PostProcessor class-level settings.
+_PP_LOCK = threading.Lock()
 
 
 class FinalizeWorker(QThread):
@@ -106,6 +111,9 @@ class FinalizeWorker(QThread):
         # Only snapshot keys that actually exist on PostProcessor — a stale
         # config key must not AttributeError-crash the entire finalize pass
         # before metadata is even saved.
+        # Guard PostProcessor class-level state with a lock so concurrent
+        # FinalizeWorker threads don't clobber each other.
+        _PP_LOCK.acquire()
         orig = {k: getattr(PostProcessor, k) for k in snapshot if hasattr(PostProcessor, k)}
         try:
             if info and out_dir:
@@ -163,6 +171,7 @@ class FinalizeWorker(QThread):
         finally:
             for k, v in orig.items():
                 setattr(PostProcessor, k, v)
+            _PP_LOCK.release()
 
         result["cancelled"] = self._interrupted()
         result["size_label"] = self._output_size_label(out_dir) if not result["cancelled"] else ""

@@ -168,13 +168,21 @@ def serve_media_range(media_path, range_header=None):
         }
         return data, 206, headers
     else:
+        # Cap non-Range reads to prevent OOM on multi-GB files. Clients that
+        # need the full file should use Range requests (browsers/players do).
+        _MAX_FULL_READ = 256 * 1024 * 1024  # 256 MB
+        read_size = min(file_size, _MAX_FULL_READ)
         with open(media_path, "rb") as f:
-            data = f.read()
+            data = f.read(read_size)
         headers = {
             "Content-Type": content_type,
-            "Content-Length": str(file_size),
+            "Content-Length": str(read_size),
             "Accept-Ranges": "bytes",
         }
+        if file_size > _MAX_FULL_READ:
+            # Signal partial content so clients know to use Range requests
+            headers["Content-Range"] = f"bytes 0-{read_size - 1}/{file_size}"
+            return data, 206, headers
         return data, 200, headers
 
 

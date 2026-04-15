@@ -37,8 +37,8 @@ class S3Destination(UploadDestination):
                     progress_cb(sent[0], file_size)
                 cb = _track
 
-            s3.upload_file(file_path, bucket, key, Callback=cb)
-            return True, f"Uploaded to s3://{bucket}/{key}"
+            s3.upload_file(file_path, cfg["bucket"], key, Callback=cb)
+            return True, f"Uploaded to s3://{cfg['bucket']}/{key}"
         except Exception as e:
             return False, f"S3 upload failed: {e}"
 

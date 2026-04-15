@@ -168,10 +168,8 @@ def _write_cookies(cookie_list, source):
 
 def _sanitize_cookie_field(value):
     """Strip control characters that would corrupt Netscape cookie rows."""
-    cleaned = (
-        str(value or "")
-        .replace("\r", " ")
-        .replace("\n", " ")
-        .replace("\t", " ")
-    )
+    # Remove NUL bytes and all C0 control chars (0x00-0x1F) except space
+    cleaned = str(value or "")
+    cleaned = "".join(c if c >= " " or c == "\t" else " " for c in cleaned)
+    cleaned = cleaned.replace("\t", " ")
     return " ".join(cleaned.split())

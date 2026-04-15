@@ -17,6 +17,7 @@ is never installed without an explicit confirm click.
 Network call runs on a background QThread so the UI never blocks.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -58,7 +59,7 @@ class UpdateCheckWorker(QThread):
     """Hits the GitHub releases API. Never raises — emits an empty
     result on error so the UI code can be simple."""
 
-    result = pyqtSignal(dict)   # {available, tag, notes, asset_url, asset_size}
+    result = pyqtSignal(dict)   # {available, tag, notes, asset_url, asset_size, asset_sha256}
 
     def __init__(self, current_version):
         super().__init__()
@@ -71,6 +72,7 @@ class UpdateCheckWorker(QThread):
             "notes": "",
             "asset_url": "",
             "asset_size": 0,
+            "asset_sha256": "",
         }
         try:
             req = urllib.request.Request(
@@ -87,9 +89,10 @@ class UpdateCheckWorker(QThread):
         if not is_newer(tag, self.current_version):
             self.result.emit(payload)
             return
-        # Find a Windows .exe asset.
+        # Find a Windows .exe asset and an optional .sha256 sidecar.
         asset_url = ""
         asset_size = 0
+        sha256_url = ""
         for asset in data.get("assets") or []:
             name = str(asset.get("name", "") or "")
             if name.lower().endswith(".exe"):
@@ -98,13 +101,26 @@ class UpdateCheckWorker(QThread):
                     asset_size = int(asset.get("size", 0) or 0)
                 except (TypeError, ValueError):
                     asset_size = 0
-                break
+            elif name.lower().endswith(".sha256"):
+                sha256_url = str(asset.get("browser_download_url", "") or "")
+        # Fetch the hash if available
+        asset_sha256 = ""
+        if sha256_url:
+            try:
+                req2 = urllib.request.Request(sha256_url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req2, timeout=10) as resp2:
+                    raw = resp2.read().decode("utf-8", errors="replace").strip()
+                    # Format: "<hex>  filename" or just "<hex>"
+                    asset_sha256 = raw.split()[0].lower() if raw else ""
+            except Exception:
+                asset_sha256 = ""
         payload.update({
             "available": True,
             "tag": tag,
             "notes": (str(data.get("body", "") or "")).strip(),
             "asset_url": asset_url,
             "asset_size": asset_size,
+            "asset_sha256": asset_sha256,
         })
         self.result.emit(payload)
 
@@ -117,10 +133,11 @@ class DownloadUpdateWorker(QThread):
     progress = pyqtSignal(int, str)     # percent, status
     done = pyqtSignal(bool, str)        # success, error_or_path
 
-    def __init__(self, asset_url, expected_size):
+    def __init__(self, asset_url, expected_size, expected_sha256=""):
         super().__init__()
         self.asset_url = asset_url
         self.expected_size = _coerce_nonnegative_int(expected_size)
+        self.expected_sha256 = str(expected_sha256 or "").strip().lower()
         self._cancel = False
 
     def cancel(self):
@@ -198,6 +215,36 @@ class DownloadUpdateWorker(QThread):
                 pass
             self.done.emit(False, "Downloaded file is smaller than expected.")
             return
+        # SHA-256 integrity verification when the release includes a hash
+        if self.expected_sha256 and len(self.expected_sha256) == 64:
+            self.progress.emit(99, "Verifying integrity...")
+            sha = hashlib.sha256()
+            try:
+                with open(new_path, "rb") as f:
+                    while True:
+                        buf = f.read(256 * 1024)
+                        if not buf:
+                            break
+                        sha.update(buf)
+                actual_hash = sha.hexdigest().lower()
+                if actual_hash != self.expected_sha256:
+                    try:
+                        os.remove(new_path)
+                    except OSError:
+                        pass
+                    self.done.emit(
+                        False,
+                        f"SHA-256 mismatch: expected {self.expected_sha256[:16]}... "
+                        f"got {actual_hash[:16]}...",
+                    )
+                    return
+            except OSError as e:
+                try:
+                    os.remove(new_path)
+                except OSError:
+                    pass
+                self.done.emit(False, f"Hash verification failed: {e}")
+                return
         self.progress.emit(100, "Downloaded")
         self.done.emit(True, new_path)
 

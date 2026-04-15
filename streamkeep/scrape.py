@@ -16,8 +16,12 @@ from .http import curl, http_interrupted, http_probe, run_capture_interruptible
 from .models import QualityInfo, StreamInfo
 
 
-# Module-level flag so we only probe the Playwright browser install once
+# Module-level flag so we only probe the Playwright browser install once.
+# None = not checked yet; True = ready; False = failed (will retry after
+# _PLAYWRIGHT_RETRY_AFTER seconds in case the user installs it mid-session).
 _PLAYWRIGHT_READY = None
+_PLAYWRIGHT_LAST_CHECK = 0.0
+_PLAYWRIGHT_RETRY_AFTER = 300  # 5 minutes
 
 
 def _cancelled(checker=None):
@@ -34,9 +38,16 @@ def ensure_playwright_browser(log_fn=None, should_cancel=None):
     """Check that Playwright is importable AND has a Chromium install.
     Attempts `playwright install chromium` on first use. Returns True
     if the browser is ready to use."""
-    global _PLAYWRIGHT_READY
-    if _PLAYWRIGHT_READY is not None:
-        return _PLAYWRIGHT_READY
+    global _PLAYWRIGHT_READY, _PLAYWRIGHT_LAST_CHECK
+    if _PLAYWRIGHT_READY is True:
+        return True
+    # Allow retry after cooldown so a mid-session install can succeed
+    if _PLAYWRIGHT_READY is False:
+        import time as _time
+        if _time.time() - _PLAYWRIGHT_LAST_CHECK < _PLAYWRIGHT_RETRY_AFTER:
+            return False
+    import time as _time
+    _PLAYWRIGHT_LAST_CHECK = _time.time()
     if _cancelled(should_cancel):
         return False
     try:
@@ -351,7 +362,9 @@ def detect_direct_media(url, log_fn=None):
         "audio/x-wav": "mp4", "audio/aac": "mp4",
         "application/vnd.apple.mpegurl": "hls", "audio/mpegurl": "hls",
         "application/x-mpegurl": "hls", "application/dash+xml": "dash",
-        "application/octet-stream": "mp4",
+        # Note: application/octet-stream is intentionally excluded — it
+        # matches any binary file (exe, zip, etc.) and would false-positive.
+        # Direct media URLs are caught earlier by extension matching.
     }
     MEDIA_EXTS = {
         ".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv", ".wmv",

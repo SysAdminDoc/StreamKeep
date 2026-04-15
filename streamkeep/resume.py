@@ -44,7 +44,8 @@ def _sanitize_timestamp(value):
 
 
 def _sanitize_text(value, max_len=2048):
-    return str(value or "")[:max_len]
+    # Use explicit None check so falsy-but-valid values like 0 are preserved
+    return str("" if value is None else value)[:max_len]
 
 
 def _sanitize_segments(value):
@@ -229,12 +230,21 @@ def scan_for_orphan_sidecars(roots):
 
 
 def merge_completed(state, seg_idx):
-    """Record a completed segment index. Idempotent."""
+    """Record a completed segment index. Idempotent.
+
+    Uses a cached set for O(1) membership checks instead of the O(n) list
+    scan that made long VODs (10k+ segments) quadratic.
+    """
     if not state:
         return
-    if seg_idx in state.completed:
+    idx = int(seg_idx)
+    # Lazily build a set cache from the authoritative list
+    if not hasattr(state, "_completed_set") or state._completed_set is None:
+        state._completed_set = set(state.completed)
+    if idx in state._completed_set:
         return
-    state.completed.append(int(seg_idx))
+    state._completed_set.add(idx)
+    state.completed.append(idx)
 
 
 def remaining_segments(state):

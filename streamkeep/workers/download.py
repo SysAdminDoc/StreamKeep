@@ -48,6 +48,8 @@ class DownloadWorker(QThread):
         # one monolithic 40+ GB file.
         self.chunk_length_secs = 0
         self._cancel = False
+        self._proc = None
+        self._proc_lock = __import__("threading").Lock()
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
         # (main_window) attach this via `attach_resume_state` just before
@@ -77,8 +79,12 @@ class DownloadWorker(QThread):
 
     def cancel(self):
         self._cancel = True
-        if hasattr(self, '_proc') and self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        with self._proc_lock:
+            if self._proc and self._proc.poll() is None:
+                try:
+                    self._proc.terminate()
+                except OSError:
+                    pass
 
     def _download_with_ytdlp(self, seg_idx, label, outfile):
         """Download via yt-dlp directly. Handles URL refresh, DASH merge,
@@ -116,31 +122,36 @@ class DownloadWorker(QThread):
         cmd.append(self.ytdlp_source)
 
         try:
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, encoding="utf-8", errors="replace",
-                creationflags=_CREATE_NO_WINDOW,
-            )
+            with self._proc_lock:
+                self._proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, encoding="utf-8", errors="replace",
+                    creationflags=_CREATE_NO_WINDOW,
+                )
             output_lines = []
-            for line in self._proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                output_lines.append(line)
-                pct_match = re.search(r'(\d+\.\d+)%\s+of\s+(~?[\d.]+\w+)', line)
-                if pct_match:
-                    pct = int(float(pct_match.group(1)))
-                    size_str = pct_match.group(2)
-                    speed_match = re.search(r'at\s+([\d.]+\w+/s)', line)
-                    eta_match = re.search(r'ETA\s+([\d:]+)', line)
-                    extra = ""
-                    if speed_match:
-                        extra += f" | {speed_match.group(1)}"
-                    if eta_match:
-                        extra += f" | ETA {eta_match.group(1)}"
-                    self.progress.emit(seg_idx, min(99, pct), f"{size_str}{extra}")
-                elif "[Merger]" in line or "Merging" in line:
-                    self.progress.emit(seg_idx, 99, "Merging video+audio")
+            try:
+                for line in self._proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    output_lines.append(line)
+                    pct_match = re.search(r'(\d+\.\d+)%\s+of\s+(~?[\d.]+\w+)', line)
+                    if pct_match:
+                        pct = int(float(pct_match.group(1)))
+                        size_str = pct_match.group(2)
+                        speed_match = re.search(r'at\s+([\d.]+\w+/s)', line)
+                        eta_match = re.search(r'ETA\s+([\d:]+)', line)
+                        extra = ""
+                        if speed_match:
+                            extra += f" | {speed_match.group(1)}"
+                        if eta_match:
+                            extra += f" | ETA {eta_match.group(1)}"
+                        self.progress.emit(seg_idx, min(99, pct), f"{size_str}{extra}")
+                    elif "[Merger]" in line or "Merging" in line:
+                        self.progress.emit(seg_idx, 99, "Merging video+audio")
+            finally:
+                if self._proc.stdout:
+                    self._proc.stdout.close()
 
             self._proc.wait()
             if self._cancel:
@@ -194,7 +205,9 @@ class DownloadWorker(QThread):
             is_live_capture = duration <= 0
             if os.path.exists(outfile):
                 size = os.path.getsize(outfile)
-                if size > 1024:
+                # Use 64 KB minimum threshold — 1 KB was too small and would
+                # treat corrupt/truncated files as complete.
+                if size > 65536:
                     self.log.emit(f"[SKIP] {label} ({fmt_size(size)})")
                     self.segment_done.emit(seg_idx, fmt_size(size))
                     self._mark_segment_done(seg_idx)
@@ -398,7 +411,7 @@ class DownloadWorker(QThread):
                 if self._cancel:
                     return
                 if attempt > 0:
-                    backoff = 2 ** attempt
+                    backoff = min(2 ** attempt, 60)  # cap at 60s
                     self.log.emit(
                         f"[RETRY {attempt}/{self.max_retries}] {label} "
                         f"(waiting {backoff}s)"
@@ -412,47 +425,52 @@ class DownloadWorker(QThread):
                     # stderr. If stdout were piped without being drained,
                     # a ffmpeg mode that emits data to stdout (e.g. -f null
                     # mux reports) would deadlock on the pipe buffer.
-                    self._proc = subprocess.Popen(
-                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                        text=True, bufsize=1, encoding="utf-8",
-                        errors="replace",
-                        creationflags=_CREATE_NO_WINDOW,
-                    )
+                    with self._proc_lock:
+                        self._proc = subprocess.Popen(
+                            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            text=True, bufsize=1, encoding="utf-8",
+                            errors="replace",
+                            creationflags=_CREATE_NO_WINDOW,
+                        )
                     output_lines = []
-                    for line in self._proc.stderr:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        output_lines.append(line)
-                        time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
-                        if time_match:
-                            try:
-                                h = int(time_match.group(1))
-                                m = int(time_match.group(2))
-                                s = int(time_match.group(3))
-                            except (ValueError, IndexError):
+                    try:
+                        for line in self._proc.stderr:
+                            line = line.strip()
+                            if not line:
                                 continue
-                            elapsed = h * 3600 + m * 60 + s
-                            pct = (
-                                0 if is_live_capture
-                                else min(99, int((elapsed / max(duration, 1)) * 100))
-                            )
-                            speed_m = re.search(r'speed=\s*([\d.]+)x', line)
-                            size_m = re.search(r'size=\s*(\d+\w+)', line)
-                            extra = ""
-                            if speed_m:
-                                spd = float(speed_m.group(1))
-                                extra += f" | {spd:.1f}x"
-                                if spd > 0 and duration > 0:
-                                    remaining = (duration - elapsed) / spd
-                                    extra += f" | ETA {fmt_duration(remaining)}"
-                            if size_m:
-                                extra += f" | {size_m.group(1)}"
-                            status = (
-                                f"{elapsed}s captured{extra}" if is_live_capture
-                                else f"{elapsed}s / {duration}s{extra}"
-                            )
-                            self.progress.emit(seg_idx, pct, status)
+                            output_lines.append(line)
+                            time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
+                            if time_match:
+                                try:
+                                    h = int(time_match.group(1))
+                                    m = int(time_match.group(2))
+                                    s = int(time_match.group(3))
+                                except (ValueError, IndexError):
+                                    continue
+                                elapsed = h * 3600 + m * 60 + s
+                                pct = (
+                                    0 if is_live_capture
+                                    else min(99, int((elapsed / max(duration, 1)) * 100))
+                                )
+                                speed_m = re.search(r'speed=\s*([\d.]+)x', line)
+                                size_m = re.search(r'size=\s*(\d+\w+)', line)
+                                extra = ""
+                                if speed_m:
+                                    spd = float(speed_m.group(1))
+                                    extra += f" | {spd:.1f}x"
+                                    if spd > 0 and duration > 0:
+                                        remaining = (duration - elapsed) / spd
+                                        extra += f" | ETA {fmt_duration(remaining)}"
+                                if size_m:
+                                    extra += f" | {size_m.group(1)}"
+                                status = (
+                                    f"{elapsed}s captured{extra}" if is_live_capture
+                                    else f"{elapsed}s / {duration}s{extra}"
+                                )
+                                self.progress.emit(seg_idx, pct, status)
+                    finally:
+                        if self._proc.stderr:
+                            self._proc.stderr.close()
 
                     self._proc.wait()
                     if self._cancel:
@@ -511,8 +529,21 @@ class DownloadWorker(QThread):
                 self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
 
         if not self._cancel:
-            # Clean finish — remove the resume sidecar so the startup banner
-            # won't offer to resume a completed download.
+            # Only clear the resume sidecar and signal completion if every
+            # segment actually succeeded.  When some segments failed, leave
+            # the sidecar in place so the user can resume later.
+            all_succeeded = True
             if self._resume_state is not None:
-                clear_resume_state(self.output_dir)
-            self.all_done.emit()
+                expected = {s[0] for s in self.segments}
+                completed = set(self._resume_state.completed)
+                if expected != completed:
+                    all_succeeded = False
+            if all_succeeded:
+                if self._resume_state is not None:
+                    clear_resume_state(self.output_dir)
+                self.all_done.emit()
+            else:
+                self.log.emit(
+                    "[PARTIAL] Some segments failed — resume sidecar kept "
+                    "for retry."
+                )
