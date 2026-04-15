@@ -48,10 +48,12 @@ class OnboardingWizard(QDialog):
         # Navigation buttons
         nav = QHBoxLayout()
         self._skip_btn = QPushButton("Skip All")
+        self._skip_btn.setObjectName("ghost")
         self._skip_btn.clicked.connect(self._skip_all)
         nav.addWidget(self._skip_btn)
         nav.addStretch(1)
         self._back_btn = QPushButton("Back")
+        self._back_btn.setObjectName("secondary")
         self._back_btn.clicked.connect(self._go_back)
         self._back_btn.setEnabled(False)
         nav.addWidget(self._back_btn)
@@ -66,7 +68,7 @@ class OnboardingWizard(QDialog):
         lay = QVBoxLayout(page)
         lay.setSpacing(12)
         title = QLabel("Welcome to StreamKeep")
-        title.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {CAT['blue']};")
+        title.setObjectName("heroTitle")
         lay.addWidget(title)
         lay.addWidget(QLabel(
             "StreamKeep is a multi-platform stream and VOD downloader.\n\n"
@@ -90,7 +92,8 @@ class OnboardingWizard(QDialog):
         self._output_label = QLabel(self._output_dir)
         self._output_label.setWordWrap(True)
         self._output_label.setStyleSheet(
-            f"background: {CAT['surface0']}; padding: 8px; border-radius: 4px;"
+            f"background: {CAT['surface0']}; padding: 10px 12px; "
+            f"border-radius: 14px; border: 1px solid {CAT['stroke']};"
         )
         lay.addWidget(self._output_label)
         browse_btn = QPushButton("Choose Folder...")
@@ -119,7 +122,7 @@ class OnboardingWizard(QDialog):
         lay = QVBoxLayout(page)
         lay.setSpacing(12)
         done_title = QLabel("You're all set!")
-        done_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {CAT['green']};")
+        done_title.setObjectName("sectionTitle")
         lay.addWidget(done_title)
         lay.addWidget(QLabel(
             "StreamKeep is ready to use.\n\n"

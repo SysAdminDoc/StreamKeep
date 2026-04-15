@@ -3,7 +3,7 @@ filename template, quality, schedule window, and retention."""
 
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QTimeEdit, QVBoxLayout,
+    QLineEdit, QPushButton, QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QTime
 
@@ -125,13 +125,6 @@ class MonitorEntryDialog(QDialog):
         root.addLayout(days_row)
         self._on_schedule_toggled(self.schedule_enabled.isChecked())
 
-        # Retention
-        root.addWidget(self._section_label(
-            "Retention",
-            "After a successful auto-record, trim older recordings from "
-            "the channel's output folder down to this count. Set to 0 to "
-            "keep everything.",
-        ))
         # Keyword filter (F3)
         root.addWidget(self._section_label(
             "Title Keywords",
@@ -193,6 +186,13 @@ class MonitorEntryDialog(QDialog):
         upgrade_row.addStretch(1)
         root.addLayout(upgrade_row)
 
+        # Retention
+        root.addWidget(self._section_label(
+            "Retention",
+            "After a successful auto-record, trim older recordings from "
+            "the channel's output folder down to this count. Set to 0 to "
+            "keep everything.",
+        ))
         ret_row = QHBoxLayout()
         ret_row.setSpacing(8)
         ret_row.addWidget(QLabel("Keep last"))
@@ -219,8 +219,17 @@ class MonitorEntryDialog(QDialog):
         root.addLayout(btn_row)
 
     def _section_label(self, title, helper):
-        w = QLabel(f"<b>{title}</b><br><span style='color:{CAT['subtext0']}'>{helper}</span>")
-        w.setWordWrap(True)
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(2)
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("fieldLabel")
+        hint_lbl = QLabel(helper)
+        hint_lbl.setObjectName("fieldHint")
+        hint_lbl.setWordWrap(True)
+        lay.addWidget(title_lbl)
+        lay.addWidget(hint_lbl)
         return w
 
     def _parse_hhmm(self, text, default_h, default_m):

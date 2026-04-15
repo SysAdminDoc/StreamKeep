@@ -18,6 +18,8 @@ This file is a thin launcher. All code lives in the `streamkeep/` package:
 """
 
 import multiprocessing
+from pathlib import Path
+from PyQt6.QtGui import QIcon
 # MUST be called before any code that could spawn a child process in a
 # frozen exe. Without this, a PyInstaller build that ever touches
 # `multiprocessing` will re-execute the entire program in each child,
@@ -30,6 +32,25 @@ bootstrap()
 
 import sys
 import subprocess
+
+
+# codex-branding:start
+def _branding_icon_path() -> Path:
+    candidates = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "icon.png")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "icon.png")
+    current = Path(__file__).resolve()
+    candidates.extend([current.parent / "icon.png", current.parent.parent / "icon.png", current.parent.parent.parent / "icon.png"])
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return Path("icon.png")
+# codex-branding:end
+
 
 from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
 from streamkeep.paths import _CREATE_NO_WINDOW
@@ -52,6 +73,8 @@ def main():
     # QApplication must exist before any QWidget (e.g. a QMessageBox in the
     # ffmpeg error path). Create it first so every failure branch is safe.
     app = QApplication(sys.argv)
+    branding_icon = QIcon(str(_branding_icon_path()))
+    app.setWindowIcon(branding_icon)
     app.setStyle("Fusion")
     # Apply saved theme (F20) — defaults to dark/Mocha
     try:

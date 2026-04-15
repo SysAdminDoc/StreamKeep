@@ -85,20 +85,46 @@ def build_history_tab(win):
     header.addWidget(clear_btn)
     card_lay.addLayout(header)
 
-    # Search filter row
+    search_card = QFrame()
+    search_card.setObjectName("toolbar")
+    search_wrap = QVBoxLayout(search_card)
+    search_wrap.setContentsMargins(14, 14, 14, 14)
+    search_wrap.setSpacing(10)
+
+    search_head = QHBoxLayout()
+    search_head.setSpacing(12)
+    search_copy = QVBoxLayout()
+    search_copy.setSpacing(4)
+    search_title = QLabel("Find a Download")
+    search_title.setObjectName("fieldLabel")
+    search_hint = QLabel(
+        "Search metadata instantly or switch to transcript text when you need quoted moments."
+    )
+    search_hint.setObjectName("subtleText")
+    search_hint.setWordWrap(True)
+    search_copy.addWidget(search_title)
+    search_copy.addWidget(search_hint)
+    search_head.addLayout(search_copy, 1)
+    win.history_filter_summary = QLabel("Showing all downloads")
+    win.history_filter_summary.setObjectName("subtleText")
+    search_head.addWidget(win.history_filter_summary)
+    search_wrap.addLayout(search_head)
+
     search_row = QHBoxLayout()
     search_row.setSpacing(8)
     win.history_search = QLineEdit()
-    win.history_search.setPlaceholderText("Search by title, platform, or path...")
+    win.history_search.setPlaceholderText("Search title, platform, channel, path, or URL…")
+    win.history_search.setClearButtonEnabled(True)
     win.history_search.textChanged.connect(win._on_history_search)
     search_row.addWidget(win.history_search, 1)
-    win.transcript_search_check = QCheckBox("Search transcripts")
+    win.transcript_search_check = QCheckBox("Search Transcript Text")
     win.transcript_search_check.setToolTip(
         "When checked, queries search indexed transcript text (SRT/VTT) instead of metadata."
     )
     win.transcript_search_check.toggled.connect(lambda _: win._on_history_search(""))
     search_row.addWidget(win.transcript_search_check)
-    card_lay.addLayout(search_row)
+    search_wrap.addLayout(search_row)
+    card_lay.addWidget(search_card)
 
     win.history_table = QTableWidget()
     win.history_table.setColumnCount(7)

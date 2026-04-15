@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import CAT
+from .widgets import style_table
 
 
 def _read_metadata(dir_path):
@@ -82,10 +83,16 @@ class RenameDialog(QDialog):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
 
-        root.addWidget(QLabel(
-            "<b>Rename Template</b> — tokens: {channel}, {date}, {title}, "
-            "{quality}, {duration}, {platform}, {seq:001}"
-        ))
+        hdr = QLabel("Batch Rename Studio")
+        hdr.setObjectName("sectionTitle")
+        root.addWidget(hdr)
+        hint = QLabel(
+            "Template tokens:  {channel}  {date}  {title}  "
+            "{quality}  {duration}  {platform}  {seq:001}"
+        )
+        hint.setObjectName("tableHint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
         tpl_row = QHBoxLayout()
         tpl_row.setSpacing(8)
         self.template_input = QLineEdit("{channel} - {date} - {title}")
@@ -102,9 +109,11 @@ class RenameDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 350)
+        style_table(self.table)
         root.addWidget(self.table, 1)
 
         self.status_label = QLabel("")
+        self.status_label.setObjectName("statusLabel")
         root.addWidget(self.status_label)
 
         btn_row = QHBoxLayout()

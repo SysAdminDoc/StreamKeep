@@ -221,8 +221,10 @@ def build_download_tab(win):
     url_row.setSpacing(10)
     win.url_input = QLineEdit()
     win.url_input.setPlaceholderText(
-        "Paste a URL: kick.com/user, twitch.tv/user, rumble.com/v..., or any video URL"
+        "Paste a stream, channel, VOD, or direct media URL…"
     )
+    win.url_input.setClearButtonEnabled(True)
+    win.url_input.setMinimumHeight(44)
     win.url_input.returnPressed.connect(lambda: win._on_fetch())
     win.url_input.textChanged.connect(win._on_url_changed)
     # Recent URLs autocomplete dropdown
@@ -235,7 +237,7 @@ def build_download_tab(win):
     url_row.addWidget(win.url_input, 1)
 
     win.platform_badge = QLabel("")
-    win.platform_badge.setFixedHeight(36)
+    win.platform_badge.setFixedHeight(40)
     win.platform_badge.setMinimumWidth(96)
     win.platform_badge.setVisible(False)
     win.platform_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -243,49 +245,59 @@ def build_download_tab(win):
 
     win.fetch_btn = QPushButton("Fetch")
     win.fetch_btn.setObjectName("primary")
-    win.fetch_btn.setFixedWidth(100)
+    win.fetch_btn.setMinimumWidth(116)
+    win.fetch_btn.setMinimumHeight(44)
     win.fetch_btn.clicked.connect(win._on_fetch)
     url_row.addWidget(win.fetch_btn)
+    url_lay.addLayout(url_row)
+
+    utility_bar = QFrame()
+    utility_bar.setObjectName("toolbar")
+    utility_lay = QHBoxLayout(utility_bar)
+    utility_lay.setContentsMargins(12, 10, 12, 10)
+    utility_lay.setSpacing(8)
+    utility_label = QLabel("Utilities")
+    utility_label.setObjectName("fieldLabel")
+    utility_lay.addWidget(utility_label)
 
     win.batch_import_btn = QPushButton("Import URLs")
     win.batch_import_btn.setObjectName("secondary")
-    win.batch_import_btn.setFixedWidth(110)
     win.batch_import_btn.setToolTip("Import URLs from a text file (one per line) and queue them all (F44)")
     win.batch_import_btn.clicked.connect(win._on_batch_url_import)
-    url_row.addWidget(win.batch_import_btn)
+    utility_lay.addWidget(win.batch_import_btn)
 
     win.expand_btn = QPushButton("Expand Playlist")
     win.expand_btn.setObjectName("secondary")
-    win.expand_btn.setFixedWidth(130)
     win.expand_btn.setToolTip("For playlist/channel URLs, queue every video via yt-dlp")
     win.expand_btn.clicked.connect(win._on_expand_playlist)
-    url_row.addWidget(win.expand_btn)
+    utility_lay.addWidget(win.expand_btn)
 
     win.scan_btn = QPushButton("Scan Page")
     win.scan_btn.setObjectName("secondary")
-    win.scan_btn.setFixedWidth(110)
     win.scan_btn.setToolTip("Fetch the URL as HTML and extract all video/media links it references")
     win.scan_btn.clicked.connect(win._on_scan_page)
-    url_row.addWidget(win.scan_btn)
+    utility_lay.addWidget(win.scan_btn)
 
     win.recover_btn = QPushButton("Recover VOD")
     win.recover_btn.setObjectName("secondary")
-    win.recover_btn.setFixedWidth(120)
     win.recover_btn.setToolTip(
         "Attempt to recover deleted / expired Twitch VODs from CDN cache"
     )
     win.recover_btn.clicked.connect(win._on_recover_vod)
-    url_row.addWidget(win.recover_btn)
+    utility_lay.addWidget(win.recover_btn)
+
+    utility_lay.addStretch(1)
 
     win.clip_btn = QPushButton("Clipboard Watch")
     win.clip_btn.setObjectName("toggleAccent")
     win.clip_btn.setCheckable(True)
-    win.clip_btn.setFixedWidth(148)
     win.clip_btn.clicked.connect(win._on_toggle_clipboard)
-    url_row.addWidget(win.clip_btn)
-    url_lay.addLayout(url_row)
+    utility_lay.addWidget(win.clip_btn)
+    url_lay.addWidget(utility_bar)
 
-    url_hint = QLabel("Press Enter to fetch. Clipboard watch auto-loads the next copied URL.")
+    url_hint = QLabel(
+        "Press Enter to fetch. Clipboard watch can auto-load the next copied URL for fast triage."
+    )
     url_hint.setObjectName("subtleText")
     url_lay.addWidget(url_hint)
 
@@ -417,6 +429,7 @@ def build_download_tab(win):
     crop_row.addWidget(crop_start_label)
     win.crop_start_input = QLineEdit()
     win.crop_start_input.setPlaceholderText("HH:MM:SS")
+    win.crop_start_input.setClearButtonEnabled(True)
     win.crop_start_input.setFixedWidth(100)
     crop_row.addWidget(win.crop_start_input)
     crop_end_label = QLabel("End:")
@@ -424,6 +437,7 @@ def build_download_tab(win):
     crop_row.addWidget(crop_end_label)
     win.crop_end_input = QLineEdit()
     win.crop_end_input.setPlaceholderText("HH:MM:SS")
+    win.crop_end_input.setClearButtonEnabled(True)
     win.crop_end_input.setFixedWidth(100)
     crop_row.addWidget(win.crop_end_input)
     crop_row.addStretch(1)
@@ -436,6 +450,7 @@ def build_download_tab(win):
     output_row = QHBoxLayout()
     output_row.setSpacing(8)
     win.output_input = QLineEdit(str(_default_output_dir()))
+    win.output_input.setClearButtonEnabled(True)
     win.output_input.textChanged.connect(win._refresh_download_summary)
     output_row.addWidget(win.output_input, 1)
     browse_btn = QPushButton("Browse")

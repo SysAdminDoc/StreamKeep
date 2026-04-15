@@ -713,7 +713,7 @@ class StreamKeep(QMainWindow):
         self._refresh_monitor_summary()
         self._refresh_history_summary()
         # Build transcript search index in background (F27)
-        from .search import index_all_async
+        from ..search import index_all_async
         index_all_async(self._history, log_fn=self._log)
 
     def _persist_config(self):
@@ -1212,11 +1212,11 @@ class StreamKeep(QMainWindow):
     def _set_status(self, message, tone="idle"):
         tones = {
             "idle": ("Standby", CAT["panelSoft"], CAT["subtext1"], CAT["stroke"]),
-            "working": ("Working", CAT["accent"], CAT["crust"], CAT["accent"]),
-            "processing": ("Finalizing", CAT["accentSoft"], CAT["crust"], CAT["accent"]),
-            "success": ("Ready", CAT["accentSoft"], CAT["crust"], CAT["accentSoft"]),
-            "warning": ("Alert", CAT["gold"], CAT["crust"], CAT["gold"]),
-            "error": ("Error", CAT["red"], CAT["crust"], CAT["red"]),
+            "working": ("Working", CAT["accent"], "#081120", CAT["accent"]),
+            "processing": ("Finalizing", CAT["accentSoft"], "#081120", CAT["accent"]),
+            "success": ("Ready", CAT["accentSoft"], "#081120", CAT["accentSoft"]),
+            "warning": ("Alert", CAT["gold"], "#081120", CAT["gold"]),
+            "error": ("Error", CAT["red"], "#081120", CAT["red"]),
         }
         pill, bg, fg, border = tones.get(tone, tones["idle"])
         self.status_pill.setText(pill)
@@ -1226,6 +1226,49 @@ class StreamKeep(QMainWindow):
         )
         self.status_label.setText(message)
         self.status_label.setToolTip(message)
+        self._refresh_shell_overview()
+
+    def _refresh_shell_overview(self):
+        """Update the compact shell snapshot in the app header."""
+        if not hasattr(self, "shell_snapshot_value"):
+            return
+
+        queued = len(self._download_queue)
+        monitored = len(getattr(self.monitor, "entries", []))
+        archived = len(self._history)
+        active_jobs = sum(
+            1 for q in self._download_queue
+            if q.get("status") in ("fetching", "downloading")
+        )
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            active_jobs += 1
+        live_now = sum(
+            1 for entry in getattr(self.monitor, "entries", [])
+            if getattr(entry, "last_status", "") == "live"
+        )
+
+        if active_jobs:
+            headline = "Capture in progress"
+            detail = f"{active_jobs} active job(s) running right now."
+        elif queued:
+            headline = "Queue ready"
+            detail = f"{queued} item(s) lined up for the next pass."
+        elif live_now:
+            headline = "Live channels detected"
+            detail = f"{live_now} monitored channel(s) are live now."
+        elif archived:
+            headline = "Archive in shape"
+            detail = f"{archived} saved download(s) are ready to revisit."
+        else:
+            headline = "Ready to capture"
+            detail = "Paste a URL, monitor a channel, or scan the archive."
+
+        self.shell_snapshot_value.setText(headline)
+        self.shell_snapshot_detail.setText(detail)
+        self.shell_snapshot_meta.setText(
+            f"Desktop v{VERSION} • {queued} queued • {monitored} monitored • {archived} archived"
+        )
 
     def _refresh_download_summary(self):
         if not hasattr(self, "download_hero_title"):
@@ -1363,23 +1406,71 @@ class StreamKeep(QMainWindow):
         total = len(entries)
         auto = sum(1 for e in entries if e.auto_record)
         live = sum(1 for e in entries if e.last_status == "live")
+        recording = sum(1 for e in entries if e.is_recording)
+        pending = len(getattr(self, "_pending_auto_records", []))
 
         self._set_metric(self.monitor_count_value, self.monitor_count_sub, str(total), "active entries")
         self._set_metric(self.monitor_auto_value, self.monitor_auto_sub, str(auto), "auto-record enabled")
         self._set_metric(self.monitor_live_value, self.monitor_live_sub, str(live), "currently live")
 
         if total:
-            self.monitor_summary_label.setText(
-                f"Watching {total} channel(s). Auto-record is enabled on {auto} of them."
-            )
+            summary_parts = [
+                f"Watching {total} channel(s)",
+                f"{auto} armed for auto-record",
+            ]
+            if live:
+                summary_parts.append(f"{live} live")
+            if recording:
+                summary_parts.append(f"{recording} recording")
+            if pending:
+                summary_parts.append(f"{pending} queued to retry")
+            self.monitor_summary_label.setText(" • ".join(summary_parts))
         else:
             self.monitor_summary_label.setText("Add a channel URL to start passive live monitoring.")
+
+        if hasattr(self, "monitor_table_hint"):
+            calendar_on = bool(
+                hasattr(self, "monitor_view_toggle")
+                and self.monitor_view_toggle.isChecked()
+            )
+            if calendar_on:
+                if total:
+                    self.monitor_table_hint.setText(
+                        "Calendar view shows cached schedule windows for the channels in your watch list."
+                    )
+                else:
+                    self.monitor_table_hint.setText(
+                        "Calendar view will show cached schedule windows after you add monitored channels."
+                    )
+            elif total:
+                if live or recording:
+                    self.monitor_table_hint.setText(
+                        f"Watch list updates automatically. {live} live now and {recording} currently recording."
+                    )
+                else:
+                    self.monitor_table_hint.setText(
+                        "Entries refresh automatically and stay ready to trigger auto-record when a stream goes live."
+                    )
+            else:
+                self.monitor_table_hint.setText(
+                    "Entries refresh automatically and can trigger auto-recording when a stream goes live."
+                )
+        self._refresh_shell_overview()
 
     def _refresh_history_summary(self):
         if not hasattr(self, "history_count_value"):
             return
         total = len(self._history)
         latest = self._history[-1] if self._history else None
+        visible = len(getattr(self, "_history_view", self._history))
+        query = self.history_search.text().strip() if hasattr(self, "history_search") else ""
+        transcript_mode = (
+            hasattr(self, "transcript_search_check")
+            and self.transcript_search_check.isChecked()
+        )
+        transcript_hits = sum(
+            len(items) for items in getattr(self, "_transcript_hits", {}).values()
+        )
 
         self._set_metric(self.history_count_value, self.history_count_sub, str(total), "saved downloads")
         latest_value = latest.date if latest else "No entries"
@@ -1414,13 +1505,44 @@ class StreamKeep(QMainWindow):
                                  "—", "appears most in history")
                 self._set_metric(self.history_channel_value, self.history_channel_sub,
                                  "—", "most downloaded")
+        self._refresh_shell_overview()
 
         if total:
-            self.history_summary_label.setText(
-                "Double-click a row to open the saved folder in Explorer. "
-                "Use the search box to filter by title, platform, path, or URL."
-            )
+            if query and transcript_mode:
+                if hasattr(self, "history_filter_summary"):
+                    self.history_filter_summary.setText(
+                        f"{visible} matching download(s) • {transcript_hits} transcript hit(s)"
+                    )
+                if visible:
+                    self.history_summary_label.setText(
+                        "Transcript search matches indexed dialogue. Hover a title to preview matching lines, then double-click to open the folder."
+                    )
+                else:
+                    self.history_summary_label.setText(
+                        "No indexed transcript text matched that phrase. Clear the query or switch back to metadata search."
+                    )
+            elif query:
+                if hasattr(self, "history_filter_summary"):
+                    self.history_filter_summary.setText(
+                        f"Showing {visible} of {total} download(s)"
+                    )
+                if visible:
+                    self.history_summary_label.setText(
+                        "Metadata search matches title, platform, channel, folder path, and source URL."
+                    )
+                else:
+                    self.history_summary_label.setText(
+                        "No downloads matched that search. Try a broader title, platform, channel, or folder term."
+                    )
+            else:
+                if hasattr(self, "history_filter_summary"):
+                    self.history_filter_summary.setText(f"Showing all {total} download(s)")
+                self.history_summary_label.setText(
+                    "Double-click a row to open the saved folder in Explorer. Use search to filter by title, platform, channel, folder, or source URL."
+                )
         else:
+            if hasattr(self, "history_filter_summary"):
+                self.history_filter_summary.setText("History fills in automatically")
             self.history_summary_label.setText("Download history builds automatically after each completed job.")
 
     def _init_ui(self):
@@ -1432,13 +1554,13 @@ class StreamKeep(QMainWindow):
         root.setSpacing(16)
 
         header_card = QFrame()
-        header_card.setObjectName("heroCard")
+        header_card.setObjectName("shellCard")
         header_lay = QVBoxLayout(header_card)
-        header_lay.setContentsMargins(20, 18, 20, 18)
+        header_lay.setContentsMargins(22, 20, 22, 20)
         header_lay.setSpacing(16)
 
         header_top = QHBoxLayout()
-        header_top.setSpacing(18)
+        header_top.setSpacing(20)
         title_col = QVBoxLayout()
         title_col.setSpacing(4)
         eyebrow = QLabel("Capture Suite")
@@ -1446,7 +1568,7 @@ class StreamKeep(QMainWindow):
         title = QLabel("StreamKeep")
         title.setObjectName("title")
         subtitle = QLabel(
-            "Premium stream and VOD capture with cleaner segmentation, monitoring, and download history."
+            "Archive live streams, queue batches, and keep every capture organized from one desktop workspace."
         )
         subtitle.setObjectName("heroBody")
         subtitle.setWordWrap(True)
@@ -1455,19 +1577,44 @@ class StreamKeep(QMainWindow):
         title_col.addWidget(subtitle)
         header_top.addLayout(title_col, 1)
 
-        version_card, _, _ = self._make_metric_card("Version", f"v{VERSION}", "Local desktop build")
-        version_card.setMaximumWidth(170)
-        header_top.addWidget(version_card)
+        shell_meta = QFrame()
+        shell_meta.setObjectName("shellMetaCard")
+        shell_meta.setMaximumWidth(310)
+        shell_meta_lay = QVBoxLayout(shell_meta)
+        shell_meta_lay.setContentsMargins(16, 14, 16, 14)
+        shell_meta_lay.setSpacing(6)
 
-        # Notifications bell — shows unread count and opens a popup with
-        # the last N events.
-        self.notif_button = QPushButton("0 \U0001F514")
+        shell_meta_top = QHBoxLayout()
+        shell_meta_top.setSpacing(8)
+        shell_meta_label = QLabel("Live Snapshot")
+        shell_meta_label.setObjectName("fieldLabel")
+        shell_meta_top.addWidget(shell_meta_label)
+        shell_meta_top.addStretch(1)
+
+        self.notif_button = QPushButton("Alerts 0")
         self.notif_button.setObjectName("secondary")
-        self.notif_button.setFixedWidth(72)
+        self.notif_button.setMinimumWidth(104)
         self.notif_button.setToolTip("Recent notifications")
         self.notif_button.clicked.connect(self._on_show_notifications)
-        header_top.addWidget(self.notif_button)
+        shell_meta_top.addWidget(self.notif_button)
+        shell_meta_lay.addLayout(shell_meta_top)
+
+        self.shell_snapshot_value = QLabel("Ready to capture")
+        self.shell_snapshot_value.setObjectName("shellStatValue")
+        self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}")
+        self.shell_snapshot_detail.setObjectName("shellStatBody")
+        self.shell_snapshot_detail.setWordWrap(True)
+        self.shell_snapshot_meta = QLabel("0 queued • 0 monitored • 0 archived")
+        self.shell_snapshot_meta.setObjectName("shellStatMeta")
+        self.shell_snapshot_meta.setWordWrap(True)
+        shell_meta_lay.addWidget(self.shell_snapshot_value)
+        shell_meta_lay.addWidget(self.shell_snapshot_detail)
+        shell_meta_lay.addWidget(self.shell_snapshot_meta)
+        header_top.addWidget(shell_meta)
         header_lay.addLayout(header_top)
+
+        shell_controls = QHBoxLayout()
+        shell_controls.setSpacing(12)
 
         tab_shell = QFrame()
         tab_shell.setObjectName("toolbar")
@@ -1485,17 +1632,25 @@ class StreamKeep(QMainWindow):
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
         tab_lay.addStretch(1)
-        header_lay.addWidget(tab_shell)
-        root.addWidget(header_card)
+        shell_controls.addWidget(tab_shell, 1)
 
-        # ── Global search bar (F45) ──
+        search_shell = QFrame()
+        search_shell.setObjectName("toolbar")
+        search_shell.setMinimumWidth(320)
+        search_lay = QVBoxLayout(search_shell)
+        search_lay.setContentsMargins(14, 12, 14, 12)
+        search_lay.setSpacing(8)
+        search_label = QLabel("Search Everything")
+        search_label.setObjectName("fieldLabel")
+        search_lay.addWidget(search_label)
+
         self._global_search = QLineEdit()
         self._global_search.setPlaceholderText(
-            "Search across History, Storage, Monitor, Queue, Transcripts..."
+            "Search history, queue, storage, monitor, and transcripts…"
         )
         self._global_search.setClearButtonEnabled(True)
-        self._global_search.setObjectName("globalSearch")
-        self._global_search.setFixedHeight(36)
+        self._global_search.setObjectName("shellSearch")
+        self._global_search.setMinimumHeight(40)
         self._global_search_timer = QTimer(self)
         self._global_search_timer.setSingleShot(True)
         self._global_search_timer.setInterval(300)
@@ -1504,7 +1659,11 @@ class StreamKeep(QMainWindow):
             lambda: self._global_search_timer.start()
         )
         self._global_search.returnPressed.connect(self._on_global_search)
-        root.addWidget(self._global_search)
+        search_lay.addWidget(self._global_search)
+        shell_controls.addWidget(search_shell, 0)
+
+        header_lay.addLayout(shell_controls)
+        root.addWidget(header_card)
 
         # Global search results dropdown (hidden until needed)
         from PyQt6.QtWidgets import QListWidget
@@ -4509,6 +4668,29 @@ class StreamKeep(QMainWindow):
         name = self.theme_combo.currentData() or "dark"
         self._config["theme"] = name
         apply_theme(name, app=QApplication.instance())
+        if hasattr(self, "settings_theme_value"):
+            theme_display = {"dark": "Dark", "light": "Light", "system": "System"}.get(
+                name, "Dark"
+            )
+            self.settings_theme_value.setText(theme_display)
+            self.settings_theme_sub.setText("Catppuccin-based desktop theme")
+        if hasattr(self, "_stack"):
+            self._switch_tab(self._stack.currentIndex())
+        if hasattr(self, "status_label"):
+            pill_to_tone = {
+                "Standby": "idle",
+                "Working": "working",
+                "Finalizing": "processing",
+                "Ready": "success",
+                "Alert": "warning",
+                "Error": "error",
+            }
+            current_tone = pill_to_tone.get(
+                self.status_pill.text() if hasattr(self, "status_pill") else "Standby",
+                "idle",
+            )
+            self._set_status(self.status_label.text() or "Theme updated.", current_tone)
+        self._refresh_notif_badge()
         self._persist_config()
 
     def _on_companion_toggled(self, checked):
@@ -4539,10 +4721,10 @@ class StreamKeep(QMainWindow):
             return
         unread = self._notifications.unread
         if unread > 0:
-            self.notif_button.setText(f"{unread} \U0001F514")
-            self.notif_button.setStyleSheet("font-weight: 600;")
+            self.notif_button.setText(f"Alerts {unread}")
+            self.notif_button.setStyleSheet("font-weight: 700;")
         else:
-            self.notif_button.setText("0 \U0001F514")
+            self.notif_button.setText("Alerts 0")
             self.notif_button.setStyleSheet("")
 
     def _on_show_notifications(self):
@@ -5309,8 +5491,26 @@ class StreamKeep(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(g.dir_path))
 
     def _on_storage_selection_changed(self):
-        count = len(self.storage_table.selectionModel().selectedRows())
+        rows = list(self.storage_table.selectionModel().selectedRows())
+        count = len(rows)
         self.storage_delete_btn.setEnabled(count > 0)
+        self.storage_delete_btn.setText(
+            f"Recycle {count} Selected" if count else "Recycle Selected"
+        )
+        groups = getattr(self, "_storage_groups", None) or []
+        total_size = sum(
+            groups[idx.row()].total_size
+            for idx in rows
+            if 0 <= idx.row() < len(groups)
+        )
+        if count:
+            self.storage_delete_btn.setToolTip(
+                f"Move {count} folder group(s) totalling {_fmt_size(total_size)} to the Recycle Bin."
+            )
+        else:
+            self.storage_delete_btn.setToolTip(
+                "Select one or more folder groups to recycle them safely."
+            )
 
     def _on_storage_delete_selected(self):
         """Move selected recording folders to the system Recycle Bin."""
@@ -6165,6 +6365,7 @@ class StreamKeep(QMainWindow):
                 rm_btn.setEnabled(False)
                 rm_btn.setToolTip("Stop the current job before removing it from the queue.")
             self.queue_table.setCellWidget(i, 5, rm_btn)
+        self._refresh_shell_overview()
 
     def _queue_move(self, idx, direction):
         """Move a queue item up (-1) or down (+1)."""
