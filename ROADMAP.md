@@ -840,3 +840,68 @@ When resuming in a new conversation:
 # Wave 2 — Features F41-F80
 ## Session Resumption Notes
    For this project: always run `py_compile` + `pyflakes` clean before committing.
+
+## Open-Source Research (Round 2)
+
+### Related OSS Projects
+- **yt-dlp** — https://github.com/yt-dlp/yt-dlp — the downloader engine everyone wraps; 1000+ site extractors, SponsorBlock integration, postprocessor hooks, --cookies-from-browser, format selection DSL
+- **dsymbol/yt-dlp-gui** — https://github.com/dsymbol/yt-dlp-gui — PySide6 wrapper, purpose-built for yt-dlp; concurrent queue, format presets, config-file driven
+- **Tartube (axcore)** — https://github.com/axcore/tartube — Python3/Gtk3 mature library-oriented GUI (Windows/Linux/BSD/macOS); channel subscriptions, archive tracking
+- **yt-dlg (oleksis/youtube-dl-gui)** — https://github.com/oleksis/youtube-dl-gui — wxPython cross-platform, distributed via PyPI/MS Store/Winget/Snap — shipping-polish reference
+- **Open Video Downloader (jely2002)** — https://github.com/jely2002/youtube-dl-gui — Tauri + Vue; modern lightweight alternative with auto-update
+- **ytdl-sub** — https://github.com/jmbannon/ytdl-sub — declarative YAML subscriptions that produce a Plex/Jellyfin-compatible library; audit trail + dry-run
+- **MeTube** — https://github.com/alexta69/metube — web-hosted yt-dlp with queue, SSO, Docker-ready; self-hosted family option
+- **streamlink** — https://github.com/streamlink/streamlink — focused on live streams (Twitch/Kick); DASH/HLS fronting; StreamKeep should integrate as a fallback extractor
+- **gallery-dl** — https://github.com/mikf/gallery-dl — image/gallery extractor with similar architecture; useful for platform breadth
+
+### Features to Borrow
+- Declarative YAML subscription format that outputs into a Plex/Jellyfin folder tree (ytdl-sub)
+- Archive.txt plus SQLite dual-tracking: quick seen check plus rich metadata (ytdl-sub pattern)
+- Format-selector DSL exposure as a visual builder ("bestvideo+bestaudio/best" → menu) with raw fallback (yt-dlp-gui)
+- Streamlink integration for Twitch/Kick/YouTube-Live that yt-dlp can't follow (Streamlink)
+- Built-in SponsorBlock chapter-add + skip-add postprocessor options (yt-dlp native)
+- --cookies-from-browser selector with Firefox/Chrome/Edge/Brave profile picker (yt-dlp)
+- Queue persistence with resumable downloads across app restarts (MeTube, yt-dlg)
+- Concurrent-download limiter per host to avoid bans (--sleep-requests, --max-downloads) (yt-dlp)
+- Automatic proxy rotation from a user-provided list on 429/403 (power-user feature in yt-dlp config)
+- Postprocessor chain: auto-chapters from SponsorBlock + metadata embed + thumbnail embed + subtitles burn/embed (yt-dlp)
+- Web UI mode mirroring desktop via Tauri/Flask so users can queue from their phone on the LAN (MeTube)
+- Per-extractor plugin API so community extractors can be dropped in without patching the core (yt-dlp plugins)
+
+### Patterns & Architectures Worth Studying
+- Extractor plugin architecture: each site = one class inheriting InfoExtractor, auto-discovered from a folder (yt-dlp)
+- Postprocessor chain pattern: each stage implements .run(info_dict, files) and returns a new info_dict (yt-dlp)
+- Archive file pattern as the dedupe source-of-truth, simpler than a DB for casual users (yt-dlp --download-archive)
+- Declarative-vs-imperative subscription modes: ytdl-sub proves a YAML-first model is more auditable than GUI clicks (ytdl-sub)
+- Headless daemon + web UI split that MeTube uses — lets StreamKeep run on a NAS and be driven from anywhere (MeTube)
+
+## Implementation Deep Dive (Round 3)
+
+### Reference Implementations to Study
+- **yt-dlp/yt-dlp `yt_dlp/YoutubeDL.py`** — https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/YoutubeDL.py — authoritative `YoutubeDL(params)` options surface; use `devscripts/cli_to_api.py` to translate CLI flags to kwargs.
+- **yt-dlp Plugin Development wiki** — https://github.com/yt-dlp/yt-dlp/wiki/Plugin-Development — canonical namespace-package pattern `yt_dlp_plugins.extractor.<name>` for third-party extractors.
+- **yt-dlp/yt-dlp-sample-plugins** — https://github.com/yt-dlp/yt-dlp-sample-plugins — template repo; fork this for StreamKeep's plugin SDK.
+- **mpv-player/python-mpv** — https://github.com/jaseg/python-mpv — embedded mpv via libmpv; `MPV(wid=winid)` binds to a Qt widget `winId()` for in-app playback.
+- **yt-dlp/yt-dlp `yt_dlp/postprocessor/ffmpeg.py`** — https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/postprocessor/ffmpeg.py — reference for ffmpeg argument construction (remux, embed subs, embed thumbnail).
+- **streamlink/streamlink `src/streamlink/plugin/plugin.py`** — https://github.com/streamlink/streamlink/blob/master/src/streamlink/plugin/plugin.py — alternate extractor architecture; matcher-based URL dispatch cleaner than yt-dlp's regex inheritance.
+- **yt-dlp progress hook example** — https://github.com/yt-dlp/yt-dlp?tab=readme-ov-file#embedding-yt-dlp — `progress_hooks=[lambda d: ...]` — wire to PyQt signal via `QObject.invoke_method` to cross threads safely.
+
+### Known Pitfalls from Similar Projects
+- `yt_dlp.YoutubeDL(params).download(urls)` blocks the calling thread — wrap in `QThread` or use `params['progress_hooks']` + `concurrent.futures.ThreadPoolExecutor`.
+- Plugin namespace packages require an empty `__init__.py` in `yt_dlp_plugins/extractor/` — missing causes silent non-registration; verify with `-v` flag.
+- `ytdlp-plugins` third-party manager is inactive (no release >12 months) — do NOT depend on it; use official plugin spec instead.
+- PyInstaller one-file + yt-dlp lazy extractor loader: `--collect-submodules yt_dlp.extractor` is mandatory or dynamic plugin discovery breaks.
+- mpv `libmpv-2.dll` on Windows must be in the same dir as the exe or next to the script; PyInstaller bundles require `--add-binary "libmpv-2.dll;."`.
+- Progress hooks fire on yt-dlp's worker thread — direct Qt widget access raises `QObject::setParent: Cannot set parent, new parent is in a different thread`. Use `QMetaObject.invokeMethod(widget, "update", Qt.QueuedConnection, ...)`.
+- Twitch HLS segments encrypted after 2024 policy change — yt-dlp >=2024.08 handles it; older pins silently produce broken files.
+- FFmpeg `-c copy` remux fails on fragmented MP4 with timestamp discontinuities — fall back to `-c:v copy -c:a aac -async 1`.
+
+### Library Integration Checklist
+- `yt-dlp==2025.01.15` — https://pypi.org/project/yt-dlp — key API `from yt_dlp import YoutubeDL; YoutubeDL(params).download([url])`. Gotcha: pin with calver; breaking changes land monthly.
+- `python-mpv==1.0.7` — https://github.com/jaseg/python-mpv — embedded player. Gotcha: requires `libmpv-2.dll` on PATH; bundle alongside exe.
+- `PyQt6==6.8.0` — `QThread` + `pyqtSignal` for progress updates. Gotcha: connect signals with `Qt.QueuedConnection` when crossing thread boundaries.
+- `ffmpeg-python==0.2.0` — fluent wrapper over ffmpeg CLI; gotcha: requires `ffmpeg.exe` on PATH (not bundled). Ship via `imageio-ffmpeg` if self-contained.
+- `imageio-ffmpeg==0.5.1` — bundles ffmpeg binary per-platform; `import imageio_ffmpeg; imageio_ffmpeg.get_ffmpeg_exe()` returns absolute path.
+- `fastapi==0.115.6` + `uvicorn==0.34.0` — REST API. Gotcha: under PyInstaller, use `--collect-all fastapi --collect-all pydantic` or `anyio` imports fail at runtime.
+- `mutagen==1.47.0` — metadata embedding for MP3/M4A; cleaner than yt-dlp's `--embed-metadata` if you need custom tags.
+- `PyInstaller==6.11.1` — spec flags: `--collect-submodules yt_dlp.extractor` + `--add-binary libmpv-2.dll;.` + runtime hook for `multiprocessing.freeze_support()`.
