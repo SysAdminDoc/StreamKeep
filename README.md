@@ -91,6 +91,13 @@ python StreamKeep.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
+## Project planning
+
+- [Roadmap](ROADMAP.md)
+- [Completed work](COMPLETED.md)
+- [Research report](RESEARCH_REPORT.md)
+- [Archived legacy roadmap](docs/archive/roadmap/ROADMAP-legacy.md)
+
 ### Quick Start
 
 1. Paste a URL:
