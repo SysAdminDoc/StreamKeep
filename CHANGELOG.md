@@ -2,6 +2,10 @@
 
 All notable changes to StreamKeep will be documented in this file.
 
+## [Unreleased]
+
+- Consolidated root planning docs into `ROADMAP.md`, `COMPLETED.md`, and `RESEARCH_REPORT.md`; archived legacy roadmap and feature candidate docs under `docs/archive/roadmap/`.
+
 ## [v4.27.4] - %Y->- (HEAD -> main, origin/main)
 
 - v4.31.0 - Phase 14 UX & Extensibility (F73-F80)
