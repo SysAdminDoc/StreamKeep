@@ -127,10 +127,21 @@ def _build_handler(expected_token, signals, state_provider=None):
                 "Access-Control-Allow-Headers", "Content-Type, Authorization"
             )
 
+        def _security_headers(self):
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+
+        def _csp_header(self):
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+            )
+
         def _json_response(self, code, obj):
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self._cors()
+            self._security_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -258,6 +269,8 @@ def _build_handler(expected_token, signals, state_provider=None):
         def _serve_web_ui(self):
             body = _WEB_UI_HTML.encode("utf-8")
             self.send_response(200)
+            self._security_headers()
+            self._csp_header()
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

@@ -14,6 +14,12 @@ import json
 import os
 import subprocess
 
+try:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = 89_478_485
+except ImportError:
+    pass
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..paths import _CREATE_NO_WINDOW, CONFIG_DIR, FFMPEG_SAFETY

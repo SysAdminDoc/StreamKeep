@@ -10,6 +10,8 @@ from ..models import QualityInfo, StreamInfo, VODInfo
 from ..utils import fmt_duration
 from .base import Extractor
 
+_SAFE_GQL_VALUE = re.compile(r'^[a-zA-Z0-9_]{1,50}$')
+
 
 class TwitchExtractor(Extractor):
     NAME = "Twitch"
@@ -51,6 +53,8 @@ class TwitchExtractor(Extractor):
         login = self.extract_channel_id(url)
         if not login or login.startswith("vod_"):
             return None
+        if not _SAFE_GQL_VALUE.match(login):
+            return None
         data = self._gql(f'{{ user(login: "{login}") {{ stream {{ id type }} }} }}')
         if data and data.get("data", {}).get("user", {}).get("stream"):
             return data["data"]["user"]["stream"]["type"] == "live"
@@ -59,6 +63,9 @@ class TwitchExtractor(Extractor):
     def list_vods(self, url, log_fn=None, cursor=None):
         login = self.extract_channel_id(url)
         if not login or login.startswith("vod_"):
+            return [], None
+        if not _SAFE_GQL_VALUE.match(login):
+            self._log(log_fn, f"Invalid channel login: {login!r}")
             return [], None
         page_label = f" (after {cursor[:12]}…)" if cursor else ""
         self._log(log_fn, f"Fetching VODs for Twitch channel: {login}{page_label}")
@@ -116,6 +123,8 @@ class TwitchExtractor(Extractor):
     def _get_access_token(self, vod_id=None, channel=None, log_fn=None):
         """Get playback access token for a VOD or live channel."""
         if vod_id:
+            if not _SAFE_GQL_VALUE.match(str(vod_id)):
+                return None, None
             data = self._gql(
                 f'{{ videoPlaybackAccessToken(id: "{vod_id}", params: '
                 f'{{ platform: "web", playerBackend: "mediaplayer", playerType: "site" }}) '
@@ -123,6 +132,8 @@ class TwitchExtractor(Extractor):
             )
             token_key = "videoPlaybackAccessToken"
         else:
+            if not channel or not _SAFE_GQL_VALUE.match(channel):
+                return None, None
             data = self._gql(
                 f'{{ streamPlaybackAccessToken(channelName: "{channel}", params: '
                 f'{{ platform: "web", playerBackend: "mediaplayer", playerType: "site" }}) '

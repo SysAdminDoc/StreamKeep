@@ -15,6 +15,12 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
+try:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = 89_478_485
+except ImportError:
+    pass
+
 
 def _extract_frame(media_path, at_secs, out_path, width=1280, height=720):
     """Extract a single frame from *media_path* at *at_secs* using ffmpeg."""
