@@ -10,12 +10,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
+import logging
 import os
 import re
 import subprocess
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .paths import _CREATE_NO_WINDOW
 from .utils import fmt_size
@@ -100,8 +103,10 @@ def run_capture_interruptible(cmd: list[str], timeout: float = 30) -> CommandRes
             creationflags=_CREATE_NO_WINDOW,
         )
     except FileNotFoundError as e:
+        logger.debug("Command not found: %s", e)
         return CommandResult(returncode=127, stderr=str(e), error=str(e))
     except Exception as e:
+        logger.debug("Command failed: %s", e)
         return CommandResult(returncode=-1, stderr=str(e), error=str(e))
 
     deadline = time.monotonic() + timeout

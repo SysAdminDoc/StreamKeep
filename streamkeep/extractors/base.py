@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class Extractor:
@@ -73,3 +76,4 @@ class Extractor:
     def _log(self, log_fn: Callable[[str], Any] | None, msg: str) -> None:
         if log_fn:
             log_fn(msg)
+        logger.debug(msg)

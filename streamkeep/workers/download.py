@@ -1,10 +1,13 @@
 """Download worker — ffmpeg-based segmented downloader with parallel
 HTTP Range fallback and yt-dlp direct download mode."""
 
+import logging
 import os
 import re
 import subprocess
 import time
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -195,6 +198,7 @@ class DownloadWorker(QThread):
         save_resume_state(self._resume_state)
 
     def run(self):
+        logger.info("Download started: %d segment(s) to %s", len(self.segments), self.output_dir)
         for seg_idx, label, start, duration in self.segments:
             if self._cancel:
                 self.log.emit("Download cancelled.")
@@ -223,6 +227,7 @@ class DownloadWorker(QThread):
                 if self._cancel:
                     return
                 if not success:
+                    logger.error("yt-dlp download failed for segment %d (%s)", seg_idx, label)
                     self.error.emit(seg_idx, "yt-dlp download failed")
                 continue
 
@@ -358,7 +363,8 @@ class DownloadWorker(QThread):
                     elif self._cancel:
                         pass
                     else:
-                        self.error.emit(seg_idx, "Chunked capture produced no files")
+                        logger.error("Chunked capture produced no files for segment %d (%s)", seg_idx, label)
+                    self.error.emit(seg_idx, "Chunked capture produced no files")
                 except FileNotFoundError:
                     self.error.emit(seg_idx, "ffmpeg not found in PATH")
                     self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
@@ -510,18 +516,22 @@ class DownloadWorker(QThread):
                             break
 
                 except FileNotFoundError:
+                    logger.error("ffmpeg not found in PATH for segment %d (%s)", seg_idx, label)
                     self.error.emit(seg_idx, "ffmpeg not found in PATH")
                     self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")
                     return
                 except PermissionError as e:
+                    logger.error("Permission denied for segment %d (%s): %s", seg_idx, label, e)
                     self.error.emit(seg_idx, f"Permission denied: {e}")
                     self.log.emit(f"[ERROR] {label}: {e}")
                     break
                 except Exception as e:
+                    logger.error("Unexpected error for segment %d (%s): %s", seg_idx, label, e)
                     last_error = str(e)
                     self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
 
             if not segment_done_flag and not self._cancel and not is_live_capture:
+                logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
                 self.error.emit(
                     seg_idx,
                     f"Failed after {attempts} attempt(s): {last_error[:120]}",
