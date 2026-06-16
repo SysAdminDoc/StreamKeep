@@ -39,7 +39,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Run unit tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: pip install pytest pytest-qt && python -m pytest tests/ -q
 
       - name: Build exe
         run: |
@@ -86,7 +86,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Run unit tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: pip install pytest pytest-qt && python -m pytest tests/ -q
 
       - name: Build app
         run: |
@@ -120,7 +120,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Run unit tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: pip install pytest pytest-qt && python -m pytest tests/ -q
 
       - name: Build binary
         run: |
