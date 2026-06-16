@@ -33,10 +33,29 @@ if getattr(sys, "frozen", False):
     _exe_dir = Path(sys.executable).resolve().parent
 PORTABLE = (_exe_dir / "portable.txt").is_file()
 
+def _default_config_dir():
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "StreamKeep"
+    # Linux/BSD — XDG Base Directory spec
+    xdg = os.environ.get("XDG_CONFIG_HOME", "")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    xdg_dir = base / "StreamKeep"
+    # Auto-migrate legacy ~/StreamKeep/ if the XDG path doesn't exist yet
+    legacy = Path.home() / "StreamKeep"
+    if not xdg_dir.exists() and legacy.is_dir():
+        try:
+            legacy.rename(xdg_dir)
+        except OSError:
+            return legacy
+    return xdg_dir
+
+
 if PORTABLE:
     CONFIG_DIR = _exe_dir / "data"
 else:
-    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "StreamKeep"
+    CONFIG_DIR = _default_config_dir()
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 LOG_FILE = CONFIG_DIR / "streamkeep.log"
