@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap rescap">
+
+  <Identity Name="SysAdminDoc.StreamKeep"
+            Publisher="CN=SysAdminDoc"
+            Version="4.31.2.0"
+            ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>StreamKeep</DisplayName>
+    <PublisherDisplayName>SysAdminDoc</PublisherDisplayName>
+    <Description>Multi-platform desktop tool for downloading VODs, live streams, podcasts, and direct media URLs.</Description>
+    <Logo>assets\icon-150.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="StreamKeep" Executable="StreamKeep.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="StreamKeep"
+                          Description="Stream &amp; VOD downloader with channel monitoring, post-processing, and archive management."
+                          BackgroundColor="#1e1e2e"
+                          Square150x150Logo="assets\icon-150.png"
+                          Square44x44Logo="assets\icon-44.png">
+        <uap:DefaultTile Wide310x150Logo="assets\icon-310x150.png" Square71x71Logo="assets\icon-71.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

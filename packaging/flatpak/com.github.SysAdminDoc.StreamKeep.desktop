@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=StreamKeep
+Comment=Download VODs, live streams, and podcasts
+Exec=streamkeep
+Icon=com.github.SysAdminDoc.StreamKeep
+Terminal=false
+Categories=AudioVideo;Video;Network;
+Keywords=stream;download;vod;twitch;kick;youtube;archive;

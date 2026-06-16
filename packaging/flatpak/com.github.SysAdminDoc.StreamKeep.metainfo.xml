@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.SysAdminDoc.StreamKeep</id>
+  <name>StreamKeep</name>
+  <summary>Download VODs, live streams, podcasts, and direct media URLs</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      StreamKeep is a multi-platform desktop tool for downloading and archiving
+      live streams, VODs, podcasts, and direct media URLs. Features native
+      extractors for Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, and
+      Podcast RSS feeds, with yt-dlp as a universal fallback.
+    </p>
+    <p>
+      Includes channel monitoring with auto-recording, download queue with
+      bandwidth scheduling, embedded media player, post-processing (convert,
+      trim, silence removal, transcription), upload destinations (S3, FTP,
+      WebDAV), and a plugin SDK for community extensions.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/SysAdminDoc/StreamKeep</url>
+  <url type="bugtracker">https://github.com/SysAdminDoc/StreamKeep/issues</url>
+  <developer id="com.github.SysAdminDoc">
+    <name>SysAdminDoc</name>
+  </developer>
+  <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="4.31.2" date="2026-06-01">
+      <description><p>Security hardening, extractor fixes, and engineering audit.</p></description>
+    </release>
+  </releases>
+</component>
