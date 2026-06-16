@@ -98,7 +98,11 @@ class SoundCloudExtractor(Extractor):
             stream_data = curl_json(f"{trans_url}?client_id={cid}")
             if stream_data and stream_data.get("url"):
                 ft = "mp4" if protocol == "progressive" else "hls"
-                name = f"{protocol} ({mime.split('/')[-1].split(';')[0]})"
+                codec = mime.split("/")[-1].split(";")[0] if mime else protocol
+                # SoundCloud AAC HLS uses audio/mp4 or audio/aac MIME
+                if "aac" in codec or "mp4" in codec:
+                    codec = "aac"
+                name = f"{protocol} ({codec})"
                 info.qualities.append(QualityInfo(
                     name=name, url=stream_data["url"],
                     resolution="audio", bandwidth=0, format_type=ft,

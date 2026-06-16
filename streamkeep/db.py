@@ -229,6 +229,21 @@ def history_count():
         db.close()
 
 
+def find_history_by_url(url):
+    """Return the most recent history entry matching *url*, or None."""
+    if not url:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM history WHERE url=? ORDER BY id DESC LIMIT 1",
+            (str(url),),
+        ).fetchone()
+        return _row_to_history_dict(row) if row else None
+    finally:
+        db.close()
+
+
 # ── Monitor channels CRUD ──────────────────────────────────────────
 
 def load_monitor_channels():

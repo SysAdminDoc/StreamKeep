@@ -4168,6 +4168,19 @@ class StreamKeep(QMainWindow):
     def _on_download(self):
         if not self.stream_info:
             return False
+        src_url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        if src_url and not self.stream_info.is_live:
+            prev = _db.find_history_by_url(src_url)
+            if prev:
+                from PyQt6.QtWidgets import QMessageBox
+                ans = QMessageBox.question(
+                    self, "Already Downloaded",
+                    f"This URL was downloaded on {prev.get('date', '?')}\n"
+                    f"to: {prev.get('path', '?')[:80]}\n\n"
+                    "Download again?",
+                )
+                if ans != QMessageBox.StandardButton.Yes:
+                    return False
         # Disk-space preflight — catches "no more room on device" before
         # ffmpeg runs for three hours and exits with a muxing error. Only
         # warns when we have a meaningful estimate; lives / unknown-duration
