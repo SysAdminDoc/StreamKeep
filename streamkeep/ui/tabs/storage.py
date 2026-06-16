@@ -6,14 +6,15 @@ send2trash so nothing is ever permanently removed from inside the app.
 
 import os
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QLabel, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
+from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
 from ..widgets import ask_premium_confirmation, make_metric_card, style_table
@@ -374,3 +375,134 @@ def prompt_confirm_delete(parent, group_count, total_size, sample_paths):
         default_action="secondary",
         min_width=620,
     )
+
+
+# ── Storage tab handler mixin ────────────────────────────────────────
+
+class StorageTabMixin:
+
+    def _storage_scan_root(self):
+        return self.output_input.text().strip() or str(_default_output_dir())
+
+    def _on_storage_rescan(self):
+        root = self._storage_scan_root()
+        self.storage_root_label.setText(f"Scanning: {root}")
+        self.storage_rescan_btn.setEnabled(False)
+        try:
+            scan = scan_storage(root)
+        except Exception as e:
+            self._log(f"[STORAGE] Scan failed: {e}")
+            scan = None
+        finally:
+            self.storage_rescan_btn.setEnabled(True)
+        if scan is None:
+            return
+        populate_storage_table(self, scan)
+        self._set_status(
+            f"Storage scan complete — {scan.total_files} file(s), "
+            f"{fmt_size(scan.total_size)}.",
+            "success" if scan.total_files else "idle",
+        )
+
+    def _on_storage_context_menu(self, pos):
+        if not hasattr(self, "storage_table"):
+            return
+        idx = self.storage_table.indexAt(pos)
+        if not idx.isValid():
+            return
+        row = idx.row()
+        groups = getattr(self, "_storage_groups", None) or []
+        if not (0 <= row < len(groups)):
+            return
+        g = groups[row]
+        menu = QMenu(self)
+        bundle_act = menu.addAction("Export share bundle (.zip)...")
+        trim_act = menu.addAction("Trim / Clip...")
+        menu.addSeparator()
+        open_act = menu.addAction("Open Folder")
+        chosen = menu.exec(self.storage_table.viewport().mapToGlobal(pos))
+        if chosen == bundle_act:
+            self._start_bundle_export(g.dir_path)
+        elif chosen == trim_act:
+            self._open_clip_dialog_for_dir(g.dir_path)
+        elif chosen == open_act and os.path.isdir(g.dir_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(g.dir_path))
+
+    def _on_storage_selection_changed(self):
+        rows = list(self.storage_table.selectionModel().selectedRows())
+        count = len(rows)
+        self.storage_delete_btn.setEnabled(count > 0)
+        self.storage_delete_btn.setText(
+            f"Recycle {count} Selected" if count else "Recycle Selected"
+        )
+        groups = getattr(self, "_storage_groups", None) or []
+        total_size = sum(
+            groups[idx.row()].total_size
+            for idx in rows
+            if 0 <= idx.row() < len(groups)
+        )
+        if count:
+            self.storage_delete_btn.setToolTip(
+                f"Move {count} folder group(s) totalling {fmt_size(total_size)} to the Recycle Bin."
+            )
+        else:
+            self.storage_delete_btn.setToolTip(
+                "Select one or more folder groups to recycle them safely."
+            )
+
+    def _on_storage_delete_selected(self):
+        rows = sorted(
+            {idx.row() for idx in self.storage_table.selectionModel().selectedRows()},
+            reverse=True,
+        )
+        groups_attr = getattr(self, "_storage_groups", None) or []
+        targets = [groups_attr[r] for r in rows if 0 <= r < len(groups_attr)]
+        if not targets:
+            return
+        total_size = sum(g.total_size for g in targets)
+        sample_paths = [g.dir_path for g in targets]
+        if not prompt_confirm_delete(self, len(targets), total_size, sample_paths):
+            return
+        try:
+            from send2trash import send2trash as _send2trash
+        except ImportError:
+            self._log(
+                "[STORAGE] send2trash is not installed. Refusing to delete "
+                "permanently. Install with: pip install send2trash"
+            )
+            self._set_status(
+                "send2trash not installed — recycle-bin delete unavailable. "
+                "No files were changed.",
+                "error",
+            )
+            return
+        recycled = 0
+        for g in targets:
+            try:
+                _send2trash(g.dir_path)
+                recycled += 1
+            except Exception as e:
+                self._log(f"[STORAGE] Could not recycle {g.dir_path}: {e}")
+        if recycled:
+            self._log(
+                f"[STORAGE] Recycled {recycled} folder(s) totalling "
+                f"{fmt_size(total_size)}."
+            )
+        self._set_status(
+            f"Recycled {recycled} of {len(targets)} folder(s).",
+            "success" if recycled == len(targets) else "warning",
+        )
+        self._on_storage_rescan()
+
+    def _on_storage_thumb_ready(self, row_key, pix):
+        groups = getattr(self, "_storage_groups", None) or []
+        for i, g in enumerate(groups):
+            if g.dir_path == row_key:
+                label = self.storage_table.cellWidget(i, 0)
+                if label is not None:
+                    label.setPixmap(pix.scaled(
+                        100, 56,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                return

@@ -1,4 +1,5 @@
-"""Settings tab — the biggest tab (510+ lines of field blocks).
+"""Settings tab — the biggest tab (510+ lines of field blocks) plus the
+``SettingsTabMixin`` handler class that is mixed into ``StreamKeep``.
 
 Groups: default output, toolchain probe, cookies, network + rate limit +
 bandwidth schedule + parallel connections, YouTube extras, templates,
@@ -6,12 +7,18 @@ webhook, dedup, media library, post-processing + converter, manual
 converter buttons, import/export/save row.
 """
 
+import json
+import os
 import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -21,15 +28,20 @@ from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor
 from ...http import set_native_proxy
 from ...paths import _CREATE_NO_WINDOW, CONFIG_FILE
+from ...config import save_config as _save_config
 from ...postprocess import (
-    AUDIO_CODECS, AUDIO_CONTAINERS, PostProcessor,
-    VIDEO_CONTAINERS, available_video_codec_keys,
+    AUDIO_CODECS, AUDIO_CONTAINERS, ConvertWorker, PostProcessor,
+    VIDEO_CONTAINERS, VIDEO_EXTS, AUDIO_EXTS,
+    available_video_codec_keys,
 )
 from ...theme import CAT
+from ...local_server import LocalCompanionServer
+from ...updater import UpdateCheckWorker, DownloadUpdateWorker, arm_self_replace
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
     default_output_dir as _default_output_dir,
     render_template as _render_template,
+    scan_browser_cookies as _scan_browser_cookies,
 )
 from ..widgets import (
     ask_premium_confirmation,
@@ -39,6 +51,7 @@ from ..widgets import (
     make_metric_card,
     make_status_banner,
     show_premium_message,
+    update_status_banner,
 )
 
 
@@ -249,6 +262,1049 @@ def _on_pp_preset_delete(win):
     presets.pop(name, None)
     _save_user_presets(win, presets)
     _populate_pp_presets(win)
+
+
+class SettingsTabMixin:
+    """Settings-tab handler methods, mixed into ``StreamKeep``."""
+
+    # ── Manual converter ─────────────────────────────────────────────
+
+    def _on_convert_files_clicked(self):
+        """Open a multi-select file picker and kick off the converter."""
+        if getattr(self, "_convert_worker", None) is not None and self._convert_worker.isRunning():
+            self._set_status("A conversion is already running.", "warning")
+            return
+        # Apply current settings first so the worker picks them up
+        self._on_save_settings()
+        exts = sorted(VIDEO_EXTS | AUDIO_EXTS)
+        filter_str = "Media files (" + " ".join(f"*{e}" for e in exts) + ");;All files (*)"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select files to convert", str(_default_output_dir()), filter_str
+        )
+        if not paths:
+            return
+        self._start_convert_worker(list(paths))
+
+    def _on_convert_folder_clicked(self):
+        """Recursively collect media files from a chosen folder and convert."""
+        if getattr(self, "_convert_worker", None) is not None and self._convert_worker.isRunning():
+            self._set_status("A conversion is already running.", "warning")
+            return
+        self._on_save_settings()
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select folder to convert", str(_default_output_dir())
+        )
+        if not folder:
+            return
+        files = []
+        try:
+            for root, _dirs, fnames in os.walk(folder):
+                for f in fnames:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in VIDEO_EXTS or ext in AUDIO_EXTS:
+                        # Skip files we produced ourselves
+                        low = f.lower()
+                        if ".converted." in low:
+                            continue
+                        files.append(os.path.join(root, f))
+        except OSError as e:
+            self._set_status(f"Folder scan failed: {e}", "error")
+            return
+        if not files:
+            self._set_status("No media files found in that folder.", "warning")
+            return
+        self._log(f"[CONVERT] Found {len(files)} file(s) in {folder}")
+        self._start_convert_worker(files)
+
+    def _start_convert_worker(self, files):
+        """Launch a ConvertWorker for the given list and wire up signals."""
+        do_video = self.pp_convert_video_check.isChecked()
+        do_audio = self.pp_convert_audio_check.isChecked()
+        if not (do_video or do_audio):
+            self._set_status(
+                "Enable 'Convert video' or 'Convert audio' in Post-Processing first.",
+                "warning"
+            )
+            return
+        self._convert_worker = ConvertWorker(files, do_video, do_audio)
+        self._convert_worker.progress.connect(self._on_convert_progress)
+        self._convert_worker.log.connect(self._log)
+        self._convert_worker.file_done.connect(self._on_convert_file_done)
+        self._convert_worker.all_done.connect(self._on_convert_all_done)
+        self.convert_files_btn.setEnabled(False)
+        self.convert_folder_btn.setEnabled(False)
+        self.convert_cancel_btn.setVisible(True)
+        self._log(f"[CONVERT] Starting batch conversion ({len(files)} file(s))")
+        self._set_status(f"Converting 0/{len(files)}...", "working")
+        self._convert_worker.start()
+
+    def _on_convert_progress(self, idx, total, name):
+        if total:
+            status = f"Converting {idx + 1}/{total}: {name}" if name else f"Converted {total}/{total}"
+            self._set_status(status, "working" if idx < total else "success")
+
+    def _on_convert_file_done(self, path, ok):
+        marker = "[OK]" if ok else "[FAIL]"
+        self._log(f"[CONVERT] {marker} {os.path.basename(path)}")
+
+    def _on_convert_all_done(self, successes, failures):
+        self.convert_files_btn.setEnabled(True)
+        self.convert_folder_btn.setEnabled(True)
+        self.convert_cancel_btn.setVisible(False)
+        total = successes + failures
+        if failures == 0:
+            self._set_status(f"Conversion complete: {successes}/{total} succeeded.", "success")
+        else:
+            self._set_status(
+                f"Conversion finished: {successes} ok, {failures} failed. See log.",
+                "warning"
+            )
+        self._notify("StreamKeep", f"Converted {successes}/{total} file(s)")
+
+    def _on_convert_cancel(self):
+        w = getattr(self, "_convert_worker", None)
+        if w is not None and w.isRunning():
+            w.cancel()
+            self._log("[CONVERT] Cancel requested — finishing current file first")
+            self._set_status("Cancelling conversion...", "warning")
+
+    # ── Config import / export ───────────────────────────────────────
+
+    def _on_export_config(self):
+        """Write current config to a user-chosen JSON file."""
+        self._persist_config()  # sync latest UI state first
+        default_name = f"StreamKeep-config-{datetime.now().strftime('%Y%m%d')}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export StreamKeep Config",
+            str(Path.home() / default_name),
+            "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._config, f, indent=2)
+            self._log(f"[CONFIG] Exported to {path}")
+            self._set_status(f"Config exported to {path}", "success")
+        except Exception as e:
+            self._log(f"[CONFIG] Export failed: {e}")
+            self._set_status(f"Export failed: {e}", "error")
+
+    def _on_import_config(self):
+        """Replace current config with the contents of a chosen JSON file."""
+        from ... import db as _db
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import StreamKeep Config",
+            str(Path.home()),
+            "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                new_cfg = json.load(f)
+            if not isinstance(new_cfg, dict):
+                self._set_status("Import failed: not a valid config file.", "error")
+                return
+        except Exception as e:
+            self._log(f"[CONFIG] Import failed: {e}")
+            self._set_status(f"Import failed: {e}", "error")
+            return
+        # Replace config and re-apply
+        self._config = new_cfg
+        _save_config(new_cfg)
+        # Clear mutable state that _apply_config appends to
+        self._history.clear()
+        self.monitor.entries.clear()
+        # If the imported config has monitor_channels, migrate and load
+        _db.migrate_from_config(new_cfg)
+        self.monitor.load_from_db()
+        if not self.monitor.entries:
+            self.monitor.load_from_config(new_cfg)
+        # Re-apply config to all UI elements
+        self._apply_config()
+        # Refresh derived views
+        self._refresh_history_table()
+        self._refresh_download_summary()
+        self._refresh_monitor_table()
+        self._refresh_monitor_summary()
+        self._refresh_history_summary()
+        if hasattr(self, "queue_table"):
+            self._refresh_queue_table()
+        self._log(f"[CONFIG] Imported from {path}")
+        self._set_status(f"Config imported from {path}. Some changes may require a restart.", "success")
+
+    # ── Settings helpers ─────────────────────────────────────────────
+
+    def _settings_browse(self, line_edit):
+        d = QFileDialog.getExistingDirectory(self, "Select Folder", line_edit.text())
+        if d:
+            line_edit.setText(d)
+
+    # ── Browser cookies ──────────────────────────────────────────────
+
+    def _scan_browsers(self):
+        """Scan for installed browsers by checking cookie database locations."""
+        return _scan_browser_cookies()
+
+    def _scan_browsers_silent(self):
+        """Populate combo with scanned browsers without UI feedback."""
+        found = self._scan_browsers()
+        self.cookies_combo.clear()
+        self.cookies_combo.addItem("None")
+        seen = set()
+        for display, ytdlp_name, path in found:
+            label = f"{display} ({ytdlp_name})"
+            if label not in seen:
+                self.cookies_combo.addItem(label, ytdlp_name)
+                seen.add(label)
+        # Also add manual entries for common browsers not found
+        for name in ["chrome", "chromium", "firefox", "edge", "brave", "opera", "vivaldi", "safari"]:
+            manual_label = f"{name} (manual)"
+            if not any(name == ytdlp for _, ytdlp, _ in found):
+                self.cookies_combo.addItem(manual_label, name)
+
+    def _on_scan_browsers(self):
+        found = self._scan_browsers()
+        self.cookies_combo.clear()
+        self.cookies_combo.addItem("None")
+        seen = set()
+        for display, ytdlp_name, path in found:
+            label = f"{display} ({ytdlp_name})"
+            if label not in seen:
+                self.cookies_combo.addItem(label, ytdlp_name)
+                seen.add(label)
+        # Manual fallbacks
+        for name in ["chrome", "chromium", "firefox", "edge", "brave"]:
+            manual_label = f"{name} (manual)"
+            if not any(name == ytdlp for _, ytdlp, _ in found):
+                self.cookies_combo.addItem(manual_label, name)
+
+        if found:
+            details = "\n".join(f"  {d} -> {p}" for d, _, p in found)
+            self.cookies_scan_label.setText(f"Found {len(found)} browser(s):\n{details}")
+            self._log(f"[SCAN] Found {len(found)} browser cookie stores:")
+            for d, y, p in found:
+                self._log(f"  {d} ({y}) -> {p}")
+            self._set_status(f"Found {len(found)} browser cookie store(s).", "success")
+        else:
+            self.cookies_scan_label.setText("No browser cookie stores found.")
+            self._set_status("No browser cookie stores were found on this machine.", "warning")
+
+    def _on_browse_cookies_file(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Select Cookies File", str(Path.home()),
+            "Cookie files (*.txt *.sqlite);;All files (*)"
+        )
+        if f:
+            self.cookies_file_input.setText(f)
+            # Also import to StreamKeep's cookies.txt (F47)
+            from ...cookies import import_from_file
+            ok, msg = import_from_file(f)
+            self._update_cookies_status()
+            if ok:
+                self._set_status(msg, "success")
+            else:
+                self._set_status(msg, "warning")
+
+    def _on_import_browser_cookies(self):
+        """Extract cookies from the selected browser to cookies.txt (F47)."""
+        from ...cookies import import_from_browser
+        browser_text = self.cookies_combo.currentText()
+        browser_data = self.cookies_combo.currentData()
+        if browser_text == "None" or not browser_data:
+            self._set_status("Select a browser first, then click Import.", "warning")
+            return
+        ytdlp_name = str(browser_data)
+        ok, msg = import_from_browser(ytdlp_name)
+        self._update_cookies_status()
+        if ok:
+            self._set_status(msg, "success")
+            self._log(f"[COOKIES] {msg}")
+        else:
+            self._set_status(msg, "error")
+            self._log(f"[COOKIES] Error: {msg}")
+
+    def _on_clear_cookies(self):
+        """Delete the cookies.txt file (F47)."""
+        from ...cookies import clear_cookies
+        ok, msg = clear_cookies()
+        self._update_cookies_status()
+        self._set_status(msg, "success" if ok else "error")
+
+    def _update_cookies_status(self):
+        """Refresh the cookies status label (F47)."""
+        from ...cookies import cookies_file_path, cookies_file_age_secs
+        label = getattr(self, "cookies_status_label", None)
+        if label is None:
+            return
+        cpath = cookies_file_path()
+        if not cpath:
+            label.setText("No cookies.txt — authenticated content may fail.")
+            return
+        age = cookies_file_age_secs()
+        if age < 0:
+            label.setText("cookies.txt present.")
+        elif age < 3600:
+            label.setText(f"cookies.txt present (updated {age // 60}m ago).")
+        elif age < 86400:
+            label.setText(f"cookies.txt present (updated {age // 3600}h ago).")
+        else:
+            days = age // 86400
+            label.setText(f"cookies.txt present ({days}d old — consider refreshing).")
+
+    # ── Platform account tokens ──────────────────────────────────────
+
+    def _on_save_account_tokens(self):
+        """Persist platform tokens to encrypted storage (F48)."""
+        from ...accounts import set_credential, credential_status
+        inputs = getattr(self, "_account_inputs", {})
+        saved = 0
+        for plat_key, (inp, status_label) in inputs.items():
+            val = inp.text().strip()
+            if val:
+                set_credential(plat_key, val)
+                inp.clear()
+                saved += 1
+            status_label.setText(credential_status(plat_key))
+        if saved:
+            self._set_status(f"Saved {saved} token(s).", "success")
+            self._log(f"[ACCOUNTS] Saved {saved} platform token(s)")
+
+    def _on_clear_account_tokens(self):
+        """Delete all stored platform tokens (F48)."""
+        from ...accounts import delete_credential, PLATFORMS, credential_status
+        inputs = getattr(self, "_account_inputs", {})
+        for plat_key in PLATFORMS:
+            delete_credential(plat_key)
+            if plat_key in inputs:
+                inputs[plat_key][0].clear()
+                inputs[plat_key][1].setText(credential_status(plat_key))
+        self._set_status("All platform tokens cleared.", "success")
+
+    # ── Proxy pool ───────────────────────────────────────────────────
+
+    def _save_proxy_pool(self):
+        """Parse the proxy pool text and persist (F49)."""
+        from ...proxy import set_pool
+        edit = getattr(self, "proxy_pool_edit", None)
+        if edit is None:
+            return
+        entries = []
+        for line in edit.toPlainText().strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("|")
+            url = parts[0].strip()
+            if not url:
+                continue
+            platforms = [p.strip() for p in (parts[1] if len(parts) > 1 else "").split(",") if p.strip()]
+            label = parts[2].strip() if len(parts) > 2 else ""
+            entries.append({
+                "url": url, "platforms": platforms,
+                "label": label, "enabled": True,
+            })
+        set_pool(entries)
+        self._config["proxy_pool"] = entries
+
+    def _on_test_proxies(self):
+        """Run health checks on all proxy pool entries (F49)."""
+        self._save_proxy_pool()
+        from ...proxy import health_check_all
+        results = health_check_all(timeout=8)
+        if not results:
+            self._set_status("No proxies configured to test.", "warning")
+            return
+        lines = []
+        for label, ok, ms in results:
+            if ok:
+                lines.append(f"  {label}: {ms}ms")
+            else:
+                lines.append(f"  {label}: FAILED")
+        self._log("[PROXY] Health check results:\n" + "\n".join(lines))
+        ok_count = sum(1 for _, ok, _ in results if ok)
+        self._set_status(
+            f"Proxy test: {ok_count}/{len(results)} reachable.",
+            "success" if ok_count == len(results) else "warning",
+        )
+
+    # ── Save settings ────────────────────────────────────────────────
+
+    def _on_save_settings(self):
+        self.output_input.setText(self.settings_output.text())
+        # Apply browser cookies setting
+        browser_text = self.cookies_combo.currentText()
+        browser_data = self.cookies_combo.currentData()
+        if browser_text == "None":
+            YtDlpExtractor.cookies_browser = ""
+            self._config["cookies_browser"] = ""
+        else:
+            ytdlp_name = browser_data if browser_data else browser_text
+            YtDlpExtractor.cookies_browser = ytdlp_name
+            self._config["cookies_browser"] = ytdlp_name
+        # Apply cookies file
+        cookies_file = self.cookies_file_input.text().strip()
+        YtDlpExtractor.cookies_file = cookies_file
+        self._config["cookies_file"] = cookies_file
+        # Apply rate limit
+        rate_limit = self.rate_limit_input.text().strip()
+        YtDlpExtractor.rate_limit = rate_limit
+        self._config["rate_limit"] = rate_limit
+        # Apply proxy (also routes native extractor curl calls through it)
+        proxy = self.proxy_input.text().strip()
+        YtDlpExtractor.proxy = proxy
+        self._config["proxy"] = proxy
+        set_native_proxy(proxy)
+        import streamkeep.ui.main_window as _mw_mod
+        _mw_mod.NATIVE_PROXY = proxy
+        # Save proxy pool (F49)
+        self._save_proxy_pool()
+        # Save speed schedule (F51)
+        if hasattr(self, "sched_enable_check"):
+            sched = {
+                "enabled": self.sched_enable_check.isChecked(),
+                "day_start": self.sched_day_start.value(),
+                "day_end": self.sched_day_end.value(),
+                "day_limit": self.sched_day_limit.text().strip(),
+                "night_limit": self.sched_night_limit.text().strip(),
+                "weekend_limit": self.sched_weekend_limit.text().strip(),
+            }
+            self._config["speed_schedule"] = sched
+            from ...scheduler import configure as _sched_configure
+            _sched_configure(sched, rate_limit)
+        # Apply parallel connections (affects direct MP4 downloads)
+        self._parallel_connections = max(1, min(16, self.parallel_spin.value()))
+        # Parallel auto-records + chunked live captures (v4.15.0).
+        if hasattr(self, "parallel_autorecords_spin"):
+            self._parallel_autorecords = max(1, min(4, self.parallel_autorecords_spin.value()))
+            self._config["parallel_autorecords"] = self._parallel_autorecords
+        if hasattr(self, "concurrent_queue_spin"):
+            self._max_concurrent_downloads = max(1, min(8, self.concurrent_queue_spin.value()))
+            self._config["max_concurrent_downloads"] = self._max_concurrent_downloads
+        if hasattr(self, "chunk_check"):
+            self._chunk_long_captures = self.chunk_check.isChecked()
+            self._config["chunk_long_captures"] = self._chunk_long_captures
+        if hasattr(self, "chunk_length_spin"):
+            self._chunk_length_secs = int(self.chunk_length_spin.value())
+            self._config["chunk_length_secs"] = self._chunk_length_secs
+        if hasattr(self, "companion_check"):
+            prev_enabled = bool(self._config.get("companion_server_enabled", False))
+            prev_bind_lan = bool(self._config.get("companion_bind_lan", False))
+            new_enabled = bool(self.companion_check.isChecked())
+            new_bind_lan = bool(self.companion_lan_check.isChecked())
+            self._config["companion_server_enabled"] = new_enabled
+            self._config["companion_bind_lan"] = new_bind_lan
+            if new_enabled != prev_enabled or new_bind_lan != prev_bind_lan:
+                self._maybe_start_companion_server(
+                    force_restart=prev_enabled and new_enabled and new_bind_lan != prev_bind_lan
+                )
+            else:
+                self._refresh_companion_ui()
+        if hasattr(self, "update_check_check"):
+            self._config["check_for_updates"] = bool(self.update_check_check.isChecked())
+        if hasattr(self, "capture_chat_check"):
+            self._config["capture_live_chat"] = bool(self.capture_chat_check.isChecked())
+        if hasattr(self, "render_chat_ass_check"):
+            self._config["render_chat_ass"] = bool(self.render_chat_ass_check.isChecked())
+        if hasattr(self, "quality_defaults_combos"):
+            self._config["quality_defaults"] = {
+                plat: (combo.currentData() or "")
+                for plat, combo in self.quality_defaults_combos.items()
+            }
+        if hasattr(self, "whisper_model_combo"):
+            self._config["whisper_model"] = str(self.whisper_model_combo.currentData() or "tiny")
+        if hasattr(self, "diarize_check"):
+            self._config["enable_diarization"] = bool(self.diarize_check.isChecked())
+        if hasattr(self, "hf_token_input"):
+            self._config["hf_token"] = self.hf_token_input.text().strip()
+        # Chat render settings (F22)
+        if hasattr(self, "chat_render_width_spin"):
+            self._config["chat_render_width"] = self.chat_render_width_spin.value()
+            self._config["chat_render_height"] = self.chat_render_height_spin.value()
+            self._config["chat_render_font_size"] = self.chat_render_font_spin.value()
+            self._config["chat_render_msg_duration"] = self.chat_render_duration_spin.value()
+            self._config["chat_render_bg_opacity"] = self.chat_render_opacity_spin.value()
+        if hasattr(self, "notif_sound_check"):
+            self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
+        # Apply bandwidth schedule rule
+        self._bandwidth_rule = {
+            "enabled": self.bw_enable_check.isChecked(),
+            "start_hour": self.bw_start_spin.value(),
+            "end_hour": self.bw_end_spin.value(),
+            "limit": self.bw_limit_input.text().strip(),
+        }
+        self._apply_bandwidth_schedule()
+        # Apply YouTube extras
+        YtDlpExtractor.download_subs = self.subs_check.isChecked()
+        self._config["download_subs"] = YtDlpExtractor.download_subs
+        YtDlpExtractor.sponsorblock = self.sponsorblock_check.isChecked()
+        self._config["sponsorblock"] = YtDlpExtractor.sponsorblock
+        # Apply filename templates
+        self._folder_template = self.folder_template_input.text().strip() or DEFAULT_FOLDER_TEMPLATE
+        self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
+        # Apply webhook
+        self._webhook_url = self.webhook_input.text().strip()
+        # Apply event hooks (F24)
+        if hasattr(self, "hooks_table"):
+            hooks = {}
+            for i in range(self.hooks_table.rowCount()):
+                evt = self.hooks_table.item(i, 0).text()
+                cmd = (self.hooks_table.item(i, 1).text() or "").strip()
+                if cmd:
+                    hooks[evt] = cmd
+            self._config["hooks"] = hooks
+        # Apply duplicate detection
+        self._check_duplicates = self.dup_check.isChecked()
+        # Apply lifecycle policies (F32)
+        if hasattr(self, "lc_enable_check"):
+            self._config["lifecycle"] = {
+                "enabled": self.lc_enable_check.isChecked(),
+                "max_days": self.lc_max_days_spin.value(),
+                "max_total_gb": self.lc_max_gb_spin.value(),
+                "delete_watched": self.lc_watched_check.isChecked(),
+                "favorites_exempt": self.lc_fav_exempt_check.isChecked(),
+            }
+        # Apply library/NFO + chat
+        from ...extractors.twitch import TwitchExtractor
+        self._write_nfo = self.nfo_check.isChecked()
+        TwitchExtractor.download_chat_enabled = self.chat_check.isChecked()
+        # Apply media server auto-import (F33)
+        if hasattr(self, "ms_enable_check"):
+            from ...integrations.media_server import SERVER_TYPES
+            self._config["media_server"] = {
+                "enabled": self.ms_enable_check.isChecked(),
+                "server_type": SERVER_TYPES[self.ms_type_combo.currentIndex()],
+                "url": self.ms_url_input.text().strip(),
+                "token": self.ms_token_input.text().strip(),
+                "library_id": self.ms_library_id_input.text().strip(),
+                "library_path": self.ms_path_input.text().strip(),
+            }
+        # Apply post-processing presets
+        PostProcessor.extract_audio = self.pp_audio_check.isChecked()
+        PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()
+        PostProcessor.reencode_h265 = self.pp_h265_check.isChecked()
+        PostProcessor.contact_sheet = self.pp_contact_check.isChecked()
+        PostProcessor.split_by_chapter = self.pp_split_check.isChecked()
+        if hasattr(self, "pp_silence_check"):
+            PostProcessor.remove_silence = self.pp_silence_check.isChecked()
+            PostProcessor.silence_noise_db = self.pp_silence_db_spin.value()
+            PostProcessor.silence_min_duration = float(self.pp_silence_dur_spin.value())
+        # Converter settings
+        PostProcessor.convert_video = self.pp_convert_video_check.isChecked()
+        PostProcessor.convert_video_format = self.pp_convert_video_format.currentText()
+        PostProcessor.convert_video_codec = self.pp_convert_video_codec.currentText()
+        PostProcessor.convert_video_scale = self.pp_convert_video_scale.currentText()
+        PostProcessor.convert_video_fps = self.pp_convert_video_fps.currentText()
+        PostProcessor.convert_audio = self.pp_convert_audio_check.isChecked()
+        PostProcessor.convert_audio_format = self.pp_convert_audio_format.currentText()
+        PostProcessor.convert_audio_codec = self.pp_convert_audio_codec.currentText()
+        PostProcessor.convert_audio_bitrate = self.pp_convert_audio_bitrate.currentText()
+        PostProcessor.convert_audio_samplerate = self.pp_convert_audio_samplerate.currentText()
+        PostProcessor.convert_delete_source = self.pp_convert_delete_check.isChecked()
+        self._persist_config()
+        self._refresh_download_summary()
+        self._set_status("Settings saved and applied to future downloads.", "success")
+
+    # ── Theme ────────────────────────────────────────────────────────
+
+    def _on_theme_changed(self, _idx):
+        """Apply theme switch instantly (F20)."""
+        from ..theme import apply_theme
+        from PyQt6.QtWidgets import QApplication
+        name = self.theme_combo.currentData() or "dark"
+        self._config["theme"] = name
+        apply_theme(name, app=QApplication.instance())
+        if hasattr(self, "settings_theme_value"):
+            theme_display = {"dark": "Dark", "light": "Light", "system": "System"}.get(
+                name, "Dark"
+            )
+            self.settings_theme_value.setText(theme_display)
+            self.settings_theme_sub.setText("Catppuccin-based desktop theme")
+        if hasattr(self, "_stack"):
+            self._switch_tab(self._stack.currentIndex())
+        if hasattr(self, "status_label"):
+            pill_to_tone = {
+                "Standby": "idle",
+                "Working": "working",
+                "Finalizing": "processing",
+                "Ready": "success",
+                "Alert": "warning",
+                "Error": "error",
+            }
+            current_tone = pill_to_tone.get(
+                self.status_pill.text() if hasattr(self, "status_pill") else "Standby",
+                "idle",
+            )
+            self._set_status(self.status_label.text() or "Theme updated.", current_tone)
+        self._refresh_notif_badge()
+        self._persist_config()
+
+    # ── Browser companion ────────────────────────────────────────────
+
+    def _on_companion_toggled(self, checked):
+        """Settings toggle — start or stop the companion server in-place."""
+        self._config["companion_server_enabled"] = bool(checked)
+        if hasattr(self, "companion_lan_check"):
+            self._config["companion_bind_lan"] = bool(self.companion_lan_check.isChecked())
+        self._persist_config()
+        self._maybe_start_companion_server()
+        if checked:
+            if self._companion_server is not None:
+                self._set_status("Browser companion ready for one-click capture.", "success")
+            else:
+                self._set_status("Browser companion could not start. Review the Settings panel for details.", "warning")
+        else:
+            self._set_status("Browser companion disabled.", "idle")
+
+    def _on_companion_scope_toggled(self, checked):
+        """Persist LAN scope changes and restart the server if needed."""
+        self._config["companion_bind_lan"] = bool(checked)
+        self._persist_config()
+        if bool(self._config.get("companion_server_enabled", False)):
+            self._maybe_start_companion_server(force_restart=self._companion_server is not None)
+            if checked:
+                self._set_status("Browser companion restarted with LAN access enabled.", "warning")
+            else:
+                self._set_status("Browser companion returned to local-only access.", "success")
+        else:
+            self._refresh_companion_ui()
+            self._set_status("Browser companion access scope saved.", "success")
+
+    def _copy_text_to_clipboard(self, text, label):
+        value = str(text or "").strip()
+        if not value:
+            self._set_status(f"{label} is not available yet.", "warning")
+            return
+        try:
+            from PyQt6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                raise RuntimeError("Clipboard unavailable")
+            clipboard.setText(value)
+            self._set_status(f"{label} copied to clipboard.", "success")
+        except Exception as e:
+            self._log(f"[CLIPBOARD] Could not copy {label.lower()}: {e}")
+            self._set_status(f"Could not copy {label.lower()}.", "error")
+
+    def _companion_local_url(self):
+        srv = getattr(self, "_companion_server", None)
+        port = int(getattr(srv, "port", 0) or 0) if srv is not None else 0
+        if port <= 0:
+            return ""
+        return f"http://127.0.0.1:{port}/"
+
+    def _refresh_companion_ui(self):
+        """Update the Browser Companion settings panel from live state."""
+        enabled = bool(self._config.get("companion_server_enabled", False))
+        bind_lan = bool(self._config.get("companion_bind_lan", False))
+        srv = getattr(self, "_companion_server", None)
+        running = srv is not None and int(getattr(srv, "port", 0) or 0) > 0
+        local_url = self._companion_local_url()
+        token = str(getattr(srv, "token", "") or "") if running else ""
+        error_text = str(getattr(self, "_companion_last_error", "") or "")
+
+        if hasattr(self, "companion_check"):
+            self.companion_check.blockSignals(True)
+            self.companion_check.setChecked(enabled)
+            self.companion_check.blockSignals(False)
+        if hasattr(self, "companion_lan_check"):
+            self.companion_lan_check.blockSignals(True)
+            self.companion_lan_check.setChecked(bind_lan)
+            self.companion_lan_check.blockSignals(False)
+
+        if running and bind_lan:
+            banner_title = "LAN access is enabled"
+            banner_body = (
+                "The companion is live on this PC and other devices on your network can connect if they know the token."
+            )
+            banner_tone = "warning"
+        elif running:
+            banner_title = "Ready for one-click capture"
+            banner_body = (
+                "The browser extension can hand URLs to StreamKeep on this PC, and the local web remote is ready."
+            )
+            banner_tone = "success"
+        elif enabled and error_text:
+            banner_title = "Companion could not start"
+            banner_body = error_text
+            banner_tone = "error"
+        elif enabled:
+            banner_title = "Starting the local receiver"
+            banner_body = "StreamKeep is preparing a token-protected local endpoint for the extension and web remote."
+            banner_tone = "info"
+        else:
+            banner_title = "Companion is off"
+            banner_body = "Enable it when you want browser handoff or the lightweight local web remote."
+            banner_tone = "info"
+
+        if hasattr(self, "companion_status_banner"):
+            update_status_banner(
+                self.companion_status_banner,
+                self.companion_status_title,
+                self.companion_status_body,
+                title=banner_title,
+                body=banner_body,
+                tone=banner_tone,
+            )
+
+        if hasattr(self, "companion_scope_value"):
+            self.companion_scope_value.setText("LAN enabled" if bind_lan else "Local only")
+            self.companion_scope_sub.setText(
+                "Other trusted devices can reach the server"
+                if bind_lan else
+                "Only this PC can reach the companion"
+            )
+        if hasattr(self, "companion_remote_value"):
+            if running:
+                self.companion_remote_value.setText("Ready")
+                self.companion_remote_sub.setText(local_url)
+            elif enabled and error_text:
+                self.companion_remote_value.setText("Error")
+                self.companion_remote_sub.setText(error_text[:72])
+            elif enabled:
+                self.companion_remote_value.setText("Starting")
+                self.companion_remote_sub.setText("Waiting for the local listener")
+            else:
+                self.companion_remote_value.setText("Off")
+                self.companion_remote_sub.setText("Enable the companion to expose a local URL")
+        if hasattr(self, "companion_token_value"):
+            if token:
+                self.companion_token_value.setText("Ready")
+                self.companion_token_sub.setText("Rotates on every app launch")
+            elif enabled:
+                self.companion_token_value.setText("Pending")
+                self.companion_token_sub.setText("Generated after the server starts")
+            else:
+                self.companion_token_value.setText("Waiting")
+                self.companion_token_sub.setText("Generated only while the companion is on")
+
+        if hasattr(self, "companion_url_display"):
+            self.companion_url_display.setText(local_url)
+        if hasattr(self, "companion_open_url_btn"):
+            self.companion_open_url_btn.setEnabled(bool(local_url))
+        if hasattr(self, "companion_copy_url_btn"):
+            self.companion_copy_url_btn.setEnabled(bool(local_url))
+        if hasattr(self, "companion_token_display"):
+            self.companion_token_display.setText(token)
+        if hasattr(self, "companion_copy_token_btn"):
+            self.companion_copy_token_btn.setEnabled(bool(token))
+
+    def _on_copy_companion_url(self):
+        self._copy_text_to_clipboard(self._companion_local_url(), "Browser companion URL")
+
+    def _on_copy_companion_token(self):
+        text = self.companion_token_display.text() if hasattr(self, "companion_token_display") else ""
+        self._copy_text_to_clipboard(text, "Pairing token")
+
+    def _on_open_companion_remote(self):
+        url = self._companion_local_url()
+        if not url:
+            self._set_status("Browser companion web remote is not available yet.", "warning")
+            return
+        QDesktopServices.openUrl(QUrl(url))
+        self._set_status("Opened the browser companion web remote.", "success")
+
+    # ── Lifecycle cleanup ────────────────────────────────────────────
+
+    def _on_lifecycle_preview(self):
+        """Show a preview of what the lifecycle cleanup would remove."""
+        from ...lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
+        policy = self._config.get("lifecycle", {})
+        if not policy.get("enabled"):
+            policy = dict(policy, enabled=True)  # preview even if disabled
+        removals = evaluate_cleanup(self._history, policy)
+        if not removals:
+            show_premium_message(
+                self,
+                title="No recordings match the current cleanup rules",
+                body="The current lifecycle policy would not recycle anything right now.",
+                eyebrow="LIFECYCLE",
+                badge_text="Preview",
+                tone="info",
+                summary_title="Nothing needs attention.",
+                summary_body="Try widening the cleanup rules or revisit this preview after more recordings accumulate.",
+                primary_label="Close",
+                min_width=560,
+            )
+            return
+        # Build preview text
+        total_size = 0
+        lines = []
+        for h, reason in removals:
+            title = getattr(h, "title", "") or "Untitled"
+            path = getattr(h, "path", "") or ""
+            sz = 0
+            if path and os.path.isdir(path):
+                for f in os.scandir(path):
+                    if f.is_file():
+                        try:
+                            sz += f.stat().st_size
+                        except OSError:
+                            pass
+            total_size += sz
+            sz_mb = sz / (1024 * 1024)
+            lines.append(f"  {title[:50]}  ({sz_mb:.1f} MB) — {reason}")
+        detail_text = "\n".join(lines[:30])
+        if len(lines) > 30:
+            detail_text += f"\n  … and {len(lines) - 30} more"
+        if ask_premium_confirmation(
+            self,
+            title="Review lifecycle cleanup",
+            body="These recordings match the current cleanup policy and would be moved to the Recycle Bin.",
+            eyebrow="LIFECYCLE",
+            badge_text="Preview",
+            tone="warning",
+            summary_title=f"{len(removals)} recording(s) matched, using about {total_size / (1024 ** 3):.2f} GB.",
+            summary_body="Files stay recoverable through the Recycle Bin if you need to bring something back.",
+            details_title="Matched recordings",
+            details_body=detail_text,
+            primary_label="Recycle matches",
+            secondary_label="Keep everything",
+            default_action="secondary",
+            min_width=720,
+            min_height=520,
+            details_monospaced=True,
+        ):
+            removed = execute_cleanup(removals, log_fn=self._log)
+            if removed:
+                removed_paths = {
+                    real_path for real_path in removal_real_paths(removals)
+                    if not os.path.isdir(real_path)
+                }
+                self._remove_history_for_paths(removed_paths)
+            self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
+            self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
+
+    def _run_lifecycle_cleanup(self):
+        """Run lifecycle cleanup silently after a download completes."""
+        from ...lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
+        policy = self._config.get("lifecycle", {})
+        if not policy or not policy.get("enabled"):
+            return
+        removals = evaluate_cleanup(self._history, policy)
+        if removals:
+            removed = execute_cleanup(removals, log_fn=self._log)
+            if removed:
+                removed_paths = {
+                    real_path for real_path in removal_real_paths(removals)
+                    if not os.path.isdir(real_path)
+                }
+                self._remove_history_for_paths(removed_paths)
+                self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
+
+    # ── Browser companion local server ───────────────────────────────
+
+    def _maybe_start_companion_server(self, force_restart=False):
+        """Start (or stop) the local companion HTTP server based on the
+        current Settings toggle. Called at launch and whenever the user
+        changes the setting."""
+        enabled = bool(self._config.get("companion_server_enabled", False))
+        bind_lan = bool(self._config.get("companion_bind_lan", False))
+        desired_bind = "0.0.0.0" if bind_lan else "127.0.0.1"
+        running = self._companion_server is not None
+        if running and getattr(self._companion_server, "_bind_addr", "") != desired_bind:
+            force_restart = True
+        if force_restart and running:
+            try:
+                self._companion_server.stop()
+            except Exception:
+                pass
+            self._companion_server = None
+            running = False
+        if enabled and not running:
+            try:
+                srv = LocalCompanionServer(bind_lan=bind_lan)
+                srv.state_provider = self._api_state_snapshot
+                srv.url_received.connect(self._on_companion_url)
+                srv.start()
+                self._companion_server = srv
+                self._companion_last_error = ""
+                self._log(
+                    f"[COMPANION] Listening on 127.0.0.1:{srv.port} "
+                    f"— token in Settings tab."
+                )
+            except OSError as e:
+                self._companion_last_error = str(e)
+                self._log(f"[COMPANION] Could not start server: {e}")
+        elif enabled and running:
+            self._companion_last_error = ""
+        elif not enabled and running:
+            try:
+                self._companion_server.stop()
+            except Exception:
+                pass
+            self._companion_server = None
+            self._companion_last_error = ""
+            self._log("[COMPANION] Server stopped.")
+        elif not enabled:
+            self._companion_last_error = ""
+        self._refresh_companion_ui()
+
+    def _api_state_snapshot(self):
+        """Return a dict snapshot of app state for the REST API (F37).
+        Called from the HTTP server thread — must be thread-safe.
+        Take list() copies of shared collections to avoid race conditions."""
+        downloads = []
+        queue_items = []
+        try:
+            for q in list(getattr(self, "_download_queue", [])):
+                queue_items.append({
+                    "url": q.get("url", ""),
+                    "title": q.get("title", ""),
+                })
+        except Exception:
+            pass
+        history = []
+        try:
+            for h in list(self._history)[-50:]:
+                history.append({
+                    "title": h.title or "",
+                    "platform": h.platform or "",
+                    "date": h.date or "",
+                    "quality": h.quality or "",
+                    "size": h.size or "",
+                })
+        except Exception:
+            pass
+        monitor = []
+        try:
+            for e in list(self.monitor.entries):
+                monitor.append({
+                    "channel_id": e.channel_id,
+                    "platform": e.platform,
+                    "status": e.last_status,
+                })
+        except Exception:
+            pass
+        live_channels = [m for m in monitor if m.get("status") == "live"]
+        return {
+            "downloads": downloads,
+            "queue": queue_items,
+            "history": history,
+            "monitor": monitor,
+            "live_channels": live_channels,
+        }
+
+    # ── Auto-update checker ──────────────────────────────────────────
+
+    def _maybe_check_for_updates(self):
+        """Kick off the GitHub release check if the user has opted in.
+        Runs once per launch, on a short delay so the UI paints first."""
+        if not bool(self._config.get("check_for_updates", False)):
+            return
+        # Only meaningful in a packaged exe — in a source checkout the
+        # updater refuses the self-replace anyway. Skip the network call
+        # entirely so source-checkout users don't see a banner.
+        if not (getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")):
+            return
+        if getattr(self, "_update_check_worker", None) is not None:
+            return
+        worker = UpdateCheckWorker(VERSION)
+        worker.result.connect(self._on_update_check_result)
+        self._update_check_worker = worker
+        worker.start()
+
+    def _on_update_check_result(self, payload):
+        worker = getattr(self, "_update_check_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._update_check_worker = None
+        if not payload or not payload.get("available"):
+            return
+        tag = payload.get("tag", "")
+        if tag == self._config.get("dismissed_update_tag", ""):
+            return
+        self._latest_update_payload = payload
+        if hasattr(self, "update_banner_label"):
+            notes = (payload.get("notes") or "").splitlines()
+            first_note = next((ln for ln in notes if ln.strip()), "").strip()
+            if first_note:
+                first_note = first_note[:140] + ("..." if len(first_note) > 140 else "")
+            label = f"StreamKeep {tag} is available (you're on v{VERSION})"
+            if first_note:
+                label = f"{label} — {first_note}"
+            self.update_banner_label.setText(label)
+            self.update_banner.setVisible(True)
+        self._notify_center(f"Update available: StreamKeep {tag}", "info")
+
+    def _on_update_install(self):
+        payload = getattr(self, "_latest_update_payload", None) or {}
+        asset_url = payload.get("asset_url", "")
+        if not asset_url:
+            self._set_status("Update available but no Windows asset was attached.", "warning")
+            return
+        self.update_banner_install_btn.setEnabled(False)
+        self.update_banner_install_btn.setText("Downloading...")
+        worker = DownloadUpdateWorker(asset_url, payload.get("asset_size", 0))
+        worker.progress.connect(self._on_update_download_progress)
+        worker.done.connect(self._on_update_download_done)
+        self._update_download_worker = worker
+        worker.start()
+
+    def _on_update_download_progress(self, pct, status):
+        if hasattr(self, "update_banner_install_btn"):
+            self.update_banner_install_btn.setText(
+                f"Downloading {status}" if status else f"Downloading {pct}%"
+            )
+
+    def _on_update_download_done(self, ok, path_or_err):
+        worker = getattr(self, "_update_download_worker", None)
+        if worker is not None and not worker.isRunning():
+            try:
+                worker.wait(200)
+            except Exception:
+                pass
+        self._update_download_worker = None
+        if not ok:
+            self._log(f"[UPDATE] {path_or_err}")
+            self._set_status(f"Update failed: {path_or_err}", "error")
+            if hasattr(self, "update_banner_install_btn"):
+                self.update_banner_install_btn.setEnabled(True)
+                self.update_banner_install_btn.setText("Download & install")
+            return
+        # Download complete — confirm self-replace + relaunch.
+        if not ask_premium_confirmation(
+            self,
+            title="Install the downloaded update?",
+            body="StreamKeep will close, swap in the new version, and relaunch itself automatically.",
+            eyebrow="UPDATER",
+            badge_text="Restart required",
+            tone="warning",
+            summary_title="Any active download or recording will be interrupted.",
+            summary_body="Install now when you are ready for the app to restart itself.",
+            details_title="What happens next",
+            details_body=(
+                "1. StreamKeep closes.\n"
+                "2. The downloaded build replaces the current executable.\n"
+                "3. StreamKeep relaunches itself."
+            ),
+            primary_label="Install and relaunch",
+            secondary_label="Not now",
+            default_action="secondary",
+            min_width=620,
+        ):
+            self._log("[UPDATE] User cancelled the install step.")
+            if hasattr(self, "update_banner_install_btn"):
+                self.update_banner_install_btn.setEnabled(True)
+                self.update_banner_install_btn.setText("Install now")
+            return
+        if arm_self_replace(path_or_err):
+            self._log("[UPDATE] Armed self-replace, quitting now.")
+            from PyQt6.QtWidgets import QApplication
+            QApplication.quit()
+        else:
+            self._set_status("Could not arm the update step. See log.", "error")
+
+    def _on_update_dismiss(self):
+        payload = getattr(self, "_latest_update_payload", None) or {}
+        self._config["dismissed_update_tag"] = payload.get("tag", "")
+        self._persist_config()
+        self.update_banner.setVisible(False)
 
 
 def build_settings_tab(win):
