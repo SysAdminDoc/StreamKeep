@@ -12,9 +12,12 @@ Schema version is stored in ``PRAGMA user_version`` and bumped on each
 migration so future schema changes are orderly.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import threading
+from typing import Any
 
 from .paths import CONFIG_DIR
 
@@ -41,7 +44,7 @@ def _connect(readonly=False):
     return db
 
 
-def init_db():
+def init_db() -> None:
     """Create tables if they don't exist.  Idempotent."""
     db = _connect()
     try:
@@ -109,7 +112,7 @@ def _apply_schema(db):
 
 # ── History CRUD ────────────────────────────────────────────────────
 
-def load_history():
+def load_history() -> list[dict[str, Any]]:
     """Return all history entries as a list of dicts, oldest-first."""
     db = _connect(readonly=True)
     try:
@@ -121,7 +124,7 @@ def load_history():
         db.close()
 
 
-def save_history_entry(entry_dict):
+def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
     """Insert a single history entry. Returns the new row id."""
     with _write_lock:
         db = _connect()
@@ -151,7 +154,7 @@ def save_history_entry(entry_dict):
             db.close()
 
 
-def update_history_entry(entry_id, fields):
+def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
     """Update specific fields on a history row by id.
 
     *fields* is a dict of column_name -> value.  Only known columns
@@ -192,7 +195,7 @@ def update_history_entry(entry_id, fields):
             db.close()
 
 
-def delete_history_entries(entry_ids):
+def delete_history_entries(entry_ids: list[int]) -> None:
     """Delete history rows by id list."""
     if not entry_ids:
         return
@@ -209,7 +212,7 @@ def delete_history_entries(entry_ids):
             db.close()
 
 
-def clear_history():
+def clear_history() -> None:
     """Delete all history entries."""
     with _write_lock:
         db = _connect()
@@ -220,7 +223,7 @@ def clear_history():
             db.close()
 
 
-def history_count():
+def history_count() -> int:
     """Return total number of history entries."""
     db = _connect(readonly=True)
     try:
@@ -229,7 +232,7 @@ def history_count():
         db.close()
 
 
-def find_history_by_url(url):
+def find_history_by_url(url: str) -> dict[str, Any] | None:
     """Return the most recent history entry matching *url*, or None."""
     if not url:
         return None
@@ -246,7 +249,7 @@ def find_history_by_url(url):
 
 # ── Monitor channels CRUD ──────────────────────────────────────────
 
-def load_monitor_channels():
+def load_monitor_channels() -> list[dict[str, Any]]:
     """Return all monitor channels as a list of dicts."""
     db = _connect(readonly=True)
     try:
@@ -258,7 +261,7 @@ def load_monitor_channels():
         db.close()
 
 
-def save_monitor_channel(entry_dict):
+def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
     """Insert or replace a monitor channel (keyed by url). Returns row id."""
     with _write_lock:
         db = _connect()
@@ -299,7 +302,7 @@ def save_monitor_channel(entry_dict):
             db.close()
 
 
-def save_all_monitor_channels(entries_dicts):
+def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
     """Replace all monitor channels atomically."""
     with _write_lock:
         db = _connect()
@@ -342,7 +345,7 @@ def save_all_monitor_channels(entries_dicts):
             db.close()
 
 
-def delete_monitor_channel(url):
+def delete_monitor_channel(url: str) -> None:
     """Remove a monitor channel by URL."""
     with _write_lock:
         db = _connect()
@@ -355,7 +358,7 @@ def delete_monitor_channel(url):
 
 # ── Download queue CRUD ─────────────────────────────────────────────
 
-def load_queue():
+def load_queue() -> list[dict[str, Any]]:
     """Return all queue items as a list of dicts, ordered by position."""
     db = _connect(readonly=True)
     try:
@@ -373,7 +376,7 @@ def load_queue():
         db.close()
 
 
-def save_queue(items):
+def save_queue(items: list[dict[str, Any]]) -> None:
     """Replace the entire queue atomically.  Each item is a dict."""
     with _write_lock:
         db = _connect()
@@ -417,7 +420,7 @@ def _row_to_monitor_dict(row):
 
 # ── Migration from config.json ──────────────────────────────────────
 
-def migrate_from_config(cfg):
+def migrate_from_config(cfg: dict[str, Any]) -> bool:
     """One-time migration: move history, monitor_channels, and download_queue
     from the JSON config dict into SQLite.  Returns True if migration ran,
     False if already done or nothing to migrate.

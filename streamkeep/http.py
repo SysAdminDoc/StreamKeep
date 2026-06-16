@@ -5,6 +5,8 @@ module-level `NATIVE_PROXY` — the Settings tab updates it via
 `set_native_proxy()` so every new request picks up the change.
 """
 
+from __future__ import annotations
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
@@ -13,6 +15,7 @@ import re
 import subprocess
 import threading
 import time
+from typing import Any
 
 from .paths import _CREATE_NO_WINDOW
 from .utils import fmt_size
@@ -34,12 +37,12 @@ class CommandResult:
     error: str = ""
 
 
-def set_native_proxy(url):
+def set_native_proxy(url: str) -> None:
     global NATIVE_PROXY
     NATIVE_PROXY = url or ""
 
 
-def get_native_proxy():
+def get_native_proxy() -> str:
     return NATIVE_PROXY
 
 
@@ -84,7 +87,7 @@ def _terminate_process(proc):
             pass
 
 
-def run_capture_interruptible(cmd, timeout=30):
+def run_capture_interruptible(cmd: list[str], timeout: float = 30) -> CommandResult:
     timeout = max(float(timeout or 0), 0.1)
     try:
         proc = subprocess.Popen(
@@ -121,7 +124,7 @@ def run_capture_interruptible(cmd, timeout=30):
             continue
 
 
-def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
+def _build_curl_cmd(url: str, headers: dict[str, str] | None = None, method: str | None = None, body: str | None = None, timeout: float = 30) -> list[str]:
     """Assemble a curl command with proxy + cookies + headers + optional POST body.
     Shared by curl/curl_json/curl_post_json so the proxy/header logic
     lives in exactly one place."""
@@ -164,14 +167,14 @@ def _append_cookie_args(cmd):
         cmd.extend(["--cookie", cpath])
 
 
-def curl(url, headers=None, timeout=30):
+def curl(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -> str | None:
     """Run curl and return stdout or None."""
     cmd = _build_curl_cmd(url, headers, timeout=timeout)
     result = run_capture_interruptible(cmd, timeout=timeout + 2)
     return result.stdout if result.returncode == 0 else None
 
 
-def curl_json(url, headers=None, timeout=30):
+def curl_json(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -> Any:
     """Run curl and parse JSON response."""
     body = curl(url, headers, timeout)
     if body:
@@ -182,7 +185,7 @@ def curl_json(url, headers=None, timeout=30):
     return None
 
 
-def curl_post_json(url, data, headers=None, timeout=30):
+def curl_post_json(url: str, data: Any, headers: dict[str, str] | None = None, timeout: float = 30) -> Any:
     """POST JSON and parse response."""
     cmd = _build_curl_cmd(
         url,

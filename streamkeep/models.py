@@ -1,5 +1,7 @@
 """Shared data classes — no runtime dependencies on anything but stdlib."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -21,7 +23,7 @@ class StreamInfo:
     channel: str = ""
     title: str = ""
     url: str = ""
-    qualities: list = field(default_factory=list)
+    qualities: list[QualityInfo] = field(default_factory=list)
     total_secs: float = 0
     duration_str: str = ""
     start_time: str = ""
@@ -29,7 +31,7 @@ class StreamInfo:
     is_master: bool = False
     segment_count: int = 0
     thumbnail_url: str = ""
-    chapters: list = field(default_factory=list)  # list of {title, start, end}
+    chapters: list[dict[str, str | float]] = field(default_factory=list)  # list of {title, start, end}
 
 
 @dataclass
@@ -59,10 +61,10 @@ class HistoryEntry:
     favorite: bool = False                 # exempt from lifecycle cleanup (F32)
     watched: bool = False                  # playback status (F32/F38)
     watch_position_secs: float = 0.0       # resume position (F38)
-    bookmarks: list = field(default_factory=list)  # [{name, secs}] (F38)
+    bookmarks: list[dict[str, str | float]] = field(default_factory=list)  # [{name, secs}] (F38)
     db_id: int = 0                         # SQLite row id (F41, 0=not persisted)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str | bool | float | list[dict[str, str | float]]]:
         """Serialize to a dict suitable for ``db.save_history_entry()``."""
         return {
             "date": self.date, "platform": self.platform,
@@ -75,7 +77,7 @@ class HistoryEntry:
         }
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, d: dict[str, object]) -> HistoryEntry:
         """Deserialize from a dict (DB row or legacy JSON)."""
         return cls(
             date=str(d.get("date", "")),
@@ -105,7 +107,7 @@ class MonitorEntry:
     last_check: float = 0
     last_status: str = "unknown"          # live, offline, error
     is_recording: bool = False
-    archive_ids: list = field(default_factory=list)  # already-seen VOD source IDs
+    archive_ids: list[str] = field(default_factory=list)  # already-seen VOD source IDs
     # Per-channel overrides (v4.14.0). None means "use the global default".
     override_output_dir: str = ""         # empty = inherit global output dir
     override_quality_pref: str = ""       # "", "highest", "source", "720p", "480p", ...
@@ -149,8 +151,8 @@ class ResumeState:
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.
-    segments: list = field(default_factory=list)     # list[[idx, label, start, duration]]
-    completed: list = field(default_factory=list)    # list[int]
+    segments: list[list[int | str | float]] = field(default_factory=list)     # list[[idx, label, start, duration]]
+    completed: list[int] = field(default_factory=list)    # list[int]
     output_dir: str = ""
     # For yt-dlp direct downloads, the outfile layout is single-file; we
     # record the expected path so the resume banner can show progress.
