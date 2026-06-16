@@ -71,6 +71,7 @@ def discover_plugins():
             "author": meta.get("author", ""),
             "description": meta.get("description", ""),
             "enabled": bool(meta.get("enabled", True)),
+            "trusted": bool(meta.get("trusted", False)),
             "path": str(plugin_path),
             "error": "",
         })
@@ -138,7 +139,7 @@ def load_plugin(plugin_info, log_fn=None):
 
 
 def load_all_plugins(log_fn=None):
-    """Discover and load all enabled plugins.
+    """Discover and load all enabled+trusted plugins.
 
     Returns ``(loaded_count, error_count)``.
     """
@@ -148,6 +149,10 @@ def load_all_plugins(log_fn=None):
     for p in plugins:
         if not p.get("enabled", True):
             continue
+        if not p.get("trusted", False):
+            if log_fn:
+                log_fn(f"[PLUGIN] Skipped untrusted: {p.get('id', '?')}")
+            continue
         if load_plugin(p, log_fn):
             loaded += 1
         elif p.get("error"):
@@ -155,6 +160,38 @@ def load_all_plugins(log_fn=None):
     if log_fn and (loaded or errors):
         log_fn(f"[PLUGIN] {loaded} loaded, {errors} error(s)")
     return loaded, errors
+
+
+def untrusted_plugins():
+    """Return plugins that are enabled but not yet trusted by the user."""
+    return [p for p in discover_plugins()
+            if p.get("enabled", True) and not p.get("trusted", False)
+            and not p.get("error")]
+
+
+def mark_trusted(plugin_id, trusted=True):
+    """Set or clear the ``trusted`` flag in a plugin's manifest."""
+    _ensure_dir()
+    for entry in os.listdir(str(PLUGINS_DIR)):
+        plugin_path = PLUGINS_DIR / entry
+        manifest_path = plugin_path / "plugin.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if meta.get("id", entry) == plugin_id:
+                meta["trusted"] = bool(trusted)
+                if not trusted:
+                    meta["enabled"] = False
+                tmp_path = manifest_path.with_suffix(".json.tmp")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+                os.replace(tmp_path, manifest_path)
+                return True
+        except (OSError, json.JSONDecodeError):
+            continue
+    return False
 
 
 def set_plugin_enabled(plugin_id, enabled):
