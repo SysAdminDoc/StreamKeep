@@ -7,10 +7,14 @@ frames to ffmpeg for H.264 encoding.
 Each message appears at the bottom and scrolls upward, staying visible for
 `msg_duration` seconds. Username colors are preserved from IRC tags.
 
+When emote support is enabled, BTTV/FFZ/7TV emotes are downloaded and cached
+per channel, then rendered inline with the text at the configured font size.
+
 Output: ``{recording_dir}/chat_render.mp4``
 """
 
 import json
+import logging
 import os
 import subprocess
 
@@ -23,6 +27,9 @@ except ImportError:
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..paths import _CREATE_NO_WINDOW, CONFIG_DIR, FFMPEG_SAFETY
+from .emote_cache import load_channel_emotes, get_emote_image
+
+logger = logging.getLogger(__name__)
 
 # Emote cache directory
 EMOTE_CACHE_DIR = CONFIG_DIR / "emote_cache"
@@ -133,7 +140,8 @@ class ChatRenderWorker(QThread):
                  font_size=DEFAULT_FONT_SIZE,
                  msg_duration=DEFAULT_MSG_DURATION,
                  bg_opacity=DEFAULT_BG_OPACITY,
-                 fps=DEFAULT_FPS, preview_secs=0):
+                 fps=DEFAULT_FPS, preview_secs=0,
+                 twitch_user_id="", enable_emotes=True):
         super().__init__()
         self.chat_jsonl_path = chat_jsonl_path
         self.output_path = output_path or os.path.join(
@@ -146,6 +154,8 @@ class ChatRenderWorker(QThread):
         self.bg_opacity = max(0, min(255, int(bg_opacity)))
         self.fps = max(1, min(60, int(fps)))
         self.preview_secs = float(preview_secs)
+        self.twitch_user_id = str(twitch_user_id or "")
+        self.enable_emotes = bool(enable_emotes)
         self._cancel = False
 
     def cancel(self):
@@ -162,6 +172,34 @@ class ChatRenderWorker(QThread):
         if not messages:
             self.done.emit(False, "No chat messages found.")
             return
+
+        # Load third-party emotes (BTTV/FFZ/7TV)
+        emote_map = {}
+        emote_images = {}
+        if self.enable_emotes:
+            self.progress.emit(0, "Loading emotes...")
+            emote_map = load_channel_emotes(
+                self.twitch_user_id or None,
+                log_fn=lambda msg: self.log.emit(msg),
+            )
+            if emote_map:
+                emote_size = self.font_size + 2
+                for name, (provider, eid) in emote_map.items():
+                    path = get_emote_image(provider, eid)
+                    if path:
+                        try:
+                            eimg = Image.open(path).convert("RGBA")
+                            eimg = eimg.resize(
+                                (emote_size, emote_size),
+                                Image.LANCZOS,
+                            )
+                            emote_images[name] = eimg
+                        except Exception:
+                            pass
+                self.log.emit(
+                    f"[CHAT RENDER] {len(emote_images)}/{len(emote_map)} "
+                    f"emote images loaded"
+                )
 
         total_duration = messages[-1]["rel"] + self.msg_duration
         if self.preview_secs > 0:
@@ -244,32 +282,60 @@ class ChatRenderWorker(QThread):
                 # Draw visible messages (most recent at bottom)
                 visible = active_msgs[-max_visible:]
                 y = self.height - len(visible) * line_height - 4
+                text_color = (205, 214, 244)
+                emote_h = self.font_size + 2
                 for _expire, nick, text, nick_rgb in visible:
-                    # Draw nick in color
                     nick_display = f"{nick}: "
                     draw.text((6, y), nick_display, fill=nick_rgb, font=font)
                     try:
                         nick_w = draw.textlength(nick_display, font=font)
                     except (TypeError, AttributeError):
                         nick_w = len(nick_display) * (self.font_size * 0.6)
-                    # Draw message text in white
-                    msg_x = 6 + int(nick_w)
-                    max_text_w = self.width - msg_x - 6
-                    # Truncate if too long (binary search instead of char-by-char)
-                    display_text = text
-                    try:
-                        if draw.textlength(text, font=font) > max_text_w:
-                            lo, hi = 0, len(text)
-                            while lo < hi:
-                                mid = (lo + hi + 1) // 2
-                                if draw.textlength(text[:mid], font=font) <= max_text_w:
-                                    lo = mid
+                    cursor_x = 6 + int(nick_w)
+                    max_x = self.width - 6
+                    if emote_images:
+                        for word in text.split():
+                            if cursor_x >= max_x:
+                                break
+                            eimg = emote_images.get(word)
+                            if eimg is not None:
+                                if cursor_x + emote_h <= max_x:
+                                    img.paste(eimg, (int(cursor_x), y), eimg)
+                                    cursor_x += emote_h + 2
+                            else:
+                                frag = word + " "
+                                try:
+                                    fw = draw.textlength(frag, font=font)
+                                except (TypeError, AttributeError):
+                                    fw = len(frag) * (self.font_size * 0.6)
+                                if cursor_x + fw > max_x:
+                                    avail = max_x - cursor_x
+                                    try:
+                                        chars = int(avail / max(fw / len(frag), 1))
+                                    except ZeroDivisionError:
+                                        chars = 0
+                                    frag = word[:max(chars - 1, 0)] + "…"
+                                    draw.text((int(cursor_x), y), frag, fill=text_color, font=font)
+                                    cursor_x = max_x
                                 else:
-                                    hi = mid - 1
-                            display_text = text[:max(lo - 1, 0)] + "…" if lo < len(text) else text
-                    except (TypeError, AttributeError):
-                        display_text = text[:int(max_text_w / (self.font_size * 0.6))]
-                    draw.text((msg_x, y), display_text, fill=(205, 214, 244), font=font)
+                                    draw.text((int(cursor_x), y), frag, fill=text_color, font=font)
+                                    cursor_x += fw
+                    else:
+                        remaining_text = text
+                        max_text_w = max_x - cursor_x
+                        try:
+                            if draw.textlength(text, font=font) > max_text_w:
+                                lo, hi = 0, len(text)
+                                while lo < hi:
+                                    mid = (lo + hi + 1) // 2
+                                    if draw.textlength(text[:mid], font=font) <= max_text_w:
+                                        lo = mid
+                                    else:
+                                        hi = mid - 1
+                                remaining_text = text[:max(lo - 1, 0)] + "…" if lo < len(text) else text
+                        except (TypeError, AttributeError):
+                            remaining_text = text[:int(max_text_w / (self.font_size * 0.6))]
+                        draw.text((int(cursor_x), y), remaining_text, fill=text_color, font=font)
                     y += line_height
 
                 # Write raw RGBA frame to ffmpeg
