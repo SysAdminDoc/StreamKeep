@@ -105,6 +105,16 @@ def refresh_schedules(monitor_entries, cache, log_fn=None):
     return cache
 
 
+def get_cached_schedule(channel_id):
+    """Return cached schedule segments for a single channel, or []."""
+    try:
+        from .config import load_config
+        cache = load_config().get("schedules", {})
+        return (cache.get(channel_id) or {}).get("segments", [])
+    except Exception:
+        return []
+
+
 def get_all_segments(cache):
     """Flatten cached schedules into a single sorted list of segments."""
     out = []

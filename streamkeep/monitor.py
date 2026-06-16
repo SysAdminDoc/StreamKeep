@@ -9,7 +9,7 @@ on the next tick.
 
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from PyQt6.QtCore import (
     QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, pyqtSlot,
@@ -18,6 +18,30 @@ from PyQt6.QtCore import (
 from .extractors import Extractor
 from .http import http_interruptible
 from .models import MonitorEntry
+
+_ESCALATED_INTERVAL = 30
+_IMMINENT_WINDOW_SECS = 600
+
+
+def _stream_imminent(entry):
+    """Return True if a cached schedule shows a stream starting within 10 min."""
+    try:
+        from .schedule import get_cached_schedule
+        segments = get_cached_schedule(entry.channel_id)
+        if not segments:
+            return False
+        now = datetime.now(timezone.utc)
+        for seg in segments:
+            start_iso = seg.get("start_iso", "")
+            if not start_iso:
+                continue
+            start = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+            delta = (start - now).total_seconds()
+            if 0 < delta <= _IMMINENT_WINDOW_SECS:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def entry_in_schedule_window(entry, now=None):
@@ -198,7 +222,10 @@ class ChannelMonitor(QObject):
                 return
             entry._cancel_requested = False
             now = time.time()
-            if now - entry.last_check < entry.interval_secs:
+            effective_interval = entry.interval_secs
+            if _stream_imminent(entry):
+                effective_interval = min(effective_interval, _ESCALATED_INTERVAL)
+            if now - entry.last_check < effective_interval:
                 return
             entry.last_check = now
             self._in_flight.add(entry.channel_id)
