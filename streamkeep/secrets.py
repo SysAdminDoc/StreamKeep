@@ -1,18 +1,17 @@
-"""Encrypted Config Storage — DPAPI on Windows, base64 fallback (F79).
+"""Encrypted Config Storage — DPAPI on Windows, keyring on macOS/Linux (F79).
 
 Encrypts sensitive config fields (tokens, webhook URLs, proxy creds)
 transparently. Non-sensitive fields remain plaintext.
 
-Uses Windows DPAPI via ctypes for machine-bound encryption. Falls back
-to base64 obfuscation on other platforms.
-
-The ``accounts.py`` module (F48) already uses the same DPAPI pattern —
-this module provides a shared implementation for config-level secrets.
+Priority chain:
+  1. Windows DPAPI via ctypes (machine-bound encryption)
+  2. ``keyring`` library (macOS Keychain, Linux SecretService/kwallet)
+  3. base64 encoding (last resort — not real encryption)
 
 Usage::
 
     from streamkeep.secrets import protect, unprotect
-    blob = protect("my_secret_token")    # "dpapi:..." or "b64:..."
+    blob = protect("my_secret_token")    # "dpapi:...", "kr:<field>", or "b64:..."
     plain = unprotect(blob)               # "my_secret_token"
 """
 
@@ -29,11 +28,12 @@ SENSITIVE_FIELDS = frozenset({
 })
 
 
-def protect(plaintext):
+def protect(plaintext, field_name=""):
     """Encrypt *plaintext* using OS-level encryption.
 
-    Returns a prefixed string: ``"dpapi:..."`` on Windows, ``"b64:..."``
-    elsewhere.  Empty input returns empty string.
+    Returns a prefixed string: ``"dpapi:..."`` on Windows,
+    ``"kr:<field_name>"`` via keyring on macOS/Linux, or ``"b64:..."``
+    as a last resort.  Empty input returns empty string.
     """
     if not plaintext:
         return ""
@@ -43,13 +43,16 @@ def protect(plaintext):
         if result:
             return result
 
+    if field_name and _keyring_set(field_name, plaintext):
+        return f"kr:{field_name}"
+
     return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
 
 
 def unprotect(stored):
     """Decrypt a value produced by ``protect()``.
 
-    Handles ``"dpapi:..."`` and ``"b64:..."`` prefixes.
+    Handles ``"dpapi:..."``, ``"kr:..."``, and ``"b64:..."`` prefixes.
     Unprefixed values are returned as-is (legacy plaintext).
     """
     if not stored:
@@ -57,6 +60,11 @@ def unprotect(stored):
 
     if stored.startswith("dpapi:") and sys.platform == "win32":
         result = _dpapi_unprotect(stored[6:])
+        if result is not None:
+            return result
+
+    if stored.startswith("kr:"):
+        result = _keyring_get(stored[3:])
         if result is not None:
             return result
 
@@ -72,7 +80,10 @@ def unprotect(stored):
 
 def is_protected(value):
     """Return True if *value* is an encrypted blob (not plaintext)."""
-    return bool(value) and (value.startswith("dpapi:") or value.startswith("b64:"))
+    if not value:
+        return False
+    return (value.startswith("dpapi:") or value.startswith("kr:")
+            or value.startswith("b64:"))
 
 
 def protect_config_fields(cfg):
@@ -83,7 +94,7 @@ def protect_config_fields(cfg):
     for key in SENSITIVE_FIELDS:
         val = cfg.get(key, "")
         if val and not is_protected(val):
-            cfg[key] = protect(val)
+            cfg[key] = protect(val, field_name=key)
 
 
 def unprotect_config_fields(cfg):
@@ -121,6 +132,26 @@ def _dpapi_protect(plaintext):
     except Exception:
         pass
     return None
+
+
+_KEYRING_SERVICE = "StreamKeep"
+
+
+def _keyring_set(field_name, plaintext):
+    try:
+        import keyring
+        keyring.set_password(_KEYRING_SERVICE, field_name, plaintext)
+        return True
+    except Exception:
+        return False
+
+
+def _keyring_get(field_name):
+    try:
+        import keyring
+        return keyring.get_password(_KEYRING_SERVICE, field_name)
+    except Exception:
+        return None
 
 
 def _dpapi_unprotect(b64_blob):

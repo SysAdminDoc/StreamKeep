@@ -44,6 +44,7 @@ def bootstrap():
         # Live Kick chat rides on Pusher WebSocket — degrades gracefully
         # to "not supported" when missing, so it's optional, not required.
         "websocket": "websocket-client",
+        "keyring": "keyring",
     }
     import importlib
 
