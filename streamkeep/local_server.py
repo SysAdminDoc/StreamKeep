@@ -92,6 +92,17 @@ def _build_handler(expected_token, signals, state_provider=None):
         def log_message(self, *_args, **_kwargs):
             return
 
+        def _host_ok(self):
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            return host in ("127.0.0.1", "localhost", "")
+
+        def _reject_bad_host(self):
+            if not self._host_ok():
+                self.send_response(403)
+                self.end_headers()
+                return True
+            return False
+
         def _auth_ok(self):
             hdr = self.headers.get("Authorization", "") or ""
             if not hdr.startswith("Bearer "):
@@ -136,11 +147,15 @@ def _build_handler(expected_token, signals, state_provider=None):
                 return {}
 
         def do_OPTIONS(self):
+            if self._reject_bad_host():
+                return
             self.send_response(204)
             self._cors()
             self.end_headers()
 
         def do_GET(self):
+            if self._reject_bad_host():
+                return
             path = self.path.split("?")[0]  # strip query params
 
             # Web Remote UI (F37) — serve at /
@@ -168,6 +183,8 @@ def _build_handler(expected_token, signals, state_provider=None):
                 self.end_headers()
 
         def do_POST(self):
+            if self._reject_bad_host():
+                return
             path = self.path.split("?")[0]
             if not self._auth_ok():
                 self.send_response(401)

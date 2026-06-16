@@ -18,6 +18,12 @@ _CREATE_NO_WINDOW = (
     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 )
 
+# ffmpeg safety flags — restrict protocols and prevent stdin reads.
+FFMPEG_SAFETY = [
+    "-nostdin",
+    "-protocol_whitelist", "file,pipe,http,https,tcp,tls,crypto",
+]
+
 # ── Portable mode detection (F43) ──────────────────────────────────
 # Check for a ``portable.txt`` marker next to the exe/script.
 _exe_dir = Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.argv[0] or "."))).resolve()

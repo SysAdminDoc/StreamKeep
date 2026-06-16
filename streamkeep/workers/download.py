@@ -9,7 +9,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..http import parallel_http_download
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import FFMPEG_SAFETY, _CREATE_NO_WINDOW
 from ..resume import (
     clear_resume_state, merge_completed, save_resume_state,
 )
@@ -294,7 +294,7 @@ class DownloadWorker(QThread):
             if chunk_mode:
                 base = os.path.join(self.output_dir, f"{label}_part%03d.mp4")
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-i", self.playlist_url,
                     "-c", "copy",
                     "-f", "segment",
@@ -373,14 +373,14 @@ class DownloadWorker(QThread):
             if self.audio_url:
                 if self.format_type == "mp4":
                     cmd = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "info",
+                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                         "-i", self.playlist_url, "-i", self.audio_url,
                         "-map", "0:v:0", "-map", "1:a:0",
                         "-c", "copy", "-y", outfile,
                     ]
                 else:
                     cmd = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "info",
+                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                         "-ss", str(start), "-i", self.playlist_url,
                         "-ss", str(start), "-i", self.audio_url,
                         "-map", "0:v:0", "-map", "1:a:0",
@@ -391,12 +391,12 @@ class DownloadWorker(QThread):
                     cmd.extend(["-y", outfile])
             elif self.format_type == "mp4":
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-i", self.playlist_url, "-c", "copy", "-y", outfile,
                 ]
             else:
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "info",
+                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
                 ]
                 if not is_live_capture:

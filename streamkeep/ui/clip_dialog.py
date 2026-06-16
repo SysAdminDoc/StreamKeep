@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 from ..theme import CAT
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
@@ -309,7 +309,7 @@ class _WaveformWorker(QThread):
 
             # Extract raw 16-bit signed PCM mono at 8 kHz
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-i", self.src_path,
                 "-ac", "1", "-ar", str(WAVE_SAMPLE_RATE),
                 "-f", "s16le", "pipe:1",
@@ -1365,7 +1365,7 @@ class _PreviewWorker(QThread):
                 return
             dst = os.path.join(cache_dir, f"_preview_{int(self.at_secs * 1000):010d}.jpg")
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-ss", f"{max(0.0, self.at_secs):.3f}",
                 "-i", self.src_path,
                 "-frames:v", "1",

@@ -21,7 +21,7 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 SINGLE_CACHE_NAME = ".streamkeep_thumb.jpg"
 STRIP_CACHE_DIR = ".streamkeep_thumbs"
@@ -90,7 +90,7 @@ def _run_ffmpeg_thumb(src, at_secs, dst, width=240):
         return False
     # -ss before -i for a fast keyframe seek — good enough for thumbs.
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
         "-ss", f"{max(0.0, at_secs):.3f}",
         "-i", src,
         "-frames:v", "1",

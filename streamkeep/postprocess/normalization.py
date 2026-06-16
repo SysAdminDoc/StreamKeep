@@ -17,7 +17,7 @@ import os
 import re
 import subprocess
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 BUILTIN_PROFILES = {
     "Broadcast (EBU R128)": {"I": -24, "TP": -2.0, "LRA": 7},
@@ -43,7 +43,7 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
     if log_fn:
         log_fn(f"[NORM] Pass 1/2: measuring loudness of {os.path.basename(src)}")
     cmd1 = [
-        "ffmpeg", "-hide_banner", "-y",
+        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-y",
         "-i", src,
         "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json",
         "-f", "null", "-",
@@ -68,7 +68,7 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
         f":linear=true"
     )
     cmd2 = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
         "-i", src,
         "-af", af,
         "-c:v", "copy",
@@ -118,7 +118,7 @@ def _run_measure(cmd):
 def _single_pass(src, dst, target_i, target_tp, target_lra, log_fn):
     """Fallback single-pass normalization."""
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
         "-i", src,
         "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}",
         "-c:v", "copy",

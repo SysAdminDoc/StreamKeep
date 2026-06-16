@@ -16,7 +16,7 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..paths import _CREATE_NO_WINDOW, CONFIG_DIR
+from ..paths import _CREATE_NO_WINDOW, CONFIG_DIR, FFMPEG_SAFETY
 
 # Emote cache directory
 EMOTE_CACHE_DIR = CONFIG_DIR / "emote_cache"
@@ -182,7 +182,7 @@ class ChatRenderWorker(QThread):
 
         # Start ffmpeg pipe
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
             "-y",
             "-f", "rawvideo",
             "-pix_fmt", "rgba",

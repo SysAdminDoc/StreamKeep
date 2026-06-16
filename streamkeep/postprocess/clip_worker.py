@@ -16,7 +16,7 @@ import tempfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
 class ClipWorker(QThread):
@@ -68,7 +68,7 @@ class ClipWorker(QThread):
             return None
         if not self.reencode:
             return [
-                "ffmpeg", "-hide_banner", "-loglevel", "info",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                 "-ss", f"{self.start_secs:.3f}",
                 "-i", self.source_path,
                 "-t", f"{dur:.3f}",
@@ -77,7 +77,7 @@ class ClipWorker(QThread):
                 "-y", self.output_path,
             ]
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "info",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
             "-i", self.source_path,
             "-ss", f"{self.start_secs:.3f}",
             "-t", f"{dur:.3f}",
@@ -232,7 +232,7 @@ class HighlightWorker(QThread):
                 part_path = os.path.join(tmp_dir, f"part_{i:03d}.mp4")
                 if not self.reencode:
                     cmd = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                         "-ss", f"{start:.3f}", "-i", self.source_path,
                         "-t", f"{dur:.3f}", "-c", "copy",
                         "-avoid_negative_ts", "make_zero",
@@ -240,7 +240,7 @@ class HighlightWorker(QThread):
                     ]
                 else:
                     cmd = [
-                        "ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                         "-i", self.source_path,
                         "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
                         "-c:v", self.video_codec, "-c:a", self.audio_codec,
@@ -286,7 +286,7 @@ class HighlightWorker(QThread):
                 os.makedirs(out_dir, exist_ok=True)
 
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-f", "concat", "-safe", "0", "-i", list_path,
                 "-c", "copy", "-y", self.output_path,
             ]

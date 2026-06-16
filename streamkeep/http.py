@@ -129,6 +129,8 @@ def _build_curl_cmd(url, headers=None, method=None, body=None, timeout=30):
     connect_timeout = max(1, min(10, max_time))
     cmd = [
         "curl", "-s", "-L",
+        "--proto", "=http,https",
+        "--max-redirs", "5",
         "--connect-timeout", str(connect_timeout),
         "--max-time", str(max_time),
     ]

@@ -13,13 +13,13 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
 def _extract_frame(media_path, at_secs, out_path, width=1280, height=720):
     """Extract a single frame from *media_path* at *at_secs* using ffmpeg."""
     cmd = [
-        "ffmpeg", "-y", "-ss", str(at_secs),
+        "ffmpeg", *FFMPEG_SAFETY, "-y", "-ss", str(at_secs),
         "-i", media_path,
         "-frames:v", "1",
         "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"

@@ -12,7 +12,7 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 SCENE_THUMB_W = 120
 
@@ -105,7 +105,7 @@ class SceneWorker(QThread):
                 break
             thumb_path = os.path.join(cache_dir, f"scene_{i:03d}.jpg")
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-ss", f"{ts:.3f}", "-i", self.source_path,
                 "-frames:v", "1",
                 "-vf", f"scale={SCENE_THUMB_W}:-2",

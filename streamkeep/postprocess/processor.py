@@ -8,7 +8,7 @@ import os
 import subprocess
 import threading
 
-from ..paths import _CREATE_NO_WINDOW
+from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 from ..utils import safe_filename
 from .codecs import (
     VIDEO_CONTAINERS, VIDEO_CODECS,
@@ -138,7 +138,7 @@ class PostProcessor:
         if log_fn:
             log_fn(f"[POST] Extracting audio to MP3: {os.path.basename(dst)}")
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
             "-i", src, "-vn", "-acodec", "libmp3lame", "-q:a", "2", dst,
         ]
         cls._ffmpeg_run(cmd, log_fn, "audio extract")
@@ -172,7 +172,7 @@ class PostProcessor:
         if log_fn:
             log_fn(f"[POST] Re-encoding to H.265: {os.path.basename(dst)}")
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
             "-i", src, "-c:v", "libx265", "-crf", "23", "-preset", "medium",
             "-c:a", "copy", dst,
         ]
@@ -232,7 +232,7 @@ class PostProcessor:
             ff_encoder = "libx264"
             codec_key = "h264"
 
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src]
+        cmd = ["ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y", "-i", src]
         if ff_encoder == "copy":
             cmd.extend(["-c", "copy"])
         else:
@@ -300,7 +300,7 @@ class PostProcessor:
             ff_codec = AUDIO_CODECS[codec_key]
 
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
             "-i", src, "-vn",
         ]
         if ff_codec == "copy":
@@ -359,7 +359,7 @@ class PostProcessor:
         fps = nb_frames / max(dur - 2, 1)
         vf = f"fps={fps:.6f},scale=480:-1,tile=3x3:margin=8:padding=6"
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
             "-ss", "1", "-i", src,
             "-vf", vf, "-frames:v", "1", "-qscale:v", "3", dst,
         ]
@@ -389,7 +389,7 @@ class PostProcessor:
             if os.path.exists(dst):
                 continue
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
                 "-ss", str(start), "-i", src,
             ]
             if end > start:
@@ -416,7 +416,7 @@ class PostProcessor:
             )
         # Step 1: run silencedetect and parse timestamps
         detect_cmd = [
-            "ffmpeg", "-hide_banner", "-i", src,
+            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-i", src,
             "-af", f"silencedetect=noise={noise_db}dB:d={min_dur}",
             "-f", "null", "-",
         ]
@@ -478,7 +478,7 @@ class PostProcessor:
             for idx, (seg_start, seg_end) in enumerate(segments):
                 seg_dst = os.path.join(tmpdir, f"seg_{idx:04d}{ext}")
                 seg_cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
                     "-ss", f"{seg_start:.3f}", "-to", f"{seg_end:.3f}",
                     "-i", src, "-c", "copy", seg_dst,
                 ]
@@ -494,7 +494,7 @@ class PostProcessor:
                     escaped = sf.replace("'", "'\\''")
                     f.write(f"file '{escaped}'\n")
             concat_cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
                 "-f", "concat", "-safe", "0", "-i", concat_path,
                 "-c", "copy", dst,
             ]
