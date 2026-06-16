@@ -71,7 +71,8 @@ def http_interrupted():
         return False
     try:
         return bool(checker())
-    except Exception:
+    except Exception as e:
+        logger.debug("http_interrupted checker raised: %s", e)
         return False
 
 
@@ -203,8 +204,8 @@ def curl_post_json(url: str, data: Any, headers: dict[str, str] | None = None, t
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
         if result.returncode == 0:
             return json.loads(result.stdout)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("curl_post_json failed for %s: %s", url, e)
     return None
 
 
@@ -238,7 +239,8 @@ def http_head(url, timeout=20):
             size = int(m.group(1))
         accepts = bool(re.search(r"(?im)^accept-ranges:\s*bytes", last))
         return (status, size, accepts)
-    except Exception:
+    except Exception as e:
+        logger.debug("http_head failed for %s: %s", url, e)
         return (0, 0, False)
 
 
@@ -270,7 +272,8 @@ def http_probe(url, headers=None, timeout=20):
             "content_type": content_type,
             "final_url": final_url or url,
         }
-    except Exception:
+    except Exception as e:
+        logger.debug("http_probe failed for %s: %s", url, e)
         return {}
 
 
@@ -371,8 +374,8 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                     # stderr is bytes when text=True is not passed
                     err = (raw.decode("utf-8", errors="replace")
                            if isinstance(raw, bytes) else raw).strip()[:120]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read stderr for part %d: %s", i, e)
                 with lock:
                     errors.append(f"part {i}: curl exit {proc.returncode} {err}")
         except FileNotFoundError:

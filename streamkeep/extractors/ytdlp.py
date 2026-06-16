@@ -8,6 +8,7 @@ Handles anything the native extractors don't. Includes:
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -18,6 +19,8 @@ from ..http import http_interrupted, run_capture_interruptible
 from ..models import QualityInfo, StreamInfo
 from ..utils import fmt_duration, scan_browser_cookies
 from .base import Extractor
+
+logger = logging.getLogger(__name__)
 
 
 class YtDlpExtractor(Extractor):
@@ -46,7 +49,8 @@ class YtDlpExtractor(Extractor):
             if parts and parts[-1]:
                 return f"{parsed.netloc}_{parts[-1]}"
             return parsed.netloc
-        except Exception:
+        except Exception as e:
+            logger.debug("extract_channel_id failed for %r: %s", url, e)
             return "download"
 
     def _build_cmd(self, url):
@@ -374,9 +378,10 @@ class YtDlpExtractor(Extractor):
         except json.JSONDecodeError:
             self._log(log_fn, "Failed to parse yt-dlp output")
             return None
-        except Exception:
+        except Exception as e:
             if http_interrupted():
                 return None
+            logger.debug("yt-dlp resolve error for %r: %s", url, e)
             self._log(log_fn, "yt-dlp timed out")
             return None
 
