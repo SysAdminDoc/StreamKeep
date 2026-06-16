@@ -34,7 +34,6 @@ import sys
 import subprocess
 
 
-# codex-branding:start
 def _branding_icon_path() -> Path:
     candidates = []
     if getattr(sys, "frozen", False):
@@ -49,7 +48,6 @@ def _branding_icon_path() -> Path:
         if candidate.exists():
             return candidate
     return Path("icon.png")
-# codex-branding:end
 
 
 from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor

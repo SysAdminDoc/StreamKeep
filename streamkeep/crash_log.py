@@ -1,10 +1,24 @@
 """Global crash handler. Writes tracebacks to crash.log and shows a MessageBox."""
 
+import os
 import sys
 from datetime import datetime
 
 from . import VERSION
 from .paths import CONFIG_DIR, CRASH_LOG
+
+_CRASH_LOG_MAX_BYTES = 2_000_000
+_CRASH_LOG_BACKUP = CRASH_LOG.parent / "crash.log.1"
+
+
+def _rotate_crash_log():
+    try:
+        if CRASH_LOG.exists() and CRASH_LOG.stat().st_size > _CRASH_LOG_MAX_BYTES:
+            if _CRASH_LOG_BACKUP.exists():
+                _CRASH_LOG_BACKUP.unlink()
+            CRASH_LOG.rename(_CRASH_LOG_BACKUP)
+    except OSError:
+        pass
 
 
 def setup_crash_logging():
@@ -14,6 +28,7 @@ def setup_crash_logging():
         tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            _rotate_crash_log()
             with open(CRASH_LOG, "a", encoding="utf-8") as f:
                 f.write(f"\n{'=' * 60}\n")
                 f.write(
