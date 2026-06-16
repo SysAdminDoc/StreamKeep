@@ -161,7 +161,7 @@ class TestKickExtractorResolve(unittest.TestCase):
     @patch(f"{_KICK}.curl_json")
     def test_resolve_no_livestream_no_vods(self, mock_curl_json):
         mock_curl_json.side_effect = [
-            {"data": {}},   # _livestream_data
+            {"data": {}},   # _v2_livestream_data — no playback_url
             [],              # list_vods API
         ]
         info = self.ext.resolve("https://kick.com/offline_user")
@@ -233,19 +233,33 @@ class TestKickExtractorResolve(unittest.TestCase):
         self.assertEqual(vods[0].title, "Has source")
 
     @patch(f"{_KICK}.curl_json")
-    def test_check_live_true(self, mock_curl_json):
-        mock_curl_json.return_value = {
-            "data": {
-                "playback_url": "https://cdn.kick.com/live.m3u8",
-            }
-        }
+    def test_check_live_true_via_official_api(self, mock_curl_json):
+        mock_curl_json.side_effect = [
+            # _official_channel response
+            {"data": [{"broadcaster_user_id": "12345", "slug": "streamer"}]},
+            # _official_livestream response
+            {"data": [{"is_live": True, "viewer_count": 100}]},
+        ]
         self.assertTrue(self.ext.check_live("https://kick.com/streamer"))
 
     @patch(f"{_KICK}.curl_json")
-    def test_check_live_false(self, mock_curl_json):
-        mock_curl_json.return_value = {"data": {"playback_url": None}}
+    def test_check_live_false_via_official_api(self, mock_curl_json):
+        mock_curl_json.side_effect = [
+            # _official_channel response
+            {"data": [{"broadcaster_user_id": "12345", "slug": "streamer"}]},
+            # _official_livestream — no items = not live
+            {"data": []},
+        ]
         result = self.ext.check_live("https://kick.com/offline")
         self.assertFalse(result)
+
+    @patch(f"{_KICK}.curl_json")
+    def test_check_live_fallback_to_v2(self, mock_curl_json):
+        mock_curl_json.side_effect = [
+            None,  # _official_channel fails
+            {"data": {"playback_url": "https://cdn.kick.com/live.m3u8"}},  # v2 fallback
+        ]
+        self.assertTrue(self.ext.check_live("https://kick.com/streamer"))
 
     @patch(f"{_KICK}.curl_json")
     def test_check_live_invalid_channel(self, mock_curl_json):

@@ -1,5 +1,14 @@
-"""Kick.com — native API v2 extractor."""
+"""Kick.com — hybrid official + v2 API extractor.
 
+Uses the official public API (api.kick.com/public/v1/) for channel
+metadata and live-status checks where possible, and falls back to the
+undocumented v2 endpoints for VOD listing and HLS playback URLs that
+the official API does not yet expose.
+
+Official API docs: https://docs.kick.com / https://api.kick.com/swagger/doc.yaml
+"""
+
+import logging
 import re
 
 from .. import CURL_UA
@@ -8,6 +17,20 @@ from ..hls import parse_hls_master, parse_hls_duration
 from ..models import StreamInfo, VODInfo
 from ..utils import fmt_duration
 from .base import Extractor
+
+logger = logging.getLogger(__name__)
+
+_SAFE_SLUG = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
+
+# Official public API base — requires no auth for App Access Token scopes
+# when called without an Authorization header on read-only endpoints.
+_OFFICIAL_API = "https://api.kick.com/public/v1"
+
+# Undocumented v2 — still the only way to get VOD source URLs and live
+# playback_url.  Keep these as fallback until the official API covers media.
+_V2_API = "https://kick.com/api/v2"
+
+_JSON_HEADERS = {"User-Agent": CURL_UA, "Accept": "application/json"}
 
 
 class KickExtractor(Extractor):
@@ -31,20 +54,68 @@ class KickExtractor(Extractor):
     def supports_live_check(self):
         return True
 
-    def _livestream_data(self, slug):
+    # ── Official API helpers ──────────────────────────────────────────
+
+    def _official_channel(self, slug):
+        """Fetch channel info via the official public API (by slug)."""
+        if not _SAFE_SLUG.match(slug):
+            return None
         data = curl_json(
-            f"https://kick.com/api/v2/channels/{slug}/livestream",
-            headers={"User-Agent": CURL_UA, "Accept": "application/json"},
+            f"{_OFFICIAL_API}/channels?slug={slug}",
+            headers=_JSON_HEADERS,
+        )
+        if not data or not isinstance(data, dict):
+            return None
+        items = data.get("data", [])
+        if isinstance(items, list) and items:
+            return items[0]
+        return None
+
+    def _official_livestream(self, broadcaster_user_id):
+        """Check live status via the official livestreams endpoint."""
+        if not broadcaster_user_id:
+            return None
+        data = curl_json(
+            f"{_OFFICIAL_API}/livestreams?broadcaster_user_id={broadcaster_user_id}",
+            headers=_JSON_HEADERS,
+        )
+        if not data or not isinstance(data, dict):
+            return None
+        items = data.get("data", [])
+        if isinstance(items, list) and items:
+            return items[0]
+        return None
+
+    # ── V2 API helpers (playback URLs, VOD sources) ───────────────────
+
+    def _v2_livestream_data(self, slug):
+        """Fetch livestream data from undocumented v2 — returns playback_url."""
+        data = curl_json(
+            f"{_V2_API}/channels/{slug}/livestream",
+            headers=_JSON_HEADERS,
         )
         if data and isinstance(data, dict):
             return data.get("data", data)
         return None
 
+    # ── Public interface ──────────────────────────────────────────────
+
     def check_live(self, url):
         slug = self.extract_channel_id(url)
         if not slug:
             return None
-        ls = self._livestream_data(slug)
+        # Try official API first — it returns live metadata without
+        # exposing undocumented endpoints
+        ch = self._official_channel(slug)
+        if ch and isinstance(ch, dict):
+            uid = ch.get("broadcaster_user_id") or ch.get("user_id")
+            if uid:
+                ls = self._official_livestream(uid)
+                if ls and isinstance(ls, dict):
+                    return True
+                return False
+        # Fallback to v2 — works without auth
+        ls = self._v2_livestream_data(slug)
         if isinstance(ls, dict):
             return ls.get("playback_url") is not None
         return None
@@ -53,14 +124,16 @@ class KickExtractor(Extractor):
         slug = self.extract_channel_id(url)
         if not slug:
             return [], None
+        if not _SAFE_SLUG.match(slug):
+            self._log(log_fn, f"Invalid Kick slug: {slug!r}")
+            return [], None
         page = int(cursor) if cursor else 1
         self._log(log_fn, f"Fetching VODs for Kick channel: {slug} (page {page})")
 
-        api_url = f"https://kick.com/api/v2/channels/{slug}/videos?page={page}"
-        data = curl_json(
-            api_url,
-            headers={"User-Agent": CURL_UA, "Accept": "application/json"},
-        )
+        # VOD listing is only available via v2 — the official API has no
+        # video/VOD endpoints yet.
+        api_url = f"{_V2_API}/channels/{slug}/videos?page={page}"
+        data = curl_json(api_url, headers=_JSON_HEADERS)
         if not data or not isinstance(data, list):
             self._log(log_fn, "No VODs found or API error")
             return [], None
@@ -94,19 +167,22 @@ class KickExtractor(Extractor):
         return vods, next_cursor
 
     def resolve(self, url, log_fn=None):
-        """Resolve Kick m3u8 URL to StreamInfo."""
+        """Resolve Kick URL to StreamInfo with qualities."""
         slug = self.extract_channel_id(url) or ""
         if ".m3u8" in url:
             return self._resolve_m3u8(url, log_fn, channel=slug)
         if slug:
-            ls = self._livestream_data(slug)
+            # Live check via v2 — only v2 returns playback_url
+            ls = self._v2_livestream_data(slug)
             playback_url = str((ls or {}).get("playback_url") or "")
             if playback_url:
+                title = str(
+                    (ls or {}).get("session_title")
+                    or (ls or {}).get("title")
+                    or ""
+                )
                 info = self._resolve_m3u8(
-                    playback_url,
-                    log_fn,
-                    channel=slug,
-                    title=str((ls or {}).get("session_title") or (ls or {}).get("title") or ""),
+                    playback_url, log_fn, channel=slug, title=title,
                 )
                 if info:
                     info.is_live = True
