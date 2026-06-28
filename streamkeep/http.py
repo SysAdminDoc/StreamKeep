@@ -215,6 +215,8 @@ def http_head(url, timeout=20):
     connect_timeout = max(1, min(10, int(timeout or 20)))
     cmd = [
         "curl", "-sI", "-L",
+        "--proto", "=http,https",
+        "--max-redirs", "5",
         "--connect-timeout", str(connect_timeout),
         "--max-time", str(max(1, int(timeout or 20))),
     ]
@@ -329,6 +331,8 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             pass
         cmd = [
             "curl", "-sS", "-L", "--fail",
+            "--proto", "=http,https",
+            "--max-redirs", "5",
             "--retry", "2", "--retry-delay", "1",
             "-r", f"{start}-{end}",
             "-o", part,

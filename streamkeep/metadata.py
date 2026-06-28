@@ -50,7 +50,12 @@ class MetadataSaver:
             try:
                 thumb_path = os.path.join(output_dir, "thumbnail.jpg")
                 subprocess.run(
-                    ["curl", "-s", "-L", "-o", thumb_path, stream_info.thumbnail_url],
+                    [
+                        "curl", "-s", "-L",
+                        "--proto", "=http,https",
+                        "--max-redirs", "5",
+                        "-o", thumb_path, stream_info.thumbnail_url,
+                    ],
                     timeout=15, creationflags=_CREATE_NO_WINDOW,
                 )
             except Exception:
