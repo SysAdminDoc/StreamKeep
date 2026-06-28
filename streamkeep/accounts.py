@@ -1,8 +1,8 @@
 """Platform Account Manager — credential store for authenticated APIs (F48).
 
 Stores per-platform auth tokens/keys in the SQLite library.db with
-optional DPAPI encryption on Windows. Falls back to base64 obfuscation
-when DPAPI is unavailable.
+DPAPI on Windows or keyring on macOS/Linux. New credentials are not
+stored when secure storage is unavailable.
 
 Supported platforms and their credential types:
   - Twitch:  OAuth token (for Schedule API, subscriber VODs)
@@ -11,13 +11,12 @@ Supported platforms and their credential types:
   - Generic: Custom header key-value pairs per domain
 """
 
-import base64
 import json
 import sqlite3
-import sys
 import threading
 
 from .paths import CONFIG_DIR
+from .secrets import protect, unprotect
 
 DB_PATH = CONFIG_DIR / "library.db"
 _WRITE_LOCK = threading.Lock()
@@ -25,71 +24,18 @@ _WRITE_LOCK = threading.Lock()
 
 # ── Encryption helpers ──────────────────────────────────────────────
 
-def _encrypt(plaintext):
-    """Encrypt *plaintext* using DPAPI on Windows, base64 fallback elsewhere."""
+def _encrypt(plaintext, platform=""):
+    """Encrypt *plaintext* using the shared secure-storage helper."""
     if not plaintext:
         return ""
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            import ctypes.wintypes
-
-            class DATA_BLOB(ctypes.Structure):
-                _fields_ = [
-                    ("cbData", ctypes.wintypes.DWORD),
-                    ("pbData", ctypes.POINTER(ctypes.c_char)),
-                ]
-
-            inp = plaintext.encode("utf-8")
-            blob_in = DATA_BLOB(len(inp), ctypes.create_string_buffer(inp, len(inp)))
-            blob_out = DATA_BLOB()
-            if ctypes.windll.crypt32.CryptProtectData(
-                ctypes.byref(blob_in), None, None, None, None, 0,
-                ctypes.byref(blob_out),
-            ):
-                enc = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-                ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-                return "dpapi:" + base64.b64encode(enc).decode("ascii")
-        except Exception:
-            pass
-    # Fallback: base64 (not secure, but better than plaintext)
-    return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+    return protect(plaintext, field_name=f"account:{platform}")
 
 
 def _decrypt(stored):
     """Decrypt a value produced by ``_encrypt()``."""
     if not stored:
         return ""
-    if stored.startswith("dpapi:") and sys.platform == "win32":
-        try:
-            import ctypes
-            import ctypes.wintypes
-
-            class DATA_BLOB(ctypes.Structure):
-                _fields_ = [
-                    ("cbData", ctypes.wintypes.DWORD),
-                    ("pbData", ctypes.POINTER(ctypes.c_char)),
-                ]
-
-            raw = base64.b64decode(stored[6:])
-            blob_in = DATA_BLOB(len(raw), ctypes.create_string_buffer(raw, len(raw)))
-            blob_out = DATA_BLOB()
-            if ctypes.windll.crypt32.CryptUnprotectData(
-                ctypes.byref(blob_in), None, None, None, None, 0,
-                ctypes.byref(blob_out),
-            ):
-                dec = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-                ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-                return dec.decode("utf-8")
-        except Exception:
-            pass
-    if stored.startswith("b64:"):
-        try:
-            return base64.b64decode(stored[4:]).decode("utf-8")
-        except Exception:
-            pass
-    # Raw plaintext fallback (legacy or migration)
-    return stored
+    return unprotect(stored)
 
 
 # ── Database operations ─────────────────────────────────────────────
@@ -126,7 +72,7 @@ def get_credential(platform):
 def set_credential(platform, value):
     """Store an encrypted credential for *platform*."""
     _ensure_table()
-    enc = _encrypt(value)
+    enc = _encrypt(value, platform)
     with _WRITE_LOCK:
         db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:

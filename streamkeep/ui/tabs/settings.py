@@ -562,15 +562,42 @@ class SettingsTabMixin:
     def _on_save_account_tokens(self):
         """Persist platform tokens to encrypted storage (F48)."""
         from ...accounts import set_credential, credential_status
+        from ...secrets import SecretStorageError
         inputs = getattr(self, "_account_inputs", {})
         saved = 0
+        errors = []
         for plat_key, (inp, status_label) in inputs.items():
             val = inp.text().strip()
             if val:
-                set_credential(plat_key, val)
+                try:
+                    set_credential(plat_key, val)
+                except SecretStorageError as e:
+                    errors.append(str(e))
+                    status_label.setText("secure store unavailable")
+                    continue
                 inp.clear()
                 saved += 1
             status_label.setText(credential_status(plat_key))
+        if errors:
+            self._log(f"[ACCOUNTS] Secure credential storage unavailable: {errors[0]}")
+            self._set_status("Token save blocked: secure credential storage unavailable.", "error")
+            show_premium_message(
+                self,
+                title="Secure credential storage unavailable",
+                body=(
+                    "StreamKeep did not save the token because Windows DPAPI or "
+                    "keyring storage is unavailable. Install/configure keyring "
+                    "or fix the OS credential store, then save again."
+                ),
+                eyebrow="ACCOUNTS",
+                badge_text="Not saved",
+                tone="error",
+                summary_title="No reversible fallback was written.",
+                summary_body="Existing legacy values can still be read, but new tokens require secure storage.",
+                primary_label="Close",
+                min_width=620,
+            )
+            return
         if saved:
             self._set_status(f"Saved {saved} token(s).", "success")
             self._log(f"[ACCOUNTS] Saved {saved} platform token(s)")

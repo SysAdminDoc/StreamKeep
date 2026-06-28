@@ -6,17 +6,21 @@ transparently. Non-sensitive fields remain plaintext.
 Priority chain:
   1. Windows DPAPI via ctypes (machine-bound encryption)
   2. ``keyring`` library (macOS Keychain, Linux SecretService/kwallet)
-  3. base64 encoding (last resort — not real encryption)
 
 Usage::
 
     from streamkeep.secrets import protect, unprotect
-    blob = protect("my_secret_token")    # "dpapi:...", "kr:<field>", or "b64:..."
+    blob = protect("my_secret_token")    # "dpapi:..." or "kr:<field>"
     plain = unprotect(blob)               # "my_secret_token"
 """
 
 import base64
 import sys
+
+
+class SecretStorageError(RuntimeError):
+    """Raised when no secure storage backend can protect a new secret."""
+
 
 # Fields in config.json that should be encrypted when saved
 SENSITIVE_FIELDS = frozenset({
@@ -28,12 +32,13 @@ SENSITIVE_FIELDS = frozenset({
 })
 
 
-def protect(plaintext, field_name=""):
+def protect(plaintext, field_name="", *, allow_insecure_fallback=False):
     """Encrypt *plaintext* using OS-level encryption.
 
     Returns a prefixed string: ``"dpapi:..."`` on Windows,
-    ``"kr:<field_name>"`` via keyring on macOS/Linux, or ``"b64:..."``
-    as a last resort.  Empty input returns empty string.
+    ``"kr:<field_name>"`` via keyring on macOS/Linux. Empty input
+    returns empty string. New ``"b64:..."`` values are only written when
+    ``allow_insecure_fallback`` is explicitly set.
     """
     if not plaintext:
         return ""
@@ -46,13 +51,19 @@ def protect(plaintext, field_name=""):
     if field_name and _keyring_set(field_name, plaintext):
         return f"kr:{field_name}"
 
-    return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+    if allow_insecure_fallback:
+        return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
+
+    raise SecretStorageError(
+        "Secure credential storage is unavailable. Install/configure keyring "
+        "or use Windows DPAPI before saving sensitive values."
+    )
 
 
 def unprotect(stored):
     """Decrypt a value produced by ``protect()``.
 
-    Handles ``"dpapi:..."``, ``"kr:..."``, and ``"b64:..."`` prefixes.
+    Handles ``"dpapi:..."``, ``"kr:..."``, and legacy ``"b64:..."`` prefixes.
     Unprefixed values are returned as-is (legacy plaintext).
     """
     if not stored:

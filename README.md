@@ -118,6 +118,7 @@ Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are
 - Python 3.10 or newer.
 - `ffmpeg` and `ffprobe` in `PATH`.
 - `curl` in `PATH`.
+- Python dependencies from `requirements.txt`, including `keyring` for secure credential storage on non-Windows systems.
 - Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
 
 Install Python dependencies:
@@ -162,7 +163,7 @@ Release packages must include:
 - `icon.ico`, `icon.png`, and `assets/`.
 - `browser-extension/` and `browser-extension/icons/`.
 - `packaging/` manifests when building MSIX or Flatpak artifacts.
-- Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, keyring, mpv/libmpv, and platform signing tools.
+- Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, mpv/libmpv, and platform signing tools.
 - A `.sha256` sidecar for each downloadable executable; the in-app updater refuses to install releases without valid SHA-256 metadata.
 
 ## Validation

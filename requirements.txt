@@ -4,3 +4,4 @@ Pillow>=12.2.0
 yt-dlp>=2026.2.21
 send2trash>=1.8
 websocket-client>=1.7
+keyring>=25.0
