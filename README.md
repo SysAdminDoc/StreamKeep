@@ -100,6 +100,7 @@ python StreamKeep.py --server --port 8765
 ```
 
 The local server binds to localhost by default, validates bearer tokens in constant time, checks Host headers to resist DNS rebinding, and restricts browser companion access to local/chrome-extension origins.
+When LAN access is enabled in Settings or with `server --bind 0.0.0.0`, StreamKeep only accepts Host and Origin values that match this machine's local interface names or IP addresses, and the token is still required for API calls.
 
 ## Browser Companion
 

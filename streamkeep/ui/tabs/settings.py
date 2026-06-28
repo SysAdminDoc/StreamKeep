@@ -893,7 +893,7 @@ class SettingsTabMixin:
         port = int(getattr(srv, "port", 0) or 0) if srv is not None else 0
         if port <= 0:
             return ""
-        return f"http://127.0.0.1:{port}/"
+        return getattr(srv, "url", "") or f"http://127.0.0.1:{port}/"
 
     def _refresh_companion_ui(self):
         """Update the Browser Companion settings panel from live state."""
@@ -1121,8 +1121,9 @@ class SettingsTabMixin:
                 srv.start()
                 self._companion_server = srv
                 self._companion_last_error = ""
+                host = getattr(srv, "display_host", "127.0.0.1")
                 self._log(
-                    f"[COMPANION] Listening on 127.0.0.1:{srv.port} "
+                    f"[COMPANION] Listening on {host}:{srv.port} "
                     f"— token in Settings tab."
                 )
             except OSError as e:

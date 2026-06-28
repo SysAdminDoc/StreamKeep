@@ -18,12 +18,13 @@ class LocalServerTests(unittest.TestCase):
         self.server.stop()
         self.app.processEvents()
 
-    def _open(self, path, *, token=None, headers=None, method="GET"):
+    def _open(self, path, *, token=None, headers=None, method="GET", server=None):
+        server = server or self.server
         request_headers = dict(headers or {})
         if token is not None:
             request_headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(
-            f"http://127.0.0.1:{self.server.port}{path}",
+            f"http://127.0.0.1:{server.port}{path}",
             headers=request_headers,
             method=method,
         )
@@ -36,6 +37,54 @@ class LocalServerTests(unittest.TestCase):
                 token=self.server.token,
                 headers={"Host": "attacker.example"},
             )
+
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_local_only_rejects_lan_host_header(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._open(
+                "/ping",
+                token=self.server.token,
+                headers={"Host": "192.168.50.10:8765"},
+            )
+
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_lan_mode_accepts_configured_lan_host(self):
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            allowed_hosts={"192.168.50.10", "streamkeepbox.local"},
+        )
+        lan_server.start()
+        try:
+            with self._open(
+                "/ping",
+                server=lan_server,
+                token=lan_server.token,
+                headers={"Host": "192.168.50.10:8765"},
+            ) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        finally:
+            lan_server.stop()
+
+        self.assertEqual(payload, {"ok": True, "app": "StreamKeep"})
+
+    def test_lan_mode_keeps_rejecting_hostile_host(self):
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            allowed_hosts={"192.168.50.10"},
+        )
+        lan_server.start()
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._open(
+                    "/ping",
+                    server=lan_server,
+                    token=lan_server.token,
+                    headers={"Host": "attacker.example"},
+                )
+        finally:
+            lan_server.stop()
 
         self.assertEqual(ctx.exception.code, 403)
 
@@ -67,6 +116,27 @@ class LocalServerTests(unittest.TestCase):
 
         self.assertEqual(resp.status, 204)
         self.assertEqual(allowed, "http://localhost")
+
+    def test_lan_mode_echoes_configured_lan_origin(self):
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            allowed_hosts={"192.168.50.10"},
+        )
+        lan_server.start()
+        origin = "http://192.168.50.10:8765"
+        try:
+            with self._open(
+                "/api/status",
+                server=lan_server,
+                headers={"Host": "192.168.50.10:8765", "Origin": origin},
+                method="OPTIONS",
+            ) as resp:
+                allowed = resp.headers["Access-Control-Allow-Origin"]
+        finally:
+            lan_server.stop()
+
+        self.assertEqual(resp.status, 204)
+        self.assertEqual(allowed, origin)
 
 
 if __name__ == "__main__":

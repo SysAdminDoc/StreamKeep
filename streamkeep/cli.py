@@ -185,9 +185,7 @@ def _run_server(args):
     from .local_server import LocalCompanionServer
 
     bind_lan = args.bind == "0.0.0.0"
-    server = LocalCompanionServer(bind_lan=bind_lan)
-    if args.port:
-        server.port = int(args.port)
+    server = LocalCompanionServer(bind_lan=bind_lan, port=args.port or 0)
 
     # In server-only mode, received URLs are just logged
     server.url_received.connect(
@@ -198,7 +196,7 @@ def _run_server(args):
     _print_line(f"StreamKeep v{VERSION} — server mode")
     _print_line(f"Listening on {'0.0.0.0' if bind_lan else '127.0.0.1'}:{server.port}")
     _print_line(f"Token: {server.token}")
-    _print_line(f"Web UI: http://{'0.0.0.0' if bind_lan else '127.0.0.1'}:{server.port}/")
+    _print_line(f"Web UI: {server.url}")
     _print_line("Press Ctrl+C to stop.")
 
     sys.exit(app.exec())

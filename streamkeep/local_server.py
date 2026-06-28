@@ -16,10 +16,13 @@ hands received URLs to the main-thread Qt via a pyqtSignal.
 """
 
 import hmac
+import ipaddress
 import json
 import secrets
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
+from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -31,6 +34,106 @@ class _ServerSignals(QObject):
 class _CompanionHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+
+_LOCAL_HOSTS = frozenset(("", "127.0.0.1", "::1", "localhost"))
+
+
+def _canonical_host(host):
+    host = str(host or "").strip().lower().rstrip(".")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host:
+        return ""
+    host = host.split("%", 1)[0]
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+def _normalize_host_header(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("["):
+        end = raw.find("]")
+        return _canonical_host(raw[1:end] if end > 0 else raw)
+    if raw.count(":") == 1:
+        raw = raw.rsplit(":", 1)[0]
+    return _canonical_host(raw)
+
+
+def _usable_interface_addr(addr):
+    try:
+        ip = ipaddress.ip_address(str(addr).split("%", 1)[0])
+    except ValueError:
+        return False
+    return not (ip.is_unspecified or ip.is_multicast)
+
+
+def _discover_lan_hosts():
+    hosts = set()
+    names = {socket.gethostname(), socket.getfqdn()}
+    for name in names:
+        norm_name = _canonical_host(name)
+        if norm_name and norm_name not in _LOCAL_HOSTS:
+            hosts.add(norm_name)
+        try:
+            for info in socket.getaddrinfo(name, None):
+                addr = info[4][0]
+                if _usable_interface_addr(addr):
+                    hosts.add(_canonical_host(addr))
+        except OSError:
+            pass
+
+    probes = (
+        (socket.AF_INET, ("8.8.8.8", 80)),
+        (socket.AF_INET6, ("2001:4860:4860::8888", 80)),
+    )
+    for family, target in probes:
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as sock:
+                sock.connect(target)
+                addr = sock.getsockname()[0]
+            if _usable_interface_addr(addr):
+                hosts.add(_canonical_host(addr))
+        except OSError:
+            pass
+
+    return hosts
+
+
+def _build_allowed_hosts(bind_lan=False, extra_hosts=None):
+    hosts = {_canonical_host(host) for host in _LOCAL_HOSTS}
+    if bind_lan:
+        hosts.update(_discover_lan_hosts())
+    for host in extra_hosts or ():
+        norm = _normalize_host_header(host)
+        if norm:
+            hosts.add(norm)
+    return frozenset(hosts)
+
+
+def _preferred_display_host(allowed_hosts):
+    for host in sorted(allowed_hosts):
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.version == 4 and not ip.is_loopback:
+            return host
+    for host in sorted(allowed_hosts):
+        if host and host not in _LOCAL_HOSTS:
+            return host
+    return "127.0.0.1"
+
+
+def _format_url_host(host):
+    host = _canonical_host(host) or "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
 
 
 class LocalCompanionServer:
@@ -46,21 +149,33 @@ class LocalCompanionServer:
     Token / port are accessible via `server.token` / `server.port`.
     """
 
-    def __init__(self, *, bind_lan=False):
+    def __init__(self, *, bind_lan=False, allowed_hosts=None, port=0):
         self.token = secrets.token_hex(16)
-        self.port = 0
+        self.port = int(port or 0)
         self._httpd = None
         self._thread = None
         self._signals = _ServerSignals()
         self.url_received = self._signals.url_received
         self.state_provider = None   # callable -> dict (F37)
-        self._bind_addr = "0.0.0.0" if bind_lan else "127.0.0.1"
+        self._bind_lan = bool(bind_lan)
+        self._bind_addr = "0.0.0.0" if self._bind_lan else "127.0.0.1"
+        self._allowed_hosts = _build_allowed_hosts(self._bind_lan, allowed_hosts)
+        self.allowed_hosts = tuple(sorted(host for host in self._allowed_hosts if host))
+        self.display_host = (
+            _preferred_display_host(self._allowed_hosts)
+            if self._bind_lan else "127.0.0.1"
+        )
 
     def start(self):
         if self._httpd is not None:
             self.stop()
-        handler_cls = _build_handler(self.token, self._signals, self.state_provider)
-        self._httpd = _CompanionHTTPServer((self._bind_addr, 0), handler_cls)
+        handler_cls = _build_handler(
+            self.token,
+            self._signals,
+            self.state_provider,
+            allowed_hosts=self._allowed_hosts,
+        )
+        self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
         self.port = self._httpd.server_address[1]
         self._thread = Thread(
             target=self._httpd.serve_forever,
@@ -85,16 +200,36 @@ class LocalCompanionServer:
         self._thread = None
         self.port = 0
 
+    @property
+    def url(self):
+        if int(self.port or 0) <= 0:
+            return ""
+        return f"http://{_format_url_host(self.display_host)}:{self.port}/"
 
-def _build_handler(expected_token, signals, state_provider=None):
+
+def _build_handler(expected_token, signals, state_provider=None, *, allowed_hosts=None):
+    allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts(False))
+
     class _Handler(BaseHTTPRequestHandler):
         # Silence stdlib access-log noise — we log via the Qt log panel.
         def log_message(self, *_args, **_kwargs):
             return
 
         def _host_ok(self):
-            host = (self.headers.get("Host") or "").split(":")[0].lower()
-            return host in ("127.0.0.1", "localhost", "")
+            return _normalize_host_header(self.headers.get("Host")) in allowed_hosts
+
+        def _origin_ok(self, origin):
+            if not origin:
+                return False
+            if origin.startswith("chrome-extension://"):
+                return True
+            try:
+                parsed = urlsplit(origin)
+            except ValueError:
+                return False
+            if parsed.scheme not in ("http", "https"):
+                return False
+            return _normalize_host_header(parsed.netloc) in allowed_hosts
 
         def _reject_bad_host(self):
             if not self._host_ok():
@@ -113,13 +248,7 @@ def _build_handler(expected_token, signals, state_provider=None):
             # Restrict CORS to the requesting localhost origin rather than
             # allowing every website to call the API.
             origin = self.headers.get("Origin", "")
-            allowed = origin if origin and (
-                origin.startswith("http://localhost") or
-                origin.startswith("http://127.0.0.1") or
-                origin.startswith("https://localhost") or
-                origin.startswith("https://127.0.0.1") or
-                origin.startswith("chrome-extension://")
-            ) else "http://localhost"
+            allowed = origin if self._origin_ok(origin) else "http://localhost"
             self.send_header("Access-Control-Allow-Origin", allowed)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
