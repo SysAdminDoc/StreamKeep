@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
 from ... import VERSION
 from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
-from ...extractors.ytdlp import YtDlpExtractor
+from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
 from ...http import set_native_proxy
 from ...paths import _CREATE_NO_WINDOW, CONFIG_FILE
 from ...config import save_config as _save_config
@@ -1487,14 +1487,7 @@ def build_settings_tab(win):
         ff_ver = r.stdout.split("\n")[0] if r.returncode == 0 else "Not found"
     except Exception:
         ff_ver = "Not found"
-    try:
-        r = subprocess.run(
-            ["yt-dlp", "--version"], capture_output=True, text=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        yt_ver = f"yt-dlp {r.stdout.strip()}" if r.returncode == 0 else "Not installed"
-    except Exception:
-        yt_ver = "Not installed"
+    yt_status = ytdlp_runtime_status()
     ff_card, _, _ = make_metric_card(
         "ffmpeg",
         "Ready" if ff_ver != "Not found" else "Missing",
@@ -1502,8 +1495,8 @@ def build_settings_tab(win):
     )
     yt_card, _, _ = make_metric_card(
         "yt-dlp",
-        "Ready" if yt_ver != "Not installed" else "Missing",
-        yt_ver[:48],
+        yt_status.get("summary", "Missing"),
+        yt_status.get("detail", "")[:96],
     )
     tools_metrics = QHBoxLayout()
     tools_metrics.setSpacing(10)

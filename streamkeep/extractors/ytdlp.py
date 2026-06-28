@@ -8,6 +8,7 @@ Handles anything the native extractors don't. Includes:
 """
 
 import json
+import importlib.util
 import logging
 import os
 import re
@@ -21,6 +22,207 @@ from ..utils import fmt_duration, scan_browser_cookies
 from .base import Extractor
 
 logger = logging.getLogger(__name__)
+
+
+_YTDLP_INSTALL_HINT = 'Install or update with: pip install -U "yt-dlp[default]"'
+_JS_RUNTIME_HINT = "Install Deno 2.3+ or Node.js 22+ for full YouTube support."
+
+
+def _parse_version_parts(text):
+    match = re.search(r"v?(\d+(?:[.\-]\d+){1,3})", str(text or ""))
+    if not match:
+        return (), ""
+    version = match.group(1).replace("-", ".")
+    parts = []
+    for part in version.split(".")[:4]:
+        try:
+            parts.append(int(part))
+        except ValueError:
+            break
+    return tuple(parts), version
+
+
+def _version_at_least(parts, minimum):
+    if not parts:
+        return False
+    max_len = max(len(parts), len(minimum))
+    padded = tuple(parts) + (0,) * (max_len - len(parts))
+    min_padded = tuple(minimum) + (0,) * (max_len - len(minimum))
+    return padded >= min_padded
+
+
+def _is_youtube_url(url):
+    try:
+        host = urllib.parse.urlparse(str(url or "").strip()).netloc.lower()
+    except Exception:
+        return False
+    return host == "youtu.be" or host.endswith(".youtu.be") or host == "youtube.com" or host.endswith(".youtube.com")
+
+
+def _has_python_module(module_name):
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def _probe_command_version(command, args=None):
+    result = run_capture_interruptible([command] + list(args or ["--version"]), timeout=5)
+    if result.interrupted:
+        return {
+            "name": command,
+            "available": False,
+            "supported": False,
+            "version": "",
+            "message": "Runtime probe was interrupted.",
+        }
+    if result.returncode != 0 or result.timed_out:
+        return {
+            "name": command,
+            "available": False,
+            "supported": False,
+            "version": "",
+            "message": (result.stderr or result.error or "not found").strip(),
+        }
+    text = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+    parts, version = _parse_version_parts(text)
+    return {
+        "name": command,
+        "available": True,
+        "supported": True,
+        "version": version,
+        "parts": parts,
+        "raw": text,
+        "message": "",
+    }
+
+
+def _probe_js_runtime():
+    candidates = [
+        ("deno", ("deno",), (2, 3, 0), None),
+        ("node", ("node", "nodejs"), (22, 0, 0), None),
+        ("quickjs", ("qjs",), (2023, 12, 9), None),
+        ("bun", ("bun",), (1, 2, 11), (1, 3, 14)),
+    ]
+    unsupported = []
+    for name, commands, minimum, maximum in candidates:
+        for command in commands:
+            probed = _probe_command_version(command)
+            if not probed.get("available"):
+                continue
+            parts = tuple(probed.get("parts") or ())
+            if name == "quickjs" and "quickjs-ng" in probed.get("raw", "").lower():
+                supported = True
+            else:
+                supported = _version_at_least(parts, minimum)
+            if maximum and parts and parts > maximum:
+                supported = False
+            probed.update({
+                "name": name,
+                "command": command,
+                "supported": supported,
+                "minimum": ".".join(str(x) for x in minimum),
+            })
+            if supported:
+                if name == "bun":
+                    probed["message"] = "Bun is deprecated by yt-dlp; prefer Deno or Node.js."
+                return probed
+            unsupported.append(probed)
+    if unsupported:
+        first = unsupported[0]
+        return {
+            "name": first.get("name", ""),
+            "command": first.get("command", ""),
+            "available": True,
+            "supported": False,
+            "version": first.get("version", ""),
+            "message": (
+                f"{first.get('name', 'JavaScript runtime')} {first.get('version', '')} "
+                f"is below the supported minimum {first.get('minimum', '')}."
+            ).strip(),
+        }
+    return {
+        "name": "",
+        "command": "",
+        "available": False,
+        "supported": False,
+        "version": "",
+        "message": _JS_RUNTIME_HINT,
+    }
+
+
+def ytdlp_runtime_status():
+    """Return yt-dlp CLI, external-component, and JS-runtime readiness."""
+    result = run_capture_interruptible(["yt-dlp", "--version"], timeout=5)
+    if result.interrupted:
+        return {
+            "state": "missing",
+            "summary": "Interrupted",
+            "detail": "yt-dlp readiness probe was interrupted.",
+            "yt_dlp_version": "",
+            "ejs_available": False,
+            "js_runtime": _probe_js_runtime(),
+            "problems": ["yt-dlp readiness probe was interrupted."],
+        }
+    if result.returncode != 0 or result.timed_out:
+        return {
+            "state": "missing",
+            "summary": "Missing",
+            "detail": f"yt-dlp was not found. {_YTDLP_INSTALL_HINT}.",
+            "yt_dlp_version": "",
+            "ejs_available": False,
+            "js_runtime": _probe_js_runtime(),
+            "problems": ["yt-dlp was not found."],
+        }
+
+    _parts, version = _parse_version_parts(result.stdout)
+    version = version or result.stdout.strip().splitlines()[0][:32]
+    yt_dlp_module = _has_python_module("yt_dlp")
+    ejs_available = _has_python_module("yt_dlp_ejs") or not yt_dlp_module
+    runtime = _probe_js_runtime()
+    problems = []
+    if not ejs_available:
+        problems.append('yt-dlp-ejs is missing; install with pip install -U "yt-dlp[default]".')
+    if not runtime.get("supported"):
+        problems.append(runtime.get("message") or _JS_RUNTIME_HINT)
+
+    if problems:
+        return {
+            "state": "limited",
+            "summary": "Limited",
+            "detail": f"yt-dlp {version} found. " + " ".join(problems),
+            "yt_dlp_version": version,
+            "ejs_available": ejs_available,
+            "js_runtime": runtime,
+            "problems": problems,
+        }
+
+    runtime_label = runtime.get("name") or "JavaScript runtime"
+    runtime_version = runtime.get("version") or "available"
+    return {
+        "state": "ready",
+        "summary": "Ready",
+        "detail": f"yt-dlp {version} with yt-dlp-ejs and {runtime_label} {runtime_version}.",
+        "yt_dlp_version": version,
+        "ejs_available": ejs_available,
+        "js_runtime": runtime,
+        "problems": [],
+    }
+
+
+def ytdlp_runtime_args(status=None):
+    status = status or ytdlp_runtime_status()
+    runtime = status.get("js_runtime") or {}
+    name = runtime.get("name", "")
+    if not runtime.get("supported") or not name or name == "deno":
+        return []
+    return ["--js-runtimes", name]
+
+
+def format_ytdlp_runtime_warning(status):
+    if status.get("state") == "ready":
+        return ""
+    return "yt-dlp runtime support is limited: " + status.get("detail", "")
 
 
 class YtDlpExtractor(Extractor):
@@ -53,8 +255,10 @@ class YtDlpExtractor(Extractor):
             logger.debug("extract_channel_id failed for %r: %s", url, e)
             return "download"
 
-    def _build_cmd(self, url):
+    def _build_cmd(self, url, include_runtime=False, runtime_status=None):
         cmd = ["yt-dlp", "--dump-json", "--no-download"]
+        if include_runtime and _is_youtube_url(url):
+            cmd.extend(ytdlp_runtime_args(runtime_status))
         if self.cookies_file and os.path.isfile(self.cookies_file):
             cmd.extend(["--cookies", self.cookies_file])
         elif self.cookies_browser:
@@ -74,11 +278,13 @@ class YtDlpExtractor(Extractor):
         lower = stderr.lower()
         return any(phrase.lower() in lower for phrase in self._AUTH_ERRORS)
 
-    def _try_with_browser(self, url, browser_name, log_fn=None):
+    def _try_with_browser(self, url, browser_name, log_fn=None, runtime_status=None):
         """Attempt yt-dlp extraction with a specific browser's cookies.
         Returns (data_dict, None) or (None, error_str)."""
-        cmd = ["yt-dlp", "--dump-json", "--no-download",
-               "--cookies-from-browser", browser_name, "--", url]
+        cmd = ["yt-dlp", "--dump-json", "--no-download"]
+        if log_fn and _is_youtube_url(url):
+            cmd.extend(ytdlp_runtime_args(runtime_status))
+        cmd.extend(["--cookies-from-browser", browser_name, "--", url])
         try:
             result = run_capture_interruptible(cmd, timeout=60)
             if result.interrupted:
@@ -246,7 +452,7 @@ class YtDlpExtractor(Extractor):
                 return p
         return None
 
-    def _auto_retry_with_browsers(self, url, original_stderr, log_fn=None):
+    def _auto_retry_with_browsers(self, url, original_stderr, log_fn=None, runtime_status=None):
         """Scan for installed browsers and try each one's cookies until one works."""
         err_line = original_stderr.strip().split("\n")[-1] if original_stderr else ""
         self._log(log_fn, f"Auth required: {err_line}")
@@ -267,7 +473,7 @@ class YtDlpExtractor(Extractor):
             if http_interrupted():
                 return None
             self._log(log_fn, f"Trying cookies from {display} ({ytdlp_name})...")
-            data, err = self._try_with_browser(url, ytdlp_name, log_fn)
+            data, err = self._try_with_browser(url, ytdlp_name, log_fn, runtime_status)
             if http_interrupted():
                 return None
             if data:
@@ -283,7 +489,7 @@ class YtDlpExtractor(Extractor):
                     if tmp_profile:
                         browser_arg = f"{ytdlp_name}:{tmp_profile}"
                         self._log(log_fn, "  Retrying with copied profile...")
-                        data2, err2 = self._try_with_browser(url, browser_arg, log_fn)
+                        data2, err2 = self._try_with_browser(url, browser_arg, log_fn, runtime_status)
                         if data2:
                             self._log(
                                 log_fn,
@@ -313,6 +519,13 @@ class YtDlpExtractor(Extractor):
             "yt-dlp", "--flat-playlist", "--dump-single-json",
             "--playlist-end", str(limit), "--no-warnings",
         ]
+        runtime_status = None
+        if log_fn and _is_youtube_url(url):
+            runtime_status = ytdlp_runtime_status()
+            warning = format_ytdlp_runtime_warning(runtime_status)
+            if warning:
+                self._log(log_fn, warning)
+            cmd.extend(ytdlp_runtime_args(runtime_status))
         if self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         if self.proxy:
@@ -355,11 +568,20 @@ class YtDlpExtractor(Extractor):
             return None
 
         self._log(log_fn, f"Running yt-dlp extraction for: {url}")
+        runtime_status = None
+        if log_fn and _is_youtube_url(url):
+            runtime_status = ytdlp_runtime_status()
+            warning = format_ytdlp_runtime_warning(runtime_status)
+            if warning:
+                self._log(log_fn, warning)
 
         if self.cookies_browser:
             self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
         try:
-            result = run_capture_interruptible(self._build_cmd(url), timeout=60)
+            result = run_capture_interruptible(
+                self._build_cmd(url, include_runtime=bool(log_fn), runtime_status=runtime_status),
+                timeout=60,
+            )
             if result.interrupted:
                 return None
             if result.timed_out:
@@ -368,7 +590,7 @@ class YtDlpExtractor(Extractor):
             if result.returncode == 0:
                 data = json.loads(result.stdout)
             elif self._is_auth_error(result.stderr):
-                data = self._auto_retry_with_browsers(url, result.stderr, log_fn)
+                data = self._auto_retry_with_browsers(url, result.stderr, log_fn, runtime_status)
                 if data is None:
                     return None
             else:

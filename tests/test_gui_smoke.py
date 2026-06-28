@@ -6,6 +6,18 @@ from PyQt6.QtCore import Qt
 from streamkeep.models import HistoryEntry, MonitorEntry
 
 
+def _ready_ytdlp_status():
+    return {
+        "state": "ready",
+        "summary": "Ready",
+        "detail": "yt-dlp 2026.01.01 with yt-dlp-ejs and deno 2.3.0.",
+        "yt_dlp_version": "2026.01.01",
+        "ejs_available": True,
+        "js_runtime": {"name": "deno", "version": "2.3.0", "supported": True},
+        "problems": [],
+    }
+
+
 def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
     from streamkeep import accounts, notifications
     from streamkeep.i18n import install_translator
@@ -44,7 +56,9 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             mock.patch(
                 "streamkeep.ui.tabs.settings.subprocess.run",
                 return_value=SimpleNamespace(returncode=0, stdout="2026.01.01\n"),
-            ):
+            ), \
+            mock.patch("streamkeep.ui.tabs.settings.ytdlp_runtime_status", _ready_ytdlp_status), \
+            mock.patch("streamkeep.ui.onboarding.ytdlp_runtime_status", _ready_ytdlp_status):
         main_window._db.init_db()
 
         window = main_window.StreamKeep()

@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..paths import _CREATE_NO_WINDOW
+from ..extractors.ytdlp import ytdlp_runtime_status
 from ..utils import default_output_dir
 from .widgets import (
     make_dialog_hero,
@@ -87,6 +88,7 @@ class OnboardingWizard(QDialog):
         layout.addLayout(nav)
 
         self._check_ffmpeg()
+        self._check_ytdlp_runtime()
         self._update_summary()
         self._update_nav()
 
@@ -103,6 +105,8 @@ class OnboardingWizard(QDialog):
         )
         self._ffmpeg_banner, self._ffmpeg_title, self._ffmpeg_body = make_status_banner()
         content.addWidget(self._ffmpeg_banner)
+        self._ytdlp_banner, self._ytdlp_title, self._ytdlp_body = make_status_banner()
+        content.addWidget(self._ytdlp_banner)
 
         checklist, checklist_content = make_dialog_section(
             "What this setup covers",
@@ -241,6 +245,27 @@ class OnboardingWizard(QDialog):
             self._ffmpeg_body,
             title=title,
             body=message,
+            tone=tone,
+        )
+
+    def _check_ytdlp_runtime(self):
+        status = ytdlp_runtime_status()
+        state = status.get("state", "missing")
+        if state == "ready":
+            title = "yt-dlp fallback is ready"
+            tone = "success"
+        elif state == "limited":
+            title = "yt-dlp fallback is limited"
+            tone = "warning"
+        else:
+            title = "yt-dlp fallback is missing"
+            tone = "warning"
+        update_status_banner(
+            self._ytdlp_banner,
+            self._ytdlp_title,
+            self._ytdlp_body,
+            title=title,
+            body=status.get("detail", "Install yt-dlp for long-tail site support."),
             tone=tone,
         )
 

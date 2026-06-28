@@ -119,6 +119,7 @@ Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are
 - `ffmpeg` and `ffprobe` in `PATH`.
 - `curl` in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring` for secure credential storage on non-Windows systems.
+- For full YouTube fallback support through yt-dlp: install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`. Settings and onboarding report when yt-dlp, `yt-dlp-ejs`, or a JavaScript runtime is missing.
 - Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
 
 Install Python dependencies:

@@ -42,6 +42,7 @@ from streamkeep.extractors.soundcloud import SoundCloudExtractor
 from streamkeep.extractors.reddit import RedditExtractor
 from streamkeep.extractors.audius import AudiusExtractor
 from streamkeep.extractors.podcast import PodcastRSSExtractor
+from streamkeep.extractors import ytdlp as ytdlp_mod
 from streamkeep.extractors.ytdlp import YtDlpExtractor
 from streamkeep.http import CommandResult
 
@@ -1268,6 +1269,88 @@ class TestYtDlpExtractorURL(unittest.TestCase):
 
     def test_supports_live_check(self):
         self.assertFalse(self.ext.supports_live_check())
+
+
+class TestYtDlpRuntimeReadiness(unittest.TestCase):
+    """yt-dlp version, EJS, and JavaScript runtime readiness helpers."""
+
+    def test_parse_version_parts_handles_cli_formats(self):
+        self.assertEqual(ytdlp_mod._parse_version_parts("2026.06.09")[0], (2026, 6, 9))
+        self.assertEqual(ytdlp_mod._parse_version_parts("v22.3.0")[0], (22, 3, 0))
+        self.assertEqual(ytdlp_mod._parse_version_parts("deno 2.3.1 (stable)")[0], (2, 3, 1))
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_status_reports_missing_ytdlp_with_actionable_hint(self, mock_run):
+        mock_run.side_effect = [
+            CommandResult(returncode=127, stderr="not found"),
+            CommandResult(returncode=127, stderr="deno missing"),
+            CommandResult(returncode=127, stderr="node missing"),
+            CommandResult(returncode=127, stderr="nodejs missing"),
+            CommandResult(returncode=127, stderr="qjs missing"),
+            CommandResult(returncode=127, stderr="bun missing"),
+        ]
+
+        status = ytdlp_mod.ytdlp_runtime_status()
+
+        self.assertEqual(status["state"], "missing")
+        self.assertIn("pip install -U", status["detail"])
+
+    @patch(f"{_YTDLP}._has_python_module")
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_status_reports_missing_ejs_and_js_runtime(self, mock_run, mock_has_module):
+        mock_has_module.side_effect = lambda name: name == "yt_dlp"
+        mock_run.side_effect = [
+            CommandResult(returncode=0, stdout="2026.06.09"),
+            CommandResult(returncode=127, stderr="deno missing"),
+            CommandResult(returncode=127, stderr="node missing"),
+            CommandResult(returncode=127, stderr="nodejs missing"),
+            CommandResult(returncode=127, stderr="qjs missing"),
+            CommandResult(returncode=127, stderr="bun missing"),
+        ]
+
+        status = ytdlp_mod.ytdlp_runtime_status()
+
+        self.assertEqual(status["state"], "limited")
+        self.assertIn("yt-dlp-ejs", status["detail"])
+        self.assertIn("Deno 2.3+", status["detail"])
+
+    @patch(f"{_YTDLP}._has_python_module")
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_status_accepts_node_runtime_and_builds_runtime_args(self, mock_run, mock_has_module):
+        mock_has_module.return_value = True
+        mock_run.side_effect = [
+            CommandResult(returncode=0, stdout="2026.06.09"),
+            CommandResult(returncode=127, stderr="deno missing"),
+            CommandResult(returncode=0, stdout="v22.3.0"),
+        ]
+
+        status = ytdlp_mod.ytdlp_runtime_status()
+
+        self.assertEqual(status["state"], "ready")
+        self.assertEqual(status["js_runtime"]["name"], "node")
+        self.assertEqual(ytdlp_mod.ytdlp_runtime_args(status), ["--js-runtimes", "node"])
+
+    @patch(f"{_YTDLP}.ytdlp_runtime_status")
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_resolve_logs_youtube_runtime_warning(self, mock_run, mock_status):
+        ext = YtDlpExtractor()
+        mock_status.return_value = {
+            "state": "limited",
+            "summary": "Limited",
+            "detail": "yt-dlp 2026.06.09 found. Install Deno 2.3+.",
+            "js_runtime": {"supported": False, "name": ""},
+            "problems": ["Install Deno 2.3+."],
+        }
+        mock_run.side_effect = [
+            CommandResult(returncode=0, stdout="2026.06.09"),
+            CommandResult(returncode=1, stderr="ERROR: Video unavailable"),
+        ]
+        logs = []
+
+        info = ext.resolve("https://www.youtube.com/watch?v=abc", log_fn=logs.append)
+
+        self.assertIsNone(info)
+        self.assertTrue(any("yt-dlp runtime support is limited" in line for line in logs))
 
 
 class TestYtDlpExtractorResolve(unittest.TestCase):

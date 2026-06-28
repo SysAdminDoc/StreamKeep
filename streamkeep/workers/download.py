@@ -122,6 +122,21 @@ class DownloadWorker(QThread):
             cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
+        try:
+            from ..extractors.ytdlp import (
+                _is_youtube_url,
+                format_ytdlp_runtime_warning,
+                ytdlp_runtime_args,
+                ytdlp_runtime_status,
+            )
+            if _is_youtube_url(self.ytdlp_source):
+                runtime_status = ytdlp_runtime_status()
+                warning = format_ytdlp_runtime_warning(runtime_status)
+                if warning:
+                    self.log.emit(f"[WARN] {warning}")
+                cmd.extend(ytdlp_runtime_args(runtime_status))
+        except Exception as e:
+            self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         cmd.append(self.ytdlp_source)
 
         try:
