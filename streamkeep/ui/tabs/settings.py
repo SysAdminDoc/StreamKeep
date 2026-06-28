@@ -36,7 +36,10 @@ from ...postprocess import (
 )
 from ...theme import CAT
 from ...local_server import LocalCompanionServer
-from ...updater import UpdateCheckWorker, DownloadUpdateWorker, arm_self_replace
+from ...updater import (
+    DownloadUpdateWorker, UpdateCheckWorker, arm_self_replace,
+    sha256_metadata_error,
+)
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
     default_output_dir as _default_output_dir,
@@ -1229,6 +1232,9 @@ class SettingsTabMixin:
             label = f"StreamKeep {tag} is available (you're on v{VERSION})"
             if first_note:
                 label = f"{label} — {first_note}"
+            hash_error = sha256_metadata_error(payload.get("asset_sha256", ""))
+            if hash_error:
+                label = f"{label} — install blocked: {hash_error}"
             self.update_banner_label.setText(label)
             self.update_banner.setVisible(True)
         self._notify_center(f"Update available: StreamKeep {tag}", "info")
@@ -1239,9 +1245,24 @@ class SettingsTabMixin:
         if not asset_url:
             self._set_status("Update available but no Windows asset was attached.", "warning")
             return
+        hash_error = sha256_metadata_error(payload.get("asset_sha256", ""))
+        if hash_error:
+            msg = f"Update install blocked: {hash_error}"
+            self._log(f"[UPDATE] {msg}")
+            self._set_status(msg, "error")
+            if hasattr(self, "update_banner_label"):
+                self.update_banner_label.setText(msg)
+            if hasattr(self, "update_banner_install_btn"):
+                self.update_banner_install_btn.setEnabled(True)
+                self.update_banner_install_btn.setText("Download & install")
+            return
         self.update_banner_install_btn.setEnabled(False)
         self.update_banner_install_btn.setText("Downloading...")
-        worker = DownloadUpdateWorker(asset_url, payload.get("asset_size", 0))
+        worker = DownloadUpdateWorker(
+            asset_url,
+            payload.get("asset_size", 0),
+            payload.get("asset_sha256", ""),
+        )
         worker.progress.connect(self._on_update_download_progress)
         worker.done.connect(self._on_update_download_done)
         self._update_download_worker = worker

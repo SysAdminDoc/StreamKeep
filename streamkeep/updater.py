@@ -30,6 +30,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 RELEASES_URL = "https://api.github.com/repos/SysAdminDoc/StreamKeep/releases/latest"
 USER_AGENT = "StreamKeep-updater"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _coerce_nonnegative_int(value, default=0):
@@ -53,6 +54,15 @@ def _parse_semver(s):
 
 def is_newer(remote, local):
     return _parse_semver(remote) > _parse_semver(local)
+
+
+def sha256_metadata_error(value):
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return "Release is missing SHA-256 integrity metadata."
+    if not _SHA256_RE.fullmatch(candidate):
+        return "Release SHA-256 integrity metadata is malformed."
+    return ""
 
 
 class UpdateCheckWorker(QThread):
@@ -127,8 +137,8 @@ class UpdateCheckWorker(QThread):
 
 class DownloadUpdateWorker(QThread):
     """Downloads the attached exe to `<exe>.new` next to the running
-    process, verifies size, then arms a self-replace batch (Windows) or
-    shell script (POSIX) that the UI invokes on user confirm."""
+    process, verifies size and SHA-256, then arms a self-replace batch
+    (Windows) or shell script (POSIX) that the UI invokes on user confirm."""
 
     progress = pyqtSignal(int, str)     # percent, status
     done = pyqtSignal(bool, str)        # success, error_or_path
@@ -162,6 +172,10 @@ class DownloadUpdateWorker(QThread):
             self.done.emit(False, "Auto-update only supported for the packaged exe.")
             return
         new_path = exe_path + ".new"
+        hash_error = sha256_metadata_error(self.expected_sha256)
+        if hash_error:
+            self.done.emit(False, f"Update blocked: {hash_error}")
+            return
         cancelled = False
         try:
             req = urllib.request.Request(
@@ -215,36 +229,34 @@ class DownloadUpdateWorker(QThread):
                 pass
             self.done.emit(False, "Downloaded file is smaller than expected.")
             return
-        # SHA-256 integrity verification when the release includes a hash
-        if self.expected_sha256 and len(self.expected_sha256) == 64:
-            self.progress.emit(99, "Verifying integrity...")
-            sha = hashlib.sha256()
-            try:
-                with open(new_path, "rb") as f:
-                    while True:
-                        buf = f.read(256 * 1024)
-                        if not buf:
-                            break
-                        sha.update(buf)
-                actual_hash = sha.hexdigest().lower()
-                if actual_hash != self.expected_sha256:
-                    try:
-                        os.remove(new_path)
-                    except OSError:
-                        pass
-                    self.done.emit(
-                        False,
-                        f"SHA-256 mismatch: expected {self.expected_sha256[:16]}... "
-                        f"got {actual_hash[:16]}...",
-                    )
-                    return
-            except OSError as e:
+        self.progress.emit(99, "Verifying integrity...")
+        sha = hashlib.sha256()
+        try:
+            with open(new_path, "rb") as f:
+                while True:
+                    buf = f.read(256 * 1024)
+                    if not buf:
+                        break
+                    sha.update(buf)
+            actual_hash = sha.hexdigest().lower()
+            if actual_hash != self.expected_sha256:
                 try:
                     os.remove(new_path)
                 except OSError:
                     pass
-                self.done.emit(False, f"Hash verification failed: {e}")
+                self.done.emit(
+                    False,
+                    f"SHA-256 mismatch: expected {self.expected_sha256[:16]}... "
+                    f"got {actual_hash[:16]}...",
+                )
                 return
+        except OSError as e:
+            try:
+                os.remove(new_path)
+            except OSError:
+                pass
+            self.done.emit(False, f"Hash verification failed: {e}")
+            return
         self.progress.emit(100, "Downloaded")
         self.done.emit(True, new_path)
 

@@ -161,6 +161,7 @@ Release packages must include:
 - `browser-extension/` and `browser-extension/icons/`.
 - `packaging/` manifests when building MSIX or Flatpak artifacts.
 - Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, keyring, mpv/libmpv, and platform signing tools.
+- A `.sha256` sidecar for each downloadable executable; the in-app updater refuses to install releases without valid SHA-256 metadata.
 
 ## Validation
 
