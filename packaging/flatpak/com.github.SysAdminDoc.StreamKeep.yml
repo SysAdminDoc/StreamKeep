@@ -33,7 +33,7 @@ modules:
     sources:
       - type: archive
         url: https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
-        sha256: PLACEHOLDER  # update with actual hash
+        sha256: 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
 
   - name: streamkeep
     buildsystem: simple
@@ -41,7 +41,7 @@ modules:
       - pip3 install --no-index --find-links=. --prefix=/app yt-dlp send2trash websocket-client keyring Pillow
       - pip3 install --no-index --prefix=/app .
       - install -Dm644 packaging/flatpak/com.github.SysAdminDoc.StreamKeep.desktop /app/share/applications/com.github.SysAdminDoc.StreamKeep.desktop
-      - install -Dm644 assets/icon.ico /app/share/icons/hicolor/256x256/apps/com.github.SysAdminDoc.StreamKeep.png
+      - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.github.SysAdminDoc.StreamKeep.png
       - install -Dm644 packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml /app/share/metainfo/com.github.SysAdminDoc.StreamKeep.metainfo.xml
     sources:
       - type: dir

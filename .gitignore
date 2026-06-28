@@ -9,6 +9,7 @@ build/
 *.log
 *.exe
 *.dmg
+!StreamKeep.spec
 CLAUDE.md
 CODEX_CHANGELOG.md
 ROADMAP-COMPLETED.md

@@ -10,7 +10,8 @@ Produces: dist/StreamKeep.msix
 Requires:
     - Windows 10 SDK (makeappx.exe in PATH or at default install location)
     - Pillow (for icon generation)
-    - signtool.exe for signing (optional)
+    - signtool.exe for signing (optional; set STREAMKEEP_SIGN=1, or
+      STREAMKEEP_SIGN_PFX / STREAMKEEP_SIGN_CERT_SUBJECT)
 """
 
 import os
@@ -48,6 +49,27 @@ def _find_makeappx():
     return None
 
 
+def _find_signtool():
+    configured = os.environ.get("STREAMKEEP_SIGNTOOL", "").strip()
+    if configured and os.path.isfile(configured):
+        return configured
+    for candidate in ("signtool", "signtool.exe"):
+        if shutil.which(candidate):
+            return candidate
+    sdk_paths = [
+        r"C:\Program Files (x86)\Windows Kits\10\bin",
+        r"C:\Program Files\Windows Kits\10\bin",
+    ]
+    for sdk in sdk_paths:
+        if not os.path.isdir(sdk):
+            continue
+        for ver in sorted(os.listdir(sdk), reverse=True):
+            candidate = os.path.join(sdk, ver, "x64", "signtool.exe")
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
 def _generate_icons(assets_dir, source_icon):
     from PIL import Image
     src = Image.open(source_icon)
@@ -59,6 +81,41 @@ def _generate_icons(assets_dir, source_icon):
         resized = src.resize((w, h), Image.LANCZOS)
         resized.save(assets_dir / name, "PNG")
         print(f"  Generated {name} ({w}x{h})")
+
+
+def _sign_msix(path):
+    signtool = _find_signtool()
+    if not signtool:
+        print("  Signing skipped: signtool.exe not found")
+        return False
+
+    timestamp = os.environ.get(
+        "STREAMKEEP_TIMESTAMP_URL",
+        "http://timestamp.digicert.com",
+    )
+    cmd = [signtool, "sign", "/fd", "SHA256", "/td", "SHA256", "/tr", timestamp]
+    pfx = os.environ.get("STREAMKEEP_SIGN_PFX", "").strip()
+    subject = os.environ.get("STREAMKEEP_SIGN_CERT_SUBJECT", "").strip()
+    if pfx:
+        cmd.extend(["/f", pfx])
+        password = os.environ.get("STREAMKEEP_SIGN_PASSWORD", "")
+        if password:
+            cmd.extend(["/p", password])
+    elif subject:
+        cmd.extend(["/n", subject])
+    elif os.environ.get("STREAMKEEP_SIGN", "").strip() == "1":
+        cmd.append("/a")
+    else:
+        print("  Signing skipped: set STREAMKEEP_SIGN=1, STREAMKEEP_SIGN_PFX, or STREAMKEEP_SIGN_CERT_SUBJECT")
+        return False
+    cmd.append(str(path))
+    print("  Signing MSIX with signtool")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  SIGNING FAILED: {r.stderr.strip()}")
+        return False
+    print("  Signed MSIX")
+    return True
 
 
 def main():
@@ -88,7 +145,7 @@ def main():
         print("WARNING: No source icon found — MSIX will lack icons")
 
     shutil.copy2(MANIFEST, dist_dir / "AppxManifest.xml")
-    print(f"  Copied AppxManifest.xml")
+    print("  Copied AppxManifest.xml")
 
     output = dist_dir.parent / "StreamKeep.msix"
     cmd = [makeappx, "pack", "/d", str(dist_dir), "/p", str(output), "/o"]
@@ -96,7 +153,7 @@ def main():
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode == 0:
         print(f"  SUCCESS: {output}")
-        print(f"  Sign with: signtool sign /a /fd SHA256 {output}")
+        _sign_msix(output)
     else:
         print(f"  FAILED: {r.stderr}")
         sys.exit(1)

@@ -147,10 +147,12 @@ History, monitor channels, and queue data are stored in SQLite with WAL mode. Ol
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- PyInstaller directory or single-file builds for Windows.
+- PyInstaller single-file builds for Windows with `python -m PyInstaller --clean StreamKeep.spec`.
 - MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
 - Flatpak packaging under `packaging/flatpak/`.
 - Browser companion extension packaging from `browser-extension/`.
+
+MSIX signing is automatic when `signtool.exe` is available and one of `STREAMKEEP_SIGN=1`, `STREAMKEEP_SIGN_PFX`, or `STREAMKEEP_SIGN_CERT_SUBJECT` is set.
 
 Release packages must include:
 
