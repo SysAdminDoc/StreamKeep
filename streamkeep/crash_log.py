@@ -1,6 +1,5 @@
 """Global crash handler. Writes tracebacks to crash.log and shows a MessageBox."""
 
-import os
 import sys
 from datetime import datetime
 

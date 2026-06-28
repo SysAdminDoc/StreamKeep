@@ -6,27 +6,21 @@ Phase 3 will carve it into per-tab widgets. For now the split wins us a
 predictable file layout and keeps the runtime unchanged.
 """
 
-import copy
 import json
 import os
-import re
 import subprocess
-import sys
-import time
-import urllib.parse
-from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTableWidgetItem, QProgressBar,
-    QFileDialog, QFrame, QStackedWidget, QSystemTrayIcon,
-    QCheckBox, QMenu, QAbstractItemView,
+    QLabel, QLineEdit, QPushButton, QProgressBar,
+    QFrame, QStackedWidget, QSystemTrayIcon,
+    QMenu, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import (
-    QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPixmap, QPainter,
+    QColor, QFont, QIcon, QKeySequence, QPixmap, QPainter,
     QBrush, QShortcut,
 )
 
@@ -40,52 +34,29 @@ from streamkeep.config import (
     write_log_line as _write_log_line,
 )
 from streamkeep.theme import CAT
-from streamkeep.models import HistoryEntry, ResumeState
+from streamkeep.models import HistoryEntry
 from streamkeep.resume import (
     clear_resume_state,
     remaining_segments,
     save_resume_state,
     scan_for_orphan_sidecars,
 )
-from streamkeep.storage import scan_storage
-from streamkeep.chat import ChatWorker
-from streamkeep.local_server import LocalCompanionServer
 from streamkeep.notifications import NotificationCenter
-from streamkeep.updater import (
-    UpdateCheckWorker, DownloadUpdateWorker, arm_self_replace,
-)
 from streamkeep.utils import (
-    fmt_size as _fmt_size,
-    fmt_duration as _fmt_duration,
-    safe_filename as _safe_filename,
     default_output_dir as _default_output_dir,
-    render_template as _render_template,
-    build_template_context as _build_template_context,
-    scan_browser_cookies as _scan_browser_cookies,
-    free_space_bytes as _free_space_bytes,
-    estimate_download_bytes as _estimate_download_bytes,
     DEFAULT_FOLDER_TEMPLATE,
     DEFAULT_FILE_TEMPLATE,
 )
-from streamkeep.http import set_native_proxy as _set_native_proxy
 from streamkeep.extractors import (
     Extractor,
     TwitchExtractor,
     YtDlpExtractor,
 )
 from streamkeep.workers import (
-    FetchWorker,
-    VodPageWorker,
     DownloadWorker,
-    FinalizeWorker,
-    PlaylistExpandWorker as _PlaylistExpandWorker,
-    PageScrapeWorker as _PageScrapeWorker,
-    SeedArchiveWorker,
-    AutoRecordResolveWorker,
 )
 from streamkeep.postprocess import (
     PostProcessor,
-    ConvertWorker,
     VIDEO_CONTAINERS,
     AUDIO_CONTAINERS,
     AUDIO_CODECS,
@@ -93,7 +64,7 @@ from streamkeep.postprocess import (
     AUDIO_EXTS,
     available_video_codec_keys as _available_video_codec_keys,
 )
-from streamkeep.monitor import ChannelMonitor, entry_in_schedule_window
+from streamkeep.monitor import ChannelMonitor
 from streamkeep.clipboard import ClipboardMonitor
 from streamkeep import db as _db
 
@@ -108,15 +79,9 @@ NATIVE_PROXY = ""
 # (which still use `self._make_field_block(...)` etc. in 50+ places) keep
 # working until a future pass switches each call site.
 from .widgets import (
-    PLATFORM_BADGES,
     TAB_STYLE,
-    ask_premium_confirmation,
-    ask_premium_text_input,
-    path_label as _path_label,
     make_metric_card,
     make_field_block,
-    show_premium_message,
-    update_status_banner,
     wrap_scroll_page,
     style_table,
     set_metric,
@@ -126,8 +91,7 @@ from .tabs.history import build_history_tab, HistoryTabMixin
 from .tabs.monitor import build_monitor_tab, MonitorTabMixin
 from .tabs.settings import build_settings_tab, SettingsTabMixin
 from .tabs.storage import (
-    build_storage_tab, populate_storage_table, prompt_confirm_delete,
-    StorageTabMixin,
+    build_storage_tab, StorageTabMixin,
 )
 
 

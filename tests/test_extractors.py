@@ -9,26 +9,29 @@ PyQt6 (the test VM lacks it).
 """
 
 import json
+import importlib
 import sys
 import unittest
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Guard against PyQt6 being imported transitively.  Several StreamKeep
-# modules pull in PyQt6 at import time; stub them out so the test suite
-# works on headless machines without the GUI toolkit.
+# Guard against PyQt6 being imported transitively only when the GUI toolkit is
+# unavailable. If PyQt6 is installed, keep the real modules in place so later
+# QThread worker tests are not contaminated by MagicMock module stubs.
 # ---------------------------------------------------------------------------
 _PYQT_STUBS = {}
-for _mod in (
-    "PyQt6", "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
-    "PyQt6.QtNetwork", "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
-    "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebChannel",
-    "PyQt6.sip",
-):
-    if _mod not in sys.modules:
-        _PYQT_STUBS[_mod] = MagicMock()
-        sys.modules[_mod] = _PYQT_STUBS[_mod]
+try:
+    importlib.import_module("PyQt6.QtCore")
+except ImportError:
+    for _mod in (
+        "PyQt6", "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
+        "PyQt6.QtNetwork", "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets",
+        "PyQt6.QtWebEngineWidgets", "PyQt6.QtWebChannel",
+        "PyQt6.sip",
+    ):
+        if _mod not in sys.modules:
+            _PYQT_STUBS[_mod] = MagicMock()
+            sys.modules[_mod] = _PYQT_STUBS[_mod]
 
 # Now safe to import extractors.
 from streamkeep.extractors.base import Extractor
@@ -40,7 +43,6 @@ from streamkeep.extractors.reddit import RedditExtractor
 from streamkeep.extractors.audius import AudiusExtractor
 from streamkeep.extractors.podcast import PodcastRSSExtractor
 from streamkeep.extractors.ytdlp import YtDlpExtractor
-from streamkeep.models import StreamInfo, QualityInfo, VODInfo
 from streamkeep.http import CommandResult
 
 # ---------------------------------------------------------------------------

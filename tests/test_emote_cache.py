@@ -1,15 +1,18 @@
 """Tests for the BTTV/FFZ/7TV emote cache module."""
 
-import json
+import importlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-for _mod in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
+try:
+    importlib.import_module("PyQt6.QtCore")
+except ImportError:
+    for _mod in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"):
+        if _mod not in sys.modules:
+            sys.modules[_mod] = MagicMock()
 
 from streamkeep.postprocess.emote_cache import (
     fetch_bttv_emotes,

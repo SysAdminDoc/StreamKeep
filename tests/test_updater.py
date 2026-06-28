@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtCore import QCoreApplication, Qt
 
 from streamkeep.updater import DownloadUpdateWorker
 
@@ -34,13 +34,15 @@ class UpdaterTests(unittest.TestCase):
             exe_path.write_bytes(b"old")
             worker = DownloadUpdateWorker("https://example.com/StreamKeep.exe", 0)
             worker._cancel = True
-            worker.done.connect(lambda ok, msg: done_events.append((ok, msg)))
+            worker.done.connect(
+                lambda ok, msg: done_events.append((ok, msg)),
+                type=Qt.ConnectionType.DirectConnection,
+            )
 
             with mock.patch.object(worker, "_target_path", return_value=str(exe_path)), \
                  mock.patch("streamkeep.updater.urllib.request.urlopen", return_value=_FakeResponse([b"new-bits"])), \
-                 mock.patch("streamkeep.updater.sys", create=True) as mock_sys:
-                mock_sys.executable = str(exe_path)
-                mock_sys.frozen = True
+                 mock.patch("streamkeep.updater.sys.executable", str(exe_path)), \
+                 mock.patch("streamkeep.updater.sys.frozen", True, create=True):
                 worker.run()
 
             app.processEvents()
@@ -54,16 +56,18 @@ class UpdaterTests(unittest.TestCase):
             exe_path = Path(tmpdir) / "StreamKeep.exe"
             exe_path.write_bytes(b"old")
             worker = DownloadUpdateWorker("https://example.com/StreamKeep.exe", 0)
-            worker.done.connect(lambda ok, msg: done_events.append((ok, msg)))
+            worker.done.connect(
+                lambda ok, msg: done_events.append((ok, msg)),
+                type=Qt.ConnectionType.DirectConnection,
+            )
 
             with mock.patch.object(worker, "_target_path", return_value=str(exe_path)), \
                  mock.patch(
                      "streamkeep.updater.urllib.request.urlopen",
                      return_value=_FakeResponse([b"fresh-binary"], headers={"Content-Length": "not-a-number"}),
                  ), \
-                 mock.patch("streamkeep.updater.sys", create=True) as mock_sys:
-                mock_sys.executable = str(exe_path)
-                mock_sys.frozen = True
+                 mock.patch("streamkeep.updater.sys.executable", str(exe_path)), \
+                 mock.patch("streamkeep.updater.sys.frozen", True, create=True):
                 worker.run()
 
             app.processEvents()

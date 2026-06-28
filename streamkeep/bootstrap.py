@@ -21,7 +21,7 @@ def _is_frozen():
     return getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
 
 
-def bootstrap():
+def bootstrap(include_optional=True):
     """Auto-install dependencies on first run (source-checkout only)."""
     # In a PyInstaller/Nuitka/cx_Freeze exe, all deps are baked in. Any
     # ImportError at this point is a build-time bug and must NOT trigger
@@ -66,6 +66,9 @@ def bootstrap():
                     break
                 except Exception:
                     continue
+
+    if not include_optional:
+        return
 
     for mod, pkg in optional.items():
         try:

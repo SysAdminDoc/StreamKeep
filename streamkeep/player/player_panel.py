@@ -8,7 +8,7 @@ metadata display (title, channel, duration).
 import os
 
 from PyQt6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 

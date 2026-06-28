@@ -18,8 +18,6 @@ This file is a thin launcher. All code lives in the `streamkeep/` package:
 """
 
 import multiprocessing
-from pathlib import Path
-from PyQt6.QtGui import QIcon
 # MUST be called before any code that could spawn a child process in a
 # frozen exe. Without this, a PyInstaller build that ever touches
 # `multiprocessing` will re-execute the entire program in each child,
@@ -27,11 +25,25 @@ from PyQt6.QtGui import QIcon
 # becomes an uncontrollable process explosion.
 multiprocessing.freeze_support()
 
-from streamkeep.bootstrap import bootstrap
-bootstrap()
-
 import sys
 import subprocess
+from pathlib import Path
+
+from streamkeep.bootstrap import bootstrap
+
+
+def _launcher_has_cli_args():
+    """Detect CLI mode without importing PyQt-backed CLI modules yet."""
+    if len(sys.argv) <= 1:
+        return False
+    cli_triggers = {
+        "download", "dl", "server", "extractors",
+        "--url", "--server", "--list-extractors", "--version", "--help", "-h",
+    }
+    return any(arg in cli_triggers for arg in sys.argv[1:])
+
+
+bootstrap(include_optional=not _launcher_has_cli_args())
 
 
 def _branding_icon_path() -> Path:
@@ -64,6 +76,7 @@ def main():
         run_cli()
         return
 
+    from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import QApplication, QMessageBox
     from streamkeep.theme import apply_theme
     from streamkeep.ui.main_window import StreamKeep

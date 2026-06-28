@@ -1,6 +1,6 @@
 """Download tab — URL input, VOD picker, segments table, queue, log."""
 
-from PyQt6.QtCore import Qt, QStringListModel
+from PyQt6.QtCore import Qt, QUrl, QStringListModel
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
@@ -713,19 +713,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMenu,
-    QProgressBar, QPushButton, QTableWidgetItem, QWidget,
+    QFileDialog, QMenu, QProgressBar, QTableWidgetItem,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QDesktopServices, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices
 
-from ...theme import CAT
-from ...models import HistoryEntry, ResumeState
-from ...resume import (
-    clear_resume_state,
-    remaining_segments,
-    save_resume_state,
-)
+from ...models import ResumeState
 from ...extractors import (
     Extractor,
     TwitchExtractor,
@@ -748,7 +740,6 @@ from ...utils import (
     fmt_size as _fmt_size,
     fmt_duration as _fmt_duration,
     safe_filename as _safe_filename,
-    default_output_dir as _default_output_dir,
     render_template as _render_template,
     build_template_context as _build_template_context,
     free_space_bytes as _free_space_bytes,
@@ -759,7 +750,6 @@ from ..widgets import (
     ask_premium_confirmation,
     ask_premium_text_input,
     path_label as _path_label,
-    set_metric,
 )
 from ... import db as _db
 

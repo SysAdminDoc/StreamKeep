@@ -642,9 +642,7 @@ class MonitorTabMixin:
             lines.append(f"Category: {cat}")
         lines.append("")
         lines.append("Open the channel profile if you want to adjust auto-record rules or retention for this stream.")
-        box.setInformativeText("\n".join(lines))
 
-        open_profile_btn = None
         entry_idx = next(
             (
                 idx

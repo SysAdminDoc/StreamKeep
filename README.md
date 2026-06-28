@@ -1,137 +1,196 @@
 # StreamKeep
 
-A multi-platform desktop GUI tool for downloading VODs and live streams with native extractors, channel monitoring, segmented downloads, GPU-accelerated post-processing, and a built-in media converter.
+![Version](https://img.shields.io/badge/version-4.31.2-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-<img width="1457" height="1014" alt="2026-04-08 23_45_10-KickVODRipper v0 1 0" src="https://github.com/user-attachments/assets/3b92c55c-9ae3-4025-8f44-3119b492fe8f" />
+StreamKeep is a local-first desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs. It combines native extractors, yt-dlp fallback, channel monitoring, queue management, post-processing, an embedded player, a local web gallery, upload adapters, and a CLI/server mode in one PyQt6 application.
 
-## Supported Platforms
+![StreamKeep screenshot](https://github.com/user-attachments/assets/3b92c55c-9ae3-4025-8f44-3119b492fe8f)
 
-| Platform | VOD Listing | Live Download | Method |
-|----------|:-----------:|:-------------:|--------|
-| **Kick** | Yes | Yes | Native API (`/api/v2/channels`) |
-| **Twitch** | Yes | Yes | Native GraphQL + Usher m3u8 |
-| **Rumble** | - | Yes | Native Embed API (HLS + MP4) |
-| **SoundCloud** | - | - | Native API v2 (progressive + HLS) |
-| **Reddit** | - | - | Native JSON API (DASH + fallback MP4) |
-| **Audius** | - | - | Native Discovery API (direct stream) |
-| **Podcast RSS** | Yes (episodes) | - | RSS feed parser (enclosure URLs) |
-| **Direct URLs** | - | - | Content-Type sniffing (mp4, mp3, m3u8, etc.) |
-| **YouTube, Facebook, 1000+ sites** | - | Varies | yt-dlp fallback |
+## Supported Sources
 
-## Features
+| Source | VOD listing | Live capture | Method |
+| --- | :---: | :---: | --- |
+| Kick | Yes | Yes | Hybrid official + v2 API |
+| Twitch | Yes | Yes | Native GraphQL + Usher HLS |
+| Rumble | No | Yes | Native embed API |
+| SoundCloud | No | No | Native API v2, progressive and HLS |
+| Reddit | No | No | JSON API, DASH, MP4 fallback |
+| Audius | No | No | Native discovery API |
+| Podcast RSS | Yes | No | Feed enclosure parser |
+| Direct media URLs | No | No | HEAD/content-type sniffing |
+| YouTube and 1000+ sites | Varies | Varies | yt-dlp fallback |
 
-### Download
-- **Multi-platform** — native extractors for Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, Podcast RSS + yt-dlp fallback
-- **Auto-detect** — paste any URL, StreamKeep identifies the platform and resolves the stream
-- **Platform badge** — colored label shows which extractor matched your URL
-- **VOD browser** — list all VODs for a channel, check the ones you want, batch download
-- **Quality picker** — choose from all available qualities (1080p, 720p, 480p, etc.)
-- **Configurable segments** — split downloads into 15min, 30min, 1hr, 2hr, 4hr chunks, or full stream
-- **HLS + MP4 + audio** — supports HLS streams, direct MP4, and audio downloads (mp3, m4a, etc.)
-- **Direct URL detection** — paste any raw media URL (mp4, mp3, m3u8) and it auto-detects via Content-Type
-- **Multi-connection parallel download** — direct MP4 URLs are split across N HTTP Range requests (default 4, max 16) for 3-5x speedup on CDN-hosted content
-- **Podcast RSS** — paste an RSS feed URL to list and download all episodes
-- **Clipboard Watch** — toggle clipboard monitoring to auto-load URLs as you copy them
-- **Resume-friendly** — skips already-downloaded segments on re-run
-- **Speed/ETA tracking** — real-time download speed, ETA, and file size in progress bars
-- **Metadata saving** — writes `metadata.json` + thumbnail alongside every download
+## Core Workflows
 
-### Media Converter
-- **Video formats** — mp4, mkv, webm, mov, avi, ts, flv
-- **Video codecs** — copy (remux), h264, h265, vp9, av1, mpeg4
-- **GPU encoders** — NVENC (NVIDIA), Quick Sync (Intel), AMF (AMD), VideoToolbox (Apple) — auto-detected at startup via a parallel 1-frame probe, 5-20x faster than software encoders
-- **Resize** — downscale to 2160p / 1440p / 1080p / 720p / 480p / 360p (aspect ratio preserved)
-- **FPS cap** — limit output to 60 / 30 / 24 fps
-- **Audio formats** — mp3, m4a, ogg, opus, flac, wav, aac
-- **Audio codecs** — copy, mp3, aac, opus, vorbis, flac, pcm + bitrate (96k-320k) and sample rate (48000 / 44100 / 22050)
-- **Auto post-process** — converter runs on every fresh download when enabled
-- **Standalone mode** — **Convert Files...** / **Convert Folder...** buttons apply the current settings to any existing file or folder (recursive), with progress + cancel
+### Download and Queue
+
+- Paste a supported URL, fetch stream metadata, choose a quality, and download HLS, DASH, MP4, audio, or podcast media.
+- Queue multiple items, reorder pending work, batch-import URLs from text, and resume interrupted segmented downloads from sidecar state.
+- Use parallel HTTP range downloads for direct files when the server supports ranges.
+- Apply bandwidth windows, day/night/weekend speed scheduling, per-download rate limits, and lifecycle cleanup rules.
 
 ### Channel Monitor
-- **Watch channels** — add Kick or Twitch channels to monitor for live status
-- **Auto-record** — automatically start recording when a monitored channel goes live
-- **Configurable polling** — per-channel interval (30-600 seconds)
-- **Round-robin** — checks one channel per tick to avoid API hammering
 
-### History & Settings
-- **Download history** — persistent log of all completed downloads, double-click to open folder
-- **Config persistence** — UI/preferences live in `%APPDATA%\StreamKeep\config.json`, while history, monitor channels, and queue are stored in `%APPDATA%\StreamKeep\library.db`
-- **Settings tab** — shows ffmpeg/yt-dlp versions, configure default output directory
+- Monitor Kick and Twitch channels with per-channel intervals and auto-record rules.
+- Override output directory, quality, filename template, schedule window, active days, and retention count per channel.
+- Escalate polling around scheduled streams and avoid duplicate in-flight checks.
+
+### Library, Storage, and Search
+
+- Persist history, monitor entries, and queue state in `%APPDATA%\StreamKeep\library.db`.
+- Keep user preferences in `%APPDATA%\StreamKeep\config.json`; portable mode uses `portable.txt` beside the executable and stores data under `data/`.
+- Search across history, monitor entries, queue rows, transcripts, notes, and tags.
+- Scan storage by platform/channel/title, detect orphaned files, and recycle selected recordings through the OS recycle bin.
+
+### Player and Clip Tools
+
+- Play recordings in-app with libmpv, watch-position persistence, chapter navigation, bookmarks, EQ, playback speed, normalization, and picture-in-picture.
+- Open a multi-stream sync viewer for 2-4 selected recordings.
+- Trim or clip recordings with stream-copy mode or frame-accurate re-encode mode.
+
+### Post-Processing and Intelligence
+
+- Convert video and audio after download or through the standalone batch converter.
+- Use GPU encoders when available: NVENC, Intel Quick Sync, AMD AMF, and VideoToolbox.
+- Generate contact sheets, thumbnails, chapters, subtitle files, transcripts, summaries, highlights, silence-removed cuts, RSS feeds, and local gallery share pages.
+- Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, emote-aware chat rendering, and optional LLM summaries.
+
+### Uploads, Backup, and Plugins
+
+- Upload finished media to S3-compatible storage, Backblaze B2/MinIO, FTP/SFTP, and WebDAV.
+- Create `.skbackup` archives containing config, database, tags, notifications, plugin metadata, and local state.
+- Restore with a pre-restore backup and overwrite safety checks.
+- Load plugin manifests only after trust consent; untrusted plugins are skipped.
+
+Plugins live under the active config directory in `plugins/`. A plugin is a package or module directory containing `plugin.json`:
+
+```json
+{
+  "id": "example-extractor",
+  "name": "Example Extractor",
+  "version": "1.0.0",
+  "author": "You",
+  "description": "Adds support for example.com",
+  "enabled": true,
+  "trusted": false
+}
+```
+
+Supported extension points are custom extractors, post-processing filters, and upload destinations. Plugins run in-process with the same privileges as StreamKeep, so they should stay untrusted until the user has reviewed the source.
+
+### CLI and Server Mode
+
+```powershell
+python StreamKeep.py --help
+python StreamKeep.py --version
+python StreamKeep.py extractors
+python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
+python StreamKeep.py server --bind 127.0.0.1 --port 8765
+```
+
+Legacy flat flags remain supported for automation:
+
+```powershell
+python StreamKeep.py --list-extractors
+python StreamKeep.py --url "https://example.com/video" --output C:\Videos
+python StreamKeep.py --server --port 8765
+```
+
+The local server binds to localhost by default, validates bearer tokens in constant time, checks Host headers to resist DNS rebinding, and restricts browser companion access to local/chrome-extension origins.
+
+## Browser Companion
+
+The Chrome/Edge/Firefox companion extension lives in `browser-extension/`.
+
+1. Load the extension unpacked from `browser-extension/`.
+2. Open StreamKeep, go to Settings, enable Browser companion, and copy the pairing token and port.
+3. Paste them into the extension popup.
+4. Use **Send to Fetch** or **Send to Queue** from the browser toolbar.
+
+Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are generated per app launch and are never written to disk.
 
 ## Requirements
 
-- **Python 3.10+**
-- **ffmpeg** in PATH
-- **PyQt6** (auto-installed on first run)
-- **yt-dlp** (auto-installed, optional — needed for non-native platforms)
+- Python 3.10 or newer.
+- `ffmpeg` and `ffprobe` in `PATH`.
+- `curl` in `PATH`.
+- Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
 
-## Usage
+Install Python dependencies:
 
-```bash
+```powershell
 pip install -r requirements.txt
 ```
 
-```bash
+Run the GUI:
+
+```powershell
 python StreamKeep.py
 ```
 
+## Configuration Locations
+
+| Mode | Config and database location |
+| --- | --- |
+| Windows installed/source | `%APPDATA%\StreamKeep\` |
+| Windows portable | `data\` beside `StreamKeep.exe` when `portable.txt` exists |
+| Linux | `$XDG_CONFIG_HOME/StreamKeep` or `~/.config/StreamKeep` |
+| macOS | `~/Library/Application Support/StreamKeep` |
+
+History, monitor channels, and queue data are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
+
+## Packaging Notes
+
+Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
+
+- PyInstaller directory or single-file builds for Windows.
+- MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
+- Flatpak packaging under `packaging/flatpak/`.
+- Browser companion extension packaging from `browser-extension/`.
+
+Release packages must include:
+
+- `StreamKeep.py` launcher and the `streamkeep/` package.
+- `requirements.txt`.
+- `LICENSE`.
+- `icon.ico`, `icon.png`, and `assets/`.
+- `browser-extension/` and `browser-extension/icons/`.
+- `packaging/` manifests when building MSIX or Flatpak artifacts.
+- Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, keyring, mpv/libmpv, and platform signing tools.
+
 ## Validation
 
-```bash
-python -m unittest discover -s tests -p "test_*.py"
+Run the lightweight validation bundle before release:
+
+```powershell
+python -m compileall StreamKeep.py streamkeep tests
+python -m pytest -q
+python StreamKeep.py --version
+python StreamKeep.py --list-extractors
+python StreamKeep.py download --help
+python StreamKeep.py server --help
 ```
 
-## Project planning
+When pyflakes is installed, also run:
 
-- [Roadmap](ROADMAP.md)
-- [Completed work](COMPLETED.md)
-- [Research report](RESEARCH_REPORT.md)
-- [Archived legacy roadmap](docs/archive/roadmap/ROADMAP-legacy.md)
-
-### Quick Start
-
-1. Paste a URL:
-   - `kick.com/fishtank` — lists all Kick VODs
-   - `twitch.tv/xqc` — lists Twitch VODs or records live
-   - `rumble.com/v...` — downloads Rumble video
-   - `soundcloud.com/artist/track` — downloads SoundCloud audio
-   - `reddit.com/r/.../comments/...` — downloads Reddit video
-   - `audius.co/artist/track` — downloads Audius audio
-   - RSS feed URL — lists podcast episodes
-   - Any `.mp4`, `.mp3`, `.m3u8` URL — direct download
-   - Any other video URL — falls back to yt-dlp
-2. Click **Fetch**
-3. Select quality and segment length
-4. Click **Download Selected** or **Download All Checked** for batch
-
-### Channel Monitoring
-
-1. Switch to the **Monitor** tab
-2. Paste a channel URL and set poll interval
-3. Check **Auto-Record** to automatically capture when the channel goes live
-4. StreamKeep checks channels in round-robin and starts recording automatically
-
-### Media Conversion
-
-1. Open the **Settings** tab and scroll to **Post-Processing**
-2. Tick **Convert video to:** or **Convert audio to:** and pick a container, codec, and optional scale/FPS/bitrate
-3. Either:
-   - Click **Save Settings** — every future download is auto-converted
-   - Click **Convert Files...** to pick files directly, or **Convert Folder...** to recursively convert an entire directory
-4. GPU encoders (NVENC, QSV, AMF, VideoToolbox) appear in the codec dropdown automatically when a compatible GPU is detected
-
-## Architecture
-
-StreamKeep uses a plugin-style extractor system with `__init_subclass__` auto-registration. Each platform is a self-contained class. Native extractors provide VOD listing, live detection, and direct API access. The yt-dlp fallback catches any URL not handled by native extractors.
-
+```powershell
+python -m pyflakes StreamKeep.py streamkeep tests
 ```
-URL Input
-  -> Extractor.detect(url)  — matches URL against registered patterns
-    -> Native Extractor (Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, RSS)
-    -> Direct URL Detector (HEAD + Content-Type sniffing)
-    -> YtDlpExtractor fallback (everything else)
-  -> StreamInfo (qualities, duration, metadata)
-  -> DownloadWorker (ffmpeg -c copy, segmented, optional parallel HTTP Range)
-  -> PostProcessor (optional convert / loudnorm / chapter split / contact sheet)
-  -> metadata.json + history entry
-```
+
+For UI-facing changes, launch the app and exercise the affected tab. For packaging changes, build the target artifact locally and smoke-launch it before publishing.
+
+## Development Notes
+
+- Keep the app local-first: no cloud sync by default and no DRM circumvention features.
+- Keep local HTTP APIs bound to loopback and token-gated.
+- Use `QThread`/signals for background work; do not block the GUI thread.
+- Keep subprocess arguments explicit, use `--` separators for user URLs, restrict curl/ffmpeg protocols, and pass `-nostdin` to ffmpeg jobs.
+- Preserve accessibility fundamentals in every UI change: named controls, keyboard-navigable dialogs, readable contrast, status text for long-running work, and log/toast feedback for failures.
+- Do not add GitHub Actions workflows; builds, tests, audits, and release artifacts are produced locally for this repo.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

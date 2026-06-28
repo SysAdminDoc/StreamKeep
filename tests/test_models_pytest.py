@@ -1,12 +1,18 @@
 """Pytest-native tests for streamkeep.models — demonstrates fixtures + parametrize."""
 
+import importlib
 import sys
 from unittest.mock import MagicMock
 
-# Stub PyQt6 before any streamkeep import
-for mod in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"):
-    if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
+# Stub PyQt6 before any streamkeep import only when the real GUI toolkit is
+# unavailable. Keeping real PyQt6 modules prevents full-suite QThread tests
+# from importing MagicMock-backed worker classes.
+try:
+    importlib.import_module("PyQt6.QtCore")
+except ImportError:
+    for mod in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"):
+        if mod not in sys.modules:
+            sys.modules[mod] = MagicMock()
 
 import pytest
 

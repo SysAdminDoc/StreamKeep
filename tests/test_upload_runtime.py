@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtCore import QCoreApplication, Qt
 
 from streamkeep.upload.base import UploadDestination
 from streamkeep.upload.upload_worker import UploadWorker
@@ -48,8 +48,11 @@ class UploadRuntimeTests(unittest.TestCase):
                 raise RuntimeError("boom")
 
         worker = UploadWorker("Broken", {}, "C:/tmp/file.bin")
-        worker.done.connect(lambda ok, msg: done_events.append((ok, msg)))
-        worker.log.connect(log_events.append)
+        worker.done.connect(
+            lambda ok, msg: done_events.append((ok, msg)),
+            type=Qt.ConnectionType.DirectConnection,
+        )
+        worker.log.connect(log_events.append, type=Qt.ConnectionType.DirectConnection)
 
         with mock.patch.object(
             UploadDestination,

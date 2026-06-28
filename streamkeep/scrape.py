@@ -51,14 +51,13 @@ def ensure_playwright_browser(log_fn=None, should_cancel=None):
     if _cancelled(should_cancel):
         return False
     try:
-        import playwright.sync_api  # noqa: F401
+        from playwright.sync_api import sync_playwright
     except ImportError:
         if log_fn:
             log_fn("[HEADLESS] Playwright not installed — falling back to regex scraper.")
         _PLAYWRIGHT_READY = False
         return False
     try:
-        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             if _cancelled(should_cancel):
                 _PLAYWRIGHT_READY = False
