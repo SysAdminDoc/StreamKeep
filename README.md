@@ -173,6 +173,7 @@ Run the lightweight validation bundle before release:
 
 ```powershell
 python -m compileall StreamKeep.py streamkeep tests
+python -m streamkeep.i18n.compile_translations
 python -m pytest -q
 python StreamKeep.py --version
 python StreamKeep.py --list-extractors

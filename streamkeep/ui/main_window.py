@@ -114,6 +114,11 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self._last_auto_output = ""
         self._history = []
         self._config = _load_config()
+        try:
+            from streamkeep.i18n import install_translator
+            install_translator(self._config.get("language", "en"))
+        except Exception:
+            pass
         self._tray_icon = None
         self._folder_template = DEFAULT_FOLDER_TEMPLATE
         self._file_template = DEFAULT_FILE_TEMPLATE

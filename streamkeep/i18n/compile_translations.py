@@ -29,7 +29,7 @@ def _find_lrelease():
                 return candidate + ".exe"
     except Exception:
         pass
-    for name in ("lrelease6", "lrelease"):
+    for name in ("lrelease6", "lrelease", "pyside6-lrelease"):
         try:
             subprocess.run([name, "-version"], capture_output=True, timeout=5)
             return name
@@ -50,7 +50,7 @@ def compile_all():
     ok = True
     for ts in ts_files:
         qm = ts.with_suffix(".qm")
-        print(f"  {ts.name} → {qm.name}")
+        print(f"  {ts.name} -> {qm.name}")
         r = subprocess.run(
             [lrelease, str(ts), "-qm", str(qm)],
             capture_output=True, text=True, timeout=30,

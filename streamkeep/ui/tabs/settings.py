@@ -27,6 +27,7 @@ from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
 from ...http import set_native_proxy
+from ...i18n import available_languages, install_translator
 from ...paths import _CREATE_NO_WINDOW, CONFIG_FILE
 from ...config import save_config as _save_config
 from ...postprocess import (
@@ -871,6 +872,18 @@ class SettingsTabMixin:
         self._refresh_notif_badge()
         self._persist_config()
 
+    def _on_language_changed(self, _idx):
+        lang = self.language_combo.currentData() or "en"
+        if install_translator(lang):
+            self._config["language"] = lang
+            self._set_status(
+                "Language setting saved. Restart StreamKeep to refresh all labels.",
+                "success",
+            )
+        else:
+            self._set_status("Language file could not be loaded.", "warning")
+        self._persist_config()
+
     # ── Browser companion ────────────────────────────────────────────
 
     def _on_companion_toggled(self, checked):
@@ -1454,6 +1467,18 @@ def build_settings_tab(win):
     win.theme_combo.currentIndexChanged.connect(win._on_theme_changed)
     win.theme_combo.setMinimumWidth(210)
     theme_row.addWidget(win.theme_combo)
+    language_label = QLabel("Language")
+    language_label.setObjectName("fieldLabel")
+    theme_row.addWidget(language_label)
+    win.language_combo = QComboBox()
+    language_labels = {"en": "English", "es": "Spanish"}
+    for lang in available_languages():
+        win.language_combo.addItem(language_labels.get(lang, lang), lang)
+    lang_idx = max(0, win.language_combo.findData(win._config.get("language", "en")))
+    win.language_combo.setCurrentIndex(lang_idx)
+    win.language_combo.currentIndexChanged.connect(win._on_language_changed)
+    win.language_combo.setMinimumWidth(150)
+    theme_row.addWidget(win.language_combo)
     card_lay.addWidget(theme_bar)
 
     # Default Output + Toolchain (side by side)

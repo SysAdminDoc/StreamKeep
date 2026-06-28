@@ -22,6 +22,7 @@ from PyQt6.QtCore import QCoreApplication, QLocale, QTranslator
 
 _I18N_DIR = Path(__file__).parent
 _translator = None
+_current_lang = "en"
 
 
 def available_languages():
@@ -43,7 +44,7 @@ def install_translator(lang, app=None):
     Returns True if a translation was loaded, False otherwise.
     'en' is the built-in fallback — always returns True.
     """
-    global _translator
+    global _translator, _current_lang
     if app is None:
         app = QCoreApplication.instance()
     if app is None:
@@ -55,6 +56,7 @@ def install_translator(lang, app=None):
         _translator = None
 
     if lang == "en" or not lang:
+        _current_lang = "en"
         return True  # English is the source language, no translation needed
 
     # Try to load the .qm file
@@ -63,19 +65,20 @@ def install_translator(lang, app=None):
     if os.path.isfile(qm_path) and translator.load(qm_path):
         app.installTranslator(translator)
         _translator = translator
+        _current_lang = lang
         return True
 
     # Try system locale fallback
     if translator.load(QLocale(lang), "streamkeep", "_", str(_I18N_DIR)):
         app.installTranslator(translator)
         _translator = translator
+        _current_lang = lang
         return True
 
+    _current_lang = "en"
     return False
 
 
 def current_language():
     """Return the currently installed language code, or 'en'."""
-    if _translator is None:
-        return "en"
-    return "translated"  # Can't easily extract the code from QTranslator
+    return _current_lang

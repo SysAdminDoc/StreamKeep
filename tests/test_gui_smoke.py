@@ -20,7 +20,7 @@ def _ready_ytdlp_status():
 
 def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
     from streamkeep import accounts, notifications
-    from streamkeep.i18n import install_translator
+    from streamkeep.i18n import available_languages, current_language, install_translator
     import streamkeep.ui.main_window as main_window
     from streamkeep.ui.monitor_entry_dialog import MonitorEntryDialog
     from streamkeep.ui.notification_log_dialog import NotificationLogDialog
@@ -72,6 +72,14 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 assert window._stack.currentIndex() == index
                 assert window._tab_btns[index].objectName() == "tabActive", name
 
+            assert install_translator("en", qt_application) is True
+            assert "es" in available_languages()
+            es_idx = window.language_combo.findData("es")
+            assert es_idx >= 0
+            window.language_combo.setCurrentIndex(es_idx)
+            qt_application.processEvents()
+            assert window._config["language"] == "es"
+            assert current_language() == "es"
             assert install_translator("en", qt_application) is True
 
             dialogs = [
