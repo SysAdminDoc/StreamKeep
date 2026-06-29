@@ -58,60 +58,9 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 
 
-### P0 - Trust and Remote-Control Correctness
-
-- [ ] P0 - Restore secure LAN companion access
-  Why: LAN mode binds to `0.0.0.0`, but Host validation only allows localhost, so legitimate remote devices are likely rejected while the UI says LAN access is enabled.
-  Evidence: `streamkeep/local_server.py`, `streamkeep/ui/tabs/settings.py`, GitHub DNS rebinding guidance.
-  Touches: `streamkeep/local_server.py`, `streamkeep/ui/tabs/settings.py`, `tests/test_local_server.py`
-  Acceptance: local-only mode still rejects non-local Host headers; LAN mode accepts explicit configured LAN host/IP values; tests cover localhost, LAN IP, hostile Host, and Origin behavior.
-  Complexity: M
-
-- [ ] P0 - Fail closed on updater integrity metadata
-  Why: Self-update accepts a downloaded executable when no `.sha256` asset exists, relying only on size sanity; executable replacement needs mandatory integrity verification.
-  Evidence: `streamkeep/updater.py`, Microsoft MSIX signing docs, PyInstaller release-artifact practice.
-  Touches: `streamkeep/updater.py`, `streamkeep/ui/tabs/download.py`, `tests/test_updater.py`, release packaging notes.
-  Acceptance: update install is blocked when SHA-256 metadata is missing or malformed; UI explains the block; tests cover missing hash, bad hash, good hash, and cancelled download cleanup.
-  Complexity: M
-
 ### P1 - Packaging, Secrets, and Test Coverage
 
-- [ ] P1 - Make release packaging reproducible and complete
-  Why: Packaging scaffolds exist, but `StreamKeep.spec` has empty data/runtime-hook lists and Flatpak ffmpeg uses a placeholder hash, so release artifacts can miss assets or be unreproducible.
-  Evidence: `StreamKeep.spec`, `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.yml`, `README.md`, PyInstaller hook docs, Microsoft MSIX signing docs.
-  Touches: `StreamKeep.spec`, `assets/`, `browser-extension/`, `streamkeep/i18n/`, `packaging/msix/`, `packaging/flatpak/`, packaging README notes.
-  Acceptance: clean packaging run includes icons, browser extension, translations, assets, and manifests; Flatpak source hashes are real; Windows artifact is signed when a cert is available; smoke launch proves one process and working icon/assets.
-  Complexity: L
-
-- [ ] P1 - Remove the silent base64 secrets fallback
-  Why: `secrets.py` can store `b64:` values when keyring is unavailable, and `requirements.txt` does not install `keyring`, weakening non-Windows credential storage.
-  Evidence: `streamkeep/secrets.py`, `requirements.txt`, Python keyring documentation.
-  Touches: `requirements.txt`, `streamkeep/secrets.py`, `streamkeep/ui/tabs/settings.py`, `tests/test_accounts.py`
-  Acceptance: source installs include `keyring`; secure-store failures surface a visible warning; new sensitive values are not stored as `b64:` unless the user explicitly chooses an insecure portable fallback.
-  Complexity: M
-
-- [ ] P1 - Add GUI and worker lifecycle smoke tests
-  Why: Unit coverage improved, but startup, tab construction, dialogs, language switching, and long-running QThread signal lifetimes still have limited automated coverage.
-  Evidence: `tests/`, `streamkeep/ui/main_window.py`, `streamkeep/ui/tabs/*.py`, pytest-qt documentation.
-  Touches: `tests/`, `pytest.ini`, `streamkeep/ui/`, `streamkeep/workers/`
-  Acceptance: pytest-qt smoke tests instantiate the app headlessly, visit each tab, open key dialogs, run representative worker success/failure signals, and pass without network or real ffmpeg downloads.
-  Complexity: L
-
-- [ ] P1 - Harden yt-dlp runtime readiness checks
-  Why: yt-dlp handles long-tail platforms and now has platform-specific runtime needs such as JavaScript interpreters; StreamKeep should detect missing support before a user starts a long download.
-  Evidence: `streamkeep/extractors/ytdlp.py`, `streamkeep/ui/onboarding.py`, yt-dlp documentation and release notes.
-  Touches: `streamkeep/extractors/ytdlp.py`, `streamkeep/bootstrap.py`, `streamkeep/ui/onboarding.py`, `streamkeep/ui/tabs/settings.py`, tests.
-  Acceptance: onboarding/settings show yt-dlp version and optional runtime status; unsupported runtime conditions produce actionable errors; tests cover version parsing and missing-runtime messaging.
-  Complexity: M
-
 ### P2 - Platform Depth, I18n, and Extensibility
-
-- [ ] P2 - Compile and ship real translation artifacts
-  Why: `.ts` sources exist, but `available_languages()` only exposes `.qm` files and the repo ships no compiled translations.
-  Evidence: `streamkeep/i18n/__init__.py`, `streamkeep/i18n/compile_translations.py`, Qt Linguist documentation.
-  Touches: `streamkeep/i18n/`, packaging specs, settings language selector, tests.
-  Acceptance: translation compile command produces `.qm` files; packaged builds include them; language selector lists Spanish when available; smoke test verifies switching language does not crash.
-  Complexity: M
 
 - [ ] P2 - Support dynamic DASH and low-latency live manifest patterns
   Why: `dash.py` rejects dynamic MPD manifests and HLS parsing does not model low-latency partial segments, while comparable downloaders handle broader live/DVR manifest shapes.
@@ -156,3 +105,60 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 - Shipped state is recorded in `COMPLETED.md` and `CHANGELOG.md`.
 - Research and rationale are summarized in `RESEARCH.md`.
 - Legacy planning artifacts stay archived and out of the repo root.
+
+## Research-Driven Additions
+
+### P1 - Reliability and Data Safety
+
+- [ ] P1 - Add archive integrity manifests and repair workflow
+  Why: ffprobe validation catches malformed media containers, but not long-term bitrot, missing sidecars, or metadata drift across archive folders.
+  Evidence: `streamkeep/verify.py`, `streamkeep/backup.py`, `streamkeep/db.py`, restic, Jellyfin.
+  Touches: `streamkeep/verify.py`, `streamkeep/backup.py`, `streamkeep/db.py`, `streamkeep/ui/tabs/history.py`, `tests/test_verify.py`, `tests/test_backup.py`.
+  Acceptance: completed recordings get DB-backed or sidecar SHA-256 manifests for media plus generated metadata; verification detects missing or changed files; repair/rescan actions are reported in the GUI; backup/restore preserves manifest state; tests cover changed media, missing sidecars, and intentional rescan.
+  Complexity: M
+
+- [ ] P1 - Persist failed-job records for retry and remote recovery
+  Why: queue status and resume sidecars preserve partial context, but remote recovery needs a normalized failure ledger that survives restart and supports the existing remote web UI recovery item.
+  Evidence: `streamkeep/db.py`, `streamkeep/workers/download.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/local_server.py`, Pinchflat, Ganymede.
+  Touches: `streamkeep/db.py`, `streamkeep/workers/download.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/local_server.py`, `tests/test_db.py`, `tests/test_local_server.py`.
+  Acceptance: fetch, download, and finalize failures are saved with URL, platform, stage, error, output directory, resume sidecar, retry count, and timestamps; desktop queue/history and `/api/status` expose retryable failures; retry and discard update the ledger; tests prove persistence across restart.
+  Complexity: L
+
+### P2 - Distribution, Portability, and Operations
+
+- [ ] P2 - Add SBOM and dependency-advisory release check
+  Why: packaged builds bundle Python runtime dependencies, but release validation does not yet produce a dependency inventory or fail on known vulnerable packages.
+  Evidence: `requirements.txt`, `StreamKeep.spec`, `packaging/`, yt-dlp 2026.06.09 release notes, Pillow releases, CycloneDX, pip-audit.
+  Touches: `requirements.txt`, `packaging/`, release validation scripts, `tests/test_packaging.py`, `README.md`.
+  Acceptance: local release validation generates a CycloneDX SBOM from the frozen environment, runs a pip-audit or OSV-compatible advisory scan, fails on known vulnerable runtime dependencies unless explicitly documented, and emits the SBOM beside built artifacts without adding CI.
+  Complexity: M
+
+- [ ] P2 - Package and smoke-test the browser companion as a release artifact
+  Why: browser capture is table-stakes in comparable download managers, but StreamKeep's MV3 companion is not yet verified as a deterministic packaged artifact with minimal permissions and working pairing.
+  Evidence: `browser-extension/manifest.json`, `StreamKeep.spec`, `README.md`, Chrome MV3 docs, MeTube, Downie, 4K Video Downloader, Internet Download Manager.
+  Touches: `browser-extension/`, `packaging/`, `tests/test_packaging.py`, `streamkeep/local_server.py`, `README.md`.
+  Acceptance: local packaging emits a deterministic extension ZIP with manifest, icons, popup, and background files; tests validate MV3 version, minimal permissions, host permissions, and missing-asset failures; smoke test exercises `/ping` against the local test server.
+  Complexity: M
+
+- [ ] P2 - Add OPML import/export for podcast and monitor subscriptions
+  Why: StreamKeep already parses podcast feeds and monitors channels, but subscription portability is app-specific while OPML is the common feed-exchange format.
+  Evidence: `streamkeep/extractors/podcast.py`, `streamkeep/monitor.py`, `streamkeep/db.py`, OPML 2.0 specification.
+  Touches: `streamkeep/extractors/podcast.py`, `streamkeep/monitor.py`, `streamkeep/db.py`, `streamkeep/ui/tabs/monitor.py`, `tests/test_db.py`, new OPML tests.
+  Acceptance: users can import nested OPML outlines into podcast/feed monitor entries with duplicate and invalid-feed reporting, export selected or all RSS-capable subscriptions, and roundtrip valid OPML in tests.
+  Complexity: M
+
+- [ ] P2 - Add a headless/service deployment profile
+  Why: CLI/server mode exists, and self-hosted competitors treat service operation as normal, but StreamKeep lacks a documented and smoke-tested service profile with explicit bind, token, config, and output paths.
+  Evidence: `StreamKeep.py`, `streamkeep/local_server.py`, `streamkeep/cli.py`, MeTube, Tube Archivist, Pinchflat, TubeSync.
+  Touches: `StreamKeep.py`, `streamkeep/cli.py`, `streamkeep/local_server.py`, `packaging/`, `tests/test_local_server.py`, `README.md`.
+  Acceptance: local service profile runs server mode with explicit config directory, bind address, token, and output directory; Windows Task Scheduler/service and systemd user examples live in existing packaging/docs locations; smoke test starts the server and verifies authenticated `/ping` without using GUI defaults implicitly.
+  Complexity: M
+
+### P3 - Archive Interoperability
+
+- [ ] P3 - Add metadata sidecar export profiles for media servers
+  Why: long-term archives should remain useful outside StreamKeep, and comparable media-library workflows rely on portable NFO/JSON/thumb sidecars for Jellyfin/Plex-style folders.
+  Evidence: `streamkeep/metadata.py`, `streamkeep/integrations/media_server.py`, Jellyfin, Ganymede, Pinchflat.
+  Touches: `streamkeep/metadata.py`, `streamkeep/integrations/media_server.py`, `streamkeep/ui/tabs/settings.py`, `tests/test_metadata.py`, media-server integration tests.
+  Acceptance: per-library profiles generate or refresh compatible NFO/JSON/thumb sidecars without overwriting user edits; disabled profiles leave existing files untouched; tests cover output names, metadata fields, and idempotent reruns.
+  Complexity: M
