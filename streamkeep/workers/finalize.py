@@ -10,6 +10,7 @@ from ..metadata import MetadataSaver
 from ..postprocess import PostProcessor
 from ..postprocess.processor import PP_LOCK as _PP_LOCK
 from ..utils import fmt_size
+from ..verify import create_archive_manifest
 
 
 class FinalizeWorker(QThread):
@@ -78,6 +79,8 @@ class FinalizeWorker(QThread):
             steps.append(("Downloading chat", "chat"))
         if self._has_postprocess_work(snapshot):
             steps.append(("Running post-processing", "postprocess"))
+        if task.get("record_manifest", True):
+            steps.append(("Capturing integrity manifest", "manifest"))
         return steps
 
     def _emit_progress(self, label, index, total):
@@ -98,7 +101,11 @@ class FinalizeWorker(QThread):
             "out_dir": out_dir,
             "history_url": task.get("history_url", ""),
             "cancelled": False,
+            "archive_manifest": None,
+            "archive_manifest_error": "",
         }
+        step_no = 0
+        total_steps = 0
         if self._interrupted():
             result["cancelled"] = True
             self.done.emit(result)
@@ -115,7 +122,6 @@ class FinalizeWorker(QThread):
             if info and out_dir:
                 steps = self._planned_steps(task, info, snapshot)
                 total_steps = len(steps)
-                step_no = 0
 
                 step_no += 1
                 self._emit_progress("Saving metadata", step_no, total_steps)
@@ -168,6 +174,23 @@ class FinalizeWorker(QThread):
             for k, v in orig.items():
                 setattr(PostProcessor, k, v)
             _PP_LOCK.release()
+
+        if out_dir and not self._interrupted() and task.get("record_manifest", True):
+            try:
+                self._emit_progress(
+                    "Capturing integrity manifest",
+                    max(step_no + 1, total_steps),
+                    max(step_no + 1, total_steps),
+                )
+                manifest = create_archive_manifest(out_dir, write_sidecar=True)
+                result["archive_manifest"] = manifest
+                self.log.emit(
+                    f"[VERIFY] Integrity manifest captured for "
+                    f"{len(manifest.get('files', []) or [])} file(s)."
+                )
+            except Exception as e:
+                result["archive_manifest_error"] = str(e)
+                self.log.emit(f"[VERIFY] Could not capture integrity manifest: {e}")
 
         result["cancelled"] = self._interrupted()
         result["size_label"] = self._output_size_label(out_dir) if not result["cancelled"] else ""

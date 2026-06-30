@@ -155,6 +155,15 @@ def _run_download(args):
 def _on_download_done(state, app, output_dir):
     _print_progress("")
     _print_line(f"\nDownload complete -> {output_dir}")
+    try:
+        from .verify import create_archive_manifest
+        manifest = create_archive_manifest(output_dir, write_sidecar=True)
+        _print_line(
+            "Integrity manifest -> "
+            f"{len(manifest.get('files', []) or [])} file(s)"
+        )
+    except Exception as e:
+        _print_line(f"Warning: integrity manifest was not created: {e}")
     app.quit()
 
 

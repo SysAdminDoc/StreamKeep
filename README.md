@@ -1,6 +1,6 @@
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.31.2-blue)
+![Version](https://img.shields.io/badge/version-4.31.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -44,6 +44,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Keep user preferences in `%APPDATA%\StreamKeep\config.json`; portable mode uses `portable.txt` beside the executable and stores data under `data/`.
 - Search across history, monitor entries, queue rows, transcripts, notes, and tags.
 - Scan storage by platform/channel/title, detect orphaned files, and recycle selected recordings through the OS recycle bin.
+- Capture SHA-256 archive manifests for completed recordings, then right-click History rows to verify or rescan the manifest when files intentionally change.
 
 ### Player and Clip Tools
 
@@ -61,7 +62,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 ### Uploads, Backup, and Plugins
 
 - Upload finished media to S3-compatible storage, Backblaze B2/MinIO, FTP/SFTP, and WebDAV.
-- Create `.skbackup` archives containing config, database, tags, notifications, plugin metadata, and local state.
+- Create `.skbackup` archives containing config, database, archive-manifest state, tags, notifications, plugin metadata, and local state.
 - Restore with a pre-restore backup and overwrite safety checks.
 - Load plugin manifests only after trust consent; untrusted plugins are skipped.
 
@@ -143,7 +144,7 @@ python StreamKeep.py
 | Linux | `$XDG_CONFIG_HOME/StreamKeep` or `~/.config/StreamKeep` |
 | macOS | `~/Library/Application Support/StreamKeep` |
 
-History, monitor channels, and queue data are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
+History, monitor channels, queue data, and archive integrity manifests are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
 
 ## Packaging Notes
 

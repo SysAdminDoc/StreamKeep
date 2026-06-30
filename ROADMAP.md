@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.31.2.
+- Current package version: v4.31.3.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -109,13 +109,6 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 ## Research-Driven Additions
 
 ### P1 - Reliability and Data Safety
-
-- [ ] P1 - Add archive integrity manifests and repair workflow
-  Why: ffprobe validation catches malformed media containers, but not long-term bitrot, missing sidecars, or metadata drift across archive folders.
-  Evidence: `streamkeep/verify.py`, `streamkeep/backup.py`, `streamkeep/db.py`, restic, Jellyfin.
-  Touches: `streamkeep/verify.py`, `streamkeep/backup.py`, `streamkeep/db.py`, `streamkeep/ui/tabs/history.py`, `tests/test_verify.py`, `tests/test_backup.py`.
-  Acceptance: completed recordings get DB-backed or sidecar SHA-256 manifests for media plus generated metadata; verification detects missing or changed files; repair/rescan actions are reported in the GUI; backup/restore preserves manifest state; tests cover changed media, missing sidecars, and intentional rescan.
-  Complexity: M
 
 - [ ] P1 - Persist failed-job records for retry and remote recovery
   Why: queue status and resume sidecars preserve partial context, but remote recovery needs a normalized failure ledger that survives restart and supports the existing remote web UI recovery item.

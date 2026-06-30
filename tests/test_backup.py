@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from streamkeep import backup
+from streamkeep import backup, db
 
 
 class BackupTests(unittest.TestCase):
@@ -78,6 +78,53 @@ class BackupTests(unittest.TestCase):
                 restored_conn.close()
 
             self.assertEqual(row[0], "restored-row")
+
+    def test_create_backup_preserves_archive_manifest_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            db_path = config_dir / "library.db"
+            manifest = {
+                "version": 1,
+                "algorithm": "sha256",
+                "files": [{"path": "clip.mp4", "sha256": "abc", "size": 3}],
+            }
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "date": "2026-06-29",
+                    "platform": "Test",
+                    "title": "Clip",
+                    "path": str(config_dir / "recording"),
+                    "url": "https://example.com/clip",
+                })
+                db.save_archive_manifest(
+                    history_id,
+                    str(config_dir / "recording"),
+                    manifest,
+                    status="created",
+                    details="Captured 1 file",
+                )
+
+            backup_path = config_dir / "streamkeep.skbackup"
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, msg = backup.create_backup(backup_path)
+
+            self.assertTrue(ok, msg)
+            extracted_db = config_dir / "manifest_snapshot.db"
+            with zipfile.ZipFile(backup_path, "r") as zf:
+                extracted_db.write_bytes(zf.read("library.db"))
+
+            conn = sqlite3.connect(extracted_db)
+            try:
+                row = conn.execute(
+                    "SELECT manifest_json FROM archive_manifests"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertIsNotNone(row)
+            self.assertIn("clip.mp4", row[0])
 
 
 if __name__ == "__main__":

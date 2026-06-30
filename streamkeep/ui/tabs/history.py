@@ -22,6 +22,11 @@ from streamkeep import db as _db
 from streamkeep.models import HistoryEntry
 from streamkeep.postprocess import PostProcessor
 from streamkeep.theme import CAT
+from streamkeep.verify import (
+    STATUS_OK,
+    rescan_archive_manifest,
+    verify_archive_manifest,
+)
 from ..widgets import make_metric_card, style_table
 
 
@@ -311,6 +316,7 @@ class HistoryTabMixin:
         self._history.append(entry)
         self._refresh_history_table()
         self._schedule_persist_config()
+        return entry
 
     def _refresh_history_table(self):
         query = ""
@@ -496,6 +502,10 @@ class HistoryTabMixin:
         trim_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         bundle_act = menu.addAction("Export share bundle (.zip)...")
         bundle_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        verify_act = menu.addAction("Verify integrity manifest")
+        verify_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        rescan_manifest_act = menu.addAction("Rescan integrity manifest")
+        rescan_manifest_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         transcribe_act = menu.addAction("Transcribe (Whisper)...")
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         silence_act = menu.addAction("Remove silence...")
@@ -550,6 +560,10 @@ class HistoryTabMixin:
             self._open_clip_dialog_for_dir(h.path)
         elif chosen == bundle_act and h.path and os.path.isdir(h.path):
             self._start_bundle_export(h.path)
+        elif chosen == verify_act and h.path and os.path.isdir(h.path):
+            self._verify_archive_integrity(h)
+        elif chosen == rescan_manifest_act and h.path and os.path.isdir(h.path):
+            self._rescan_archive_manifest(h)
         elif chosen == transcribe_act and h.path and os.path.isdir(h.path):
             self._start_transcribe_for_dir(h.path)
         elif chosen == silence_act and h.path and os.path.isdir(h.path):
@@ -616,6 +630,58 @@ class HistoryTabMixin:
             self._set_status(
                 f"Removed {removed} missing history entries.", "success"
             )
+
+    def _verify_archive_integrity(self, h):
+        """Verify a history row against its DB-backed or sidecar manifest."""
+        if not h.path or not os.path.isdir(h.path):
+            self._set_status("Recording folder is missing.", "warning")
+            return
+        row = _db.load_archive_manifest(getattr(h, "db_id", 0))
+        manifest = row.get("manifest") if row else None
+        status, details, report = verify_archive_manifest(h.path, manifest)
+        if getattr(h, "db_id", 0):
+            _db.update_archive_manifest_check(h.db_id, status, details)
+        title = (h.title or os.path.basename(h.path) or "recording")[:60]
+        self._log(f"[VERIFY] {title}: {details}")
+        missing = report.get("missing", []) if isinstance(report, dict) else []
+        changed = report.get("changed", []) if isinstance(report, dict) else []
+        for item in (missing[:5] + changed[:5]):
+            path = item.get("path", "") if isinstance(item, dict) else str(item)
+            reason = item.get("reason", "missing") if isinstance(item, dict) else ""
+            suffix = f" ({reason})" if reason else ""
+            self._log(f"  - {path}{suffix}")
+        if status == STATUS_OK:
+            self._set_status(details, "success")
+            self._notify_center(f"Integrity verified: {title}", "success")
+        else:
+            self._set_status(details, "warning")
+            self._notify_center(f"Integrity drift: {title}", "warning")
+
+    def _rescan_archive_manifest(self, h):
+        """Rebaseline a history row manifest to the current file state."""
+        if not h.path or not os.path.isdir(h.path):
+            self._set_status("Recording folder is missing.", "warning")
+            return
+        try:
+            manifest = rescan_archive_manifest(h.path, write_sidecar=True)
+        except Exception as e:
+            self._log(f"[VERIFY] Rescan failed: {e}")
+            self._set_status("Integrity manifest rescan failed.", "error")
+            return
+        count = len(manifest.get("files", []) or [])
+        details = f"Rescanned integrity manifest for {count} file(s)"
+        if getattr(h, "db_id", 0):
+            _db.save_archive_manifest(
+                h.db_id,
+                h.path,
+                manifest,
+                status="rescanned",
+                details=details,
+            )
+        title = (h.title or os.path.basename(h.path) or "recording")[:60]
+        self._log(f"[VERIFY] {title}: {details}")
+        self._set_status(details, "success")
+        self._notify_center(f"Integrity manifest updated: {title}", "success")
 
     def _add_bookmark_dialog(self, h):
         """Show a dialog to add a named timestamp bookmark to a recording (F38)."""

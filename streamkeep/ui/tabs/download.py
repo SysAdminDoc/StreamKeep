@@ -3465,7 +3465,7 @@ class DownloadTabMixin:
         self._finalize_active_total = 0
         finished_title = result.get("title", "download")
         if not result.get("cancelled"):
-            self._add_history(
+            history_entry = self._add_history(
                 result.get("platform", "?"),
                 result.get("title", "?"),
                 result.get("quality_name", ""),
@@ -3474,6 +3474,26 @@ class DownloadTabMixin:
                 channel=result.get("channel", ""),
                 url=result.get("history_url", ""),
             )
+            manifest = result.get("archive_manifest")
+            if history_entry is not None and manifest:
+                try:
+                    _db.save_archive_manifest(
+                        history_entry.db_id,
+                        history_entry.path,
+                        manifest,
+                        status="created",
+                        details=(
+                            f"Captured {len(manifest.get('files', []) or [])} "
+                            "file(s)"
+                        ),
+                    )
+                except Exception as e:
+                    self._log(f"[VERIFY] Could not save integrity manifest: {e}")
+            elif result.get("archive_manifest_error"):
+                self._log(
+                    "[VERIFY] Integrity manifest was not saved: "
+                    f"{result.get('archive_manifest_error')}"
+                )
         remaining = len(self._finalize_tasks)
         self._refresh_download_summary()
         if not self._foreground_busy():

@@ -17,12 +17,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 from .paths import CONFIG_DIR
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _write_lock = threading.Lock()
 
@@ -107,6 +108,23 @@ def _apply_schema(db):
             data     TEXT    NOT NULL DEFAULT '{}'
         );
         CREATE INDEX IF NOT EXISTS idx_queue_pos ON download_queue(position);
+
+        CREATE TABLE IF NOT EXISTS archive_manifests (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id         INTEGER NOT NULL UNIQUE,
+            recording_path     TEXT    NOT NULL DEFAULT '',
+            manifest_json      TEXT    NOT NULL DEFAULT '{}',
+            created_at         TEXT    NOT NULL DEFAULT '',
+            updated_at         TEXT    NOT NULL DEFAULT '',
+            status             TEXT    NOT NULL DEFAULT '',
+            last_check_at      TEXT    NOT NULL DEFAULT '',
+            last_check_details TEXT    NOT NULL DEFAULT '',
+            FOREIGN KEY(history_id) REFERENCES history(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_archive_manifest_history
+            ON archive_manifests(history_id);
+        CREATE INDEX IF NOT EXISTS idx_archive_manifest_path
+            ON archive_manifests(recording_path);
     """)
 
 
@@ -203,9 +221,14 @@ def delete_history_entries(entry_ids: list[int]) -> None:
         db = _connect()
         try:
             placeholders = ",".join("?" for _ in entry_ids)
+            ids = [int(i) for i in entry_ids]
+            db.execute(
+                f"DELETE FROM archive_manifests WHERE history_id IN ({placeholders})",
+                ids,
+            )
             db.execute(
                 f"DELETE FROM history WHERE id IN ({placeholders})",
-                [int(i) for i in entry_ids],
+                ids,
             )
             db.commit()
         finally:
@@ -217,6 +240,7 @@ def clear_history() -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("DELETE FROM archive_manifests")
             db.execute("DELETE FROM history")
             db.commit()
         finally:
@@ -393,6 +417,101 @@ def save_queue(items: list[dict[str, Any]]) -> None:
 
 
 # ── Row conversion helpers ──────────────────────────────────────────
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def save_archive_manifest(
+    history_id: int,
+    recording_path: str,
+    manifest: dict[str, Any],
+    *,
+    status: str = "created",
+    details: str = "",
+) -> None:
+    """Insert or replace the archive integrity manifest for a history row."""
+    if not history_id or not isinstance(manifest, dict):
+        return
+    now = _utc_now_iso()
+    payload = json.dumps(manifest, ensure_ascii=False, sort_keys=True)
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                INSERT INTO archive_manifests
+                    (history_id, recording_path, manifest_json, created_at,
+                     updated_at, status, last_check_at, last_check_details)
+                VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(history_id) DO UPDATE SET
+                    recording_path=excluded.recording_path,
+                    manifest_json=excluded.manifest_json,
+                    updated_at=excluded.updated_at,
+                    status=excluded.status,
+                    last_check_at=excluded.last_check_at,
+                    last_check_details=excluded.last_check_details
+            """, (
+                int(history_id),
+                str(recording_path or ""),
+                payload,
+                str(manifest.get("created_at", now) or now),
+                now,
+                str(status or ""),
+                now,
+                str(details or ""),
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+
+def load_archive_manifest(history_id: int) -> dict[str, Any] | None:
+    """Load the archive manifest row for a history id."""
+    if not history_id:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM archive_manifests WHERE history_id=?",
+            (int(history_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        try:
+            data["manifest"] = json.loads(data.get("manifest_json", "{}") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            data["manifest"] = {}
+        return data
+    finally:
+        db.close()
+
+
+def update_archive_manifest_check(history_id: int, status: str, details: str) -> None:
+    """Persist the latest verification status for a manifest."""
+    if not history_id:
+        return
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                UPDATE archive_manifests
+                   SET status=?, last_check_at=?, last_check_details=?
+                 WHERE history_id=?
+            """, (str(status or ""), _utc_now_iso(), str(details or ""), int(history_id)))
+            db.commit()
+        finally:
+            db.close()
+
+
+def archive_manifest_count() -> int:
+    """Return total archive manifest rows."""
+    db = _connect(readonly=True)
+    try:
+        return db.execute("SELECT COUNT(*) FROM archive_manifests").fetchone()[0]
+    finally:
+        db.close()
+
 
 def _row_to_history_dict(row):
     d = dict(row)
