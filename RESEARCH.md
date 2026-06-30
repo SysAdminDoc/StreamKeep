@@ -2,99 +2,99 @@
 
 ## Executive Summary
 
-StreamKeep is a mature local-first Python/PyQt6 desktop archive workstation for live streams, VODs, podcasts, direct media URLs, and post-download media workflows. Its strongest current shape is the breadth around native extractors, queue/monitor automation, SQLite library state, embedded playback, local web surfaces, uploads, backup/restore, plugins, and packaging scaffolds; the highest-value direction is to make unattended long-term archiving more trustworthy rather than adding another generic downloader wrapper. Top opportunities, in priority order: (1) add archive integrity manifests and repair flows; (2) persist failed-job records for retry and remote recovery; (3) implement dynamic DASH/LL-HLS roadmap coverage; (4) publish the plugin SDK contract and sample plugin; (5) add SQLite maintenance and recovery diagnostics; (6) add local SBOM/advisory release checks; (7) package and smoke-test the browser companion; (8) add OPML portability; (9) document and test headless/service operation; (10) add media-server sidecar export profiles.
+StreamKeep is a mature local-first Python/PyQt6 archive workstation for live streams, VODs, podcasts, direct media URLs, and post-download media operations. Its strongest current shape is the combination of native extractors, yt-dlp fallback, SQLite-backed queue/library state, restart-surviving failed-job recovery, archive integrity manifests, local web/extension control, backup/restore, and rich media post-processing; the highest-value direction is to harden unattended archive operation rather than add another generic downloader surface. Top opportunities, in priority order: (1) scope and rotate local API tokens before the browser companion and remote recovery surfaces grow; (2) add disk-to-library import/reconcile so existing archive folders can repopulate SQLite safely; (3) normalize queue rows out of opaque JSON blobs; (4) build a protocol/extractor fixture corpus for upstream churn; (5) add a privacy-redacted support snapshot; (6) add host-scoped request profiles instead of global header injection; (7) extend the browser companion with clip-range handoff after packaging smoke tests land; (8) keep existing roadmap items for dynamic DASH/LL-HLS, plugin SDK, structured logging, SBOM/advisory checks, OPML, service mode, media-server sidecars, and SQLite maintenance.
 
 ## Product Map
 
-- Core workflows: URL fetch and quality selection; queued download/resume; channel/feed monitor and auto-record; library search/storage cleanup; playback, clipping, chat/subtitle rendering, summaries, uploads, feeds, and backup/restore.
-- User personas: unattended stream archivists, creators clipping their own VODs, local media librarians, and power users who want GUI control over yt-dlp/ffmpeg workflows without surrendering local-first storage.
-- Platforms and distribution: source checkout on Python 3.10+; Windows is primary; Linux/macOS have supported code paths; PyInstaller, MSIX, Flatpak, and browser companion packaging are scaffolded.
-- Key integrations and data flows: curl fetches APIs/manifests; ffmpeg/ffprobe download and validate media; yt-dlp handles long-tail sites; SQLite stores history/monitor/queue state; JSON config stores preferences; browser companion and local web remote talk to `streamkeep/local_server.py`; plugins load from the config directory after trust gating.
+- Core workflows: fetch a URL, choose quality, queue/download/resume, record monitored channels, retry failed jobs, verify archive manifests, search/play/clip/post-process recordings, and back up local state.
+- User personas: unattended stream archivists, creators clipping their own recordings, media-library operators, and power users who want GUI control over yt-dlp/ffmpeg workflows without cloud-first storage.
+- Platforms and distribution: Python 3.10+ source checkout; Windows is primary; Linux/macOS code paths exist; PyInstaller, MSIX, Flatpak, and MV3 browser companion packaging are scaffolded.
+- Key integrations and data flows: curl fetches APIs/manifests; ffmpeg/ffprobe download and validate media; yt-dlp covers long-tail sites; SQLite stores history/monitor/queue/failed-job/archive-manifest state; JSON config stores preferences; `streamkeep/local_server.py` bridges the web remote and browser companion; plugins load from the config directory after trust consent.
 
 ## Competitive Landscape
 
-- yt-dlp and Streamlink: best-in-class extractor/protocol/plugin ecosystems. Learn from their plugin contracts, runtime-readiness messaging, and rapid platform-churn response; avoid making StreamKeep CLI-only because the GUI/library/monitor surface is the differentiator.
-- MeTube, Pinchflat, Tube Archivist, and TubeSync: self-hosted download managers make subscriptions, durable queues, retries, archive metadata, search, and web operation table-stakes. Learn from unattended-recovery and database-maintenance pain points; avoid narrowing StreamKeep to YouTube-only assumptions.
-- Ganymede, LiveStreamDVR, and TwitchDownloader: Twitch-focused archivers set expectations for long-running recording, chat synchronization, rendered chat artifacts, and remote failure visibility. Learn from their recovery/status surfaces; avoid single-platform coupling.
-- N_m3u8DL-RE and segmented-download tools: broader HLS/DASH handling, retries, and protocol edge cases are expected by power users. Learn from dynamic MPD, multi-period, low-latency, and retry behavior; avoid exposing raw protocol toggles before the UI can explain failures.
-- HandBrake and Tdarr: adjacent media tools show mature preset, health-check, and post-processing workflows. Learn from profiles and validation reports; avoid burying users in codec-only controls.
-- 4K Video Downloader and JDownloader: commercial tools normalize browser capture, scheduler/resume, polished installers, account-aware downloads, and remote management. Learn from onboarding and recovery polish; avoid adware, opaque cloud sync, and DRM-centered positioning.
-- Jellyfin and restic: analogous long-term library and backup systems emphasize metadata portability, integrity checks, rebuild/repair workflows, and data that remains useful outside the app. Learn from checksum, sidecar, and restore-test discipline; avoid proprietary archive formats as the only source of truth.
+- yt-dlp and Streamlink: best-in-class extractor/plugin ecosystems and rapid platform-churn response. StreamKeep should learn from explicit plugin contracts and extractor diagnostics; it should avoid becoming CLI-only because its library, GUI, monitor, and recovery surfaces are the differentiator.
+- MeTube, Pinchflat, Tube Archivist, and TubeSync: self-hosted downloaders make durable queues, subscriptions, browser handoff, metadata portability, and service operation table-stakes. StreamKeep should learn from their unattended archive workflows and database-maintenance pain; it should avoid YouTube-only assumptions.
+- Ganymede, LiveStreamDVR, and TwitchDownloader: Twitch archivers set expectations for chat capture/rendering, long-running recorders, mobile-friendly remote control, and disk-to-database import. StreamKeep should learn from their recovery/status needs; it should avoid platform lock-in.
+- N_m3u8DL-RE and segmented-download tools: power users expect broad HLS/DASH handling, live edge cases, headers, retries, and low-latency manifest support. StreamKeep should implement safe protocol fixtures and host-scoped request profiles; it should avoid exposing unsafe global network knobs.
+- HandBrake and adjacent transcode automation tools: adjacent media tools show mature presets, health checks, and post-processing pipelines. StreamKeep should borrow validation reports and named profiles; it should avoid burying users in codec-only controls without previews and safe defaults.
+- 4K Video Downloader, Downie, and JDownloader: commercial tools normalize browser capture, resume, schedulers, account-aware downloads, installers, and remote/mobile handoff. StreamKeep should borrow onboarding and recovery polish; it should avoid adware, opaque cloud sync, and DRM-centered positioning.
+- Jellyfin, restic, CycloneDX, and SQLite: adjacent library/backup/release systems emphasize sidecar portability, fixity checks, rebuild workflows, SBOMs, and explicit database integrity primitives. StreamKeep should keep archive truth portable and verifiable.
 
 ## Security, Privacy, and Reliability
 
-- Verified: `streamkeep/verify.py` uses ffprobe to validate media containers and rough duration, but there is no durable checksum manifest for media, thumbnails, captions, chat, metadata, or generated sidecars. Long-term archives can drift without detection.
-- Verified: `streamkeep/backup.py` snapshots config, SQLite, tags, searches, notifications, and cookies, but not media-file integrity state; restore can recover app data without proving the referenced archive files are still intact.
-- Verified: `streamkeep/db.py` stores history, monitor channels, and queue state, but there is no normalized failed-job ledger with URL, platform, stage, error, retry count, resume sidecar, and timestamps. `streamkeep/local_server.py` therefore cannot expose robust remote recovery without scraping queue/status text.
-- Verified: `streamkeep/db.py` has no app-visible SQLite `integrity_check`, `PRAGMA optimize`, WAL checkpoint, or backup-before-vacuum maintenance path. Pinchflat and Tube Archivist issue traffic shows database growth/reindex pain is a real archive-ops failure mode, and SQLite documents explicit integrity/maintenance primitives.
-- Verified: `streamkeep/dash.py` rejects dynamic/live MPD manifests and `streamkeep/hls.py` has minimal low-latency playlist modeling. This is safe fail-closed behavior, but remains a protocol-coverage gap versus N_m3u8DL-RE and yt-dlp.
-- Verified: `streamkeep/plugins.py` discovers trusted local plugins and appends plugin parents to `sys.path`, but plugin manifest schema, compatibility checks, developer docs, and sample plugins are still roadmap work.
-- Verified: `browser-extension/manifest.json` is MV3 and limited to localhost permissions, but release packaging tests do not yet prove extension ZIP contents, manifest permissions, icons, or `/ping` pairing.
-- Verified: `requirements.txt`, `StreamKeep.spec`, and `packaging/` support local packaging, but there is no local SBOM/advisory gate for bundled PyQt6, Pillow, yt-dlp, PyInstaller, and related runtime dependencies.
-- Verified: compiled translations and GUI smoke coverage were recently improved; keep future i18n and accessibility work test-driven rather than adding broad UI rewrites.
+- Verified: `streamkeep/local_server.py` token-gates requests and rejects bad Host/Origin values, but all authenticated endpoints share one launch token; `browser-extension/popup.js` stores that token and can call queue/failure actions once configured. Add rotation and capability scopes before expanding remote operations.
+- Verified: `streamkeep/plugins.py` skips untrusted plugins, but trusted plugins execute in-process and the README warns they have StreamKeep's privileges. The existing plugin SDK roadmap should include manifest compatibility and permission guardrails before recommending third-party plugins broadly.
+- Verified: `streamkeep/db.py` persists `download_queue` as `{position, data JSON}` while failed jobs and archive manifests are normalized. Queue status, recurrence, failure links, and recovery queries remain harder to inspect, migrate, and expose through the local API.
+- Verified: `streamkeep/storage.py`, `streamkeep/metadata.py`, `streamkeep/verify.py`, and `streamkeep/db.py` can scan folders and verify known manifest rows, but there is no disk-to-library import/reconcile flow that creates missing history rows from existing archive folders.
+- Verified: `streamkeep/dash.py` rejects dynamic MPDs and `streamkeep/hls.py` only models basic HLS duration/master playlists. The existing dynamic DASH/LL-HLS item remains valid; protocol changes should be backed by fixture manifests, not only live-site testing.
+- Verified: `requirements.txt`, `StreamKeep.spec`, and `packaging/` have local packaging scaffolds, but the existing SBOM/advisory roadmap item remains important because bundled yt-dlp/Pillow/PyInstaller/PyQt6 dependency risk changes over time.
+- Verified: `browser-extension/manifest.json` uses MV3 and localhost host permissions, but MeTube issue traffic shows browser extensions break in real deployments; the existing packaging smoke item should exercise `/ping`, permissions, icons, and stored-pairing failure modes.
+- Verified: `CHANGELOG.md` records compiled translations and GUI smoke coverage. Broad i18n/accessibility rewrites are not recommended now; every new UI control from the roadmap should add labels, focus behavior, translated strings, and tests as it lands.
+- Verified: `Roadmap_Blocked.md` correctly holds the blocked GitHub Actions idea. Local validation, not CI, remains the release strategy.
 
 ## Architecture Assessment
 
-- `streamkeep/db.py` is the right boundary for new durable failure, integrity, and maintenance state. Add schema migrations and maintenance helpers there instead of encoding retry/integrity data only in JSON config or sidecar filenames.
-- `streamkeep/workers/download.py` and `streamkeep/ui/tabs/download.py` should emit structured failure records while preserving current queue behavior and resume sidecars; this supports the existing remote web UI recovery item without duplicating it.
-- `streamkeep/verify.py`, `streamkeep/backup.py`, and history/library UI should share one archive-integrity model so verification, backup/restore, and repair reports agree on missing/changed files.
-- SQLite maintenance should be exposed as a safe operation: read-only integrity check first, backup snapshot before any vacuum/repair action, clear diagnostics, and no mutation of missing/corrupt DB files.
-- `browser-extension/`, `StreamKeep.spec`, and `packaging/` need a release-artifact boundary for the browser companion that is deterministic and locally smoke-tested, with no GitHub Actions dependency.
-- `streamkeep/extractors/podcast.py`, `streamkeep/monitor.py`, and `streamkeep/db.py` can support OPML import/export without changing the local-first model or adding accounts.
-- Accessibility and i18n should stay defect-driven: compiled translations and GUI smoke coverage were recently improved, so new controls from this roadmap should add labels, focus-order checks, and language-switch smoke coverage rather than a broad UI rewrite.
-- Multi-user/server-account work is not recommended now: `streamkeep/local_server.py` is a token-gated local/lan control plane for a single operator, and the proposed service profile should preserve that trust model.
-- Upgrade strategy should remain manual and local: SBOM/advisory checks and release validation cover dependency drift without Dependabot or GitHub Actions, matching repo policy.
-- Test gaps: checksum manifest drift/missing-file tests; failed-job migration/retry tests; SQLite maintenance tests for healthy, corrupt-copy, missing-file, backup-before-vacuum, and no-op paths; OPML import/export roundtrip and invalid XML tests; browser companion packaging tests; SBOM/advisory command smoke; service/headless server smoke; dynamic DASH/LL-HLS parser tests already covered by existing roadmap.
-- Documentation gaps: README should eventually document plugin SDK, service/headless profile, browser companion packaging, OPML portability, SQLite maintenance, and local release verification as those items ship.
+- `streamkeep/local_server.py` should own API capability checks, token rotation, and endpoint-level authorization so GUI/server/headless behavior stays consistent.
+- `streamkeep/db.py` is still the right migration boundary. Normalize queue rows with a schema bump and compatibility loader rather than spreading more recovery state through JSON blobs.
+- `streamkeep/storage.py`, `streamkeep/metadata.py`, `streamkeep/verify.py`, and `streamkeep/ui/tabs/storage.py` should share one import/reconcile model: preview first, create DB rows second, write manifests only after the user accepts, and never overwrite user-edited sidecars.
+- `tests/test_extractors.py`, `tests/test_scrape.py`, `streamkeep/dash.py`, `streamkeep/hls.py`, and `streamkeep/extractors/` need a curated offline fixture corpus for API samples, HLS/DASH manifests, error bodies, and DRM/unsupported cases.
+- `streamkeep/http.py`, `streamkeep/proxy.py`, `streamkeep/accounts.py`, and extractor modules should support host-scoped request profiles only after redaction, allowlist validation, and per-host tests exist.
+- `streamkeep/backup.py`, `streamkeep/config.py`, `streamkeep/db.py`, and log/crash files can produce a support snapshot without adding telemetry or cloud upload; redact tokens, cookies, credentials, absolute secrets, and full bearer values.
+- `browser-extension/` should not gain clip-range handoff until the existing deterministic packaging and pairing smoke tests are in place.
+- Multi-user/RBAC server work is rejected for now: the product is a local-first single-operator archive tool, and token-scoped service mode is the safer next step.
+- Native mobile is rejected for now: a responsive local web remote and browser companion workflows cover the practical phone/tablet control case first.
+- Upgrade strategy should stay local and manual: SBOM/advisory checks, SQLite schema migrations, and release validation fit the repo policy better than GitHub Actions or Dependabot.
 
 ## Rejected Ideas
 
-- DRM circumvention support, source: JDownloader/commercial downloader comparisons. Reason: legal and trust risk; StreamKeep should stay on user-owned, public, non-DRM, or otherwise authorized media.
-- Electron/web rewrite, source: web-wrapper downloader comparisons. Reason: would discard working PyQt/mpv integration and not solve archive integrity, retries, or packaging reliability.
-- Cloud account sync for library/config, source: commercial account-based tools. Reason: contradicts local-first storage; backup/restore, user-selected uploads, and service mode cover portable workflows.
-- Native mobile app, source: remote-management patterns in Ganymede/LiveStreamDVR and commercial tools. Reason: browser-accessible remote recovery should land first and covers the near-term mobile-control case.
-- Multi-user account/RBAC server, source: self-hosted archive managers. Reason: the local-first token-gated control plane fits single-operator use; durable recovery and service mode should land before shared accounts.
-- Public plugin marketplace, source: yt-dlp and Streamlink plugin ecosystems. Reason: premature until local plugin schema, samples, compatibility checks, and trust UX are solid.
-- User-editable global HTTP header injection, source: MeTube and N_m3u8DL-RE issue traffic. Reason: useful for some Referer-locked media but risky until host-scoped profiles, redaction, and extractor-specific guardrails exist.
-- Built-in proxy/VPN product, source: JDownloader/account-manager comparisons. Reason: the existing per-platform proxy abstraction fits better and avoids operating a network service.
-- Keyboard shortcut expansion, source: desktop downloader UX norms. Reason: project/user policy forbids adding keyboard shortcuts.
-- GitHub Actions or Dependabot release automation, source: common OSS packaging practice. Reason: repo policy requires local builds and manual dependency updates.
+- DRM circumvention support, source: commercial downloader comparisons and JDownloader-style account workflows. Reason: legal/trust risk and not aligned with StreamKeep's README policy.
+- Electron/web rewrite, source: MeTube/self-hosted web apps. Reason: would discard working PyQt/mpv/local-desktop integration without solving reliability gaps.
+- Cloud account sync for library/config, source: commercial account-based tools. Reason: contradicts local-first storage; backup/restore, uploads, and service mode cover portability.
+- Public plugin marketplace, source: yt-dlp/Streamlink plugin ecosystems. Reason: premature until the local SDK, compatibility checks, and permission UX are solid.
+- Global user-editable HTTP headers, source: N_m3u8DL-RE and downloader issue traffic. Reason: too risky without host-scoped profiles, redaction, and extractor guardrails.
+- Multi-user account/RBAC server, source: self-hosted archive managers. Reason: token-scoped single-operator control is the correct near-term trust model.
+- Native mobile app, source: Ganymede/LiveStreamDVR remote-use patterns. Reason: responsive local web recovery and extension handoff should land first.
+- GitHub Actions/Dependabot automation, source: common OSS release practice. Reason: repo policy requires local builds/tests/releases and manual dependency updates.
+- Keyboard shortcut expansion, source: desktop downloader norms. Reason: project policy forbids adding keyboard shortcuts.
 
 ## Sources
 
-### OSS Competitors and Adjacent Tools
+### Project and GitHub API
+- https://github.com/SysAdminDoc/StreamKeep
+
+### OSS Competitors and Issues
 - https://github.com/yt-dlp/yt-dlp
 - https://github.com/yt-dlp/yt-dlp/releases/tag/2026.06.09
 - https://github.com/streamlink/streamlink
 - https://streamlink.github.io/cli/plugin-sideloading.html
-- https://github.com/alexta69/metube
-- https://github.com/kieraneglin/pinchflat
+- https://github.com/alexta69/metube/issues/987
+- https://github.com/alexta69/metube/issues/966
 - https://github.com/kieraneglin/pinchflat/issues/887
-- https://github.com/tubearchivist/tubearchivist
 - https://github.com/tubearchivist/tubearchivist/issues/915
+- https://github.com/tubearchivist/tubearchivist/issues/265
 - https://github.com/meeb/tubesync
 - https://github.com/Zibbp/ganymede
+- https://github.com/Zibbp/ganymede/issues/1043
 - https://github.com/MrBrax/LiveStreamDVR
 - https://github.com/lay295/TwitchDownloader
 - https://github.com/nilaoda/N_m3u8DL-RE
-- https://github.com/HaveAGitGat/Tdarr
-- https://handbrake.fr/docs/en/latest/technical/official-presets.html
-- https://github.com/restic/restic
-- https://github.com/jellyfin/jellyfin
-- https://github.com/awesome-selfhosted/awesome-selfhosted
 
-### Commercial, Community, Standards, and Security
+### Commercial, Adjacent, Standards, and Security
 - https://www.4kdownload.com/products/videodownloader-42
 - https://jdownloader.org/
-- https://www.reddit.com/r/DataHoarder/
+- https://software.charliemonroe.net/downie/
+- https://www.internetdownloadmanager.com/
+- https://handbrake.fr/docs/en/latest/technical/official-presets.html
+- https://jellyfin.org/docs/general/server/media/shows/
+- https://restic.readthedocs.io/en/latest/045_working_with_repos.html
+- https://www.sqlite.org/pragma.html
 - https://datatracker.ietf.org/doc/html/rfc8216
 - https://dashif.org/docs/
-- https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3
 - https://opml.org/spec2.html
+- https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions
 - https://cyclonedx.org/guides/sbom/obtain/
-- https://pip-audit.readthedocs.io/
-- https://www.sqlite.org/pragma.html
-- https://github.com/python-pillow/Pillow/releases
+- https://pypi.org/project/pip-audit/
 
 ## Open Questions
 

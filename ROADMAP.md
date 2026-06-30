@@ -157,3 +157,60 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
   Touches: `streamkeep/db.py`, `streamkeep/backup.py`, `streamkeep/ui/tabs/settings.py`, `streamkeep/local_server.py`, `tests/test_db.py`, `tests/test_backup.py`.
   Acceptance: Settings or CLI can run a read-only integrity check, `PRAGMA optimize`, WAL checkpoint, and optional vacuum after backup; failures produce a clear diagnostic/export bundle and never mutate the DB before a backup snapshot; tests cover healthy DB, corrupt-copy detection, backup-before-vacuum, and no-op behavior when the DB is missing.
   Complexity: M
+
+## Research-Driven Additions
+
+### P1 - Local API Trust Boundary
+
+- [ ] P1 - Add scoped token rotation for the local API and browser companion
+  Why: the local server has Host/Origin and bearer-token checks, but one launch token currently authorizes status, queue mutation, and failure-recovery actions from the browser companion.
+  Evidence: `streamkeep/local_server.py`, `browser-extension/popup.js`, Chrome MV3 permissions docs, MeTube issue #966.
+  Touches: `streamkeep/local_server.py`, `streamkeep/ui/tabs/settings.py`, `browser-extension/`, `tests/test_local_server.py`, `tests/test_packaging.py`.
+  Acceptance: users can rotate the pairing token; old tokens stop working immediately; endpoint tests distinguish read/status, queue-send, and failure-recovery scopes; the extension handles expired tokens with a clear pairing error.
+  Complexity: M
+
+### P2 - Archive Resilience and Diagnostics
+
+- [ ] P2 - Add archive import and DB reconcile from existing folders
+  Why: StreamKeep can scan storage and verify known manifests, but it cannot rebuild missing history rows from existing archive folders after migration, restore, or manual file moves.
+  Evidence: `streamkeep/storage.py`, `streamkeep/metadata.py`, `streamkeep/verify.py`, Ganymede issue #1043, Tube Archivist issue #915.
+  Touches: `streamkeep/storage.py`, `streamkeep/metadata.py`, `streamkeep/verify.py`, `streamkeep/db.py`, `streamkeep/ui/tabs/storage.py`, `tests/test_verify.py`, `tests/test_db.py`.
+  Acceptance: Storage offers a preview-only reconcile action that identifies importable folders, duplicates, missing metadata, and conflicts; accepted imports create history rows and optional archive manifests without overwriting sidecars; tests cover duplicate, orphan, malformed metadata, and dry-run paths.
+  Complexity: L
+
+- [ ] P2 - Normalize download queue rows for recovery and API queries
+  Why: failed jobs and archive manifests are normalized, but `download_queue` still stores opaque JSON blobs, making retries, recurrence, remote status, and migrations harder to inspect safely.
+  Evidence: `streamkeep/db.py`, `streamkeep/local_server.py`, v4.31.4 failed-job normalization, Tube Archivist issue #915.
+  Touches: `streamkeep/db.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/local_server.py`, `streamkeep/cli.py`, `tests/test_db.py`, `tests/test_local_server.py`.
+  Acceptance: a schema migration stores queue URL, title, platform, quality, status, schedule/recurrence, failure id, and timestamps in typed columns while preserving legacy JSON extras; old JSON-only queues migrate losslessly; API/status tests can filter queued/running/failed rows without parsing UI text.
+  Complexity: L
+
+- [ ] P2 - Add extractor and manifest fixture corpus for protocol drift
+  Why: native extractor and manifest support changes whenever upstream APIs or streaming standards shift, and live-site-only validation makes regressions hard to reproduce.
+  Evidence: `tests/test_extractors.py`, `streamkeep/dash.py`, `streamkeep/hls.py`, yt-dlp 2026.06.09 release notes, RFC 8216, DASH-IF docs.
+  Touches: `tests/fixtures/`, `tests/test_extractors.py`, `tests/test_scrape.py`, `streamkeep/dash.py`, `streamkeep/hls.py`, `streamkeep/extractors/`.
+  Acceptance: offline fixtures cover representative Kick/Twitch/Rumble/SoundCloud/Reddit/Audius/podcast/yt-dlp responses, static and unsupported DASH MPDs, HLS master/media playlists, DRM markers, and error bodies; tests assert stable parse results and clear unsupported-case messages.
+  Complexity: M
+
+- [ ] P2 - Add a privacy-redacted support snapshot export
+  Why: local-first users still need a safe diagnostic bundle when server, extractor, DB, packaging, or optional-runtime issues occur, without leaking tokens, cookies, credentials, or full local paths unnecessarily.
+  Evidence: `streamkeep/config.py`, `streamkeep/backup.py`, `streamkeep/crash_log.py`, `streamkeep/db.py`, MeTube issues #966/#987, Tube Archivist issue #915.
+  Touches: `streamkeep/config.py`, `streamkeep/backup.py`, `streamkeep/db.py`, `streamkeep/ui/tabs/settings.py`, `streamkeep/local_server.py`, `tests/test_backup.py`, new diagnostic tests.
+  Acceptance: Settings and CLI can export a zip containing app/version info, dependency/runtime checks, redacted config, DB integrity summary, recent log/crash tails, and packaging/server state; tests prove bearer tokens, cookies, API keys, passwords, and credential-store payloads are redacted.
+  Complexity: M
+
+- [ ] P2 - Add host-scoped request profiles for guarded headers and referrers
+  Why: some media hosts require Referer/User-Agent/header context, but global header injection would risk leaking secrets across extractors and downloads.
+  Evidence: `streamkeep/http.py`, `streamkeep/proxy.py`, `streamkeep/accounts.py`, N_m3u8DL-RE, MeTube issue #987.
+  Touches: `streamkeep/http.py`, `streamkeep/config.py`, `streamkeep/extractors/`, `streamkeep/ui/tabs/settings.py`, `tests/test_http.py`, `tests/test_secrets.py`.
+  Acceptance: users can define per-host allowlisted headers/referrers with redacted display and export behavior; curl/ffmpeg/yt-dlp paths apply only matching host profiles; tests prove headers do not cross hosts, logs redact sensitive values, and unsupported schemes are rejected.
+  Complexity: M
+
+### P3 - Browser Companion Workflow Depth
+
+- [ ] P3 - Add browser clip-range handoff to the companion
+  Why: StreamKeep already has clipping tools and a browser companion, while downloader users are asking for extension workflows that mark start/end times before sending a page to the app.
+  Evidence: `browser-extension/`, `streamkeep/ui/clip_dialog.py`, `streamkeep/postprocess/clip_worker.py`, MeTube issue #987.
+  Touches: `browser-extension/popup.html`, `browser-extension/popup.js`, `browser-extension/background.js`, `streamkeep/local_server.py`, `streamkeep/ui/tabs/download.py`, `tests/test_local_server.py`, `tests/test_packaging.py`.
+  Acceptance: the extension can send URL plus optional start/end timestamps; StreamKeep stores that clip context on the queue item, validates timestamp order, and opens/executes the existing clip path after download; invalid or unsupported pages show clear extension errors.
+  Complexity: M
