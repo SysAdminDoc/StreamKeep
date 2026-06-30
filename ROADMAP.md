@@ -162,3 +162,14 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
   Touches: `streamkeep/metadata.py`, `streamkeep/integrations/media_server.py`, `streamkeep/ui/tabs/settings.py`, `tests/test_metadata.py`, media-server integration tests.
   Acceptance: per-library profiles generate or refresh compatible NFO/JSON/thumb sidecars without overwriting user edits; disabled profiles leave existing files untouched; tests cover output names, metadata fields, and idempotent reruns.
   Complexity: M
+
+## Research-Driven Additions
+
+### P2 - Data Store Reliability
+
+- [ ] P2 - Add SQLite maintenance and recovery diagnostics
+  Why: StreamKeep's archive state depends on SQLite, but `db.py` has no integrity check, optimize/vacuum, WAL checkpoint, or user-visible repair guidance, while comparable archive apps report database growth and reindex pain.
+  Evidence: `streamkeep/db.py`, `tests/test_db.py`, Pinchflat issue #887, Tube Archivist issue #915, SQLite PRAGMA docs, restic check/rebuild patterns.
+  Touches: `streamkeep/db.py`, `streamkeep/backup.py`, `streamkeep/ui/tabs/settings.py`, `streamkeep/local_server.py`, `tests/test_db.py`, `tests/test_backup.py`.
+  Acceptance: Settings or CLI can run a read-only integrity check, `PRAGMA optimize`, WAL checkpoint, and optional vacuum after backup; failures produce a clear diagnostic/export bundle and never mutate the DB before a backup snapshot; tests cover healthy DB, corrupt-copy detection, backup-before-vacuum, and no-op behavior when the DB is missing.
+  Complexity: M
