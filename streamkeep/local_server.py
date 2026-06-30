@@ -9,6 +9,8 @@ REST API endpoints (F37):
   POST /api/queue     — add a URL to the download queue
   GET  /api/library   — search/list recorded VODs
   GET  /api/monitor   — channel monitor statuses
+  POST /api/failures/retry    — retry a persisted failed job
+  POST /api/failures/discard  — discard a persisted failed job
   GET  /               — serves the single-page web remote UI
 
 The server runs on its own thread (stdlib http.server is threaded), and
@@ -29,6 +31,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 class _ServerSignals(QObject):
     url_received = pyqtSignal(str, str)   # url, action ("fetch" | "queue")
+    failed_job_retry_requested = pyqtSignal(int)
+    failed_job_discard_requested = pyqtSignal(int)
 
 
 class _CompanionHTTPServer(ThreadingHTTPServer):
@@ -156,6 +160,8 @@ class LocalCompanionServer:
         self._thread = None
         self._signals = _ServerSignals()
         self.url_received = self._signals.url_received
+        self.failed_job_retry_requested = self._signals.failed_job_retry_requested
+        self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
         self._bind_lan = bool(bind_lan)
         self._bind_addr = "0.0.0.0" if self._bind_lan else "127.0.0.1"
@@ -336,6 +342,10 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
                 self._handle_send_url()
             elif path == "/api/queue":
                 self._handle_api_queue()
+            elif path == "/api/failures/retry":
+                self._handle_api_failure_retry()
+            elif path == "/api/failures/discard":
+                self._handle_api_failure_discard()
             else:
                 self.send_response(404)
                 self._cors()
@@ -369,6 +379,7 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
                 "ok": True,
                 "downloads": state.get("downloads", []),
                 "queue": state.get("queue", []),
+                "failures": state.get("failures", []),
                 "live_channels": state.get("live_channels", []),
             })
 
@@ -393,6 +404,46 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
                 self._json_response(400, {"ok": False, "err": "invalid url"})
                 return
             signals.url_received.emit(url, "queue")
+            self._json_response(200, {"ok": True})
+
+        def _read_failure_id(self):
+            data = self._read_body()
+            try:
+                job_id = int(data.get("id") or data.get("job_id") or 0)
+            except (TypeError, ValueError):
+                job_id = 0
+            if job_id <= 0:
+                self._json_response(400, {"ok": False, "err": "invalid failure id"})
+                return 0
+            return job_id
+
+        def _handle_api_failure_retry(self):
+            job_id = self._read_failure_id()
+            if not job_id:
+                return
+            try:
+                from . import db as _db
+                job = _db.mark_failed_job_retrying(job_id)
+            except Exception as e:
+                self._json_response(500, {"ok": False, "err": str(e)})
+                return
+            if not job:
+                self._json_response(404, {"ok": False, "err": "failure not found"})
+                return
+            signals.failed_job_retry_requested.emit(job_id)
+            self._json_response(200, {"ok": True, "failure": job})
+
+        def _handle_api_failure_discard(self):
+            job_id = self._read_failure_id()
+            if not job_id:
+                return
+            try:
+                from . import db as _db
+                _db.mark_failed_job_discarded(job_id)
+            except Exception as e:
+                self._json_response(500, {"ok": False, "err": str(e)})
+                return
+            signals.failed_job_discard_requested.emit(job_id)
             self._json_response(200, {"ok": True})
 
         def _serve_web_ui(self):
@@ -435,6 +486,9 @@ button:hover{background:#74c7ec}
 .badge-live{background:#a6e3a1;color:#1e1e2e}
 .badge-offline{background:#45475a;color:#6c7086}
 .badge-queue{background:#fab387;color:#1e1e2e}
+.badge-failure{background:#f38ba8;color:#1e1e2e}
+.item-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.item-actions button{font-size:12px;padding:5px 9px}
 .item{padding:8px 0;border-bottom:1px solid #45475a}
 .item:last-child{border:none}
 .item .title{color:#cdd6f4}
@@ -473,6 +527,7 @@ button:hover{background:#74c7ec}
 <div id="tab-status" class="tab-content active">
 <div class="card"><h2>Active Downloads</h2><div id="dl-list"><p class="empty">Loading...</p></div></div>
 <div class="card"><h2>Queue</h2><div id="q-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>Failures</h2><div id="failure-list"><p class="empty">Loading...</p></div></div>
 </div>
 <div id="tab-queue" class="tab-content">
 <div class="card">
@@ -530,6 +585,14 @@ function renderItems(el,items,empty,renderFn){
   if(!items||!items.length){el.innerHTML='<p class="empty">'+empty+'</p>';return;}
   el.innerHTML=items.map(renderFn).join('');
 }
+function retryFailure(id){
+  api('/api/failures/retry',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
+function discardFailure(id){
+  api('/api/failures/discard',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
 function refresh(){
   api('/api/status').then(d=>{
     renderItems(document.getElementById('dl-list'),d.downloads,'No active downloads.',
@@ -538,7 +601,16 @@ function refresh(){
         (i.percent!=null?'<div class="progress"><div class="fill" style="width:'+i.percent+'%"></div></div>':'')+
         '</div>');
     renderItems(document.getElementById('q-list'),d.queue,'Queue empty.',
-      i=>'<div class="item"><span class="badge badge-queue">QUEUED</span>'+esc(i.title||i.url||'?')+'</div>');
+      i=>'<div class="item"><span class="badge badge-queue">'+esc((i.status||'queued').toUpperCase())+'</span>'+
+        esc(i.title||i.url||'?')+
+        (i.note?'<div class="meta">'+esc(i.note)+'</div>':'')+'</div>');
+    renderItems(document.getElementById('failure-list'),d.failures,'No retryable failures.',
+      i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||'failed').toUpperCase())+'</span>'+
+        '<span class="title">'+esc(i.title||i.url||'Failed job')+'</span>'+
+        '<div class="meta">'+esc(i.platform||'')+' &middot; retry '+esc(String(i.retry_count||0))+
+        ' &middot; '+esc(i.error||'')+'</div>'+
+        '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">Retry</button>'+
+        '<button onclick="discardFailure('+Number(i.id||0)+')">Discard</button></div></div>');
   }).catch(()=>{});
   api('/api/library').then(d=>{
     renderItems(document.getElementById('lib-list'),d.history,'No recordings yet.',

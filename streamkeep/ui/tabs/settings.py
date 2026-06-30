@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ... import VERSION
+from ... import db as _db
 from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
@@ -1161,6 +1162,8 @@ class SettingsTabMixin:
                 srv = LocalCompanionServer(bind_lan=bind_lan)
                 srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)
+                srv.failed_job_retry_requested.connect(self._retry_failed_job)
+                srv.failed_job_discard_requested.connect(self._discard_failed_job)
                 srv.start()
                 self._companion_server = srv
                 self._companion_last_error = ""
@@ -1197,6 +1200,28 @@ class SettingsTabMixin:
                 queue_items.append({
                     "url": q.get("url", ""),
                     "title": q.get("title", ""),
+                    "platform": q.get("platform", ""),
+                    "status": q.get("status", ""),
+                    "note": q.get("note", ""),
+                    "failure_id": q.get("failure_id", 0),
+                })
+        except Exception:
+            pass
+        failures = []
+        try:
+            for row in _db.load_failed_jobs(limit=25):
+                failures.append({
+                    "id": row.get("id", 0),
+                    "url": row.get("url", ""),
+                    "title": row.get("title", ""),
+                    "platform": row.get("platform", ""),
+                    "stage": row.get("stage", ""),
+                    "error": row.get("error", ""),
+                    "output_dir": row.get("output_dir", ""),
+                    "resume_sidecar": row.get("resume_sidecar", ""),
+                    "retry_count": row.get("retry_count", 0),
+                    "status": row.get("status", ""),
+                    "updated_at": row.get("updated_at", ""),
                 })
         except Exception:
             pass
@@ -1226,6 +1251,7 @@ class SettingsTabMixin:
         return {
             "downloads": downloads,
             "queue": queue_items,
+            "failures": failures,
             "history": history,
             "monitor": monitor,
             "live_channels": live_channels,

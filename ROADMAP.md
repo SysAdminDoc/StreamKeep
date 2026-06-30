@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.31.3.
+- Current package version: v4.31.4.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -107,15 +107,6 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 - Legacy planning artifacts stay archived and out of the repo root.
 
 ## Research-Driven Additions
-
-### P1 - Reliability and Data Safety
-
-- [ ] P1 - Persist failed-job records for retry and remote recovery
-  Why: queue status and resume sidecars preserve partial context, but remote recovery needs a normalized failure ledger that survives restart and supports the existing remote web UI recovery item.
-  Evidence: `streamkeep/db.py`, `streamkeep/workers/download.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/local_server.py`, Pinchflat, Ganymede.
-  Touches: `streamkeep/db.py`, `streamkeep/workers/download.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/local_server.py`, `tests/test_db.py`, `tests/test_local_server.py`.
-  Acceptance: fetch, download, and finalize failures are saved with URL, platform, stage, error, output directory, resume sidecar, retry count, and timestamps; desktop queue/history and `/api/status` expose retryable failures; retry and discard update the ledger; tests prove persistence across restart.
-  Complexity: L
 
 ### P2 - Distribution, Portability, and Operations
 

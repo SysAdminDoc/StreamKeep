@@ -1,6 +1,6 @@
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.31.3-blue)
+![Version](https://img.shields.io/badge/version-4.31.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -29,6 +29,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 - Paste a supported URL, fetch stream metadata, choose a quality, and download HLS, DASH, MP4, audio, or podcast media.
 - Queue multiple items, reorder pending work, batch-import URLs from text, and resume interrupted segmented downloads from sidecar state.
+- Persist fetch, download, and finalize failures to a retryable recovery ledger that survives restart and is exposed in the queue and web remote.
 - Use parallel HTTP range downloads for direct files when the server supports ranges.
 - Apply bandwidth windows, day/night/weekend speed scheduling, per-download rate limits, and lifecycle cleanup rules.
 
@@ -102,6 +103,7 @@ python StreamKeep.py --server --port 8765
 
 The local server binds to localhost by default, validates bearer tokens in constant time, checks Host headers to resist DNS rebinding, and restricts browser companion access to local/chrome-extension origins.
 When LAN access is enabled in Settings or with `server --bind 0.0.0.0`, StreamKeep only accepts Host and Origin values that match this machine's local interface names or IP addresses, and the token is still required for API calls.
+Authenticated `/api/status` responses include retryable failure records, and `/api/failures/retry` plus `/api/failures/discard` update the recovery ledger.
 
 ## Browser Companion
 
@@ -144,7 +146,7 @@ python StreamKeep.py
 | Linux | `$XDG_CONFIG_HOME/StreamKeep` or `~/.config/StreamKeep` |
 | macOS | `~/Library/Application Support/StreamKeep` |
 
-History, monitor channels, queue data, and archive integrity manifests are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
+History, monitor channels, queue data, failed-job recovery records, and archive integrity manifests are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
 
 ## Packaging Notes
 

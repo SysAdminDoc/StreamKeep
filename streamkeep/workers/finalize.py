@@ -101,6 +101,7 @@ class FinalizeWorker(QThread):
             "out_dir": out_dir,
             "history_url": task.get("history_url", ""),
             "cancelled": False,
+            "finalize_error": "",
             "archive_manifest": None,
             "archive_manifest_error": "",
         }
@@ -169,6 +170,7 @@ class FinalizeWorker(QThread):
                             chapters=getattr(info, "chapters", None) or None,
                         )
         except Exception as e:
+            result["finalize_error"] = str(e)
             self.log.emit(f"[FINALIZE] Background finalization error: {e}")
         finally:
             for k, v in orig.items():

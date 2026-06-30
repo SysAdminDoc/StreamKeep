@@ -23,7 +23,7 @@ from typing import Any
 from .paths import CONFIG_DIR
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _write_lock = threading.Lock()
 
@@ -125,6 +125,28 @@ def _apply_schema(db):
             ON archive_manifests(history_id);
         CREATE INDEX IF NOT EXISTS idx_archive_manifest_path
             ON archive_manifests(recording_path);
+
+        CREATE TABLE IF NOT EXISTS failed_jobs (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            url            TEXT    NOT NULL DEFAULT '',
+            platform       TEXT    NOT NULL DEFAULT '',
+            title          TEXT    NOT NULL DEFAULT '',
+            stage          TEXT    NOT NULL DEFAULT '',
+            error          TEXT    NOT NULL DEFAULT '',
+            output_dir     TEXT    NOT NULL DEFAULT '',
+            resume_sidecar TEXT    NOT NULL DEFAULT '',
+            retry_count    INTEGER NOT NULL DEFAULT 0,
+            status         TEXT    NOT NULL DEFAULT 'retryable',
+            queue_data     TEXT    NOT NULL DEFAULT '{}',
+            context_json   TEXT    NOT NULL DEFAULT '{}',
+            created_at     TEXT    NOT NULL DEFAULT '',
+            updated_at     TEXT    NOT NULL DEFAULT '',
+            last_retry_at  TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_failed_jobs_status
+            ON failed_jobs(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_failed_jobs_url
+            ON failed_jobs(url);
     """)
 
 
@@ -513,6 +535,208 @@ def archive_manifest_count() -> int:
         db.close()
 
 
+def save_failed_job(
+    *,
+    url: str,
+    platform: str = "",
+    title: str = "",
+    stage: str,
+    error: str,
+    output_dir: str = "",
+    resume_sidecar: str = "",
+    queue_data: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+    status: str = "retryable",
+) -> int:
+    """Insert or update a retryable failed-job ledger row.
+
+    Active rows are deduplicated by URL, stage, and output directory so a
+    flapping network failure does not flood the recovery list.
+    """
+    url = str(url or "").strip()
+    stage = str(stage or "").strip() or "unknown"
+    if not url and not output_dir:
+        return 0
+    now = _utc_now_iso()
+    queue_payload = json.dumps(queue_data or {}, ensure_ascii=False, sort_keys=True)
+    context_payload = json.dumps(context or {}, ensure_ascii=False, sort_keys=True)
+    with _write_lock:
+        db = _connect()
+        try:
+            row = db.execute("""
+                SELECT id, retry_count
+                  FROM failed_jobs
+                 WHERE url=? AND stage=? AND output_dir=?
+                   AND status IN ('retryable', 'retrying')
+                 ORDER BY id DESC
+                 LIMIT 1
+            """, (url, stage, str(output_dir or ""))).fetchone()
+            if row:
+                job_id = int(row["id"])
+                db.execute("""
+                    UPDATE failed_jobs
+                       SET platform=?, title=?, error=?, resume_sidecar=?,
+                           status=?, queue_data=?, context_json=?,
+                           updated_at=?
+                     WHERE id=?
+                """, (
+                    str(platform or ""),
+                    str(title or ""),
+                    str(error or ""),
+                    str(resume_sidecar or ""),
+                    str(status or "retryable"),
+                    queue_payload,
+                    context_payload,
+                    now,
+                    job_id,
+                ))
+                db.commit()
+                return job_id
+            cur = db.execute("""
+                INSERT INTO failed_jobs
+                    (url, platform, title, stage, error, output_dir,
+                     resume_sidecar, retry_count, status, queue_data,
+                     context_json, created_at, updated_at, last_retry_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                url,
+                str(platform or ""),
+                str(title or ""),
+                stage,
+                str(error or ""),
+                str(output_dir or ""),
+                str(resume_sidecar or ""),
+                0,
+                str(status or "retryable"),
+                queue_payload,
+                context_payload,
+                now,
+                now,
+                "",
+            ))
+            db.commit()
+            return int(cur.lastrowid or 0)
+        finally:
+            db.close()
+
+
+def load_failed_jobs(
+    *,
+    statuses: tuple[str, ...] = ("retryable", "retrying"),
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return failed jobs ordered newest-first."""
+    status_values = tuple(str(s) for s in statuses if str(s))
+    if not status_values:
+        return []
+    placeholders = ",".join("?" for _ in status_values)
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            f"""
+            SELECT *
+              FROM failed_jobs
+             WHERE status IN ({placeholders})
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ?
+            """,
+            (*status_values, max(1, int(limit or 50))),
+        ).fetchall()
+        return [_row_to_failed_job_dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def load_failed_job(job_id: int) -> dict[str, Any] | None:
+    """Load one failed job by id."""
+    if not job_id:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM failed_jobs WHERE id=?",
+            (int(job_id),),
+        ).fetchone()
+        return _row_to_failed_job_dict(row) if row else None
+    finally:
+        db.close()
+
+
+def mark_failed_job_retrying(job_id: int) -> dict[str, Any] | None:
+    """Increment retry count and mark a failed job as being retried."""
+    if not job_id:
+        return None
+    now = _utc_now_iso()
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                UPDATE failed_jobs
+                   SET status='retrying',
+                       retry_count=retry_count + 1,
+                       last_retry_at=?,
+                       updated_at=?
+                 WHERE id=?
+            """, (now, now, int(job_id)))
+            db.commit()
+        finally:
+            db.close()
+    return load_failed_job(job_id)
+
+
+def mark_failed_job_discarded(job_id: int) -> None:
+    """Hide a failed job from active recovery lists without deleting it."""
+    if not job_id:
+        return
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                UPDATE failed_jobs
+                   SET status='discarded', updated_at=?
+                 WHERE id=?
+            """, (_utc_now_iso(), int(job_id)))
+            db.commit()
+        finally:
+            db.close()
+
+
+def mark_failed_job_resolved(job_id: int) -> None:
+    """Mark a failed job resolved after a successful retry."""
+    if not job_id:
+        return
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                UPDATE failed_jobs
+                   SET status='resolved', updated_at=?
+                 WHERE id=?
+            """, (_utc_now_iso(), int(job_id)))
+            db.commit()
+        finally:
+            db.close()
+
+
+def mark_failed_jobs_resolved_for_url(url: str) -> None:
+    """Resolve active failure rows for a source URL."""
+    url = str(url or "").strip()
+    if not url:
+        return
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("""
+                UPDATE failed_jobs
+                   SET status='resolved', updated_at=?
+                 WHERE url=?
+                   AND status IN ('retryable', 'retrying')
+            """, (_utc_now_iso(), url))
+            db.commit()
+        finally:
+            db.close()
+
+
 def _row_to_history_dict(row):
     d = dict(row)
     d["favorite"] = bool(d.get("favorite", 0))
@@ -522,6 +746,17 @@ def _row_to_history_dict(row):
         d["bookmarks"] = json.loads(d.get("bookmarks", "[]") or "[]")
     except (json.JSONDecodeError, TypeError):
         d["bookmarks"] = []
+    return d
+
+
+def _row_to_failed_job_dict(row):
+    d = dict(row)
+    d["retry_count"] = int(d.get("retry_count", 0) or 0)
+    for key in ("queue_data", "context_json"):
+        try:
+            d[key] = json.loads(d.get(key, "{}") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            d[key] = {}
     return d
 
 

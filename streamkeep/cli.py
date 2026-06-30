@@ -50,6 +50,24 @@ def _check_ffmpeg():
         return False
 
 
+def _record_cli_failure(url, stage, error, output_dir="", info=None):
+    try:
+        _db.save_failed_job(
+            url=url,
+            platform=(info.platform if info else ""),
+            title=(info.title if info else url),
+            stage=stage,
+            error=str(error or ""),
+            output_dir=output_dir,
+            resume_sidecar=os.path.join(output_dir, ".streamkeep_resume.json")
+            if output_dir and os.path.isfile(os.path.join(output_dir, ".streamkeep_resume.json"))
+            else "",
+            queue_data={"url": url, "title": (info.title if info else url)},
+        )
+    except Exception:
+        pass
+
+
 # ── --url handler ───────────────────────────────────────────────────
 
 def _run_download(args):
@@ -77,7 +95,14 @@ def _run_download(args):
     _print_line(f"Quality: {quality_pref}")
     _print_line("")
 
-    state = {"phase": "fetch", "info": None, "exit_code": 0, "fw": None, "dw": None}
+    state = {
+        "phase": "fetch",
+        "info": None,
+        "exit_code": 0,
+        "fw": None,
+        "dw": None,
+        "source_url": args.url,
+    }
 
     # ── Fetch ──
     fw = FetchWorker(args.url)
@@ -95,6 +120,7 @@ def _run_download(args):
         )
         if not info.qualities:
             _print_line("Error: No downloadable qualities found.")
+            _record_cli_failure(args.url, "fetch", "No downloadable qualities found", output_dir, info)
             state["exit_code"] = 1
             app.quit()
             return
@@ -125,15 +151,22 @@ def _run_download(args):
             f"[{pct:3d}%] {txt}"
         ))
         dw.log.connect(lambda msg: write_log_line(msg))
-        dw.error.connect(lambda si, msg: _print_line(f"Error: {msg}"))
+        def on_download_error(_si, msg):
+            _print_line(f"Error: {msg}")
+            state["exit_code"] = 1
+            _record_cli_failure(args.url, "download", msg, output_dir, state.get("info"))
+
+        dw.error.connect(on_download_error)
         dw.segment_done.connect(lambda si, path: _print_line(
             f"  segment {si} done"
         ))
         dw.all_done.connect(lambda: _on_download_done(state, app, output_dir))
+        dw.finished.connect(lambda: app.quit() if state.get("exit_code") else None)
         dw.start()
 
     def on_fetch_error(msg):
         _print_line(f"Fetch error: {msg}")
+        _record_cli_failure(args.url, "fetch", msg, output_dir)
         state["exit_code"] = 1
         app.quit()
 
@@ -155,6 +188,7 @@ def _run_download(args):
 def _on_download_done(state, app, output_dir):
     _print_progress("")
     _print_line(f"\nDownload complete -> {output_dir}")
+    _db.mark_failed_jobs_resolved_for_url(state.get("source_url", ""))
     try:
         from .verify import create_archive_manifest
         manifest = create_archive_manifest(output_dir, write_sidecar=True)

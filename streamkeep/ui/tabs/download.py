@@ -1148,6 +1148,12 @@ class DownloadTabMixin:
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
         self._log(f"[ERROR] {err}")
+        self._record_failed_job(
+            stage="fetch",
+            error=err,
+            item=self._queue_active_item,
+            out_dir=self.output_input.text().strip() if hasattr(self, "output_input") else "",
+        )
         self._refresh_download_summary()
         self._set_status(f"Fetch failed: {err}", "error")
         if self._queue_active_item is not None:
@@ -1974,6 +1980,7 @@ class DownloadTabMixin:
         self.download_worker.error.connect(self._on_dl_error)
         self.download_worker.log.connect(self._log)
         self.download_worker.all_done.connect(self._on_all_done)
+        self.download_worker.finished.connect(self._on_download_worker_finished)
         self._attach_resume_to_worker(self.download_worker)
         # Store overrides for postprocess snapshot merge (F18)
         self._dl_overrides = _dl_overrides
@@ -1982,6 +1989,25 @@ class DownloadTabMixin:
         _reset_adv_overrides(self)
         self.download_worker.start()
         return True
+
+    def _on_download_worker_finished(self):
+        if not getattr(self, "_download_had_errors", False):
+            return
+        self.download_btn.setEnabled(True)
+        self.fetch_btn.setEnabled(True)
+        self.stop_btn.setVisible(False)
+        self.open_folder_btn.setVisible(self._output_contains_media(self._active_output_dir))
+        if self._queue_active_item is not None:
+            note = f"{getattr(self, '_completed_segments', 0)}/{getattr(self, '_total_segments', 0)} segments completed"
+            self._release_queue_item("failed", note)
+        self._set_status(
+            "Download stopped after failed segment(s). Resume sidecar was kept for retry.",
+            "warning",
+        )
+        self._persist_config()
+        self._update_tray_badge()
+        self._reset_speed_dashboard()
+        self._start_next_background_job()
 
     def _on_dl_progress(self, idx, pct, status):
         if idx < len(self._segment_progress):
@@ -2017,6 +2043,13 @@ class DownloadTabMixin:
 
     def _on_dl_error(self, idx, err):
         self._download_had_errors = True
+        self._record_failed_job(
+            stage="download",
+            error=err,
+            item=self._queue_active_item,
+            info=self._active_stream_info or self.stream_info,
+            out_dir=self._active_output_dir,
+        )
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setStyleSheet(
                 f"QProgressBar::chunk {{ background-color: {CAT['red']}; border-radius: 6px; }}"
@@ -2050,6 +2083,13 @@ class DownloadTabMixin:
         if self._download_had_errors:
             self._log("Download finished with one or more failed segments.")
             self._log(f"{'=' * 50}")
+            self._record_failed_job(
+                stage="download",
+                error=f"{self._completed_segments}/{self._total_segments} segments completed",
+                item=self._queue_active_item,
+                info=active_info,
+                out_dir=out_dir,
+            )
             self._set_status(
                 "Download finished with one or more failed segments. Review the log before retrying.",
                 "warning",
@@ -2077,6 +2117,7 @@ class DownloadTabMixin:
                     "download_complete", title=title,
                     path=out_dir,
                     platform=active_info.platform if active_info else "")
+                _db.mark_failed_jobs_resolved_for_url(self._active_history_url)
             self._save_metadata(
                 out_dir,
                 q_name,
@@ -2617,6 +2658,12 @@ class DownloadTabMixin:
         vod_date = str(item.get("vod_date", "") or "")
         if vod_date:
             normalized["vod_date"] = vod_date
+        try:
+            failure_id = int(item.get("failure_id", 0) or 0)
+        except (TypeError, ValueError):
+            failure_id = 0
+        if failure_id:
+            normalized["failure_id"] = failure_id
         return normalized
 
     def _queue_add(
@@ -2750,6 +2797,13 @@ class DownloadTabMixin:
             except Exception:
                 pass
         if info is None:
+            job_id = self._record_failed_job(
+                stage="fetch",
+                error="Fetch returned no data",
+                item=item,
+            )
+            if job_id:
+                item["failure_id"] = job_id
             self._set_queue_item_status(item, "failed", "Fetch returned no data")
             self._log(f"[QUEUE] Fetch failed: {item.get('title', '')[:60]}")
             self._advance_queue()
@@ -2759,6 +2813,14 @@ class DownloadTabMixin:
         if info.qualities:
             q_data = info.qualities[0]  # Highest quality (pre-sorted)
         if q_data is None and not info.url:
+            job_id = self._record_failed_job(
+                stage="fetch",
+                error="No playable quality",
+                item=item,
+                info=info,
+            )
+            if job_id:
+                item["failure_id"] = job_id
             self._set_queue_item_status(item, "failed", "No playable quality")
             self._advance_queue()
             return
@@ -2778,6 +2840,15 @@ class DownloadTabMixin:
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as e:
+            job_id = self._record_failed_job(
+                stage="download",
+                error=f"Cannot create dir: {e}",
+                item=item,
+                info=info,
+                out_dir=out_dir,
+            )
+            if job_id:
+                item["failure_id"] = job_id
             self._set_queue_item_status(item, "failed", f"Cannot create dir: {e}")
             self._advance_queue()
             return
@@ -2835,6 +2906,13 @@ class DownloadTabMixin:
                 fw.wait(500)
             except Exception:
                 pass
+        job_id = self._record_failed_job(
+            stage="fetch",
+            error=err,
+            item=item,
+        )
+        if job_id:
+            item["failure_id"] = job_id
         self._set_queue_item_status(item, "failed", str(err)[:120])
         self._log(f"[QUEUE] Fetch error for {item.get('title', '')[:60]}: {err}")
         self._advance_queue()
@@ -2869,6 +2947,10 @@ class DownloadTabMixin:
                 item["status"] = "done"
         else:
             item["status"] = "done"
+        failure_id = int(item.get("failure_id", 0) or 0)
+        if failure_id:
+            _db.mark_failed_job_resolved(failure_id)
+        _db.mark_failed_jobs_resolved_for_url(item.get("url", ""))
         self._queue_status_changed()
         self._update_tray_badge()
         self._advance_queue()
@@ -2876,13 +2958,22 @@ class DownloadTabMixin:
     def _on_queue_item_error(self, item, err):
         """Handle download error for a concurrent queue item."""
         item_id = id(item)
-        self._queue_contexts.pop(item_id, None)
+        ctx = self._queue_contexts.pop(item_id, {})
         worker = self._queue_workers.pop(item_id, None)
         if worker and not worker.isRunning():
             try:
                 worker.wait(500)
             except Exception:
                 pass
+        job_id = self._record_failed_job(
+            stage="download",
+            error=err,
+            item=item,
+            out_dir=ctx.get("out_dir", "") if isinstance(ctx, dict) else "",
+            info=ctx.get("info") if isinstance(ctx, dict) else None,
+        )
+        if job_id:
+            item["failure_id"] = job_id
         self._set_queue_item_status(item, "failed", str(err)[:120])
         self._log(f"[QUEUE] Error: {item.get('title', '')[:60]} — {err}")
         self._advance_queue()
@@ -3024,12 +3115,27 @@ class DownloadTabMixin:
         header = menu.addAction(f"Recurrence: {current}")
         header.setEnabled(False)
         menu.addSeparator()
+        retry_failure = None
+        discard_failure = None
+        failure_id = int(item.get("failure_id", 0) or 0)
+        if item.get("status") == "failed" and failure_id:
+            failure_header = menu.addAction(f"Failure #{failure_id}")
+            failure_header.setEnabled(False)
+            retry_failure = menu.addAction("Retry failed job")
+            discard_failure = menu.addAction("Discard failure")
+            menu.addSeparator()
         one_shot = menu.addAction("One-shot (no recurrence)")
         daily = menu.addAction("Daily")
         weekly = menu.addAction("Weekly")
         custom = menu.addAction("Weekday mask... (mon,tue,fri)")
         chosen = menu.exec(self.queue_table.viewport().mapToGlobal(pos))
         if chosen is None:
+            return
+        if retry_failure is not None and chosen == retry_failure:
+            self._retry_failed_job(failure_id)
+            return
+        if discard_failure is not None and chosen == discard_failure:
+            self._discard_failed_job(failure_id)
             return
         new_rec = ""
         if chosen == one_shot:
@@ -3322,6 +3428,119 @@ class DownloadTabMixin:
         item["note"] = note
         self._queue_status_changed()
 
+    def _failure_resume_sidecar(self, out_dir):
+        if not out_dir:
+            return ""
+        path = os.path.join(out_dir, ".streamkeep_resume.json")
+        return path if os.path.isfile(path) else ""
+
+    def _record_failed_job(
+        self,
+        *,
+        stage,
+        error,
+        item=None,
+        info=None,
+        out_dir="",
+        queue_data=None,
+    ):
+        """Persist one failed fetch/download/finalize job for recovery."""
+        item = item or {}
+        queue_seed = dict(queue_data or {})
+        info = info or getattr(self, "_active_stream_info", None) or self.stream_info
+        source_url = (
+            item.get("url")
+            or item.get("vod_source")
+            or queue_seed.get("url")
+            or queue_seed.get("vod_source")
+            or self._resolve_history_url()
+            or (self.url_input.text().strip() if hasattr(self, "url_input") else "")
+        )
+        platform = item.get("platform") or queue_seed.get("platform") or (info.platform if info else "")
+        title = item.get("title") or queue_seed.get("title") or (info.title if info else "") or source_url
+        output_dir = out_dir or getattr(self, "_active_output_dir", "") or (
+            self.output_input.text().strip() if hasattr(self, "output_input") else ""
+        )
+        q_data = dict(queue_seed or item or {})
+        if source_url and "url" not in q_data:
+            q_data["url"] = source_url
+        if title and "title" not in q_data:
+            q_data["title"] = title
+        if platform and "platform" not in q_data:
+            q_data["platform"] = platform
+        try:
+            job_id = _db.save_failed_job(
+                url=source_url,
+                platform=platform,
+                title=title,
+                stage=stage,
+                error=str(error or ""),
+                output_dir=output_dir,
+                resume_sidecar=self._failure_resume_sidecar(output_dir),
+                queue_data=q_data,
+                context={
+                    "quality_name": getattr(self, "_active_quality_name", ""),
+                    "completed_segments": getattr(self, "_completed_segments", 0),
+                    "total_segments": getattr(self, "_total_segments", 0),
+                },
+            )
+            if item is not None and job_id:
+                item["failure_id"] = job_id
+            return job_id
+        except Exception as e:
+            self._log(f"[RECOVERY] Could not save failed-job record: {e}")
+            return 0
+
+    def _retry_failed_job(self, job_id):
+        job = _db.load_failed_job(job_id)
+        if job and job.get("status") != "retrying":
+            job = _db.mark_failed_job_retrying(job_id)
+        if not job:
+            self._set_status("Failed-job record was not found.", "warning")
+            return False
+        queue_data = dict(job.get("queue_data") or {})
+        queue_data["status"] = "queued"
+        queue_data["note"] = f"retry #{job.get('retry_count', 0)}"
+        queue_data["failure_id"] = int(job.get("id", 0) or 0)
+        if not queue_data.get("url"):
+            queue_data["url"] = job.get("url", "")
+        if not queue_data.get("title"):
+            queue_data["title"] = job.get("title", "") or job.get("url", "")
+        if not queue_data.get("platform"):
+            queue_data["platform"] = job.get("platform", "") or "?"
+        normalized = self._normalize_queue_item(queue_data)
+        if normalized is None:
+            self._set_status("Failed job has no retryable URL.", "warning")
+            return False
+        normalized["failure_id"] = int(job.get("id", 0) or 0)
+        existing = None
+        for q in self._download_queue:
+            if int(q.get("failure_id", 0) or 0) == normalized["failure_id"]:
+                existing = q
+                break
+        if existing is None:
+            self._download_queue.append(normalized)
+        else:
+            existing.update(normalized)
+        self._queue_status_changed()
+        self._set_status(f"Retry queued: {normalized.get('title', '')[:60]}", "success")
+        self._advance_queue()
+        return True
+
+    def _discard_failed_job(self, job_id):
+        _db.mark_failed_job_discarded(job_id)
+        removed = 0
+        kept = []
+        for q in self._download_queue:
+            if int(q.get("failure_id", 0) or 0) == int(job_id) and q.get("status") == "failed":
+                removed += 1
+                continue
+            kept.append(q)
+        if removed:
+            self._download_queue = kept
+            self._queue_status_changed()
+        self._set_status("Failed-job recovery item discarded.", "success")
+
     def _release_queue_item(self, status=None, note=""):
         item = self._queue_active_item
         self._queue_active_item = None
@@ -3493,6 +3712,18 @@ class DownloadTabMixin:
                 self._log(
                     "[VERIFY] Integrity manifest was not saved: "
                     f"{result.get('archive_manifest_error')}"
+                )
+            finalize_error = result.get("finalize_error") or result.get("archive_manifest_error")
+            if finalize_error:
+                self._record_failed_job(
+                    stage="finalize",
+                    error=finalize_error,
+                    out_dir=result.get("out_dir", ""),
+                    queue_data={
+                        "url": result.get("history_url", ""),
+                        "title": result.get("title", ""),
+                        "platform": result.get("platform", "?"),
+                    },
                 )
         remaining = len(self._finalize_tasks)
         self._refresh_download_summary()
@@ -3677,5 +3908,3 @@ class DownloadTabMixin:
                 self._log(f"[COMPANION] Queue failed: {e}")
         else:
             self._on_fetch()
-
-

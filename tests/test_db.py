@@ -68,6 +68,38 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(updated["status"], "verified")
             self.assertEqual(count, 0)
 
+    def test_failed_job_ledger_persists_retry_and_discard_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job_id = db.save_failed_job(
+                    url="https://example.com/video",
+                    platform="Example",
+                    title="Example video",
+                    stage="download",
+                    error="network timeout",
+                    output_dir=str(Path(tmpdir) / "recording"),
+                    resume_sidecar=str(Path(tmpdir) / "recording" / ".streamkeep_resume.json"),
+                    queue_data={"url": "https://example.com/video", "title": "Example video"},
+                )
+                first = db.load_failed_job(job_id)
+                retrying = db.mark_failed_job_retrying(job_id)
+                active_after_retry = db.load_failed_jobs()
+                db.mark_failed_job_discarded(job_id)
+                active_after_discard = db.load_failed_jobs()
+                discarded = db.load_failed_job(job_id)
+
+            self.assertGreater(job_id, 0)
+            self.assertEqual(first["stage"], "download")
+            self.assertEqual(first["queue_data"]["url"], "https://example.com/video")
+            self.assertEqual(retrying["status"], "retrying")
+            self.assertEqual(retrying["retry_count"], 1)
+            self.assertEqual(len(active_after_retry), 1)
+            self.assertEqual(active_after_discard, [])
+            self.assertEqual(discarded["status"], "discarded")
+
 
 if __name__ == "__main__":
     unittest.main()
