@@ -38,14 +38,16 @@ class BandwidthTracker:
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS bandwidth_daily (
-                    day   TEXT PRIMARY KEY,
-                    bytes INTEGER NOT NULL DEFAULT 0
-                )
-            """)
-            db.commit()
-            db.close()
+            try:
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS bandwidth_daily (
+                        day   TEXT PRIMARY KEY,
+                        bytes INTEGER NOT NULL DEFAULT 0
+                    )
+                """)
+                db.commit()
+            finally:
+                db.close()
         except Exception:
             pass
 
@@ -54,11 +56,13 @@ class BandwidthTracker:
         self._today_key = key
         try:
             db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
-            row = db.execute(
-                "SELECT bytes FROM bandwidth_daily WHERE day=?", (key,)
-            ).fetchone()
-            db.close()
-            self._today_bytes = row[0] if row else 0
+            try:
+                row = db.execute(
+                    "SELECT bytes FROM bandwidth_daily WHERE day=?", (key,)
+                ).fetchone()
+                self._today_bytes = row[0] if row else 0
+            finally:
+                db.close()
         except Exception:
             self._today_bytes = 0
 
@@ -88,12 +92,14 @@ class BandwidthTracker:
     def _persist(self):
         try:
             db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
-            db.execute(
-                "INSERT OR REPLACE INTO bandwidth_daily (day, bytes) VALUES (?, ?)",
-                (self._today_key, self._today_bytes),
-            )
-            db.commit()
-            db.close()
+            try:
+                db.execute(
+                    "INSERT OR REPLACE INTO bandwidth_daily (day, bytes) VALUES (?, ?)",
+                    (self._today_key, self._today_bytes),
+                )
+                db.commit()
+            finally:
+                db.close()
         except Exception:
             pass
 
@@ -107,13 +113,15 @@ class BandwidthTracker:
         month_prefix = date.today().strftime("%Y-%m")
         try:
             db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
-            row = db.execute(
-                "SELECT COALESCE(SUM(bytes), 0) FROM bandwidth_daily "
-                "WHERE day LIKE ? AND day != ?",
-                (month_prefix + "%", self._today_key),
-            ).fetchone()
-            db.close()
-            return (row[0] if row else 0) + self._today_bytes
+            try:
+                row = db.execute(
+                    "SELECT COALESCE(SUM(bytes), 0) FROM bandwidth_daily "
+                    "WHERE day LIKE ? AND day != ?",
+                    (month_prefix + "%", self._today_key),
+                ).fetchone()
+                return (row[0] if row else 0) + self._today_bytes
+            finally:
+                db.close()
         except Exception:
             return self._today_bytes
 
