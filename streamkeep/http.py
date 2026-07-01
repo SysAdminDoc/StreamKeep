@@ -29,6 +29,54 @@ from .utils import fmt_size
 NATIVE_PROXY = ""
 _INTERRUPT_STATE = threading.local()
 
+# Host-scoped request profiles — per-host headers/referrer that are applied
+# only to matching requests and never leak across hosts.
+_HOST_PROFILES_LOCK = threading.Lock()
+_HOST_PROFILES = {}  # host_lower -> {"headers": {str: str}, "referrer": str}
+
+
+def set_host_profiles(profiles):
+    """Replace all host profiles from a config dict.
+
+    *profiles* maps hostname (lowercase) to dicts with optional keys
+    ``headers`` (dict[str, str]) and ``referrer`` (str).
+    Only ``http`` and ``https`` schemes are accepted for referrers.
+    """
+    cleaned = {}
+    for host, profile in (profiles or {}).items():
+        host = str(host).strip().lower()
+        if not host:
+            continue
+        entry = {}
+        hdrs = profile.get("headers") if isinstance(profile, dict) else None
+        if isinstance(hdrs, dict):
+            entry["headers"] = {str(k): str(v) for k, v in hdrs.items()}
+        ref = str(profile.get("referrer", "") or "") if isinstance(profile, dict) else ""
+        if ref and ref.startswith(("http://", "https://")):
+            entry["referrer"] = ref
+        if entry:
+            cleaned[host] = entry
+    with _HOST_PROFILES_LOCK:
+        _HOST_PROFILES.clear()
+        _HOST_PROFILES.update(cleaned)
+
+
+def get_host_profiles():
+    with _HOST_PROFILES_LOCK:
+        return dict(_HOST_PROFILES)
+
+
+def _host_profile_for_url(url):
+    """Return the host profile dict for a URL, or None."""
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname or ""
+        host = host.lower()
+    except Exception:
+        return None
+    with _HOST_PROFILES_LOCK:
+        return _HOST_PROFILES.get(host)
+
 
 @dataclass
 class CommandResult:
@@ -151,6 +199,13 @@ def _build_curl_cmd(url: str, headers: dict[str, str] | None = None, method: str
         cmd.extend(["-X", method.upper()])
     if body is not None:
         cmd.extend(["-H", "Content-Type: application/json", "-d", body])
+    profile = _host_profile_for_url(url)
+    if profile:
+        for k, v in profile.get("headers", {}).items():
+            cmd.extend(["-H", f"{k}: {v}"])
+        ref = profile.get("referrer", "")
+        if ref:
+            cmd.extend(["-e", ref])
     for k, v in (headers or {}).items():
         cmd.extend(["-H", f"{k}: {v}"])
     cmd.append(url)
