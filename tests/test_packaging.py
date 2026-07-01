@@ -83,3 +83,17 @@ def test_browser_extension_rejects_missing_asset():
         ok, errors = validate_extension(ext)
         assert not ok
         assert any("Missing file" in e for e in errors)
+
+
+def test_sbom_generates_cyclonedx_with_components():
+    from sbom import generate_sbom
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "sbom.cdx.json"
+        ok, result = generate_sbom(out)
+        assert ok, f"SBOM generation failed: {result}"
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["bomFormat"] == "CycloneDX"
+        assert data["specVersion"] == "1.5"
+        assert len(data["components"]) > 0
+        purls = [c["purl"] for c in data["components"]]
+        assert any("pyqt6" in p for p in purls)
