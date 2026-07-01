@@ -484,13 +484,13 @@ class MonitorTabMixin:
     # ── Import / Export Monitor Channels (F10) ──────────────────────
 
     def _on_monitor_export(self):
-        """Export monitored channel list to a JSON file."""
+        """Export monitored channel list to a JSON or OPML file."""
         if not self.monitor.entries:
             self._set_status("No channels to export.", "warning")
             return
-        path, _ = QFileDialog.getSaveFileName(
+        path, selected_filter = QFileDialog.getSaveFileName(
             self, "Export Monitor Channels", "streamkeep_channels.json",
-            "JSON files (*.json)",
+            "JSON files (*.json);;OPML files (*.opml)",
         )
         if not path:
             return
@@ -498,21 +498,34 @@ class MonitorTabMixin:
         self.monitor.save_to_config(cfg)
         data = cfg.get("monitor_channels", [])
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            if path.lower().endswith(".opml") or "OPML" in selected_filter:
+                from ...opml import export_opml
+                xml_text = export_opml(data)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(xml_text)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
             self._log(f"[EXPORT] {len(data)} channels exported to {path}")
             self._set_status(f"Exported {len(data)} channels to {os.path.basename(path)}", "success")
         except OSError as e:
             self._set_status(f"Export failed: {e}", "error")
 
     def _on_monitor_import(self):
-        """Import monitored channels from a JSON file, skipping duplicates."""
+        """Import monitored channels from a JSON or OPML file, skipping duplicates."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Import Monitor Channels", "",
-            "JSON files (*.json);;All files (*)",
+            "Supported files (*.json *.opml);;JSON files (*.json);;OPML files (*.opml);;All files (*)",
         )
         if not path:
             return
+
+        if path.lower().endswith(".opml"):
+            self._import_opml_file(path)
+        else:
+            self._import_json_file(path)
+
+    def _import_json_file(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -538,7 +551,6 @@ class MonitorTabMixin:
                 ch.get("subscribe_vods", False),
             )
             if ok:
-                # Restore per-channel profile fields
                 for e in self.monitor.entries:
                     if e.url == ch["url"]:
                         e.override_output_dir = str(ch.get("override_output_dir", "") or "")
@@ -563,6 +575,34 @@ class MonitorTabMixin:
         self._log(f"[IMPORT] {added} added, {skipped} skipped (duplicate) from {path}")
         self._set_status(
             f"Imported {added} channels ({skipped} skipped as duplicates).",
+            "success" if added else "warning",
+        )
+
+    def _import_opml_file(self, path):
+        from ...opml import import_opml
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                xml_text = f.read()
+        except OSError as e:
+            self._set_status(f"Import failed: {e}", "error")
+            return
+        existing_urls = {e.url for e in self.monitor.entries}
+        entries, report = import_opml(xml_text, existing_urls=existing_urls)
+        added = 0
+        for ch in entries:
+            ok = self.monitor.add_channel(ch["url"], 120, False, False)
+            if ok:
+                added += 1
+        if added:
+            self._refresh_monitor_table()
+            self._persist_config()
+        errors_text = f" Errors: {'; '.join(report['errors'][:3])}" if report["errors"] else ""
+        self._log(
+            f"[IMPORT] OPML: {report['imported']} imported, "
+            f"{report['duplicates']} duplicates, {report['invalid']} invalid from {path}"
+        )
+        self._set_status(
+            f"OPML: {added} channels added, {report['duplicates']} duplicates skipped.{errors_text}",
             "success" if added else "warning",
         )
 
