@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic"
+     availabilityStartTime="2026-07-01T12:00:00Z"
+     minimumUpdatePeriod="PT5S" minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <Representation id="v1" width="1920" height="1080" bandwidth="5000000">
+        <SegmentTemplate timescale="90000" media="seg_$Number$.m4s" initialization="init.mp4"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
