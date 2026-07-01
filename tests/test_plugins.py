@@ -57,7 +57,10 @@ class PluginTests(unittest.TestCase):
             plugin_dir = base / "example_plugin"
             plugin_dir.mkdir()
             (plugin_dir / "plugin.json").write_text(
-                json.dumps({"id": "example", "enabled": True, "trusted": False}),
+                json.dumps({
+                    "id": "example", "name": "Example", "version": "1.0.0",
+                    "enabled": True, "trusted": False,
+                }),
                 encoding="utf-8",
             )
             (plugin_dir / "__init__.py").write_text("LOADED = True\n", encoding="utf-8")
@@ -88,6 +91,78 @@ class PluginTests(unittest.TestCase):
 
         self.assertTrue(updated)
         self.assertTrue(data["trusted"])
+
+
+    def test_validate_manifest_rejects_missing_required_fields(self):
+        errors = plugins.validate_manifest({"name": "X", "version": "1.0.0"})
+        self.assertTrue(any("id" in e for e in errors))
+
+    def test_validate_manifest_rejects_invalid_version(self):
+        errors = plugins.validate_manifest(
+            {"id": "x", "name": "X", "version": "not-semver"}
+        )
+        self.assertTrue(any("version format" in e for e in errors))
+
+    def test_validate_manifest_rejects_future_manifest_version(self):
+        errors = plugins.validate_manifest(
+            {"id": "x", "name": "X", "version": "1.0.0", "manifest_version": 999}
+        )
+        self.assertTrue(any("Unsupported manifest_version" in e for e in errors))
+
+    def test_validate_manifest_rejects_app_version_too_old(self):
+        errors = plugins.validate_manifest(
+            {"id": "x", "name": "X", "version": "1.0.0",
+             "min_app_version": "999.0.0"}
+        )
+        self.assertTrue(any("Requires StreamKeep" in e for e in errors))
+
+    def test_validate_manifest_accepts_valid_manifest(self):
+        errors = plugins.validate_manifest(
+            {"id": "x", "name": "X", "version": "1.0.0",
+             "manifest_version": 1, "min_app_version": "4.0.0"}
+        )
+        self.assertEqual(errors, [])
+
+    def test_discover_disables_plugin_with_incompatible_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            plugin_dir = base / "future_plugin"
+            plugin_dir.mkdir()
+            (plugin_dir / "plugin.json").write_text(
+                json.dumps({
+                    "id": "future", "name": "Future Plugin",
+                    "version": "2.0.0", "manifest_version": 999,
+                    "enabled": True,
+                }),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(plugins, "PLUGINS_DIR", base):
+                found = plugins.discover_plugins()
+
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0]["enabled"])
+        self.assertIn("Unsupported manifest_version", found[0]["error"])
+
+    def test_sample_plugin_fixture_has_valid_manifest(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "sample_plugin" / "plugin.json"
+        self.assertTrue(fixture_path.is_file(), "Sample plugin fixture missing")
+        with open(fixture_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        errors = plugins.validate_manifest(meta)
+        self.assertEqual(errors, [], f"Sample plugin manifest errors: {errors}")
+
+    def test_sample_plugin_loads_only_when_trusted(self):
+        fixture_dir = Path(__file__).parent / "fixtures"
+        with mock.patch.object(plugins, "PLUGINS_DIR", fixture_dir):
+            found = plugins.discover_plugins()
+        sample = [p for p in found if p["id"] == "sample-extractor"]
+        self.assertEqual(len(sample), 1)
+        self.assertFalse(sample[0]["trusted"])
+        log_events = []
+        with mock.patch.object(plugins, "PLUGINS_DIR", fixture_dir):
+            loaded, errors = plugins.load_all_plugins(log_events.append)
+        self.assertEqual(loaded, 0)
 
 
 if __name__ == "__main__":

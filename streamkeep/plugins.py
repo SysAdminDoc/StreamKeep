@@ -10,8 +10,14 @@ a ``plugin.json`` manifest:
         "version": "1.0.0",
         "author": "User",
         "description": "Adds support for example.com",
+        "min_app_version": "4.0.0",
+        "manifest_version": 1,
         "enabled": true
     }
+
+Required manifest fields: ``id``, ``name``, ``version``.
+Optional: ``manifest_version`` (int, currently 1), ``min_app_version``
+(semver string — plugin is skipped if the running app version is older).
 
 Plugin types (detected by what the module imports/subclasses):
   - Custom extractors: subclass ``streamkeep.extractors.base.Extractor``
@@ -24,9 +30,15 @@ Plugins run in the same process — no sandbox. Trust-based, like yt-dlp.
 import importlib.util
 import json
 import os
+import re
 import sys
 
+from . import VERSION
 from .paths import CONFIG_DIR
+
+CURRENT_MANIFEST_VERSION = 1
+_REQUIRED_FIELDS = ("id", "name", "version")
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 PLUGINS_DIR = CONFIG_DIR / "plugins"
 
@@ -34,6 +46,47 @@ PLUGINS_DIR = CONFIG_DIR / "plugins"
 def _ensure_dir():
     """Create the plugins directory if it doesn't exist."""
     PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_semver(version_str):
+    """Parse a version string into a (major, minor, patch) tuple or None."""
+    m = _SEMVER_RE.match(str(version_str or ""))
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def validate_manifest(meta, entry_name=""):
+    """Validate a plugin manifest dict. Returns a list of error strings."""
+    errors = []
+    if not isinstance(meta, dict):
+        return ["Manifest is not a JSON object"]
+    for field in _REQUIRED_FIELDS:
+        if not meta.get(field):
+            errors.append(f"Missing required field: {field}")
+    if meta.get("version") and _parse_semver(meta["version"]) is None:
+        errors.append(f"Invalid version format: {meta['version']!r} (expected X.Y.Z)")
+    mv = meta.get("manifest_version")
+    if mv is not None:
+        try:
+            mv_int = int(mv)
+        except (TypeError, ValueError):
+            errors.append(f"Invalid manifest_version: {mv!r}")
+            mv_int = -1
+        if mv_int > CURRENT_MANIFEST_VERSION:
+            errors.append(
+                f"Unsupported manifest_version {mv_int} "
+                f"(app supports up to {CURRENT_MANIFEST_VERSION})"
+            )
+    min_ver = meta.get("min_app_version", "")
+    if min_ver:
+        required = _parse_semver(min_ver)
+        current = _parse_semver(VERSION)
+        if required and current and required > current:
+            errors.append(
+                f"Requires StreamKeep >= {min_ver} (running {VERSION})"
+            )
+    return errors
 
 
 def discover_plugins():
@@ -48,7 +101,6 @@ def discover_plugins():
         plugin_path = PLUGINS_DIR / entry
         manifest_path = plugin_path / "plugin.json"
 
-        # Must be a directory with plugin.json
         if not plugin_path.is_dir() or not manifest_path.is_file():
             continue
 
@@ -64,16 +116,18 @@ def discover_plugins():
             })
             continue
 
+        validation_errors = validate_manifest(meta, entry)
+        error_msg = "; ".join(validation_errors) if validation_errors else ""
         plugins.append({
             "id": meta.get("id", entry),
             "name": meta.get("name", entry),
             "version": meta.get("version", "0.0.0"),
             "author": meta.get("author", ""),
             "description": meta.get("description", ""),
-            "enabled": bool(meta.get("enabled", True)),
+            "enabled": bool(meta.get("enabled", True)) and not validation_errors,
             "trusted": bool(meta.get("trusted", False)),
             "path": str(plugin_path),
-            "error": "",
+            "error": error_msg,
         })
 
     return plugins

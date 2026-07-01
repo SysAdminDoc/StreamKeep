@@ -1,0 +1,11 @@
+{
+  "id": "sample-extractor",
+  "name": "Sample Extractor Plugin",
+  "version": "1.0.0",
+  "author": "StreamKeep SDK",
+  "description": "Demonstrates the plugin SDK contract for custom extractors.",
+  "manifest_version": 1,
+  "min_app_version": "4.0.0",
+  "enabled": true,
+  "trusted": false
+}
