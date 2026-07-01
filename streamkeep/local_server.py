@@ -502,6 +502,8 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
                 "queue": state.get("queue", []),
                 "failures": state.get("failures", []),
                 "live_channels": state.get("live_channels", []),
+                "active_workers": state.get("active_workers", []),
+                "resumable": state.get("resumable", []),
             })
 
         def _handle_api_library(self):
@@ -647,7 +649,9 @@ button:hover{background:#74c7ec}
 </div>
 <div id="tab-status" class="tab-content active">
 <div class="card"><h2>Active Downloads</h2><div id="dl-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>Active Workers</h2><div id="worker-list"><p class="empty">Loading...</p></div></div>
 <div class="card"><h2>Queue</h2><div id="q-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>Resumable</h2><div id="resume-list"><p class="empty">Loading...</p></div></div>
 <div class="card"><h2>Failures</h2><div id="failure-list"><p class="empty">Loading...</p></div></div>
 </div>
 <div id="tab-queue" class="tab-content">
@@ -735,11 +739,20 @@ function refresh(){
       i=>'<div class="item"><span class="badge badge-queue">'+esc((i.status||'queued').toUpperCase())+'</span>'+
         esc(i.title||i.url||'?')+
         (i.note?'<div class="meta">'+esc(i.note)+'</div>':'')+'</div>');
+    renderItems(document.getElementById('worker-list'),d.active_workers||[],'No active workers.',
+      i=>'<div class="item"><span class="badge badge-live">'+esc((i.type||'worker').toUpperCase())+'</span>'+
+        esc(i.title||i.channel||'Worker')+
+        (i.running?' <span style="color:#a6e3a1">(running)</span>':'')+'</div>');
+    renderItems(document.getElementById('resume-list'),d.resumable||[],'No resumable downloads.',
+      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||'Download')+'</div>'+
+        '<div class="meta">'+esc(String(i.remaining||0))+' segments remaining</div></div>');
     renderItems(document.getElementById('failure-list'),d.failures,'No retryable failures.',
       i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||'failed').toUpperCase())+'</span>'+
         '<span class="title">'+esc(i.title||i.url||'Failed job')+'</span>'+
         '<div class="meta">'+esc(i.platform||'')+' &middot; retry '+esc(String(i.retry_count||0))+
-        ' &middot; '+esc(i.error||'')+'</div>'+
+        ' &middot; '+esc(i.error||'')+
+        (i.resume_sidecar?' &middot; <span style="color:#a6e3a1">resume available</span>':'')+
+        '</div>'+
         '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">Retry</button>'+
         '<button onclick="discardFailure('+Number(i.id||0)+')">Discard</button></div></div>');
   }).catch(()=>{});

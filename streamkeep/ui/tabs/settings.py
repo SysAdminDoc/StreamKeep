@@ -1261,6 +1261,35 @@ class SettingsTabMixin:
         except Exception:
             pass
         live_channels = [m for m in monitor if m.get("status") == "live"]
+        active_workers = []
+        try:
+            for ch_id, w in dict(getattr(self, "_autorecord_workers", {})).items():
+                ctx = dict(getattr(self, "_autorecord_contexts", {})).get(ch_id, {})
+                active_workers.append({
+                    "type": "auto-record",
+                    "channel": ch_id,
+                    "title": ctx.get("q_name", ch_id),
+                    "running": w.isRunning() if w else False,
+                })
+            if getattr(self, "download_worker", None) and self.download_worker.isRunning():
+                active_workers.append({
+                    "type": "foreground",
+                    "title": str(getattr(self, "_active_stream_info", None) and
+                                 getattr(self._active_stream_info, "title", "") or "Download"),
+                    "running": True,
+                })
+        except Exception:
+            pass
+        resumable = []
+        try:
+            for rc in list(getattr(self, "_resume_candidates", [])):
+                resumable.append({
+                    "title": getattr(rc, "title", "") or "",
+                    "url": getattr(rc, "url", "") or "",
+                    "remaining": getattr(rc, "remaining_count", 0),
+                })
+        except Exception:
+            pass
         return {
             "downloads": downloads,
             "queue": queue_items,
@@ -1268,6 +1297,8 @@ class SettingsTabMixin:
             "history": history,
             "monitor": monitor,
             "live_channels": live_channels,
+            "active_workers": active_workers,
+            "resumable": resumable,
         }
 
     # ── Auto-update checker ──────────────────────────────────────────
