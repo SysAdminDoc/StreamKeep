@@ -127,3 +127,85 @@ def scan_storage(root, max_depth=3):
         groups.values(), key=lambda g: g.newest_mtime, reverse=True
     )
     return scan
+
+
+@dataclass
+class ReconcileResult:
+    importable: list = field(default_factory=list)    # list[StorageGroup]
+    duplicates: list = field(default_factory=list)     # list[StorageGroup]
+    missing_metadata: list = field(default_factory=list)  # list[StorageGroup]
+    conflicts: list = field(default_factory=list)      # list[StorageGroup]
+    total: int = 0
+
+
+def reconcile_folders(root, existing_paths=None, *, dry_run=True):
+    """Identify importable folders by comparing storage scan against existing history.
+
+    *existing_paths* is a set of recording paths already in the DB.
+    Returns a ReconcileResult in preview-only mode (dry_run=True) or
+    after performing the import (dry_run=False).
+    """
+    existing = set(existing_paths or ())
+    scan = scan_storage(root)
+    result = ReconcileResult(total=len(scan.groups))
+
+    for group in scan.groups:
+        norm_path = os.path.normpath(group.dir_path)
+        meta = _read_sidecar(group.dir_path)
+
+        if norm_path in existing or group.dir_path in existing:
+            result.duplicates.append(group)
+            continue
+
+        if not meta:
+            result.missing_metadata.append(group)
+
+        if not group.files:
+            result.conflicts.append(group)
+            continue
+
+        result.importable.append(group)
+
+    return result
+
+
+def import_folders(groups, *, db_module=None):
+    """Import StorageGroups into the history database.
+
+    Returns (imported_count, errors). Does not overwrite existing sidecars.
+    """
+    if db_module is None:
+        from . import db as db_module
+    imported = 0
+    errors = []
+    for group in groups:
+        meta = _read_sidecar(group.dir_path)
+        try:
+            from datetime import datetime
+            entry = {
+                "date": meta.get("downloaded_at", "")
+                    or datetime.fromtimestamp(group.newest_mtime).isoformat(timespec="seconds")
+                    if group.newest_mtime else "",
+                "platform": group.platform,
+                "title": group.title,
+                "channel": group.channel,
+                "quality": "",
+                "size": _fmt_size(group.total_size),
+                "path": group.dir_path,
+                "url": meta.get("url", ""),
+            }
+            db_module.save_history_entry(entry)
+            imported += 1
+        except Exception as e:
+            errors.append(f"{group.dir_path}: {e}")
+    return imported, errors
+
+
+def _fmt_size(size_bytes):
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 ** 2:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 ** 3:
+        return f"{size_bytes / 1024 ** 2:.1f} MB"
+    return f"{size_bytes / 1024 ** 3:.2f} GB"
