@@ -415,11 +415,9 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
                 self._serve_web_ui()
                 return
 
-            if not self._require_auth():
-                return
-
             if path == "/ping":
-                self._json_response(200, {"ok": True, "app": "StreamKeep"})
+                if self._require_auth():
+                    self._json_response(200, {"ok": True, "app": "StreamKeep"})
             elif path == "/api/status":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_status()
@@ -438,8 +436,6 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
             if self._reject_bad_host():
                 return
             path = self.path.split("?")[0]
-            if not self._require_auth():
-                return
 
             if path == "/send_url":
                 if self._require_auth(SCOPE_QUEUE):

@@ -9,9 +9,20 @@ referenced by ``http._build_curl_cmd()`` and ``DownloadWorker`` (yt-dlp
 ``--cookies``).
 """
 
+import os
+import sys
 import time
 
 from .paths import CONFIG_DIR
+
+
+def _restrict_file_permissions(path):
+    """Set owner-only permissions on POSIX systems."""
+    if sys.platform != "win32":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 COOKIES_FILE = CONFIG_DIR / "cookies.txt"
 
@@ -111,6 +122,7 @@ def import_from_file(source_path):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     try:
         COOKIES_FILE.write_text(content, encoding="utf-8")
+        _restrict_file_permissions(COOKIES_FILE)
     except OSError as e:
         return False, f"Failed to write cookies: {e}"
 
@@ -160,6 +172,7 @@ def _write_cookies(cookie_list, source):
 
     try:
         COOKIES_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _restrict_file_permissions(COOKIES_FILE)
     except OSError as e:
         return False, f"Failed to write cookies: {e}"
 

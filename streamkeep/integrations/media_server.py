@@ -149,10 +149,11 @@ def _do_import(config, out_dir, info, log_fn):
 
 
 def _scan_plex(url, token, library_id, log_fn):
-    """Plex: GET /library/sections/{id}/refresh?X-Plex-Token={token}"""
+    """Plex: GET /library/sections/{id}/refresh with token in header."""
     section = library_id or "1"
-    scan_url = f"{url}/library/sections/{section}/refresh?X-Plex-Token={token}"
+    scan_url = f"{url}/library/sections/{section}/refresh"
     req = urllib.request.Request(scan_url, method="GET")
+    req.add_header("X-Plex-Token", token)
     with urllib.request.urlopen(req, timeout=15):
         pass
     if log_fn:

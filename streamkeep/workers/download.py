@@ -331,12 +331,13 @@ class DownloadWorker(QThread):
                 # then fall through to the outer for-loop's next segment
                 # (lives always have just one segment, so we'll exit).
                 try:
-                    self._proc = subprocess.Popen(
-                        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                        text=True, bufsize=1, encoding="utf-8",
-                        errors="replace",
-                        creationflags=_CREATE_NO_WINDOW,
-                    )
+                    with self._proc_lock:
+                        self._proc = subprocess.Popen(
+                            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            text=True, bufsize=1, encoding="utf-8",
+                            errors="replace",
+                            creationflags=_CREATE_NO_WINDOW,
+                        )
                     for line in self._proc.stderr:
                         line = line.strip()
                         if not line:
@@ -379,7 +380,7 @@ class DownloadWorker(QThread):
                         pass
                     else:
                         logger.error("Chunked capture produced no files for segment %d (%s)", seg_idx, label)
-                    self.error.emit(seg_idx, "Chunked capture produced no files")
+                        self.error.emit(seg_idx, "Chunked capture produced no files")
                 except FileNotFoundError:
                     self.error.emit(seg_idx, "ffmpeg not found in PATH")
                     self.log.emit(f"[ERROR] {label}: ffmpeg not in PATH")

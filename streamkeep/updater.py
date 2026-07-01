@@ -221,8 +221,8 @@ class DownloadUpdateWorker(QThread):
             return
         # Size sanity check — if GitHub served an HTML error page we'd
         # otherwise install a corrupt binary.
-        if (self.expected_size > 0
-                and os.path.getsize(new_path) < int(self.expected_size * 0.9)):
+        actual_size = os.path.getsize(new_path)
+        if self.expected_size > 0 and actual_size != self.expected_size:
             try:
                 os.remove(new_path)
             except OSError:

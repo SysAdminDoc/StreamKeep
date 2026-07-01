@@ -128,6 +128,13 @@ def serve_media_range(media_path, range_header=None):
     if not media_path or not os.path.isfile(media_path):
         return None, 404, {}
 
+    try:
+        resolved = os.path.realpath(media_path)
+        if resolved != os.path.normpath(media_path) and os.path.islink(media_path):
+            return None, 403, {}
+    except (OSError, ValueError):
+        return None, 403, {}
+
     file_size = os.path.getsize(media_path)
     content_type = mimetypes.guess_type(media_path)[0] or "video/mp4"
 

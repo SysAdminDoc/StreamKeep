@@ -33,6 +33,8 @@ _SENSITIVE_CONFIG_KEYS = frozenset({
     "webhook_url", "proxy", "companion_token",
     "media_server_token", "media_server_url",
     "youtube_api_key", "twitch_oauth_token",
+    "token", "api_key", "secret", "password",
+    "oauth_token", "access_token", "refresh_token",
 })
 
 
@@ -53,7 +55,7 @@ def redact_config(cfg):
         elif isinstance(value, dict):
             out[key] = redact_config(value)
         elif isinstance(value, list):
-            out[key] = value
+            out[key] = list(value)
         else:
             out[key] = value
     return out

@@ -35,7 +35,7 @@ class SeedArchiveWorker(QThread):
                     self.finished.emit(self.channel_id or self.url, [])
                     return
                 channel_id = self.channel_id or ext.extract_channel_id(self.url) or self.url
-                vods = ext.list_vods(self.url, log_fn=self.log.emit)
+                vods, _ = ext.list_vods(self.url, log_fn=self.log.emit)
                 if self._interrupted():
                     return
                 sources = [v.source for v in vods if getattr(v, "source", "")]

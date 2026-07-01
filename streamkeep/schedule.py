@@ -54,7 +54,7 @@ def fetch_twitch_schedule(channel_login, log_fn=None):
         resp = curl_post_json(
             _TWITCH_GQL,
             {"query": query},
-            extra_headers={"Client-ID": _TWITCH_CLIENT_ID},
+            headers={"Client-ID": _TWITCH_CLIENT_ID},
         )
         data = json.loads(resp) if isinstance(resp, str) else resp
     except Exception as e:
