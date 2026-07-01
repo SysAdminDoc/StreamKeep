@@ -75,16 +75,23 @@ def ttml_to_srt(ttml_text):
     cue_idx = 1
     for p in paragraphs:
         begin = p.attrib.get("begin", "")
-        end = p.attrib.get("end", p.attrib.get("dur", ""))
+        end = p.attrib.get("end", "")
+        dur = p.attrib.get("dur", "")
         if not begin:
             continue
         text = "".join(p.itertext()).strip()
         if not text:
             continue
 
-        # Convert TTML time format (HH:MM:SS.mmm or ticks) to SRT
         begin_srt = _ttml_time_to_srt(begin)
-        end_srt = _ttml_time_to_srt(end)
+        if end:
+            end_srt = _ttml_time_to_srt(end)
+        elif dur:
+            begin_secs = _ttml_time_to_secs(begin)
+            dur_secs = _ttml_time_to_secs(dur)
+            end_srt = _ttml_time_to_srt(f"{begin_secs + dur_secs:.3f}") if begin_secs >= 0 and dur_secs >= 0 else ""
+        else:
+            end_srt = ""
         if not begin_srt or not end_srt:
             continue
 
@@ -95,6 +102,21 @@ def ttml_to_srt(ttml_text):
         cue_idx += 1
 
     return "\n".join(srt_lines)
+
+
+def _ttml_time_to_secs(t):
+    """Convert TTML time to seconds as a float. Returns -1 on failure."""
+    if not t:
+        return -1
+    m = re.match(r"(\d{1,2}):(\d{2}):(\d{2})\.?(\d{0,3})", t)
+    if m:
+        h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        ms = int((m.group(4) or "0").ljust(3, "0"))
+        return h * 3600 + mi * 60 + s + ms / 1000
+    m = re.match(r"(\d+\.?\d*)", t)
+    if m:
+        return float(m.group(1))
+    return -1
 
 
 def _ttml_time_to_srt(t):

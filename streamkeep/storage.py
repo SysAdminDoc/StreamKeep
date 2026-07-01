@@ -181,10 +181,10 @@ def import_folders(groups, *, db_module=None):
     for group in groups:
         meta = _read_sidecar(group.dir_path)
         try:
-            from datetime import datetime
+            from datetime import datetime, timezone
             entry = {
                 "date": meta.get("downloaded_at", "")
-                    or datetime.fromtimestamp(group.newest_mtime).isoformat(timespec="seconds")
+                    or datetime.fromtimestamp(group.newest_mtime, tz=timezone.utc).isoformat(timespec="seconds")
                     if group.newest_mtime else "",
                 "platform": group.platform,
                 "title": group.title,

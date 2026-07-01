@@ -279,7 +279,8 @@ class HighlightWorker(QThread):
             list_path = os.path.join(tmp_dir, "concat.txt")
             with open(list_path, "w", encoding="utf-8") as f:
                 for p in parts:
-                    f.write(f"file '{p.replace(chr(92), '/')}'\n")
+                    safe_p = p.replace(chr(92), "/").replace("'", "'\\''")
+                    f.write(f"file '{safe_p}'\n")
 
             out_dir = os.path.dirname(self.output_path)
             if out_dir:

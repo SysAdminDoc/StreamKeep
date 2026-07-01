@@ -71,7 +71,14 @@ def get_active_limit():
     day_start = int(_schedule.get("day_start", 8) or 8)
     day_end = int(_schedule.get("day_end", 23) or 23)
 
-    if day_start <= hour < day_end:
+    if day_end >= 24 or day_end == 0:
+        is_day = hour >= day_start
+    elif day_start < day_end:
+        is_day = day_start <= hour < day_end
+    else:
+        is_day = hour >= day_start or hour < day_end
+
+    if is_day:
         return _schedule.get("day_limit", "") or _static_limit
     else:
         return _schedule.get("night_limit", "") or _static_limit
