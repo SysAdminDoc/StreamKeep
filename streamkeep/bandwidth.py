@@ -108,8 +108,9 @@ class BandwidthTracker:
         try:
             db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
             row = db.execute(
-                "SELECT COALESCE(SUM(bytes), 0) FROM bandwidth_daily WHERE day LIKE ?",
-                (month_prefix + "%",),
+                "SELECT COALESCE(SUM(bytes), 0) FROM bandwidth_daily "
+                "WHERE day LIKE ? AND day != ?",
+                (month_prefix + "%", self._today_key),
             ).fetchone()
             db.close()
             return (row[0] if row else 0) + self._today_bytes

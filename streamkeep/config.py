@@ -123,6 +123,9 @@ class GuiLogHandler(logging.Handler):
     file as well.  Duplicate suppression: if a record with the same
     message was emitted within the last second, it is counted but not
     forwarded until the burst ends.
+
+    The callback is invoked via QTimer.singleShot(0, ...) so it runs on
+    the Qt main thread regardless of which thread emitted the log record.
     """
 
     def __init__(self, callback):
@@ -131,6 +134,17 @@ class GuiLogHandler(logging.Handler):
         self._last_msg = ""
         self._last_time = 0.0
         self._suppress_count = 0
+
+    def _invoke_on_main_thread(self, text):
+        try:
+            from PyQt6.QtCore import QCoreApplication, QThread, QTimer
+            app = QCoreApplication.instance()
+            if app is None or QThread.currentThread() is app.thread():
+                self._callback(text)
+            else:
+                QTimer.singleShot(0, lambda: self._callback(text))
+        except Exception:
+            self._callback(text)
 
     def emit(self, record):
         try:
@@ -144,7 +158,7 @@ class GuiLogHandler(logging.Handler):
                 self._last_time = now
                 return
             if self._suppress_count > 0:
-                self._callback(
+                self._invoke_on_main_thread(
                     f"[{module}] {level}: (repeated {self._suppress_count}x)"
                 )
                 self._suppress_count = 0
@@ -152,7 +166,7 @@ class GuiLogHandler(logging.Handler):
             self._last_msg = msg
             self._last_time = now
             formatted = f"[{module}] {level}: {msg}"
-            self._callback(formatted)
+            self._invoke_on_main_thread(formatted)
             write_log_line(formatted)
         except Exception:
             pass

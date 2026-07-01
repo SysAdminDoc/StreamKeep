@@ -56,14 +56,21 @@ class TwitchIRCReader:
     def connect(self):
         nick = f"justinfan{random.randint(10000, 99999)}"
         raw = socket.create_connection((SERVER, PORT), timeout=self.timeout)
-        ctx = ssl.create_default_context()
-        sock = ctx.wrap_socket(raw, server_hostname=SERVER)
-        sock.settimeout(1.0)   # short timeout so we can poll should_cancel
-        sock.sendall(b"CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
-        sock.sendall(b"PASS SCHMOOPIIE\r\n")   # anonymous password
-        sock.sendall(f"NICK {nick}\r\n".encode())
-        sock.sendall(f"JOIN #{self.channel}\r\n".encode())
-        self._sock = sock
+        try:
+            ctx = ssl.create_default_context()
+            sock = ctx.wrap_socket(raw, server_hostname=SERVER)
+            sock.settimeout(1.0)
+            sock.sendall(b"CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
+            sock.sendall(b"PASS SCHMOOPIIE\r\n")
+            sock.sendall(f"NICK {nick}\r\n".encode())
+            sock.sendall(f"JOIN #{self.channel}\r\n".encode())
+            self._sock = sock
+        except Exception:
+            try:
+                raw.close()
+            except OSError:
+                pass
+            raise
 
     def close(self):
         if self._sock is not None:

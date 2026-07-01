@@ -36,7 +36,7 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
 
     Returns True on success.
     """
-    if os.path.exists(dst):
+    if os.path.exists(dst) and os.path.getsize(dst) > 0:
         return True
 
     # Pass 1: measure

@@ -73,7 +73,7 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
       <title>{etitle}</title>
       <description>{echannel}</description>
       <pubDate>{pub_date}</pubDate>
-      <guid isPermaLink="false">{sid}</guid>"""
+      <guid isPermaLink="false">{escape(str(sid))}</guid>"""
 
         if media_url:
             items_xml += f"""
