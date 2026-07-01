@@ -1,6 +1,11 @@
+import json
 import re
+import tempfile
+import zipfile
 from pathlib import Path
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packaging"))
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,3 +45,41 @@ def test_msix_builder_supports_configured_signing():
         "signtool.exe",
     ):
         assert required in script
+
+
+def test_browser_extension_validates_mv3_manifest():
+    from browser_extension import validate_extension
+    ok, errors = validate_extension(ROOT / "browser-extension")
+    assert ok, f"Extension validation failed: {errors}"
+
+
+def test_browser_extension_packages_deterministic_zip():
+    from browser_extension import package_extension
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "companion.zip"
+        ok, result = package_extension(out, ROOT / "browser-extension")
+        assert ok, f"Packaging failed: {result}"
+        assert out.is_file()
+        with zipfile.ZipFile(out, "r") as zf:
+            names = zf.namelist()
+            assert "manifest.json" in names
+            assert "popup.html" in names
+            assert "popup.js" in names
+            assert "background.js" in names
+            assert "icons/128.png" in names
+            manifest = json.loads(zf.read("manifest.json"))
+            assert manifest["manifest_version"] == 3
+
+
+def test_browser_extension_rejects_missing_asset():
+    from browser_extension import validate_extension
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ext = Path(tmpdir)
+        (ext / "manifest.json").write_text(json.dumps({
+            "manifest_version": 3, "version": "1.0.0",
+            "permissions": ["activeTab", "storage", "contextMenus"],
+            "host_permissions": ["http://127.0.0.1/*"],
+        }), encoding="utf-8")
+        ok, errors = validate_extension(ext)
+        assert not ok
+        assert any("Missing file" in e for e in errors)
