@@ -101,6 +101,75 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(discarded["status"], "discarded")
 
 
+class DbQueueNormalizationTests(unittest.TestCase):
+    def test_save_and_load_queue_preserves_typed_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                items = [
+                    {"url": "https://a.com/v1", "title": "Video 1", "platform": "Kick",
+                     "status": "queued", "quality": "1080p"},
+                    {"url": "https://b.com/v2", "title": "Video 2", "platform": "Twitch",
+                     "status": "running", "recurrence": "daily"},
+                ]
+                db.save_queue(items)
+                loaded = db.load_queue()
+
+            self.assertEqual(len(loaded), 2)
+            self.assertEqual(loaded[0]["url"], "https://a.com/v1")
+            self.assertEqual(loaded[0]["platform"], "Kick")
+            self.assertEqual(loaded[1]["recurrence"], "daily")
+
+    def test_load_queue_by_status_filters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.save_queue([
+                    {"url": "https://a.com", "status": "queued"},
+                    {"url": "https://b.com", "status": "running"},
+                    {"url": "https://c.com", "status": "queued"},
+                ])
+                queued = db.load_queue_by_status("queued")
+                running = db.load_queue_by_status("running")
+
+            self.assertEqual(len(queued), 2)
+            self.assertEqual(len(running), 1)
+            self.assertEqual(running[0]["url"], "https://b.com")
+
+    def test_legacy_json_only_queue_migrates_losslessly(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE download_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    data TEXT NOT NULL DEFAULT '{}'
+                )
+            """)
+            import json
+            legacy_item = {"url": "https://old.com/video", "title": "Old", "platform": "Rumble"}
+            conn.execute(
+                "INSERT INTO download_queue (position, data) VALUES (0, ?)",
+                (json.dumps(legacy_item),),
+            )
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+            conn.close()
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                loaded = db.load_queue()
+
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["url"], "https://old.com/video")
+            self.assertEqual(loaded[0]["platform"], "Rumble")
+
+
 class DbMaintenanceTests(unittest.TestCase):
     def test_check_integrity_on_healthy_db(self):
         with tempfile.TemporaryDirectory() as tmpdir:

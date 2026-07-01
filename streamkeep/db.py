@@ -23,7 +23,7 @@ from typing import Any
 from .paths import CONFIG_DIR
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _write_lock = threading.Lock()
 
@@ -51,7 +51,16 @@ def init_db() -> None:
     try:
         v = db.execute("PRAGMA user_version").fetchone()[0]
         if v < SCHEMA_VERSION:
+            if v >= 1 and v < 4:
+                _migrate_queue_v4(db)
             _apply_schema(db)
+            try:
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_queue_status "
+                    "ON download_queue(status)"
+                )
+            except Exception:
+                pass
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             db.commit()
     finally:
@@ -103,9 +112,18 @@ def _apply_schema(db):
         );
 
         CREATE TABLE IF NOT EXISTS download_queue (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            position INTEGER NOT NULL DEFAULT 0,
-            data     TEXT    NOT NULL DEFAULT '{}'
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            position    INTEGER NOT NULL DEFAULT 0,
+            url         TEXT    NOT NULL DEFAULT '',
+            title       TEXT    NOT NULL DEFAULT '',
+            platform    TEXT    NOT NULL DEFAULT '',
+            quality     TEXT    NOT NULL DEFAULT '',
+            status      TEXT    NOT NULL DEFAULT 'queued',
+            recurrence  TEXT    NOT NULL DEFAULT '',
+            failure_id  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT    NOT NULL DEFAULT '',
+            updated_at  TEXT    NOT NULL DEFAULT '',
+            data        TEXT    NOT NULL DEFAULT '{}'
         );
         CREATE INDEX IF NOT EXISTS idx_queue_pos ON download_queue(position);
 
@@ -148,6 +166,59 @@ def _apply_schema(db):
         CREATE INDEX IF NOT EXISTS idx_failed_jobs_url
             ON failed_jobs(url);
     """)
+
+
+def _migrate_queue_v4(db):
+    """Migrate download_queue from JSON-only blobs to typed columns.
+
+    Adds columns if they don't exist, then backfills from the JSON data field.
+    """
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(download_queue)").fetchall()
+    }
+    new_cols = [
+        ("url", "TEXT NOT NULL DEFAULT ''"),
+        ("title", "TEXT NOT NULL DEFAULT ''"),
+        ("platform", "TEXT NOT NULL DEFAULT ''"),
+        ("quality", "TEXT NOT NULL DEFAULT ''"),
+        ("status", "TEXT NOT NULL DEFAULT 'queued'"),
+        ("recurrence", "TEXT NOT NULL DEFAULT ''"),
+        ("failure_id", "INTEGER NOT NULL DEFAULT 0"),
+        ("created_at", "TEXT NOT NULL DEFAULT ''"),
+        ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+    ]
+    for col_name, col_def in new_cols:
+        if col_name not in existing_cols:
+            db.execute(f"ALTER TABLE download_queue ADD COLUMN {col_name} {col_def}")
+
+    try:
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_queue_status ON download_queue(status)"
+        )
+    except Exception:
+        pass
+
+    rows = db.execute("SELECT id, data FROM download_queue").fetchall()
+    for row in rows:
+        try:
+            d = json.loads(row[1]) if row[1] else {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+        db.execute("""
+            UPDATE download_queue SET
+                url = ?, title = ?, platform = ?, quality = ?,
+                status = ?, recurrence = ?, failure_id = ?
+            WHERE id = ?
+        """, (
+            str(d.get("url", "")),
+            str(d.get("title", "")),
+            str(d.get("platform", "")),
+            str(d.get("quality", "")),
+            str(d.get("status", "queued")),
+            str(d.get("recurrence", "")),
+            int(d.get("failure_id", 0) or 0),
+            row[0],
+        ))
 
 
 # ── History CRUD ────────────────────────────────────────────────────
@@ -409,14 +480,27 @@ def load_queue() -> list[dict[str, Any]]:
     db = _connect(readonly=True)
     try:
         rows = db.execute(
-            "SELECT data FROM download_queue ORDER BY position ASC"
+            "SELECT url, title, platform, quality, status, recurrence, "
+            "failure_id, created_at, updated_at, data "
+            "FROM download_queue ORDER BY position ASC"
         ).fetchall()
         items = []
         for r in rows:
             try:
-                items.append(json.loads(r[0]))
+                extras = json.loads(r[9]) if r[9] else {}
             except (json.JSONDecodeError, TypeError):
-                pass
+                extras = {}
+            item = dict(extras)
+            item.update({
+                "url": r[0] or extras.get("url", ""),
+                "title": r[1] or extras.get("title", ""),
+                "platform": r[2] or extras.get("platform", ""),
+                "quality": r[3] or extras.get("quality", ""),
+                "status": r[4] or extras.get("status", "queued"),
+                "recurrence": r[5] or extras.get("recurrence", ""),
+                "failure_id": r[6] or extras.get("failure_id", 0),
+            })
+            items.append(item)
         return items
     finally:
         db.close()
@@ -424,18 +508,62 @@ def load_queue() -> list[dict[str, Any]]:
 
 def save_queue(items: list[dict[str, Any]]) -> None:
     """Replace the entire queue atomically.  Each item is a dict."""
+    now = _utc_now_iso()
     with _write_lock:
         db = _connect()
         try:
             db.execute("DELETE FROM download_queue")
             for i, item in enumerate(items):
                 db.execute(
-                    "INSERT INTO download_queue (position, data) VALUES (?,?)",
-                    (i, json.dumps(item, ensure_ascii=False)),
+                    "INSERT INTO download_queue "
+                    "(position, url, title, platform, quality, status, "
+                    " recurrence, failure_id, created_at, updated_at, data) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        i,
+                        str(item.get("url", "")),
+                        str(item.get("title", "")),
+                        str(item.get("platform", "")),
+                        str(item.get("quality", "")),
+                        str(item.get("status", "queued")),
+                        str(item.get("recurrence", "")),
+                        int(item.get("failure_id", 0) or 0),
+                        str(item.get("created_at", "") or now),
+                        now,
+                        json.dumps(item, ensure_ascii=False),
+                    ),
                 )
             db.commit()
         finally:
             db.close()
+
+
+def load_queue_by_status(status: str) -> list[dict[str, Any]]:
+    """Return queue items filtered by status column."""
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            "SELECT url, title, platform, quality, status, recurrence, "
+            "failure_id, created_at, updated_at, data "
+            "FROM download_queue WHERE status = ? ORDER BY position ASC",
+            (status,),
+        ).fetchall()
+        items = []
+        for r in rows:
+            try:
+                extras = json.loads(r[9]) if r[9] else {}
+            except (json.JSONDecodeError, TypeError):
+                extras = {}
+            item = dict(extras)
+            item.update({
+                "url": r[0], "title": r[1], "platform": r[2],
+                "quality": r[3], "status": r[4], "recurrence": r[5],
+                "failure_id": r[6],
+            })
+            items.append(item)
+        return items
+    finally:
+        db.close()
 
 
 # ── Row conversion helpers ──────────────────────────────────────────
