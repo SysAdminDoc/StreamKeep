@@ -263,6 +263,19 @@ def _list_extractors():
     _print_line(f"\n  ({len(_ExtBase._registry)} extractors registered)")
 
 
+def _run_snapshot(args):
+    """Export a privacy-redacted diagnostic snapshot."""
+    from .diagnostics import create_diagnostic_snapshot
+    from datetime import datetime
+    out = args.output or f"streamkeep_diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    ok, msg = create_diagnostic_snapshot(out)
+    _print_line(f"Snapshot: {'OK' if ok else 'FAILED'} — {msg}")
+    if ok:
+        _print_line(f"File: {out}")
+    else:
+        sys.exit(1)
+
+
 def _run_db_maintenance(args):
     """Run a database maintenance action."""
     import json as _json
@@ -329,6 +342,11 @@ def build_parser():
                       choices=["info", "check", "optimize", "checkpoint", "vacuum"],
                       help="Action: info (default), check, optimize, checkpoint, vacuum")
 
+    # -- diagnostic snapshot --
+    diag_p = sub.add_parser("snapshot", help="Export a privacy-redacted diagnostic ZIP")
+    diag_p.add_argument("-o", "--output", default="",
+                        help="Output path (default: streamkeep_diag_<timestamp>.zip)")
+
     # Legacy flat args for backward compat
     p.add_argument("--url", dest="legacy_url", default="",
                    help=argparse.SUPPRESS)
@@ -373,6 +391,8 @@ def run_cli(argv=None):
         _list_extractors()
     elif args.command == "db":
         _run_db_maintenance(args)
+    elif args.command == "snapshot":
+        _run_snapshot(args)
     else:
         p.print_help()
         sys.exit(0)
