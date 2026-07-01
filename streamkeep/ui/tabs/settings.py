@@ -1016,13 +1016,16 @@ class SettingsTabMixin:
         if hasattr(self, "companion_token_value"):
             if token:
                 self.companion_token_value.setText("Ready")
-                self.companion_token_sub.setText("Rotates on every app launch")
+                self.companion_token_sub.setText("Rotate on demand or on next launch")
             elif enabled:
                 self.companion_token_value.setText("Pending")
                 self.companion_token_sub.setText("Generated after the server starts")
             else:
                 self.companion_token_value.setText("Waiting")
                 self.companion_token_sub.setText("Generated only while the companion is on")
+
+        if hasattr(self, "companion_rotate_token_btn"):
+            self.companion_rotate_token_btn.setEnabled(bool(token))
 
         if hasattr(self, "companion_url_display"):
             self.companion_url_display.setText(local_url)
@@ -1041,6 +1044,16 @@ class SettingsTabMixin:
     def _on_copy_companion_token(self):
         text = self.companion_token_display.text() if hasattr(self, "companion_token_display") else ""
         self._copy_text_to_clipboard(text, "Pairing token")
+
+    def _on_rotate_companion_token(self):
+        srv = getattr(self, "_companion_server", None)
+        if srv is None or int(getattr(srv, "port", 0) or 0) <= 0:
+            self._set_status("Companion server is not running.", "warning")
+            return
+        srv.rotate_token()
+        self._refresh_companion_ui()
+        self._log("[COMPANION] Token rotated — old tokens are now invalid.")
+        self._set_status("Pairing token rotated. Re-pair the browser extension.", "success")
 
     def _on_open_companion_remote(self):
         url = self._companion_local_url()
@@ -2138,10 +2151,19 @@ def build_settings_tab(win):
     win.companion_copy_token_btn.setFixedWidth(108)
     win.companion_copy_token_btn.clicked.connect(win._on_copy_companion_token)
     comp_token_row.addWidget(win.companion_copy_token_btn)
+    win.companion_rotate_token_btn = QPushButton("Rotate")
+    win.companion_rotate_token_btn.setObjectName("secondary")
+    win.companion_rotate_token_btn.setFixedWidth(82)
+    win.companion_rotate_token_btn.setToolTip(
+        "Generate a new token immediately. The old token stops working — "
+        "re-pair the browser extension with the new one."
+    )
+    win.companion_rotate_token_btn.clicked.connect(win._on_rotate_companion_token)
+    comp_token_row.addWidget(win.companion_rotate_token_btn)
     companion_panel_lay.addLayout(comp_token_row)
 
     companion_hint = QLabel(
-        "The token rotates every launch and is never stored on disk. If LAN access is on, share it only with devices you trust."
+        "The token rotates every launch and can be rotated on demand. It is never stored on disk. If LAN access is on, share it only with devices you trust."
     )
     companion_hint.setObjectName("subtleText")
     companion_hint.setWordWrap(True)

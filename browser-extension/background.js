@@ -6,7 +6,7 @@ async function companionPost(path, body) {
   ]);
   if (!host || !port || !token) return;
   const url = `http://${host}:${port}${path}`;
-  await fetch(url, {
+  const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -14,6 +14,9 @@ async function companionPost(path, body) {
     },
     body: JSON.stringify(body),
   });
+  if (resp.status === 401) {
+    console.warn("[StreamKeep] Token expired or rotated. Re-pair from StreamKeep Settings.");
+  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {

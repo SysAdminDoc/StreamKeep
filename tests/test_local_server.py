@@ -9,7 +9,12 @@ from unittest import mock
 from PyQt6.QtCore import QCoreApplication
 
 from streamkeep import db
-from streamkeep.local_server import LocalCompanionServer
+from streamkeep.local_server import (
+    SCOPE_QUEUE,
+    SCOPE_RECOVERY,
+    SCOPE_STATUS,
+    LocalCompanionServer,
+)
 
 
 class LocalServerTests(unittest.TestCase):
@@ -39,25 +44,32 @@ class LocalServerTests(unittest.TestCase):
         )
         return urllib.request.urlopen(req, timeout=5)
 
-    def test_rejects_dns_rebinding_host_before_auth(self):
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self._open(
-                "/ping",
-                token=self.server.token,
-                headers={"Host": "attacker.example"},
-            )
+    def _open_json(self, path, **kwargs):
+        with self._open(path, **kwargs) as resp:
+            return json.loads(resp.read().decode("utf-8")), resp.status
 
-        self.assertEqual(ctx.exception.code, 403)
+    def _expect_error(self, path, expected_code, **kwargs):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._open(path, **kwargs)
+        self.assertEqual(ctx.exception.code, expected_code)
+        try:
+            return json.loads(ctx.exception.read().decode("utf-8"))
+        except Exception:
+            return {}
+
+    def test_rejects_dns_rebinding_host_before_auth(self):
+        self._expect_error(
+            "/ping", 403,
+            token=self.server.token,
+            headers={"Host": "attacker.example"},
+        )
 
     def test_local_only_rejects_lan_host_header(self):
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self._open(
-                "/ping",
-                token=self.server.token,
-                headers={"Host": "192.168.50.10:8765"},
-            )
-
-        self.assertEqual(ctx.exception.code, 403)
+        self._expect_error(
+            "/ping", 403,
+            token=self.server.token,
+            headers={"Host": "192.168.50.10:8765"},
+        )
 
     def test_lan_mode_accepts_configured_lan_host(self):
         lan_server = LocalCompanionServer(
@@ -66,13 +78,12 @@ class LocalServerTests(unittest.TestCase):
         )
         lan_server.start()
         try:
-            with self._open(
+            payload, _ = self._open_json(
                 "/ping",
                 server=lan_server,
                 token=lan_server.token,
                 headers={"Host": "192.168.50.10:8765"},
-            ) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            )
         finally:
             lan_server.stop()
 
@@ -85,23 +96,18 @@ class LocalServerTests(unittest.TestCase):
         )
         lan_server.start()
         try:
-            with self.assertRaises(urllib.error.HTTPError) as ctx:
-                self._open(
-                    "/ping",
-                    server=lan_server,
-                    token=lan_server.token,
-                    headers={"Host": "attacker.example"},
-                )
+            self._expect_error(
+                "/ping", 403,
+                server=lan_server,
+                token=lan_server.token,
+                headers={"Host": "attacker.example"},
+            )
         finally:
             lan_server.stop()
 
-        self.assertEqual(ctx.exception.code, 403)
-
     def test_ping_requires_bearer_token(self):
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self._open("/ping")
-
-        self.assertEqual(ctx.exception.code, 401)
+        err = self._expect_error("/ping", 401)
+        self.assertEqual(err.get("err"), "token_invalid")
 
     def test_authenticated_ping_allows_localhost_origin(self):
         origin = "http://localhost:8765"
@@ -147,6 +153,85 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(resp.status, 204)
         self.assertEqual(allowed, origin)
 
+    # ── Token rotation ────────────────────────────────────────────
+
+    def test_rotate_token_invalidates_old_token(self):
+        old_token = self.server.token
+        payload, _ = self._open_json("/ping", token=old_token)
+        self.assertTrue(payload["ok"])
+
+        new_token = self.server.rotate_token()
+        self.assertNotEqual(old_token, new_token)
+
+        err = self._expect_error("/ping", 401, token=old_token)
+        self.assertEqual(err["err"], "token_invalid")
+
+        payload, _ = self._open_json("/ping", token=new_token)
+        self.assertTrue(payload["ok"])
+
+    def test_expired_token_returns_pairing_error(self):
+        old_token = self.server.token
+        self.server.rotate_token()
+        err = self._expect_error("/ping", 401, token=old_token)
+        self.assertEqual(err["err"], "token_invalid")
+        self.assertIn("Re-pair", err["message"])
+
+    # ── Scoped tokens ─────────────────────────────────────────────
+
+    def test_status_scope_allows_read_endpoints(self):
+        tok = self.server.create_scoped_token({SCOPE_STATUS})
+        for path in ("/api/status", "/api/library", "/api/monitor"):
+            payload, code = self._open_json(path, token=tok)
+            self.assertEqual(code, 200, f"{path} should be allowed with status scope")
+
+    def test_status_scope_denies_queue_send(self):
+        tok = self.server.create_scoped_token({SCOPE_STATUS})
+        err = self._expect_error(
+            "/send_url", 403, token=tok, method="POST",
+            data={"url": "https://example.com", "action": "queue"},
+        )
+        self.assertEqual(err["err"], "scope_denied")
+
+    def test_queue_scope_allows_send_url(self):
+        tok = self.server.create_scoped_token({SCOPE_QUEUE})
+        payload, _ = self._open_json(
+            "/send_url", token=tok, method="POST",
+            data={"url": "https://example.com/video", "action": "fetch"},
+        )
+        self.assertTrue(payload["ok"])
+
+    def test_queue_scope_denies_status_read(self):
+        tok = self.server.create_scoped_token({SCOPE_QUEUE})
+        err = self._expect_error("/api/status", 403, token=tok)
+        self.assertEqual(err["err"], "scope_denied")
+
+    def test_recovery_scope_denies_queue_and_status(self):
+        tok = self.server.create_scoped_token({SCOPE_RECOVERY})
+        self._expect_error("/api/status", 403, token=tok)
+        self._expect_error(
+            "/send_url", 403, token=tok, method="POST",
+            data={"url": "https://example.com", "action": "queue"},
+        )
+
+    def test_master_token_has_all_scopes(self):
+        payload, _ = self._open_json("/api/status", token=self.server.token)
+        self.assertTrue(payload["ok"])
+        payload, _ = self._open_json(
+            "/send_url", token=self.server.token, method="POST",
+            data={"url": "https://example.com/video", "action": "fetch"},
+        )
+        self.assertTrue(payload["ok"])
+
+    def test_revoked_scoped_token_rejected(self):
+        tok = self.server.create_scoped_token({SCOPE_STATUS})
+        payload, _ = self._open_json("/api/status", token=tok)
+        self.assertTrue(payload["ok"])
+
+        self.server.revoke_token(tok)
+        self._expect_error("/api/status", 401, token=tok)
+
+    # ── Failure actions (with scopes) ─────────────────────────────
+
     def test_status_and_failure_actions_expose_retryable_jobs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"
@@ -167,32 +252,29 @@ class LocalServerTests(unittest.TestCase):
                 }
                 recovery_server.start()
                 try:
-                    with self._open(
+                    status_payload, _ = self._open_json(
                         "/api/status",
                         server=recovery_server,
                         token=recovery_server.token,
-                    ) as resp:
-                        status_payload = json.loads(resp.read().decode("utf-8"))
+                    )
 
-                    with self._open(
+                    retry_payload, _ = self._open_json(
                         "/api/failures/retry",
                         server=recovery_server,
                         token=recovery_server.token,
                         method="POST",
                         data={"id": job_id},
-                    ) as resp:
-                        retry_payload = json.loads(resp.read().decode("utf-8"))
+                    )
 
                     retried = db.load_failed_job(job_id)
 
-                    with self._open(
+                    discard_payload, _ = self._open_json(
                         "/api/failures/discard",
                         server=recovery_server,
                         token=recovery_server.token,
                         method="POST",
                         data={"id": job_id},
-                    ) as resp:
-                        discard_payload = json.loads(resp.read().decode("utf-8"))
+                    )
 
                     active_after_discard = db.load_failed_jobs()
                 finally:
@@ -204,6 +286,46 @@ class LocalServerTests(unittest.TestCase):
             self.assertEqual(retried["retry_count"], 1)
             self.assertTrue(discard_payload["ok"])
             self.assertEqual(active_after_discard, [])
+
+    def test_recovery_scope_allows_failure_actions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            recovery_server = LocalCompanionServer()
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job_id = db.save_failed_job(
+                    url="https://example.com/video",
+                    platform="Example",
+                    title="Test",
+                    stage="fetch",
+                    error="test error",
+                    output_dir=str(Path(tmpdir) / "out"),
+                    queue_data={},
+                )
+                recovery_server.state_provider = lambda: {}
+                recovery_server.start()
+                try:
+                    recovery_tok = recovery_server.create_scoped_token({SCOPE_RECOVERY})
+                    payload, _ = self._open_json(
+                        "/api/failures/retry",
+                        server=recovery_server,
+                        token=recovery_tok,
+                        method="POST",
+                        data={"id": job_id},
+                    )
+                    self.assertTrue(payload["ok"])
+
+                    status_tok = recovery_server.create_scoped_token({SCOPE_STATUS})
+                    err = self._expect_error(
+                        "/api/failures/discard", 403,
+                        server=recovery_server,
+                        token=status_tok,
+                        method="POST",
+                        data={"id": job_id},
+                    )
+                    self.assertEqual(err["err"], "scope_denied")
+                finally:
+                    recovery_server.stop()
 
 
 if __name__ == "__main__":

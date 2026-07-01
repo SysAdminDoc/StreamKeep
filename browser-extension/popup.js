@@ -46,7 +46,21 @@ async function companionCall(path, method, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const err = await resp.json();
+      if (err.err === "token_invalid") {
+        throw new Error("Token expired or rotated. Re-pair with the current token from StreamKeep Settings.");
+      }
+      if (err.err === "scope_denied") {
+        throw new Error(err.message || "Token lacks the required scope.");
+      }
+      if (err.message) detail = err.message;
+    } catch (e) {
+      if (e.message.startsWith("Token expired") || e.message.startsWith("Token lacks"))
+        throw e;
+    }
+    throw new Error(detail);
   }
   return resp.json();
 }

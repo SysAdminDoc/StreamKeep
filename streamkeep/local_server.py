@@ -4,29 +4,67 @@ Binds to 127.0.0.1 (or 0.0.0.0 if LAN access is enabled in Settings)
 on a random port. Every request requires a bearer token — 32-byte hex,
 regenerated every app launch, displayed in the Settings tab.
 
+Tokens carry scopes: ``status`` (read-only state), ``queue`` (send URLs),
+``recovery`` (retry/discard failed jobs).  The master token created at
+launch has all scopes.  ``rotate_token()`` replaces it atomically;
+``create_scoped_token()`` mints a restricted token.
+
 REST API endpoints (F37):
-  GET  /api/status    — active downloads, queue, live channels
-  POST /api/queue     — add a URL to the download queue
-  GET  /api/library   — search/list recorded VODs
-  GET  /api/monitor   — channel monitor statuses
-  POST /api/failures/retry    — retry a persisted failed job
-  POST /api/failures/discard  — discard a persisted failed job
+  GET  /api/status    — active downloads, queue, live channels  [status]
+  POST /api/queue     — add a URL to the download queue         [queue]
+  GET  /api/library   — search/list recorded VODs               [status]
+  GET  /api/monitor   — channel monitor statuses                [status]
+  POST /api/failures/retry    — retry a persisted failed job    [recovery]
+  POST /api/failures/discard  — discard a persisted failed job  [recovery]
   GET  /               — serves the single-page web remote UI
 
 The server runs on its own thread (stdlib http.server is threaded), and
 hands received URLs to the main-thread Qt via a pyqtSignal.
 """
 
-import hmac
 import ipaddress
 import json
 import secrets
 import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+SCOPE_STATUS = "status"
+SCOPE_QUEUE = "queue"
+SCOPE_RECOVERY = "recovery"
+ALL_SCOPES = frozenset({SCOPE_STATUS, SCOPE_QUEUE, SCOPE_RECOVERY})
+
+
+class TokenStore:
+    """Thread-safe token → scopes mapping."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._tokens = {}  # token_str -> frozenset of scopes
+
+    def add(self, token, scopes):
+        with self._lock:
+            self._tokens[token] = frozenset(scopes)
+
+    def remove(self, token):
+        with self._lock:
+            self._tokens.pop(token, None)
+
+    def revoke_all(self):
+        with self._lock:
+            self._tokens.clear()
+
+    def check(self, token):
+        with self._lock:
+            return self._tokens.get(token)
+
+    def __len__(self):
+        with self._lock:
+            return len(self._tokens)
 
 
 class _ServerSignals(QObject):
@@ -154,7 +192,9 @@ class LocalCompanionServer:
     """
 
     def __init__(self, *, bind_lan=False, allowed_hosts=None, port=0):
+        self._token_store = TokenStore()
         self.token = secrets.token_hex(16)
+        self._token_store.add(self.token, ALL_SCOPES)
         self.port = int(port or 0)
         self._httpd = None
         self._thread = None
@@ -172,11 +212,32 @@ class LocalCompanionServer:
             if self._bind_lan else "127.0.0.1"
         )
 
+    def rotate_token(self):
+        """Replace the master token. Old tokens stop working immediately."""
+        old = self.token
+        self._token_store.remove(old)
+        self.token = secrets.token_hex(16)
+        self._token_store.add(self.token, ALL_SCOPES)
+        return self.token
+
+    def create_scoped_token(self, scopes):
+        """Mint a token restricted to the given scopes."""
+        valid = frozenset(scopes) & ALL_SCOPES
+        if not valid:
+            raise ValueError(f"No valid scopes in {scopes!r}")
+        tok = secrets.token_hex(16)
+        self._token_store.add(tok, valid)
+        return tok
+
+    def revoke_token(self, token):
+        """Revoke a specific token (scoped or master)."""
+        self._token_store.remove(token)
+
     def start(self):
         if self._httpd is not None:
             self.stop()
         handler_cls = _build_handler(
-            self.token,
+            self._token_store,
             self._signals,
             self.state_provider,
             allowed_hosts=self._allowed_hosts,
@@ -213,11 +274,10 @@ class LocalCompanionServer:
         return f"http://{_format_url_host(self.display_host)}:{self.port}/"
 
 
-def _build_handler(expected_token, signals, state_provider=None, *, allowed_hosts=None):
+def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=None):
     allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts(False))
 
     class _Handler(BaseHTTPRequestHandler):
-        # Silence stdlib access-log noise — we log via the Qt log panel.
         def log_message(self, *_args, **_kwargs):
             return
 
@@ -244,15 +304,36 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
                 return True
             return False
 
-        def _auth_ok(self):
+        def _token_scopes(self):
+            """Return the scopes for the bearer token, or None."""
             hdr = self.headers.get("Authorization", "") or ""
             if not hdr.startswith("Bearer "):
+                return None
+            candidate = hdr[7:].strip()
+            if not candidate:
+                return None
+            return token_store.check(candidate)
+
+        def _require_auth(self, scope=None):
+            """Check auth + optional scope. Returns True if authorized."""
+            scopes = self._token_scopes()
+            if scopes is None:
+                self._json_response(401, {
+                    "ok": False,
+                    "err": "token_invalid",
+                    "message": "Missing or expired bearer token. Re-pair with the current token from Settings.",
+                })
                 return False
-            return hmac.compare_digest(hdr[7:].strip(), expected_token)
+            if scope and scope not in scopes:
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "scope_denied",
+                    "message": f"This token does not have the '{scope}' scope.",
+                })
+                return False
+            return True
 
         def _cors(self):
-            # Restrict CORS to the requesting localhost origin rather than
-            # allowing every website to call the API.
             origin = self.headers.get("Origin", "")
             allowed = origin if self._origin_ok(origin) else "http://localhost"
             self.send_header("Access-Control-Allow-Origin", allowed)
@@ -302,27 +383,26 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
         def do_GET(self):
             if self._reject_bad_host():
                 return
-            path = self.path.split("?")[0]  # strip query params
+            path = self.path.split("?")[0]
 
-            # Web Remote UI (F37) — serve at /
             if path == "/":
                 self._serve_web_ui()
                 return
 
-            if not self._auth_ok():
-                self.send_response(401)
-                self._cors()
-                self.end_headers()
+            if not self._require_auth():
                 return
 
             if path == "/ping":
                 self._json_response(200, {"ok": True, "app": "StreamKeep"})
             elif path == "/api/status":
-                self._handle_api_status()
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_status()
             elif path == "/api/library":
-                self._handle_api_library()
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_library()
             elif path == "/api/monitor":
-                self._handle_api_monitor()
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_monitor()
             else:
                 self.send_response(404)
                 self._cors()
@@ -332,20 +412,21 @@ def _build_handler(expected_token, signals, state_provider=None, *, allowed_host
             if self._reject_bad_host():
                 return
             path = self.path.split("?")[0]
-            if not self._auth_ok():
-                self.send_response(401)
-                self._cors()
-                self.end_headers()
+            if not self._require_auth():
                 return
 
             if path == "/send_url":
-                self._handle_send_url()
+                if self._require_auth(SCOPE_QUEUE):
+                    self._handle_send_url()
             elif path == "/api/queue":
-                self._handle_api_queue()
+                if self._require_auth(SCOPE_QUEUE):
+                    self._handle_api_queue()
             elif path == "/api/failures/retry":
-                self._handle_api_failure_retry()
+                if self._require_auth(SCOPE_RECOVERY):
+                    self._handle_api_failure_retry()
             elif path == "/api/failures/discard":
-                self._handle_api_failure_discard()
+                if self._require_auth(SCOPE_RECOVERY):
+                    self._handle_api_failure_discard()
             else:
                 self.send_response(404)
                 self._cors()
@@ -550,7 +631,15 @@ const BASE=location.origin;
 function api(path,opts){
   opts=opts||{};opts.headers=opts.headers||{};
   opts.headers['Authorization']='Bearer '+TOKEN;
-  return fetch(BASE+path,opts).then(r=>r.json());
+  return fetch(BASE+path,opts).then(r=>{
+    if(r.status===401){clearInterval(_refreshId);
+      document.getElementById('app').style.display='none';
+      document.getElementById('auth').style.display='block';
+      document.getElementById('auth-err').style.display='block';
+      document.getElementById('auth-err').textContent=
+        'Token expired or rotated. Re-enter the current token from Settings.';
+      return {ok:false};}
+    return r.json();});
 }
 function doAuth(){
   TOKEN=document.getElementById('token-input').value.trim();
@@ -558,10 +647,12 @@ function doAuth(){
     if(d.ok){document.getElementById('auth').style.display='none';
       document.getElementById('app').style.display='block';refresh();
       _refreshId=setInterval(refresh,5000);}
-    else throw new Error();
-  }).catch(()=>{
+    else throw new Error(d.message||'');
+  }).catch(e=>{
     document.getElementById('auth-err').style.display='block';
-    document.getElementById('auth-err').textContent='Invalid token or server unreachable.';
+    var msg=e&&e.message&&e.message.includes('expired')?e.message:
+      'Invalid token or server unreachable. Check the token in StreamKeep Settings.';
+    document.getElementById('auth-err').textContent=msg;
   });
 }
 function switchTab(name,btn){
