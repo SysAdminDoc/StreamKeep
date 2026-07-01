@@ -69,6 +69,7 @@ class TokenStore:
 
 class _ServerSignals(QObject):
     url_received = pyqtSignal(str, str)   # url, action ("fetch" | "queue")
+    clip_received = pyqtSignal(str, float, float)  # url, start_secs, end_secs
     failed_job_retry_requested = pyqtSignal(int)
     failed_job_discard_requested = pyqtSignal(int)
 
@@ -200,6 +201,7 @@ class LocalCompanionServer:
         self._thread = None
         self._signals = _ServerSignals()
         self.url_received = self._signals.url_received
+        self.clip_received = self._signals.clip_received
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
@@ -272,6 +274,30 @@ class LocalCompanionServer:
         if int(self.port or 0) <= 0:
             return ""
         return f"http://{_format_url_host(self.display_host)}:{self.port}/"
+
+
+def _parse_timestamp(value):
+    """Parse a timestamp value (seconds float, or HH:MM:SS string). Returns float or None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value >= 0 else None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    parts = s.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+    except (ValueError, IndexError):
+        pass
+    return None
 
 
 def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=None):
@@ -441,6 +467,20 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
             if not url.startswith(("http://", "https://")):
                 self._json_response(400, {"ok": False, "err": "invalid url"})
                 return
+            clip_start = _parse_timestamp(data.get("clip_start"))
+            clip_end = _parse_timestamp(data.get("clip_end"))
+            if clip_start is not None and clip_end is not None and clip_end <= clip_start:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "clip_end must be after clip_start",
+                })
+                return
+            if clip_start is not None or clip_end is not None:
+                signals.clip_received.emit(
+                    url,
+                    clip_start if clip_start is not None else 0.0,
+                    clip_end if clip_end is not None else 0.0,
+                )
             signals.url_received.emit(url, action)
             self._json_response(200, {"ok": True})
 

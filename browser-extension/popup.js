@@ -83,8 +83,14 @@ async function sendUrl(action) {
       setStatus("Current tab has no http(s) URL.", "err");
       return;
     }
-    await companionCall("/send_url", "POST", { url, action });
-    setStatus(`Sent to ${action}.`, "ok");
+    const body = { url, action };
+    const clipStart = ($("clip-start") || {}).value || "";
+    const clipEnd = ($("clip-end") || {}).value || "";
+    if (clipStart) body.clip_start = clipStart.trim();
+    if (clipEnd) body.clip_end = clipEnd.trim();
+    await companionCall("/send_url", "POST", body);
+    const clipNote = (clipStart || clipEnd) ? " with clip range" : "";
+    setStatus(`Sent to ${action}${clipNote}.`, "ok");
   } catch (e) {
     setStatus(`Send failed: ${e.message}`, "err");
   }

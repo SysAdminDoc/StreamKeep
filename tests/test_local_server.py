@@ -287,6 +287,51 @@ class LocalServerTests(unittest.TestCase):
             self.assertTrue(discard_payload["ok"])
             self.assertEqual(active_after_discard, [])
 
+    # ── Clip-range handoff ──────────────────────────────────────────
+
+    def test_send_url_with_clip_range_accepted(self):
+        payload, _ = self._open_json(
+            "/send_url", token=self.server.token, method="POST",
+            data={
+                "url": "https://example.com/video",
+                "action": "queue",
+                "clip_start": "0:30",
+                "clip_end": "5:00",
+            },
+        )
+        self.assertTrue(payload["ok"])
+
+    def test_send_url_rejects_invalid_clip_order(self):
+        err = self._expect_error(
+            "/send_url", 400, token=self.server.token, method="POST",
+            data={
+                "url": "https://example.com/video",
+                "action": "queue",
+                "clip_start": 300,
+                "clip_end": 30,
+            },
+        )
+        self.assertIn("clip_end", err.get("err", ""))
+
+    def test_send_url_accepts_numeric_timestamps(self):
+        payload, _ = self._open_json(
+            "/send_url", token=self.server.token, method="POST",
+            data={
+                "url": "https://example.com/video",
+                "action": "fetch",
+                "clip_start": 10.5,
+                "clip_end": 120.0,
+            },
+        )
+        self.assertTrue(payload["ok"])
+
+    def test_send_url_without_clip_still_works(self):
+        payload, _ = self._open_json(
+            "/send_url", token=self.server.token, method="POST",
+            data={"url": "https://example.com/video", "action": "fetch"},
+        )
+        self.assertTrue(payload["ok"])
+
     def test_headless_server_with_fixed_token(self):
         """Smoke test: server with a fixed token works like service mode."""
         from streamkeep.local_server import ALL_SCOPES
