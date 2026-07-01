@@ -1,9 +1,10 @@
-"""Config persistence + rotating log file.
+"""Config persistence + rotating log file + structured logging bridge.
 
 Free-form JSON dict for now. A typed dataclass wrapper lands in Phase 3b.
 """
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime
@@ -101,3 +102,101 @@ def write_log_line(msg):
                 f.write(f"[{ts}] {msg}\n")
         except Exception:
             pass
+
+
+# ── Structured logging bridge ──────────────────────────────────────
+
+_LEVEL_LABELS = {
+    logging.DEBUG: "DEBUG",
+    logging.INFO: "INFO",
+    logging.WARNING: "WARN",
+    logging.ERROR: "ERROR",
+    logging.CRITICAL: "CRIT",
+}
+
+
+class GuiLogHandler(logging.Handler):
+    """Forwards logging records to a callable (e.g. main window ``_log``).
+
+    Install via ``install_gui_logging(callback)`` — attaches to the
+    ``streamkeep`` root logger and writes through to the rotating log
+    file as well.  Duplicate suppression: if a record with the same
+    message was emitted within the last second, it is counted but not
+    forwarded until the burst ends.
+    """
+
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+        self._last_msg = ""
+        self._last_time = 0.0
+        self._suppress_count = 0
+
+    def emit(self, record):
+        try:
+            module = record.name.rsplit(".", 1)[-1] if record.name else ""
+            level = _LEVEL_LABELS.get(record.levelno, str(record.levelno))
+            msg = self.format(record) if self.formatter else record.getMessage()
+
+            now = record.created
+            if msg == self._last_msg and (now - self._last_time) < 1.0:
+                self._suppress_count += 1
+                self._last_time = now
+                return
+            if self._suppress_count > 0:
+                self._callback(
+                    f"[{module}] {level}: (repeated {self._suppress_count}x)"
+                )
+                self._suppress_count = 0
+
+            self._last_msg = msg
+            self._last_time = now
+            formatted = f"[{module}] {level}: {msg}"
+            self._callback(formatted)
+            write_log_line(formatted)
+        except Exception:
+            pass
+
+
+class FileLogHandler(logging.Handler):
+    """Writes logging records to the rotating log file only."""
+
+    def emit(self, record):
+        try:
+            msg = self.format(record) if self.formatter else record.getMessage()
+            module = record.name.rsplit(".", 1)[-1] if record.name else ""
+            level = _LEVEL_LABELS.get(record.levelno, str(record.levelno))
+            write_log_line(f"[{module}] {level}: {msg}")
+        except Exception:
+            pass
+
+
+def install_gui_logging(callback, *, level=logging.INFO):
+    """Attach a ``GuiLogHandler`` to the ``streamkeep`` root logger.
+
+    Call once at app startup. Returns the handler so it can be removed
+    later if needed.
+    """
+    root = logging.getLogger("streamkeep")
+    root.setLevel(level)
+    for h in list(root.handlers):
+        if isinstance(h, (GuiLogHandler, FileLogHandler)):
+            root.removeHandler(h)
+    handler = GuiLogHandler(callback)
+    root.addHandler(handler)
+    return handler
+
+
+def install_file_logging(*, level=logging.WARNING):
+    """Attach a ``FileLogHandler`` to the ``streamkeep`` root logger.
+
+    Used in CLI/headless mode where there is no GUI log panel.
+    """
+    root = logging.getLogger("streamkeep")
+    root.setLevel(level)
+    for h in list(root.handlers):
+        if isinstance(h, FileLogHandler):
+            root.removeHandler(h)
+    handler = FileLogHandler()
+    root.addHandler(handler)
+    return handler

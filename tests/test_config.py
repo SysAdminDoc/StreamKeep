@@ -1,9 +1,11 @@
+import logging
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from streamkeep import config
+from streamkeep.config import install_gui_logging
 
 
 class ConfigTests(unittest.TestCase):
@@ -21,6 +23,41 @@ class ConfigTests(unittest.TestCase):
                 data = config.load_config()
 
             self.assertEqual(data, {"theme": "dark"})
+
+
+class GuiLogBridgeTests(unittest.TestCase):
+    def setUp(self):
+        self.messages = []
+        self.handler = install_gui_logging(self.messages.append)
+        self.logger = logging.getLogger("streamkeep.test_bridge")
+
+    def tearDown(self):
+        root = logging.getLogger("streamkeep")
+        root.removeHandler(self.handler)
+
+    def test_warning_propagates_with_level_and_module(self):
+        self.logger.warning("disk almost full")
+        matching = [m for m in self.messages if "disk almost full" in m]
+        self.assertEqual(len(matching), 1)
+        self.assertIn("WARN", matching[0])
+        self.assertIn("test_bridge", matching[0])
+
+    def test_error_propagates(self):
+        self.logger.error("connection lost")
+        matching = [m for m in self.messages if "connection lost" in m]
+        self.assertEqual(len(matching), 1)
+        self.assertIn("ERROR", matching[0])
+
+    def test_duplicate_suppression(self):
+        for _ in range(10):
+            record = self.logger.makeRecord(
+                "streamkeep.test_bridge", logging.WARNING, "", 0,
+                "same message", (), None,
+            )
+            record.created = 1000.0
+            self.handler.emit(record)
+        forwarded = [m for m in self.messages if "same message" in m and "repeated" not in m]
+        self.assertEqual(len(forwarded), 1)
 
 
 if __name__ == "__main__":

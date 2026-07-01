@@ -78,6 +78,8 @@ def _run_download(args):
 
     app = QCoreApplication(sys.argv)
     _db.init_db()
+    from .config import install_file_logging
+    install_file_logging()
 
     from .workers import FetchWorker, DownloadWorker
 

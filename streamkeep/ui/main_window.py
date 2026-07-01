@@ -261,6 +261,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         # Start the browser-companion local server if the user opted in.
         # Deferred so the UI paints before we open a socket.
         QTimer.singleShot(1000, self._maybe_start_companion_server)
+        from streamkeep.config import install_gui_logging
+        self._gui_log_handler = install_gui_logging(self._log)
         # Keyboard shortcuts (F11)
         self._setup_shortcuts()
 
