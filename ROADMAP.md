@@ -33,6 +33,28 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 - Deeper library views for very large archives: filters, smart collections, transcript search, notes, bandwidth/storage trends, and channel statistics.
 - Optional integrations where they stay local-first and user-controlled.
 
+### 3. Audit-Deferred Items
+
+- [ ] P2 — Remove b64 fallback in secrets.py or gate it behind explicit opt-in
+  Why: `allow_insecure_fallback=True` stores secrets as trivially reversible base64 in config.json.
+  Where: `streamkeep/secrets.py`
+
+- [ ] P2 — Isolate plugin imports from the app namespace
+  Why: `load_plugin` appends plugin parent to `sys.path`, allowing a malicious plugin to shadow stdlib modules.
+  Where: `streamkeep/plugins.py`
+
+- [ ] P3 — Increase gallery share ID entropy from 48 to 128 bits
+  Why: `uuid4().hex[:12]` (48 bits) is brute-forceable when bound to LAN (`bind_lan=True`).
+  Where: `streamkeep/gallery.py`
+
+- [ ] P3 — Strip trailing punctuation from clipboard URL captures
+  Why: regex captures trailing `)`, `,`, `.` from natural text around URLs.
+  Where: `streamkeep/clipboard.py`
+
+- [ ] P3 — Validate FTP STOR filenames for special characters
+  Why: `os.path.basename` strips paths but filenames with spaces or FTP-meaningful chars could fail.
+  Where: `streamkeep/upload/ftp.py`
+
 ## Definition of Done
 
 - Active planning remains in this file.
