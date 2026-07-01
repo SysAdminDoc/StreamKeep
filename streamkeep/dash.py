@@ -1,12 +1,13 @@
-"""DASH/MPD manifest parser — static VOD manifests (F50).
+"""DASH/MPD manifest parser — static and dynamic manifests (F50).
 
 Parses MPEG-DASH Media Presentation Description (MPD) XML into
 ``QualityInfo`` entries.  Handles ``SegmentTemplate`` (pattern-based
 URLs) and ``SegmentList`` (explicit URL lists) addressing.
 
-Only **static** MPD manifests (``type="static"``) are supported.
-Dynamic/live MPD is deferred.  DRM-protected content (``ContentProtection``
-elements) is detected and skipped with a warning.
+Both static and dynamic (live) MPD manifests are supported — dynamic
+manifests are passed through to ffmpeg which handles segment polling
+natively.  DRM-protected content (``ContentProtection`` elements) is
+detected and skipped with a warning.
 """
 
 import re
@@ -50,12 +51,11 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
         ns = root.tag.split("}")[0] + "}"
 
     mpd_type = root.attrib.get("type", "static")
-    if mpd_type != "static":
-        if log_fn:
-            log_fn(f"[DASH] Dynamic MPD (type={mpd_type}) not yet supported.")
-        return []
+    is_dynamic = mpd_type == "dynamic"
 
-    # Parse total duration from mediaPresentationDuration (ISO 8601)
+    if is_dynamic and log_fn:
+        log_fn("[DASH] Dynamic/live MPD — ffmpeg will handle segment polling.")
+
     total_secs = _parse_duration(root.attrib.get("mediaPresentationDuration", ""))
 
     qualities = []
@@ -119,12 +119,13 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
 
                 resolution = f"{width}x{height}" if width and height else ""
 
+                fmt = "dash-live" if is_dynamic else "dash"
                 qi = QualityInfo(
                     name=name,
                     url=rep_url,
                     resolution=resolution,
                     bandwidth=bandwidth,
-                    format_type="dash",
+                    format_type=fmt,
                 )
                 qualities.append(qi)
 

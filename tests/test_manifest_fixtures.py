@@ -45,17 +45,21 @@ class DashStaticMPDTests(unittest.TestCase):
 
 
 class DashDynamicMPDTests(unittest.TestCase):
-    def test_dynamic_mpd_returns_empty_with_message(self):
+    def test_dynamic_mpd_returns_qualities_with_live_format(self):
         messages = []
         qualities = parse_mpd_xml(
             _read("dynamic_live.mpd"),
             "https://cdn.example.com/live.mpd",
             log_fn=messages.append,
         )
-        self.assertEqual(qualities, [])
+        self.assertGreater(len(qualities), 0)
         self.assertTrue(
-            any("dynamic" in m.lower() or "not yet supported" in m.lower() for m in messages),
-            f"Expected dynamic MPD rejection message, got: {messages}",
+            any("dynamic" in m.lower() or "live" in m.lower() for m in messages),
+            f"Expected dynamic MPD info message, got: {messages}",
+        )
+        self.assertTrue(
+            all(q.format_type == "dash-live" for q in qualities),
+            "Dynamic MPD qualities should have format_type='dash-live'",
         )
 
 
@@ -103,10 +107,12 @@ class HLSMediaPlaylistTests(unittest.TestCase):
         total, start_time, seg_count = parse_hls_duration(_read("media.m3u8"))
         self.assertEqual(seg_count, 4)
         self.assertIn("2026-07-01", start_time)
+        self.assertAlmostEqual(total, 38.5, places=1)
 
     def test_ll_hls_media_segment_count(self):
-        _, _, seg_count = parse_hls_duration(_read("ll_hls.m3u8"))
+        total, _, seg_count = parse_hls_duration(_read("ll_hls.m3u8"))
         self.assertEqual(seg_count, 2)
+        self.assertAlmostEqual(total, 8.0, places=1)
 
 
 if __name__ == "__main__":

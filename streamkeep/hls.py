@@ -40,7 +40,12 @@ def parse_hls_master(body, base_url):
 
 def parse_hls_duration(body):
     """Parse HLS playlist for duration metadata.
-    Returns (total_secs, start_time, segment_count)."""
+    Returns (total_secs, start_time, segment_count).
+
+    Handles both standard HLS and LL-HLS playlists. Duration is
+    calculated from EXTINF tags; LL-HLS partial segments (EXT-X-PART)
+    are counted but not added to total_secs (they're sub-segment).
+    """
     total_secs = 0.0
     start_time = ""
     m = re.search(r'TOTAL-SECS[=:](\d+\.?\d*)', body)
@@ -50,4 +55,7 @@ def parse_hls_duration(body):
     if m2:
         start_time = m2.group(1).strip()
     seg_count = len(re.findall(r'#EXTINF:', body))
+    if not total_secs and seg_count:
+        for dur_m in re.finditer(r'#EXTINF:([\d.]+)', body):
+            total_secs += float(dur_m.group(1))
     return total_secs, start_time, seg_count
