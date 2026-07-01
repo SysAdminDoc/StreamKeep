@@ -772,6 +772,131 @@ def _row_to_monitor_dict(row):
     return d
 
 
+# ── Maintenance and diagnostics ────────────────────────────────────
+
+
+def check_integrity() -> tuple[bool, str]:
+    """Run a read-only integrity check. Returns (ok, detail)."""
+    if not DB_PATH.is_file():
+        return False, "Database file does not exist"
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute("PRAGMA integrity_check").fetchall()
+        results = [str(r[0]) for r in rows]
+        ok = len(results) == 1 and results[0] == "ok"
+        return ok, "\n".join(results)
+    except sqlite3.Error as e:
+        return False, str(e)
+    finally:
+        db.close()
+
+
+def run_optimize() -> str:
+    """Run PRAGMA optimize to update query planner statistics."""
+    if not DB_PATH.is_file():
+        return "Database file does not exist"
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("PRAGMA optimize")
+            return "ok"
+        except sqlite3.Error as e:
+            return str(e)
+        finally:
+            db.close()
+
+
+def checkpoint_wal() -> tuple[bool, str]:
+    """Force a WAL checkpoint (TRUNCATE mode). Returns (ok, detail)."""
+    if not DB_PATH.is_file():
+        return False, "Database file does not exist"
+    with _write_lock:
+        db = _connect()
+        try:
+            row = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            blocked, pages_written, pages_total = int(row[0]), int(row[1]), int(row[2])
+            if blocked:
+                return False, f"Checkpoint blocked (wrote {pages_written}/{pages_total} pages)"
+            return True, f"Checkpoint complete ({pages_written} pages written)"
+        except sqlite3.Error as e:
+            return False, str(e)
+        finally:
+            db.close()
+
+
+def vacuum_after_backup(backup_fn=None) -> tuple[bool, str]:
+    """Create a backup snapshot, then VACUUM the database.
+
+    *backup_fn* is an optional callable that receives the DB path and
+    should create a safe copy (e.g. ``backup.create_backup``).  If it
+    returns a falsy first element, the vacuum is aborted.
+
+    Returns (ok, detail).
+    """
+    if not DB_PATH.is_file():
+        return False, "Database file does not exist"
+    if backup_fn is not None:
+        try:
+            result = backup_fn(DB_PATH)
+            if isinstance(result, tuple) and not result[0]:
+                return False, f"Backup failed, vacuum aborted: {result[1]}"
+        except Exception as e:
+            return False, f"Backup failed, vacuum aborted: {e}"
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("VACUUM")
+            return True, "Vacuum complete"
+        except sqlite3.Error as e:
+            return False, str(e)
+        finally:
+            db.close()
+
+
+def db_diagnostics() -> dict[str, Any]:
+    """Return a diagnostic summary of the database state."""
+    result: dict[str, Any] = {
+        "exists": DB_PATH.is_file(),
+        "path": str(DB_PATH),
+    }
+    if not result["exists"]:
+        return result
+    try:
+        result["size_bytes"] = DB_PATH.stat().st_size
+    except OSError:
+        result["size_bytes"] = -1
+
+    wal_path = DB_PATH.parent / (DB_PATH.name + "-wal")
+    result["wal_size_bytes"] = wal_path.stat().st_size if wal_path.is_file() else 0
+
+    db = _connect(readonly=True)
+    try:
+        result["schema_version"] = db.execute("PRAGMA user_version").fetchone()[0]
+        result["journal_mode"] = db.execute("PRAGMA journal_mode").fetchone()[0]
+        result["page_size"] = db.execute("PRAGMA page_size").fetchone()[0]
+        result["page_count"] = db.execute("PRAGMA page_count").fetchone()[0]
+        result["freelist_count"] = db.execute("PRAGMA freelist_count").fetchone()[0]
+
+        counts = {}
+        for table in ("history", "monitor_channels", "download_queue",
+                       "archive_manifests", "failed_jobs"):
+            try:
+                counts[table] = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            except sqlite3.Error:
+                counts[table] = -1
+        result["row_counts"] = counts
+
+        integrity_rows = db.execute("PRAGMA quick_check").fetchall()
+        qc = [str(r[0]) for r in integrity_rows]
+        result["quick_check"] = "ok" if len(qc) == 1 and qc[0] == "ok" else "\n".join(qc[:10])
+    except sqlite3.Error as e:
+        result["error"] = str(e)
+    finally:
+        db.close()
+
+    return result
+
+
 # ── Migration from config.json ──────────────────────────────────────
 
 def migrate_from_config(cfg: dict[str, Any]) -> bool:

@@ -261,6 +261,35 @@ def _list_extractors():
     _print_line(f"\n  ({len(_ExtBase._registry)} extractors registered)")
 
 
+def _run_db_maintenance(args):
+    """Run a database maintenance action."""
+    import json as _json
+    _db.init_db()
+    action = getattr(args, "action", "info")
+    if action == "info":
+        diag = _db.db_diagnostics()
+        _print_line(_json.dumps(diag, indent=2))
+    elif action == "check":
+        ok, detail = _db.check_integrity()
+        _print_line(f"Integrity: {'PASS' if ok else 'FAIL'}")
+        _print_line(detail)
+        if not ok:
+            sys.exit(1)
+    elif action == "optimize":
+        result = _db.run_optimize()
+        _print_line(f"Optimize: {result}")
+    elif action == "checkpoint":
+        ok, detail = _db.checkpoint_wal()
+        _print_line(f"WAL checkpoint: {'OK' if ok else 'FAILED'} — {detail}")
+        if not ok:
+            sys.exit(1)
+    elif action == "vacuum":
+        ok, detail = _db.vacuum_after_backup()
+        _print_line(f"Vacuum: {'OK' if ok else 'FAILED'} — {detail}")
+        if not ok:
+            sys.exit(1)
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 def build_parser():
@@ -291,6 +320,12 @@ def build_parser():
 
     # -- list-extractors --
     sub.add_parser("extractors", help="List supported platforms")
+
+    # -- db maintenance --
+    db_p = sub.add_parser("db", help="Database maintenance and diagnostics")
+    db_p.add_argument("action", nargs="?", default="info",
+                      choices=["info", "check", "optimize", "checkpoint", "vacuum"],
+                      help="Action: info (default), check, optimize, checkpoint, vacuum")
 
     # Legacy flat args for backward compat
     p.add_argument("--url", dest="legacy_url", default="",
@@ -334,6 +369,8 @@ def run_cli(argv=None):
         _run_server(args)
     elif args.command == "extractors":
         _list_extractors()
+    elif args.command == "db":
+        _run_db_maintenance(args)
     else:
         p.print_help()
         sys.exit(0)

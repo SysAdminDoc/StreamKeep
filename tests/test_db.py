@@ -101,5 +101,81 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(discarded["status"], "discarded")
 
 
+class DbMaintenanceTests(unittest.TestCase):
+    def test_check_integrity_on_healthy_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                ok, detail = db.check_integrity()
+            self.assertTrue(ok)
+            self.assertEqual(detail, "ok")
+
+    def test_check_integrity_missing_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "nonexistent.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                ok, detail = db.check_integrity()
+            self.assertFalse(ok)
+            self.assertIn("does not exist", detail)
+
+    def test_optimize_on_healthy_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                result = db.run_optimize()
+            self.assertEqual(result, "ok")
+
+    def test_checkpoint_wal_on_healthy_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                ok, detail = db.checkpoint_wal()
+            self.assertTrue(ok)
+            self.assertIn("pages written", detail)
+
+    def test_vacuum_after_backup_skips_on_backup_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                ok, detail = db.vacuum_after_backup(
+                    backup_fn=lambda _: (False, "disk full"),
+                )
+            self.assertFalse(ok)
+            self.assertIn("disk full", detail)
+
+    def test_vacuum_without_backup_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.save_history_entry({"title": "Test", "url": "https://x.com/v"})
+                ok, detail = db.vacuum_after_backup()
+            self.assertTrue(ok)
+            self.assertIn("complete", detail.lower())
+
+    def test_db_diagnostics_on_healthy_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.save_history_entry({"title": "T", "url": "https://x.com/v"})
+                diag = db.db_diagnostics()
+            self.assertTrue(diag["exists"])
+            self.assertEqual(diag["schema_version"], db.SCHEMA_VERSION)
+            self.assertEqual(diag["quick_check"], "ok")
+            self.assertEqual(diag["row_counts"]["history"], 1)
+
+    def test_db_diagnostics_missing_db(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "nonexistent.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                diag = db.db_diagnostics()
+            self.assertFalse(diag["exists"])
+
+
 if __name__ == "__main__":
     unittest.main()
