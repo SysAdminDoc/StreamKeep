@@ -287,6 +287,22 @@ class LocalServerTests(unittest.TestCase):
             self.assertTrue(discard_payload["ok"])
             self.assertEqual(active_after_discard, [])
 
+    def test_headless_server_with_fixed_token(self):
+        """Smoke test: server with a fixed token works like service mode."""
+        from streamkeep.local_server import ALL_SCOPES
+        srv = LocalCompanionServer()
+        srv._token_store.remove(srv.token)
+        fixed = "deadbeefcafebabe1234567890abcdef"
+        srv.token = fixed
+        srv._token_store.add(fixed, ALL_SCOPES)
+        srv.start()
+        try:
+            payload, _ = self._open_json("/ping", server=srv, token=fixed)
+            self.assertTrue(payload["ok"])
+            self._expect_error("/ping", 401, server=srv, token="wrong-token")
+        finally:
+            srv.stop()
+
     def test_recovery_scope_allows_failure_actions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"

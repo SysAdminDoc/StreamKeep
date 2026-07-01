@@ -224,15 +224,37 @@ def _pick_quality(qualities, pref):
 
 def _run_server(args):
     """Start the REST API / web remote server headlessly."""
+    config_dir = getattr(args, "config_dir", "") or ""
+    if config_dir:
+        from . import paths
+        from pathlib import Path
+        paths.CONFIG_DIR = Path(config_dir)
+        paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    output_dir = getattr(args, "output_dir", "") or ""
+    if output_dir:
+        cfg = load_config()
+        cfg["output_dir"] = output_dir
+        from .config import save_config
+        save_config(cfg)
+
     app = QCoreApplication(sys.argv)
     _db.init_db()
+    from .config import install_file_logging
+    install_file_logging()
 
     from .local_server import LocalCompanionServer
 
     bind_lan = args.bind == "0.0.0.0"
     server = LocalCompanionServer(bind_lan=bind_lan, port=args.port or 0)
 
-    # In server-only mode, received URLs are just logged
+    fixed_token = getattr(args, "token", "") or ""
+    if fixed_token:
+        from .local_server import ALL_SCOPES
+        server._token_store.remove(server.token)
+        server.token = fixed_token
+        server._token_store.add(fixed_token, ALL_SCOPES)
+
     server.url_received.connect(
         lambda url, action: _print_line(f"[{action}] {url}")
     )
@@ -242,6 +264,10 @@ def _run_server(args):
     _print_line(f"Listening on {'0.0.0.0' if bind_lan else '127.0.0.1'}:{server.port}")
     _print_line(f"Token: {server.token}")
     _print_line(f"Web UI: {server.url}")
+    if config_dir:
+        _print_line(f"Config: {config_dir}")
+    if output_dir:
+        _print_line(f"Output: {output_dir}")
     _print_line("Press Ctrl+C to stop.")
 
     sys.exit(app.exec())
@@ -332,6 +358,12 @@ def build_parser():
                      help="Port to bind (default: random)")
     srv.add_argument("--bind", default="127.0.0.1",
                      help="Bind address (127.0.0.1 or 0.0.0.0)")
+    srv.add_argument("--token", default="",
+                     help="Fixed bearer token (default: random per launch)")
+    srv.add_argument("--config-dir", default="",
+                     help="Override config directory path")
+    srv.add_argument("--output-dir", default="",
+                     help="Default output directory for queued downloads")
 
     # -- list-extractors --
     sub.add_parser("extractors", help="List supported platforms")
