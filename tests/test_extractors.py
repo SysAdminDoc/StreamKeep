@@ -124,6 +124,29 @@ class TestKickExtractorURL(unittest.TestCase):
     def test_supports_live_check(self):
         self.assertTrue(self.ext.supports_live_check())
 
+    def test_detect_vod_permalink(self):
+        vod = "https://kick.com/blame/videos/36165d38-e240-4a14-8e38-003f0e0e2e86"
+        self.assertIsInstance(Extractor.detect(vod), KickExtractor)
+
+    def test_vod_url_channel_and_id(self):
+        vod = "https://kick.com/blame/videos/36165d38-e240-4a14-8e38-003f0e0e2e86"
+        self.assertEqual(self.ext.extract_channel_id(vod), "blame")
+        self.assertEqual(
+            self.ext.extract_vod_id(vod),
+            "36165d38-e240-4a14-8e38-003f0e0e2e86",
+        )
+
+    def test_vod_url_channelless(self):
+        vod = "https://kick.com/video/36165d38-e240-4a14-8e38-003f0e0e2e86"
+        self.assertIsNone(self.ext.extract_channel_id(vod))
+        self.assertEqual(
+            self.ext.extract_vod_id(vod),
+            "36165d38-e240-4a14-8e38-003f0e0e2e86",
+        )
+
+    def test_channel_url_has_no_vod_id(self):
+        self.assertIsNone(self.ext.extract_vod_id("https://kick.com/xqc"))
+
 
 class TestKickExtractorResolve(unittest.TestCase):
     """Kick resolve() and list_vods() with mocked HTTP."""
@@ -174,6 +197,39 @@ class TestKickExtractorResolve(unittest.TestCase):
     def test_resolve_api_returns_none(self, mock_curl_json):
         mock_curl_json.return_value = None
         info = self.ext.resolve("https://kick.com/offline_user")
+        self.assertIsNone(info)
+
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl")
+    def test_resolve_vod_permalink(self, mock_curl, mock_curl_json):
+        mock_curl_json.return_value = {
+            "source": "https://stream.kick.com/vod/media/hls/master.m3u8",
+            "livestream": {"session_title": "Archived stream"},
+        }
+        master_body = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=1920x1080\n"
+            "1080p60/playlist.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n"
+            "720p60/playlist.m3u8\n"
+        )
+        sub_body = "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n#EXTINF:2.0,\nseg1.ts\n"
+        mock_curl.side_effect = [master_body, sub_body]
+        info = self.ext.resolve(
+            "https://kick.com/blame/videos/36165d38-e240-4a14-8e38-003f0e0e2e86"
+        )
+        self.assertIsNotNone(info)
+        self.assertEqual(info.platform, "Kick")
+        self.assertEqual(info.channel, "blame")
+        self.assertEqual(info.title, "Archived stream")
+        self.assertGreater(len(info.qualities), 0)
+
+    @patch(f"{_KICK}.curl_json")
+    def test_resolve_vod_no_source(self, mock_curl_json):
+        mock_curl_json.return_value = {"source": "", "livestream": {}}
+        info = self.ext.resolve(
+            "https://kick.com/blame/videos/36165d38-e240-4a14-8e38-003f0e0e2e86"
+        )
         self.assertIsNone(info)
 
     @patch(f"{_KICK}.curl_json")

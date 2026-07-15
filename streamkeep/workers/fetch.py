@@ -68,6 +68,19 @@ class FetchWorker(QThread):
 
                 self.log.emit(f"Detected platform: {ext.NAME}")
 
+                # A direct permalink (e.g. a VOD-by-UUID URL) resolves to a
+                # single item — skip live-check / channel-wide VOD listing,
+                # which would target the channel rather than this URL.
+                if ext.is_direct_url(self.url):
+                    info = ext.resolve(self.url, log_fn=self.log.emit)
+                    if self._interrupted():
+                        return
+                    if info:
+                        self.finished.emit(info)
+                    else:
+                        self.error.emit("Failed to resolve stream URL")
+                    return
+
                 if ext.supports_live_check():
                     is_live = False
                     try:

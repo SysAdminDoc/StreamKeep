@@ -21,6 +21,16 @@ from .base import Extractor
 logger = logging.getLogger(__name__)
 
 _SAFE_SLUG = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
+_SAFE_UUID = re.compile(r'^[0-9a-fA-F-]{8,64}$')
+
+# Channel page:  kick.com/<slug>
+_CHANNEL_URL = re.compile(r'(?:https?://)?(?:www\.)?kick\.com/([a-zA-Z0-9_-]+)/?$')
+# VOD permalink: kick.com/<slug>/videos/<uuid>  or  kick.com/video[s]/<uuid>
+_VOD_URL = re.compile(
+    r'(?:https?://)?(?:www\.)?kick\.com/'
+    r'(?:([a-zA-Z0-9_-]+)/)?videos?/'
+    r'([0-9a-fA-F-]{8,})'
+)
 
 # Official public API base — requires no auth for App Access Token scopes
 # when called without an Authorization header on read-only endpoints.
@@ -30,6 +40,10 @@ _OFFICIAL_API = "https://api.kick.com/public/v1"
 # playback_url.  Keep these as fallback until the official API covers media.
 _V2_API = "https://kick.com/api/v2"
 
+# Undocumented v1 — the only endpoint that resolves a VOD UUID to its HLS
+# master playlist (v2 no longer exposes video-by-uuid).
+_V1_API = "https://kick.com/api/v1"
+
 _JSON_HEADERS = {"User-Agent": CURL_UA, "Accept": "application/json"}
 
 
@@ -37,16 +51,26 @@ class KickExtractor(Extractor):
     NAME = "Kick"
     ICON = "K"
     COLOR = "green"
-    URL_PATTERNS = [
-        re.compile(r'(?:https?://)?(?:www\.)?kick\.com/([a-zA-Z0-9_-]+)/?$'),
-    ]
+    URL_PATTERNS = [_CHANNEL_URL, _VOD_URL]
 
     def extract_channel_id(self, url):
-        for p in self.URL_PATTERNS:
-            m = p.match(url.strip())
-            if m:
-                return m.group(1)
+        u = url.strip()
+        m = _VOD_URL.match(u)
+        if m:
+            # group(1) is the channel slug (may be absent on /video/<uuid>)
+            return m.group(1)
+        m = _CHANNEL_URL.match(u)
+        if m:
+            return m.group(1)
         return None
+
+    def extract_vod_id(self, url):
+        """Return the VOD UUID for a permalink URL, or None."""
+        m = _VOD_URL.match(url.strip())
+        return m.group(2) if m else None
+
+    def is_direct_url(self, url):
+        return self.extract_vod_id(url) is not None
 
     def supports_vod_listing(self):
         return True
@@ -97,6 +121,20 @@ class KickExtractor(Extractor):
         if data and isinstance(data, dict):
             return data.get("data", data)
         return None
+
+    def _v1_video(self, uuid):
+        """Resolve a VOD UUID to ``(source_m3u8, title)`` via undocumented v1."""
+        if not uuid or not _SAFE_UUID.match(uuid):
+            return "", ""
+        data = curl_json(f"{_V1_API}/video/{uuid}", headers=_JSON_HEADERS)
+        if not data or not isinstance(data, dict):
+            return "", ""
+        source = str(data.get("source") or "")
+        ls = data.get("livestream")
+        title = ""
+        if isinstance(ls, dict):
+            title = str(ls.get("session_title") or ls.get("title") or "")
+        return source, title
 
     # ── Public interface ──────────────────────────────────────────────
 
@@ -171,6 +209,13 @@ class KickExtractor(Extractor):
         slug = self.extract_channel_id(url) or ""
         if ".m3u8" in url:
             return self._resolve_m3u8(url, log_fn, channel=slug)
+        vod_id = self.extract_vod_id(url)
+        if vod_id:
+            source, title = self._v1_video(vod_id)
+            if source:
+                return self._resolve_m3u8(source, log_fn, channel=slug, title=title)
+            self._log(log_fn, f"Kick VOD {vod_id}: no source URL (private/pruned?)")
+            return None
         if slug:
             # Live check via v2 — only v2 returns playback_url
             ls = self._v2_livestream_data(slug)

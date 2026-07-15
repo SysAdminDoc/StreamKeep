@@ -59,6 +59,12 @@ class Extractor:
         """
         return [], None
 
+    def is_direct_url(self, url: str) -> bool:
+        """True when *url* points at a single resolvable item (e.g. a VOD
+        permalink) that should be resolved directly rather than treated as
+        a channel for live-check / VOD-listing."""
+        return False
+
     def supports_vod_listing(self) -> bool:
         return False
 

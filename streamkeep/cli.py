@@ -28,14 +28,24 @@ from . import db as _db
 
 def _print_progress(text):
     """Overwrite the current console line with *text*."""
-    cols = os.get_terminal_size(fallback=(80, 24)).columns
-    sys.stdout.write("\r" + text[:cols].ljust(cols) + "\r")
-    sys.stdout.flush()
+    import shutil
+    # shutil.get_terminal_size honors the `fallback` kwarg and works when
+    # stdout is redirected (background/headless) — os.get_terminal_size on
+    # Windows rejects the keyword and raises when there is no console.
+    cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+    try:
+        sys.stdout.write("\r" + text[:cols].ljust(cols) + "\r")
+        sys.stdout.flush()
+    except OSError:
+        pass  # stdout closed/redirected — progress is best-effort
 
 
 def _print_line(text):
-    sys.stdout.write(text + "\n")
-    sys.stdout.flush()
+    try:
+        sys.stdout.write(text + "\n")
+        sys.stdout.flush()
+    except OSError:
+        pass
 
 
 def _check_ffmpeg():
@@ -132,13 +142,12 @@ def _run_download(args):
         _print_line(f"Selected: {qi.name} ({qi.resolution or qi.format_type})")
         _print_line("")
 
-        # Build segments
-        from .hls import parse_hls_playlist
-        segments = []
-        if qi.format_type == "hls" and qi.url:
-            segments = parse_hls_playlist(qi.url)
-        if not segments:
-            segments = [(0, info.title or "stream", 0, info.total_secs)]
+        # Build a single whole-stream segment. The DownloadWorker downloads
+        # each (seg_idx, label, start, duration) tuple with ffmpeg, so one
+        # segment spanning the full duration yields a single output file.
+        from .utils import safe_filename
+        label = safe_filename(info.title or info.channel or "stream")
+        segments = [(0, label, 0, info.total_secs)]
 
         # Start download
         dw = DownloadWorker(qi.url, segments, output_dir, qi.format_type)
@@ -172,8 +181,35 @@ def _run_download(args):
         state["exit_code"] = 1
         app.quit()
 
+    def on_vods_found(vods, platform_name, _next_cursor):
+        # A channel URL resolved to a list of VODs. In headless mode there is
+        # no picker UI, so auto-select the most recent one and resolve it.
+        if not vods:
+            on_fetch_error("No VODs found for this URL")
+            return
+        chosen = vods[0]
+        _print_line(
+            f"{len(vods)} VOD(s) found; selecting most recent: {chosen.title}"
+        )
+        fw2 = FetchWorker(
+            args.url,
+            vod_source=chosen.source,
+            vod_platform=getattr(chosen, "platform", platform_name),
+            vod_title=getattr(chosen, "title", ""),
+            vod_channel=getattr(chosen, "channel", ""),
+        )
+        state["fw"] = fw2  # prevent GC; replaces the finished first worker
+        fw2.finished.connect(on_fetch_done)
+        fw2.error.connect(on_fetch_error)
+        fw2.vods_found.connect(
+            lambda *_: on_fetch_error("Unexpected nested VOD listing")
+        )
+        fw2.log.connect(lambda msg: write_log_line(msg))
+        fw2.start()
+
     fw.finished.connect(on_fetch_done)
     fw.error.connect(on_fetch_error)
+    fw.vods_found.connect(on_vods_found)
     fw.log.connect(lambda msg: write_log_line(msg))
     _print_line("Fetching...")
     fw.start()
