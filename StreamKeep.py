@@ -41,6 +41,7 @@ def _launcher_has_cli_args():
         "startup-check",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
         "--internal-ytdlp",
+        "--internal-update-helper", "--update-transaction",
     }
     return any(arg in cli_triggers for arg in sys.argv[1:])
 
@@ -122,9 +123,34 @@ def _run_internal_ytdlp():
     return True
 
 
+def _pop_flag_value(flag):
+    """Remove an internal flag and its value before Qt/CLI parse argv."""
+    if flag not in sys.argv[1:]:
+        return ""
+    index = sys.argv.index(flag)
+    if index + 1 >= len(sys.argv):
+        del sys.argv[index]
+        return ""
+    value = sys.argv[index + 1]
+    del sys.argv[index:index + 2]
+    return value
+
+
+def _run_internal_update_helper():
+    transaction = _pop_flag_value("--internal-update-helper")
+    if not transaction:
+        return False
+    from streamkeep.update_runtime import run_update_watchdog
+    raise SystemExit(run_update_watchdog(transaction))
+
+
 def main():
+    if _run_internal_update_helper():
+        return
     if _run_internal_ytdlp():
         return
+
+    update_transaction = _pop_flag_value("--update-transaction")
 
     # CLI / headless mode (F42): detect subcommands before creating the GUI
     from streamkeep.cli import has_cli_args, run_cli
@@ -136,6 +162,7 @@ def main():
     setup_crash_logging()
 
     from PyQt6.QtGui import QIcon
+    from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
     from streamkeep.theme import apply_theme
     from streamkeep.ui.main_window import StreamKeep
@@ -160,6 +187,33 @@ def main():
 
     win = StreamKeep()
     win.show()
+
+    def _finish_startup():
+        from streamkeep.paths import CONFIG_DIR
+        from streamkeep.update_runtime import (
+            cleanup_update_helper,
+            consume_recovery_notice,
+            mark_transaction_healthy,
+        )
+        if update_transaction:
+            try:
+                mark_transaction_healthy(update_transaction, _VERSION)
+                win._log(f"[UPDATE] StreamKeep v{_VERSION} completed startup and is healthy.")
+            except (OSError, ValueError) as exc:
+                win._log(f"[UPDATE] Startup health confirmation failed: {exc}")
+                return
+        notice = consume_recovery_notice(CONFIG_DIR)
+        if notice:
+            message = str(notice.get("message", "Update rollback completed.") or "")
+            log_path = str(notice.get("log_path", "") or "")
+            win._log(f"[UPDATE RECOVERY] {message} Recovery log: {log_path}")
+            win._set_status(message, "warning")
+            win._notify_center(message, "warning")
+        QTimer.singleShot(2500, lambda: cleanup_update_helper(sys.executable))
+
+    # A build becomes healthy only after the full window initialization and
+    # the first event-loop turn have both completed.
+    QTimer.singleShot(0, _finish_startup)
     sys.exit(app.exec())
 
 

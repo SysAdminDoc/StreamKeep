@@ -1,314 +1,438 @@
-"""GitHub-release auto-update checker.
+"""Publisher-authenticated GitHub release updater.
 
-Hits the releases API once per launch (when enabled), compares semver
-against the running `VERSION`, and surfaces a banner in the Download tab
-if something newer is available.
-
-Self-replace on Windows: download the new `StreamKeep.exe` next to the
-current one as `StreamKeep.exe.new`, then spawn a tiny batch file that
-waits for the current process to exit, renames the new exe into place,
-and relaunches. A one-deep backup `StreamKeep.exe.old` is kept so a
-corrupted update is recoverable.
-
-Strictly opt-in: the check only runs when the user has ticked the
-"Check for updates on startup" box in Settings, and an available update
-is never installed without an explicit confirm click.
-
-Network call runs on a background QThread so the UI never blocks.
+Updates are accepted only when a canonical manifest is signed by the same
+certificate as the currently installed StreamKeep executable.  The selected
+asset must also have a valid Windows signature from that certificate, match
+the signed size and digest, and come from the exact repository release path.
 """
 
-import hashlib
+from __future__ import annotations
+
 import json
 import os
-import re
+import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from .update_runtime import prepare_update_transaction
+from .update_security import (
+    MANIFEST_NAME,
+    SIGNATURE_NAME,
+    UpdateSecurityError,
+    enforce_release_progress,
+    require_authenticode,
+    sha256_bytes,
+    sha256_file,
+    validate_manifest,
+    validate_release_asset_url,
+    verify_manifest_signature,
+)
+
+
 RELEASES_URL = "https://api.github.com/repos/SysAdminDoc/StreamKeep/releases/latest"
 USER_AGENT = "StreamKeep-updater"
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+MAX_RELEASE_BYTES = 2 * 1024 * 1024
+MAX_MANIFEST_BYTES = 256 * 1024
+MAX_SIGNATURE_BYTES = 16 * 1024
 
 
-def _coerce_nonnegative_int(value, default=0):
+def _parse_semver(value):
     try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return max(0, int(default or 0))
-
-
-def _parse_semver(s):
-    """Parse 'v4.15.0' / '4.15.0-rc1' into (4, 15, 0) ignoring any
-    pre-release tail. Returns (0, 0, 0) on anything unparseable — the
-    caller treats that as "equal or older" to avoid false positives."""
-    if not s:
+        from .update_security import parse_version
+        return parse_version(str(value or "").lstrip("v"))
+    except UpdateSecurityError:
         return (0, 0, 0)
-    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", str(s).strip())
-    if not m:
-        return (0, 0, 0)
-    return tuple(int(m.group(i)) for i in (1, 2, 3))
 
 
 def is_newer(remote, local):
     return _parse_semver(remote) > _parse_semver(local)
 
 
-def sha256_metadata_error(value):
-    candidate = str(value or "").strip().lower()
-    if not candidate:
-        return "Release is missing SHA-256 integrity metadata."
-    if not _SHA256_RE.fullmatch(candidate):
-        return "Release SHA-256 integrity metadata is malformed."
-    return ""
+def _empty_payload(error=""):
+    return {
+        "available": False,
+        "error": str(error or ""),
+        "tag": "",
+        "version": "",
+        "notes": "",
+        "sequence": 0,
+        "manifest_sha256": "",
+        "current_version": "",
+        "signer_subject": "",
+        "asset": {},
+    }
+
+
+def _read_limited(response, maximum):
+    data = response.read(maximum + 1)
+    if len(data) > maximum:
+        raise UpdateSecurityError("Update metadata exceeded its size limit.")
+    return data
+
+
+def _fetch_bytes(url, maximum, *, timeout=15):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return _read_limited(response, maximum)
+
+
+def _find_release_asset(release, name):
+    matches = [
+        asset for asset in (release.get("assets") or [])
+        if isinstance(asset, dict) and asset.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise UpdateSecurityError(f"Release must contain exactly one {name} asset.")
+    return matches[0]
+
+
+def _release_asset_url(release, name):
+    asset = _find_release_asset(release, name)
+    tag = str(release.get("tag_name", "") or "")
+    url = str(asset.get("browser_download_url", "") or "")
+    validate_release_asset_url(url, tag, name)
+    return url
+
+
+def load_update_state(path):
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UpdateSecurityError("Local update rollback state is unreadable.") from exc
+    if not isinstance(state, dict):
+        raise UpdateSecurityError("Local update rollback state is invalid.")
+    sequence = state.get("highest_sequence", 0)
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+        raise UpdateSecurityError("Local update rollback sequence is invalid.")
+    return state
+
+
+def _write_update_state(path, state):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        try:
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
+    os.replace(temporary, path)
+
+
+def record_verified_manifest(state_path, payload):
+    state = load_update_state(state_path)
+    sequence = int(payload["sequence"])
+    if sequence >= int(state.get("highest_sequence", 0) or 0):
+        state.update({
+            "highest_sequence": sequence,
+            "highest_version": payload["version"],
+            "manifest_sha256": payload["manifest_sha256"],
+        })
+        _write_update_state(state_path, state)
+
+
+def verify_release_document(
+    release,
+    manifest_bytes,
+    signature_bytes,
+    signer_info,
+    current_version,
+    state,
+):
+    """Verify already-fetched release metadata and return a safe UI payload."""
+    if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+        raise UpdateSecurityError("Update feed did not return a stable published release.")
+    verify_manifest_signature(manifest_bytes, signature_bytes, signer_info)
+    manifest = validate_manifest(manifest_bytes, signer_info)
+    digest = sha256_bytes(manifest_bytes)
+    if release.get("tag_name") != manifest["tag"]:
+        raise UpdateSecurityError("Release feed tag did not match the signed manifest.")
+    enforce_release_progress(manifest, digest, current_version, state)
+
+    api_assets = {}
+    for row in release.get("assets") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name", "") or "")
+        if name in api_assets:
+            raise UpdateSecurityError("Release feed contains duplicate asset names.")
+        api_assets[name] = row
+    mapped_assets = []
+    for signed_asset in manifest["assets"]:
+        name = signed_asset["name"]
+        api_asset = api_assets.get(name)
+        if not api_asset:
+            raise UpdateSecurityError(f"Signed release asset {name} is missing.")
+        size = api_asset.get("size")
+        if isinstance(size, bool):
+            size = -1
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            size = -1
+        if size != signed_asset["size"]:
+            raise UpdateSecurityError("Release feed asset size did not match the signed manifest.")
+        url = str(api_asset.get("browser_download_url", "") or "")
+        validate_release_asset_url(url, manifest["tag"], name)
+        mapped_assets.append({**signed_asset, "url": url})
+    selected = next(
+        (asset for asset in mapped_assets if asset["format"] == "portable-exe"),
+        None,
+    )
+    if selected is None:
+        raise UpdateSecurityError("Signed release does not contain the portable Windows executable.")
+    return {
+        "available": True,
+        "error": "",
+        "tag": manifest["tag"],
+        "version": manifest["version"],
+        "notes": str(release.get("body", "") or "").strip(),
+        "sequence": manifest["sequence"],
+        "manifest_sha256": digest,
+        "current_version": current_version,
+        "signer_subject": str(signer_info.get("subject", "") or ""),
+        "asset": selected,
+    }
+
+
+def validate_download_payload(payload, state):
+    if not isinstance(payload, dict) or not payload.get("available"):
+        raise UpdateSecurityError("Verified update metadata is missing.")
+    sequence = payload.get("sequence")
+    if sequence != state.get("highest_sequence"):
+        raise UpdateSecurityError("Update metadata is not the newest verified release.")
+    if payload.get("version") != state.get("highest_version"):
+        raise UpdateSecurityError("Update version does not match local rollback state.")
+    if payload.get("manifest_sha256") != state.get("manifest_sha256"):
+        raise UpdateSecurityError("Update manifest identity does not match local rollback state.")
+    asset = payload.get("asset")
+    if not isinstance(asset, dict):
+        raise UpdateSecurityError("Verified update asset metadata is missing.")
+    required = {"name", "format", "size", "sha256", "signer_sha256", "url"}
+    if set(asset) != required:
+        raise UpdateSecurityError("Verified update asset schema is invalid.")
+    validate_release_asset_url(asset["url"], payload.get("tag"), asset["name"])
+    if asset["format"] != "portable-exe" or asset["name"] != "StreamKeep.exe":
+        raise UpdateSecurityError("Self-update requires the signed portable executable.")
+    return asset
 
 
 class UpdateCheckWorker(QThread):
-    """Hits the GitHub releases API. Never raises — emits an empty
-    result on error so the UI code can be simple."""
+    """Fetch and verify the signed release documents without blocking the UI."""
 
-    result = pyqtSignal(dict)   # {available, tag, notes, asset_url, asset_size, asset_sha256}
+    result = pyqtSignal(dict)
 
     def __init__(self, current_version):
         super().__init__()
         self.current_version = current_version
 
+    def _current_path(self):
+        return sys.executable
+
     def run(self):
-        payload = {
-            "available": False,
-            "tag": "",
-            "notes": "",
-            "asset_url": "",
-            "asset_size": 0,
-            "asset_sha256": "",
-        }
+        payload = _empty_payload()
         try:
-            req = urllib.request.Request(
-                RELEASES_URL,
-                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+            current_path = Path(self._current_path()).resolve()
+            signer_info = require_authenticode(current_path, asset_format="portable-exe")
+            release = json.loads(_fetch_bytes(RELEASES_URL, MAX_RELEASE_BYTES).decode("utf-8"))
+            tag = str(release.get("tag_name", "") or "")
+            if not is_newer(tag, self.current_version):
+                self.result.emit(payload)
+                return
+            manifest_url = _release_asset_url(release, MANIFEST_NAME)
+            signature_url = _release_asset_url(release, SIGNATURE_NAME)
+            manifest_bytes = _fetch_bytes(manifest_url, MAX_MANIFEST_BYTES)
+            signature_bytes = _fetch_bytes(signature_url, MAX_SIGNATURE_BYTES)
+            from .paths import CONFIG_DIR
+            state_path = CONFIG_DIR / "update-state.json"
+            state = load_update_state(state_path)
+            payload = verify_release_document(
+                release,
+                manifest_bytes,
+                signature_bytes,
+                signer_info,
+                self.current_version,
+                state,
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError,
-                TimeoutError, OSError, ValueError):
-            self.result.emit(payload)
-            return
-        tag = str(data.get("tag_name", "") or "")
-        if not is_newer(tag, self.current_version):
-            self.result.emit(payload)
-            return
-        # Find a Windows .exe asset and an optional .sha256 sidecar.
-        asset_url = ""
-        asset_size = 0
-        sha256_url = ""
-        for asset in data.get("assets") or []:
-            name = str(asset.get("name", "") or "")
-            if name.lower().endswith(".exe"):
-                asset_url = str(asset.get("browser_download_url", "") or "")
-                try:
-                    asset_size = int(asset.get("size", 0) or 0)
-                except (TypeError, ValueError):
-                    asset_size = 0
-            elif name.lower().endswith(".sha256"):
-                sha256_url = str(asset.get("browser_download_url", "") or "")
-        # Fetch the hash if available
-        asset_sha256 = ""
-        if sha256_url:
-            try:
-                req2 = urllib.request.Request(sha256_url, headers={"User-Agent": USER_AGENT})
-                with urllib.request.urlopen(req2, timeout=10) as resp2:
-                    raw = resp2.read().decode("utf-8", errors="replace").strip()
-                    # Format: "<hex>  filename" or just "<hex>"
-                    asset_sha256 = raw.split()[0].lower() if raw else ""
-            except Exception:
-                asset_sha256 = ""
-        payload.update({
-            "available": True,
-            "tag": tag,
-            "notes": (str(data.get("body", "") or "")).strip(),
-            "asset_url": asset_url,
-            "asset_size": asset_size,
-            "asset_sha256": asset_sha256,
-        })
+            record_verified_manifest(state_path, payload)
+        except UpdateSecurityError as exc:
+            payload = _empty_payload(f"Update blocked: {exc}")
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ):
+            payload = _empty_payload()
         self.result.emit(payload)
 
 
 class DownloadUpdateWorker(QThread):
-    """Downloads the attached exe to `<exe>.new` next to the running
-    process, verifies size and SHA-256, then arms a self-replace batch
-    (Windows) or shell script (POSIX) that the UI invokes on user confirm."""
+    """Download and authenticate the exact asset from a verified manifest."""
 
-    progress = pyqtSignal(int, str)     # percent, status
-    done = pyqtSignal(bool, str)        # success, error_or_path
+    progress = pyqtSignal(int, str)
+    done = pyqtSignal(bool, str)
 
-    def __init__(self, asset_url, expected_size, expected_sha256=""):
+    def __init__(self, release_payload):
         super().__init__()
-        self.asset_url = asset_url
-        self.expected_size = _coerce_nonnegative_int(expected_size)
-        self.expected_sha256 = str(expected_sha256 or "").strip().lower()
+        self.release_payload = dict(release_payload or {})
         self._cancel = False
 
     def cancel(self):
         self._cancel = True
 
     def _target_path(self):
-        """Only meaningful in a frozen build — where `sys.executable`
-        actually is StreamKeep.exe. In a source checkout the update
-        path is "git pull" territory, not our concern."""
         return sys.executable
 
+    def _remove_staged(self, path):
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def run(self):
-        exe_path = self._target_path()
-        if not exe_path or not os.path.exists(exe_path):
-            self.done.emit(False, "Running executable path not found.")
-            return
-        if not str(self.asset_url or "").strip():
-            self.done.emit(False, "Update asset URL was missing.")
-            return
+        target = Path(self._target_path()).resolve()
+        staged = Path(f"{target}.new")
         frozen = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
         if not frozen:
-            self.done.emit(False, "Auto-update only supported for the packaged exe.")
+            self.done.emit(False, "Auto-update only supports the packaged executable.")
             return
-        new_path = exe_path + ".new"
-        hash_error = sha256_metadata_error(self.expected_sha256)
-        if hash_error:
-            self.done.emit(False, f"Update blocked: {hash_error}")
+        try:
+            from .paths import CONFIG_DIR
+            state = load_update_state(CONFIG_DIR / "update-state.json")
+            asset = validate_download_payload(self.release_payload, state)
+            require_authenticode(
+                target,
+                expected_certificate_sha256=asset["signer_sha256"],
+                asset_format="portable-exe",
+            )
+        except (OSError, UpdateSecurityError) as exc:
+            self.done.emit(False, f"Update blocked: {exc}")
             return
         cancelled = False
         try:
-            req = urllib.request.Request(
-                self.asset_url,
-                headers={"User-Agent": USER_AGENT},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp, open(new_path, "wb") as out:
-                total = self.expected_size or _coerce_nonnegative_int(
-                    resp.headers.get("Content-Length", 0)
-                )
+            request = urllib.request.Request(asset["url"], headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=30) as response, open(staged, "wb") as output:
                 written = 0
-                chunk = 64 * 1024
+                expected_size = asset["size"]
                 while True:
                     if self._cancel:
                         cancelled = True
                         break
-                    buf = resp.read(chunk)
-                    if not buf:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
                         break
-                    out.write(buf)
-                    written += len(buf)
-                    if total > 0:
-                        pct = min(99, int((written / total) * 100))
-                        self.progress.emit(pct, f"{written // 1024} KB / {total // 1024} KB")
-                    else:
-                        self.progress.emit(0, f"{written // 1024} KB")
-        except (urllib.error.URLError, urllib.error.HTTPError,
-                TimeoutError, OSError) as e:
-            try:
-                if os.path.exists(new_path):
-                    os.remove(new_path)
-            except OSError:
-                pass
-            self.done.emit(False, f"Download failed: {e}")
+                    output.write(chunk)
+                    written += len(chunk)
+                    if written > expected_size:
+                        raise UpdateSecurityError(
+                            "Download exceeded the size in the signed manifest."
+                        )
+                    percent = min(99, int((written / expected_size) * 100))
+                    self.progress.emit(
+                        percent,
+                        f"{written // 1024} KB / {expected_size // 1024} KB",
+                    )
+        except UpdateSecurityError as exc:
+            self._remove_staged(staged)
+            self.done.emit(False, f"Update blocked: {exc}")
+            return
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            OSError,
+        ) as exc:
+            self._remove_staged(staged)
+            self.done.emit(False, f"Download failed: {exc}")
             return
         if cancelled:
-            try:
-                if os.path.exists(new_path):
-                    os.remove(new_path)
-            except OSError:
-                pass
+            self._remove_staged(staged)
             self.done.emit(False, "Download cancelled.")
             return
-        # Size sanity check — if GitHub served an HTML error page we'd
-        # otherwise install a corrupt binary.
-        actual_size = os.path.getsize(new_path)
-        if self.expected_size > 0 and actual_size != self.expected_size:
-            try:
-                os.remove(new_path)
-            except OSError:
-                pass
-            self.done.emit(False, "Downloaded file is smaller than expected.")
-            return
-        self.progress.emit(99, "Verifying integrity...")
-        sha = hashlib.sha256()
         try:
-            with open(new_path, "rb") as f:
-                while True:
-                    buf = f.read(256 * 1024)
-                    if not buf:
-                        break
-                    sha.update(buf)
-            actual_hash = sha.hexdigest().lower()
-            if actual_hash != self.expected_sha256:
-                try:
-                    os.remove(new_path)
-                except OSError:
-                    pass
-                self.done.emit(
-                    False,
-                    f"SHA-256 mismatch: expected {self.expected_sha256[:16]}... "
-                    f"got {actual_hash[:16]}...",
-                )
-                return
-        except OSError as e:
-            try:
-                os.remove(new_path)
-            except OSError:
-                pass
-            self.done.emit(False, f"Hash verification failed: {e}")
+            if staged.stat().st_size != asset["size"]:
+                raise UpdateSecurityError("Downloaded file size did not match the signed manifest.")
+            self.progress.emit(99, "Verifying publisher signature...")
+            if sha256_file(staged) != asset["sha256"]:
+                raise UpdateSecurityError("Downloaded file SHA-256 did not match the signed manifest.")
+            require_authenticode(
+                staged,
+                expected_certificate_sha256=asset["signer_sha256"],
+                asset_format=asset["format"],
+            )
+        except (OSError, UpdateSecurityError) as exc:
+            self._remove_staged(staged)
+            self.done.emit(False, f"Update blocked: {exc}")
             return
-        self.progress.emit(100, "Downloaded")
-        self.done.emit(True, new_path)
+        self.progress.emit(100, "Authenticated")
+        self.done.emit(True, str(staged))
 
 
-def arm_self_replace(new_exe_path):
-    """Spawn a detached Windows .bat (or POSIX sh) that waits for the
-    parent process to exit, renames the new exe into place with a
-    one-deep backup, and relaunches. Returns True on success.
-
-    The batch detaches via START so terminating this process doesn't
-    kill it. Uses `ping -n 3` as a portable 2-second sleep on Windows.
-    """
-    target = sys.executable
-    if not target or not os.path.exists(new_exe_path):
+def arm_self_replace(new_exe_path, release_payload):
+    """Start a detached last-known-good watchdog and return immediately."""
+    target = Path(sys.executable).resolve()
+    staged = Path(new_exe_path).resolve()
+    helper = Path(f"{target}.update-helper.exe")
+    frozen = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+    if not frozen or staged != Path(f"{target}.new") or not staged.is_file():
         return False
-    backup = target + ".old"
-    if os.name == "nt":
-        script = target + ".update.bat"
-        try:
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(
-                    "@echo off\r\n"
-                    "ping -n 3 127.0.0.1 >nul\r\n"
-                    f'if exist "{backup}" del /f /q "{backup}"\r\n'
-                    f'move /y "{target}" "{backup}" >nul\r\n'
-                    f'move /y "{new_exe_path}" "{target}" >nul\r\n'
-                    f'start "" "{target}"\r\n'
-                    'del "%~f0"\r\n'
-                )
-            subprocess.Popen(
-                ["cmd", "/c", "start", "", "/min", script],
-                creationflags=0x00000008,   # DETACHED_PROCESS
-                close_fds=True,
-            )
-            return True
-        except OSError:
-            return False
-    # POSIX fallback — not the shipping target today, but doesn't hurt.
-    script = target + ".update.sh"
+    transaction = None
     try:
-        with open(script, "w", encoding="utf-8") as f:
-            f.write(
-                "#!/bin/sh\nsleep 2\n"
-                f'rm -f "{backup}"\n'
-                f'mv "{target}" "{backup}" || exit 1\n'
-                f'mv "{new_exe_path}" "{target}" || exit 1\n'
-                f'chmod +x "{target}"\n'
-                f'"{target}" &\n'
-                'rm -- "$0"\n'
+        from .paths import CONFIG_DIR
+        state = load_update_state(CONFIG_DIR / "update-state.json")
+        asset = validate_download_payload(release_payload, state)
+        require_authenticode(
+            target,
+            expected_certificate_sha256=asset["signer_sha256"],
+            asset_format="portable-exe",
+        )
+        require_authenticode(
+            staged,
+            expected_certificate_sha256=asset["signer_sha256"],
+            asset_format="portable-exe",
+        )
+        shutil.copy2(target, helper)
+        transaction = prepare_update_transaction(
+            current_path=target,
+            staged_path=staged,
+            helper_path=helper,
+            config_dir=CONFIG_DIR,
+            release_payload=release_payload,
+        )
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
             )
-        os.chmod(script, 0o755)
-        subprocess.Popen(["/bin/sh", script], close_fds=True)
+        subprocess.Popen(
+            [str(helper), "--internal-update-helper", str(transaction)],
+            close_fds=True,
+            creationflags=flags,
+        )
         return True
-    except OSError:
+    except (OSError, ValueError, UpdateSecurityError, subprocess.SubprocessError):
+        if transaction is not None:
+            shutil.rmtree(Path(transaction).parent, ignore_errors=True)
+        try:
+            helper.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False

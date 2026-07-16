@@ -70,6 +70,14 @@ def _find_signtool():
     return None
 
 
+def _signing_requested():
+    return bool(
+        os.environ.get("STREAMKEEP_SIGN", "").strip() == "1"
+        or os.environ.get("STREAMKEEP_SIGN_PFX", "").strip()
+        or os.environ.get("STREAMKEEP_SIGN_CERT_SUBJECT", "").strip()
+    )
+
+
 def _generate_icons(assets_dir, source_icon):
     from PIL import Image
     src = Image.open(source_icon)
@@ -83,7 +91,7 @@ def _generate_icons(assets_dir, source_icon):
         print(f"  Generated {name} ({w}x{h})")
 
 
-def _sign_msix(path):
+def _sign_windows_artifact(path, label):
     signtool = _find_signtool()
     if not signtool:
         print("  Signing skipped: signtool.exe not found")
@@ -109,13 +117,17 @@ def _sign_msix(path):
         print("  Signing skipped: set STREAMKEEP_SIGN=1, STREAMKEEP_SIGN_PFX, or STREAMKEEP_SIGN_CERT_SUBJECT")
         return False
     cmd.append(str(path))
-    print("  Signing MSIX with signtool")
+    print(f"  Signing {label} with signtool")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(f"  SIGNING FAILED: {r.stderr.strip()}")
         return False
-    print("  Signed MSIX")
+    print(f"  Signed {label}")
     return True
+
+
+def _sign_msix(path):
+    return _sign_windows_artifact(path, "MSIX")
 
 
 def main():
@@ -147,13 +159,25 @@ def main():
     shutil.copy2(MANIFEST, dist_dir / "AppxManifest.xml")
     print("  Copied AppxManifest.xml")
 
+    # The installed executable is the in-app updater's trust anchor.  Sign it
+    # before MakeAppx captures the directory, then sign the outer MSIX too.
+    packaged_exe = dist_dir / "StreamKeep.exe"
+    if packaged_exe.is_file():
+        signed_exe = _sign_windows_artifact(packaged_exe, "packaged executable")
+        if _signing_requested() and not signed_exe:
+            print("ERROR: packaged executable signing was requested but failed")
+            sys.exit(1)
+
     output = dist_dir.parent / "StreamKeep.msix"
     cmd = [makeappx, "pack", "/d", str(dist_dir), "/p", str(output), "/o"]
     print(f"  Running: {' '.join(cmd)}")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode == 0:
         print(f"  SUCCESS: {output}")
-        _sign_msix(output)
+        signed_msix = _sign_msix(output)
+        if _signing_requested() and not signed_msix:
+            print("ERROR: MSIX signing was requested but failed")
+            sys.exit(1)
     else:
         print(f"  FAILED: {r.stderr}")
         sys.exit(1)

@@ -40,7 +40,6 @@ from ...theme import CAT
 from ...local_server import LocalCompanionServer
 from ...updater import (
     DownloadUpdateWorker, UpdateCheckWorker, arm_self_replace,
-    sha256_metadata_error,
 )
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
@@ -1401,6 +1400,17 @@ class SettingsTabMixin:
             except Exception:
                 pass
         self._update_check_worker = None
+        error = str((payload or {}).get("error", "") or "")
+        if error:
+            self._latest_update_payload = None
+            self._log(f"[UPDATE] {error}")
+            self._set_status(error, "error")
+            if hasattr(self, "update_banner_label"):
+                self.update_banner_label.setText(error)
+                self.update_banner.setVisible(True)
+                self.update_banner_install_btn.setEnabled(False)
+                self.update_banner_install_btn.setText("Install blocked")
+            return
         if not payload or not payload.get("available"):
             return
         tag = payload.get("tag", "")
@@ -1415,37 +1425,23 @@ class SettingsTabMixin:
             label = f"StreamKeep {tag} is available (you're on v{VERSION})"
             if first_note:
                 label = f"{label} — {first_note}"
-            hash_error = sha256_metadata_error(payload.get("asset_sha256", ""))
-            if hash_error:
-                label = f"{label} — install blocked: {hash_error}"
+            signer = str(payload.get("signer_subject", "") or "")
+            if signer:
+                label = f"{label} — publisher verified"
             self.update_banner_label.setText(label)
             self.update_banner.setVisible(True)
+            self.update_banner_install_btn.setEnabled(True)
+            self.update_banner_install_btn.setText("Download & install")
         self._notify_center(f"Update available: StreamKeep {tag}", "info")
 
     def _on_update_install(self):
         payload = getattr(self, "_latest_update_payload", None) or {}
-        asset_url = payload.get("asset_url", "")
-        if not asset_url:
-            self._set_status("Update available but no Windows asset was attached.", "warning")
-            return
-        hash_error = sha256_metadata_error(payload.get("asset_sha256", ""))
-        if hash_error:
-            msg = f"Update install blocked: {hash_error}"
-            self._log(f"[UPDATE] {msg}")
-            self._set_status(msg, "error")
-            if hasattr(self, "update_banner_label"):
-                self.update_banner_label.setText(msg)
-            if hasattr(self, "update_banner_install_btn"):
-                self.update_banner_install_btn.setEnabled(True)
-                self.update_banner_install_btn.setText("Download & install")
+        if not payload.get("asset"):
+            self._set_status("Update available but no authenticated Windows asset was attached.", "warning")
             return
         self.update_banner_install_btn.setEnabled(False)
         self.update_banner_install_btn.setText("Downloading...")
-        worker = DownloadUpdateWorker(
-            asset_url,
-            payload.get("asset_size", 0),
-            payload.get("asset_sha256", ""),
-        )
+        worker = DownloadUpdateWorker(payload)
         worker.progress.connect(self._on_update_download_progress)
         worker.done.connect(self._on_update_download_done)
         self._update_download_worker = worker
@@ -1476,7 +1472,7 @@ class SettingsTabMixin:
         if not ask_premium_confirmation(
             self,
             title="Install the downloaded update?",
-            body="StreamKeep will close, swap in the new version, and relaunch itself automatically.",
+            body="StreamKeep will close, install the publisher-authenticated build, and relaunch automatically.",
             eyebrow="UPDATER",
             badge_text="Restart required",
             tone="warning",
@@ -1485,8 +1481,9 @@ class SettingsTabMixin:
             details_title="What happens next",
             details_body=(
                 "1. StreamKeep closes.\n"
-                "2. The downloaded build replaces the current executable.\n"
-                "3. StreamKeep relaunches itself."
+                "2. Migration-sensitive state is snapshotted.\n"
+                "3. The signed build replaces the current executable.\n"
+                "4. If startup health confirmation fails, the previous build and state are restored."
             ),
             primary_label="Install and relaunch",
             secondary_label="Not now",
@@ -1498,7 +1495,7 @@ class SettingsTabMixin:
                 self.update_banner_install_btn.setEnabled(True)
                 self.update_banner_install_btn.setText("Install now")
             return
-        if arm_self_replace(path_or_err):
+        if arm_self_replace(path_or_err, self._latest_update_payload or {}):
             self._log("[UPDATE] Armed self-replace, quitting now.")
             from PyQt6.QtWidgets import QApplication
             QApplication.quit()

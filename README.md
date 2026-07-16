@@ -168,6 +168,8 @@ Source checkouts run directly with `python StreamKeep.py`. Release packaging cur
 
 MSIX signing is automatic when `signtool.exe` is available and one of `STREAMKEEP_SIGN=1`, `STREAMKEEP_SIGN_PFX`, or `STREAMKEEP_SIGN_CERT_SUBJECT` is set.
 
+In-app updates require `StreamKeep.exe`, `StreamKeep-update.json`, and `StreamKeep-update.json.sig` on the same stable GitHub release. Generate them with `python packaging/update_manifest.py --version X.Y.Z --sequence N --asset dist/StreamKeep.exe` (add the MSIX with another `--asset` when published). The command requires `STREAMKEEP_SIGN_PFX`, signs each asset by default, and signs the canonical manifest with the same publisher key. The MSIX builder signs its contained executable before packaging so installed builds retain the updater trust anchor. Release sequences must increase monotonically.
+
 Release packages must include:
 
 - `StreamKeep.py` launcher and the `streamkeep/` package.
@@ -177,7 +179,7 @@ Release packages must include:
 - `browser-extension/` and `browser-extension/icons/`.
 - `packaging/` manifests when building MSIX or Flatpak artifacts.
 - Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, mpv/libmpv, and platform signing tools.
-- A `.sha256` sidecar for each downloadable executable; the in-app updater refuses to install releases without valid SHA-256 metadata.
+- An offline-signed update manifest and detached signature produced by `packaging/update_manifest.py`; the updater rejects unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and signed size/digest mismatches.
 
 ## Validation
 

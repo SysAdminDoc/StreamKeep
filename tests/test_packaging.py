@@ -43,8 +43,35 @@ def test_msix_builder_supports_configured_signing():
         "STREAMKEEP_SIGN_CERT_SUBJECT",
         "STREAMKEEP_SIGN=1",
         "signtool.exe",
+        "packaged_exe",
+        '_sign_windows_artifact(packaged_exe, "packaged executable")',
     ):
         assert required in script
+
+
+def test_update_manifest_binds_assets_and_metadata_to_one_publisher_key():
+    script = (ROOT / "packaging" / "update_manifest.py").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "STREAMKEEP_SIGN_PFX",
+        "require_authenticode",
+        "sign_manifest_bytes",
+        "certificate_sha256",
+        "StreamKeep.exe",
+        "StreamKeep.msix",
+        "--sequence",
+    ):
+        assert required in script
+
+
+def test_launcher_marks_update_healthy_only_after_full_window_initialization():
+    launcher = (ROOT / "StreamKeep.py").read_text(encoding="utf-8")
+    construct = launcher.index("win = StreamKeep()")
+    show = launcher.index("win.show()", construct)
+    mark = launcher.index("mark_transaction_healthy", show)
+    event_loop = launcher.index("QTimer.singleShot(0, _finish_startup)", mark)
+    assert construct < show < mark < event_loop
 
 
 def test_browser_extension_validates_mv3_manifest():
