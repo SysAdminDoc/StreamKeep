@@ -77,6 +77,13 @@ class DownloadWorker(QThread):
         self.ytdlp_embed_thumbnail = None
         self.ytdlp_template_name = ""
         self.ytdlp_template_args = ()
+        # Optional aria2c external-downloader routing (V21). The source URL is
+        # sanitized before hand-off because aria2c treats leading-dash / newline
+        # tokens as options or extra URIs (CVE-2026-50574).
+        self.ytdlp_external_downloader = ""
+        self.ytdlp_aria2c_connections = 0
+        self.ytdlp_aria2c_splits = 0
+        self.ytdlp_aria2c_min_split_size = ""
         # Per-job clear AES-128 override for HLS playlists that advertise the
         # wrong key URI/value. Never copied into resume/config persistence.
         self.hls_key_override = ""
@@ -167,6 +174,10 @@ class DownloadWorker(QThread):
             state.ytdlp_embed_chapters = self.ytdlp_embed_chapters
             state.ytdlp_embed_metadata = self.ytdlp_embed_metadata
             state.ytdlp_embed_thumbnail = self.ytdlp_embed_thumbnail
+            state.ytdlp_external_downloader = self.ytdlp_external_downloader or ""
+            state.ytdlp_aria2c_connections = int(self.ytdlp_aria2c_connections or 0)
+            state.ytdlp_aria2c_splits = int(self.ytdlp_aria2c_splits or 0)
+            state.ytdlp_aria2c_min_split_size = self.ytdlp_aria2c_min_split_size or ""
             state.ytdlp_template_name = self.ytdlp_template_name or ""
             state.playlist_validator = self.hls_playlist_validator or ""
             state.media_sequence = int(self.hls_media_sequence or 0)
@@ -229,7 +240,9 @@ class DownloadWorker(QThread):
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
             validate_hls_key_override,
             validate_sponsorblock_options, validate_subtitle_options,
+            validate_external_downloader_options,
             validate_ytdlp_template_args, validate_ytdlp_transfer_options,
+            sanitize_download_target_url,
         )
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
@@ -271,6 +284,12 @@ class DownloadWorker(QThread):
         )
         hls_key_options = validate_hls_key_override(
             self.hls_key_override, self.hls_key_iv,
+        )
+        external_downloader = validate_external_downloader_options(
+            downloader=self.ytdlp_external_downloader,
+            connections=self.ytdlp_aria2c_connections,
+            splits=self.ytdlp_aria2c_splits,
+            min_split_size=self.ytdlp_aria2c_min_split_size,
         )
         format_spec = options["format_spec"]
         if options["audio_format"] and not self.ytdlp_format:
@@ -375,6 +394,8 @@ class DownloadWorker(QThread):
                 cmd.append("--break-on-existing")
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
+        if external_downloader["downloader"]:
+            cmd.extend(external_downloader["argv"])
         cmd.extend(validate_ytdlp_template_args(self.ytdlp_template_args or ()))
         if hls_key_options["extractor_arg"]:
             cmd.extend([
@@ -397,7 +418,12 @@ class DownloadWorker(QThread):
                 cmd.extend(ytdlp_runtime_args(runtime_status))
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
-        cmd.append(self._effective_ytdlp_source())
+        source = self._effective_ytdlp_source()
+        if external_downloader["downloader"]:
+            # Gate the source at the input boundary before it enters an
+            # aria2c-routed pipeline (CVE-2026-50574 defense in depth).
+            source = sanitize_download_target_url(source)
+        cmd.append(source)
         return cmd
 
     def _effective_ytdlp_source(self):

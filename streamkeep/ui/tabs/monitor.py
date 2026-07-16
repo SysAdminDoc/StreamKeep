@@ -1165,10 +1165,12 @@ class MonitorTabMixin:
         worker.ytdlp_format = q.ytdlp_format
         worker.parallel_connections = self._parallel_connections
         from ...download_options import (
+            apply_external_downloader_options,
             apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
         )
         from ...extractors.ytdlp import YtDlpExtractor
         apply_ytdlp_transfer_options(worker, YtDlpExtractor)
+        apply_external_downloader_options(worker, YtDlpExtractor)
         worker.cookies_browser = YtDlpExtractor.cookies_browser
         worker.rate_limit = YtDlpExtractor.rate_limit
         worker.proxy = YtDlpExtractor.proxy

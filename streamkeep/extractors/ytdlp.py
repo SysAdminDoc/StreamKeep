@@ -201,6 +201,10 @@ class YtDlpExtractor(Extractor):
     ytdlp_embed_chapters = None
     ytdlp_embed_metadata = None
     ytdlp_embed_thumbnail = None
+    ytdlp_external_downloader = ""
+    ytdlp_aria2c_connections = 0
+    ytdlp_aria2c_splits = 0
+    ytdlp_aria2c_min_split_size = ""
 
     def _has_ytdlp(self):
         from ..capabilities import CapabilityUnavailableError, require_capability

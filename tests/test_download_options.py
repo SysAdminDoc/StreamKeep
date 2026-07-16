@@ -1,10 +1,13 @@
 import pytest
 
 from streamkeep.download_options import (
+    apply_external_downloader_options,
     apply_ytdlp_transfer_options,
     format_command_argv, normalize_ytdlp_arg_templates,
     parse_ytdlp_template_text, resolve_ytdlp_arg_template,
-    validate_download_options, validate_hls_key_override,
+    sanitize_download_target_url,
+    validate_download_options, validate_external_downloader_options,
+    validate_hls_key_override,
     validate_playlist_options,
     validate_sponsorblock_options,
     validate_subtitle_options, validate_ytdlp_template_args,
@@ -252,3 +255,113 @@ def test_ytdlp_transfer_matrix_validates_and_applies_to_worker():
 def test_ytdlp_transfer_matrix_rejects_invalid_values(kwargs):
     with pytest.raises(ValueError):
         validate_ytdlp_transfer_options(**kwargs)
+
+
+# --- External downloader routing + URL sanitization (V21, CVE-2026-50574) ---
+
+
+def test_external_downloader_unset_returns_no_argv():
+    result = validate_external_downloader_options()
+    assert result == {"downloader": "", "downloader_args": "", "argv": []}
+
+
+def test_external_downloader_aria2c_builds_bounded_argv():
+    result = validate_external_downloader_options(
+        downloader="aria2c", connections=8, splits=8, min_split_size="1M",
+    )
+    assert result["downloader"] == "aria2c"
+    assert result["downloader_args"] == (
+        "aria2c:--max-connection-per-server=8 --split=8 --min-split-size=1M"
+    )
+    assert result["argv"] == [
+        "--downloader", "aria2c",
+        "--downloader-args",
+        "aria2c:--max-connection-per-server=8 --split=8 --min-split-size=1M",
+    ]
+
+
+def test_external_downloader_aria2c_without_tuning_omits_args():
+    result = validate_external_downloader_options(downloader="aria2c")
+    assert result["argv"] == ["--downloader", "aria2c"]
+    assert result["downloader_args"] == ""
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"downloader": "wget"},
+    {"downloader": "curl"},
+    {"downloader": "aria2c", "connections": 99},
+    {"downloader": "aria2c", "splits": -1},
+    {"downloader": "aria2c", "min_split_size": "; rm -rf /"},
+    {"downloader": "aria2c", "min_split_size": "1 --rpc-secret=x"},
+])
+def test_external_downloader_rejects_unsafe_values(kwargs):
+    with pytest.raises(ValueError):
+        validate_external_downloader_options(**kwargs)
+
+
+def test_external_downloader_args_cannot_carry_injected_options():
+    # Only numeric/rate knobs are exposed, so no aria2c control/exec option
+    # can appear in the generated argv regardless of input.
+    result = validate_external_downloader_options(
+        downloader="aria2c", connections=4, splits=2,
+    )
+    for token in result["argv"]:
+        assert "--on-download-complete" not in token
+        assert "--rpc" not in token
+        assert "--conf-path" not in token
+        assert "--dir" not in token
+
+
+def test_sanitize_download_target_url_preserves_valid_url():
+    url = "https://cdn.example.com/video/master.m3u8?token=abc123"
+    assert sanitize_download_target_url(url) == url
+
+
+@pytest.mark.parametrize("url", [
+    "",
+    "   ",
+    "-x8",                                   # leading dash → aria2c option
+    "--max-connection-per-server=16",        # aria2c option smuggling
+    "https://a.example/one\nhttps://b/two",  # newline → extra URI
+    "https://a.example/space here",          # embedded whitespace
+    "ftp://a.example/file",                  # non-HTTP scheme
+    "file:///etc/passwd",                    # local scheme
+    "https://user:secret@a.example/x",       # embedded credentials
+    "notaurl",                               # no scheme/host
+])
+def test_sanitize_download_target_url_rejects_hostile_input(url):
+    with pytest.raises(ValueError):
+        sanitize_download_target_url(url)
+
+
+def test_apply_external_downloader_options_sets_worker_fields():
+    class _Worker:
+        pass
+
+    worker = _Worker()
+    apply_external_downloader_options(worker, {
+        "ytdlp_external_downloader": "aria2c",
+        "ytdlp_aria2c_connections": 6,
+        "ytdlp_aria2c_splits": 4,
+        "ytdlp_aria2c_min_split_size": "512K",
+    })
+    assert worker.ytdlp_external_downloader == "aria2c"
+    assert worker.ytdlp_aria2c_connections == 6
+    assert worker.ytdlp_aria2c_splits == 4
+    assert worker.ytdlp_aria2c_min_split_size == "512K"
+
+
+def test_apply_external_downloader_options_disables_on_bad_config():
+    class _Worker:
+        pass
+
+    worker = _Worker()
+    # A stale/hostile config value must disable routing, never raise.
+    apply_external_downloader_options(worker, {
+        "ytdlp_external_downloader": "wget",
+        "ytdlp_aria2c_connections": 999,
+    })
+    assert worker.ytdlp_external_downloader == ""
+    assert worker.ytdlp_aria2c_connections == 0
+    assert worker.ytdlp_aria2c_splits == 0
+    assert worker.ytdlp_aria2c_min_split_size == ""

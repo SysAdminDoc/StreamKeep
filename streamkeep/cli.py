@@ -127,7 +127,8 @@ def _run_download(args):
         sys.exit(1)
 
     from .download_options import (
-        validate_download_options, validate_sponsorblock_options,
+        validate_download_options, validate_external_downloader_options,
+        validate_sponsorblock_options,
         validate_subtitle_options, validate_ytdlp_transfer_options,
     )
     subtitle_requested = any((
@@ -206,6 +207,12 @@ def _run_download(args):
             embed_chapters=getattr(args, "embed_chapters", None),
             embed_metadata=getattr(args, "embed_metadata", None),
             embed_thumbnail=getattr(args, "embed_thumbnail", None),
+        )
+        external_downloader_options = validate_external_downloader_options(
+            downloader=getattr(args, "external_downloader", ""),
+            connections=getattr(args, "aria2c_connections", 0),
+            splits=getattr(args, "aria2c_splits", 0),
+            min_split_size=getattr(args, "aria2c_min_split_size", ""),
         )
         if (output_options["audio_format"] and subtitle_options["enabled"]
                 and subtitle_options["embed"]):
@@ -352,6 +359,14 @@ def _run_download(args):
         dw.sponsorblock_api = sponsorblock_options["api_url"]
         for name, value in transfer_options.items():
             setattr(dw, f"ytdlp_{name}", value)
+        dw.ytdlp_external_downloader = external_downloader_options["downloader"]
+        dw.ytdlp_aria2c_connections = int(
+            getattr(args, "aria2c_connections", 0) or 0
+        )
+        dw.ytdlp_aria2c_splits = int(getattr(args, "aria2c_splits", 0) or 0)
+        dw.ytdlp_aria2c_min_split_size = (
+            getattr(args, "aria2c_min_split_size", "") or ""
+        )
         dw.ytdlp_template_name = getattr(args, "arg_template", "") or ""
         dw.ytdlp_template_args = ytdlp_template_args
         if args.rate_limit:
@@ -773,6 +788,23 @@ def build_parser():
     dl.add_argument(
         "--live-from-start", action="store_true",
         help="Download a live stream from its beginning when supported",
+    )
+    dl.add_argument(
+        "--external-downloader", default="", choices=["", "aria2c"],
+        help="Route yt-dlp segment downloads through aria2c (source URL is "
+             "sanitized before hand-off; CVE-2026-50574)",
+    )
+    dl.add_argument(
+        "--aria2c-connections", type=int, default=0,
+        help="aria2c connections per server (1-16; requires --external-downloader aria2c)",
+    )
+    dl.add_argument(
+        "--aria2c-splits", type=int, default=0,
+        help="aria2c download splits (1-16; requires --external-downloader aria2c)",
+    )
+    dl.add_argument(
+        "--aria2c-min-split-size", default="",
+        help="aria2c minimum split size, e.g. 1M (requires --external-downloader aria2c)",
     )
     dl.add_argument(
         "--wait-for-video", default="",

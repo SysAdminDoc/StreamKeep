@@ -651,3 +651,48 @@ def test_hls_playlist_identity_persists_into_resume_sidecar(tmp_path):
     assert state.media_sequence == 947210
     assert state.discontinuity_sequence == 31
     assert state.playlist_segment_count == 2
+
+
+def test_aria2c_routing_emits_downloader_argv_and_sanitizes_source(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://www.youtube.com/watch?v=oshdvLLtl3U"
+    worker._ffmpeg_path = r"C:\Toolsfmpeg.exe"
+    worker.ytdlp_external_downloader = "aria2c"
+    worker.ytdlp_aria2c_connections = 8
+    worker.ytdlp_aria2c_splits = 8
+    worker.ytdlp_aria2c_min_split_size = "1M"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("--downloader") + 1] == "aria2c"
+    assert cmd[cmd.index("--downloader-args") + 1] == (
+        "aria2c:--max-connection-per-server=8 --split=8 --min-split-size=1M"
+    )
+    # The sanitized source is the final positional argument, unchanged.
+    assert cmd[-1] == "https://www.youtube.com/watch?v=oshdvLLtl3U"
+
+
+def test_native_download_has_no_downloader_argv(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Toolsfmpeg.exe"
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    assert "--downloader" not in cmd
+    assert "--downloader-args" not in cmd
+
+
+def test_aria2c_routing_rejects_option_smuggling_source(tmp_path):
+    worker = _make_worker(tmp_path)
+    # A hostile source that would be read as an aria2c option must be refused
+    # once aria2c routing is active (CVE-2026-50574).
+    worker._ffmpeg_path = r"C:\Toolsfmpeg.exe"
+    worker.ytdlp_source = "--max-connection-per-server=64"
+    worker.ytdlp_external_downloader = "aria2c"
+    with pytest.raises(ValueError):
+        worker._build_ytdlp_download_cmd(
+            os.path.join(str(tmp_path), "video.%(ext)s")
+        )

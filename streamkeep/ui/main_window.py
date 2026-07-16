@@ -584,6 +584,33 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             transfer_options = validate_ytdlp_transfer_options()
         for name, value in transfer_options.items():
             setattr(YtDlpExtractor, f"ytdlp_{name}", value)
+        from streamkeep.download_options import (
+            validate_external_downloader_options,
+        )
+        try:
+            validate_external_downloader_options(
+                downloader=cfg.get("ytdlp_external_downloader", ""),
+                connections=cfg.get("ytdlp_aria2c_connections", 0),
+                splits=cfg.get("ytdlp_aria2c_splits", 0),
+                min_split_size=cfg.get("ytdlp_aria2c_min_split_size", ""),
+            )
+            YtDlpExtractor.ytdlp_external_downloader = str(
+                cfg.get("ytdlp_external_downloader", "") or ""
+            ).strip().lower()
+            YtDlpExtractor.ytdlp_aria2c_connections = int(
+                cfg.get("ytdlp_aria2c_connections", 0) or 0
+            )
+            YtDlpExtractor.ytdlp_aria2c_splits = int(
+                cfg.get("ytdlp_aria2c_splits", 0) or 0
+            )
+            YtDlpExtractor.ytdlp_aria2c_min_split_size = str(
+                cfg.get("ytdlp_aria2c_min_split_size", "") or ""
+            ).strip()
+        except (ValueError, TypeError):
+            YtDlpExtractor.ytdlp_external_downloader = ""
+            YtDlpExtractor.ytdlp_aria2c_connections = 0
+            YtDlpExtractor.ytdlp_aria2c_splits = 0
+            YtDlpExtractor.ytdlp_aria2c_min_split_size = ""
         try:
             self._config["ytdlp_arg_templates"] = normalize_ytdlp_arg_templates(
                 cfg.get("ytdlp_arg_templates", {})
@@ -1771,8 +1798,11 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.sponsorblock_api = state.sponsorblock_api or ""
             worker.download_archive = state.download_archive or ""
             worker.break_on_existing = bool(state.break_on_existing)
-            from streamkeep.download_options import apply_ytdlp_transfer_options
+            from streamkeep.download_options import (
+                apply_external_downloader_options, apply_ytdlp_transfer_options,
+            )
             apply_ytdlp_transfer_options(worker, state)
+            apply_external_downloader_options(worker, state)
             worker.ytdlp_template_name = state.ytdlp_template_name or ""
             from streamkeep.download_options import resolve_ytdlp_arg_template
             worker.ytdlp_template_args = resolve_ytdlp_arg_template(

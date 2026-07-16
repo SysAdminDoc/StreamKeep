@@ -241,6 +241,18 @@ def _sanitize_resume_payload(data, output_dir):
         "ytdlp_embed_thumbnail": _sanitize_optional_bool(
             data.get("ytdlp_embed_thumbnail")
         ),
+        "ytdlp_external_downloader": _sanitize_text(
+            data.get("ytdlp_external_downloader", ""), max_len=16
+        ),
+        "ytdlp_aria2c_connections": _sanitize_int_range(
+            data.get("ytdlp_aria2c_connections", 0), 0, 16
+        ),
+        "ytdlp_aria2c_splits": _sanitize_int_range(
+            data.get("ytdlp_aria2c_splits", 0), 0, 16
+        ),
+        "ytdlp_aria2c_min_split_size": _sanitize_text(
+            data.get("ytdlp_aria2c_min_split_size", ""), max_len=16
+        ),
         "ytdlp_template_name": _sanitize_text(
             data.get("ytdlp_template_name", ""), max_len=64
         ),

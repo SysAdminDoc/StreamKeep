@@ -60,7 +60,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 - [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
 - [ ] V19 — YouTube health doctor: Deno/EJS runtime detect, PO-token provider status, player_client strategy presets, degraded-capability warnings. Effort: M
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
-- [ ] V21 — aria2c external-downloader routing with mandatory URL sanitization (CVE-2026-50574). Effort: S
 - [ ] V22 — HAR import (media/manifest URLs + headers → link table). Effort: S-M
 - [ ] V23 — streamkeep:// protocol handler + bookmarklet + documented iOS Shortcut. Effort: S
 - [ ] V24 — Queue-complete power actions (notify/sleep/shutdown/run-hook). Effort: S

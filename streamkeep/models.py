@@ -277,6 +277,10 @@ class ResumeState:
     ytdlp_embed_chapters: bool | None = None
     ytdlp_embed_metadata: bool | None = None
     ytdlp_embed_thumbnail: bool | None = None
+    ytdlp_external_downloader: str = ""
+    ytdlp_aria2c_connections: int = 0
+    ytdlp_aria2c_splits: int = 0
+    ytdlp_aria2c_min_split_size: str = ""
     ytdlp_template_name: str = ""
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so

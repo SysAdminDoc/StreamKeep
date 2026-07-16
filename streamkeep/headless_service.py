@@ -320,8 +320,11 @@ class HeadlessJobService(QObject):
         worker.sponsorblock_api = str(
             self.config.get("sponsorblock_api", "") or ""
         )
-        from .download_options import apply_ytdlp_transfer_options
+        from .download_options import (
+            apply_external_downloader_options, apply_ytdlp_transfer_options,
+        )
         apply_ytdlp_transfer_options(worker, self.config)
+        apply_external_downloader_options(worker, self.config)
         template_name = str(job.get("arg_template", "") or "")
         if template_name and format_type != "ytdlp_direct":
             self._fail_job(

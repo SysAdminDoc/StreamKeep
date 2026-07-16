@@ -2241,8 +2241,11 @@ class DownloadTabMixin:
         worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
-        from ...download_options import apply_ytdlp_transfer_options
+        from ...download_options import (
+            apply_external_downloader_options, apply_ytdlp_transfer_options,
+        )
         apply_ytdlp_transfer_options(worker, YtDlpExtractor)
+        apply_external_downloader_options(worker, YtDlpExtractor)
         worker.parallel_connections = self._parallel_connections
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
@@ -2847,11 +2850,14 @@ class DownloadTabMixin:
         self.download_worker.sponsorblock_mark = sponsorblock_options["mark"]
         self.download_worker.sponsorblock_remove = sponsorblock_options["remove"]
         self.download_worker.sponsorblock_api = sponsorblock_options["api_url"]
-        from ...download_options import apply_ytdlp_transfer_options
+        from ...download_options import (
+            apply_external_downloader_options, apply_ytdlp_transfer_options,
+        )
         apply_ytdlp_transfer_options(
             self.download_worker,
             transfer_options,
         )
+        apply_external_downloader_options(self.download_worker, YtDlpExtractor)
         self.download_worker.ytdlp_template_name = ytdlp_template_name
         self.download_worker.ytdlp_template_args = ytdlp_template_args
         self.download_worker.hls_key_override = hls_key_options["value"]
@@ -3905,9 +3911,11 @@ class DownloadTabMixin:
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
         from ...download_options import (
+            apply_external_downloader_options,
             apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
         )
         apply_ytdlp_transfer_options(worker, YtDlpExtractor)
+        apply_external_downloader_options(worker, YtDlpExtractor)
         worker.ytdlp_template_name = str(
             item.get("ytdlp_template_name", "") or ""
         )

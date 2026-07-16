@@ -187,6 +187,95 @@ def format_command_argv(argv, *, windows=None):
     return subprocess.list2cmdline(values) if windows else shlex.join(values)
 
 
+EXTERNAL_DOWNLOADERS = ("", "aria2c")
+
+
+def sanitize_download_target_url(url):
+    """Validate a target URL before an aria2c-routed download (CVE-2026-50574).
+
+    aria2c interprets leading-dash tokens as options and treats embedded
+    whitespace/newlines as additional URIs, so a hostile source URL could
+    smuggle aria2c options or extra download targets into the delegated
+    process. Enforce a strict HTTP(S)-only, control-free, credential-free
+    URL. The URL is returned byte-for-byte unchanged when valid so yt-dlp
+    receives the exact source.
+    """
+    text = str(url or "").strip()
+    if not text:
+        raise ValueError("Download URL is empty")
+    if len(text) > 4096:
+        raise ValueError("Download URL is too long (maximum 4096 characters)")
+    if any(ord(char) < 32 or ord(char) == 127 for char in text) or any(
+        char.isspace() for char in text
+    ):
+        raise ValueError(
+            "Download URL cannot contain control or whitespace characters"
+        )
+    if text.startswith("-"):
+        raise ValueError("Download URL cannot begin with a dash")
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except ValueError as error:
+        raise ValueError("Download URL is invalid") from error
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Download URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("Download URL cannot contain embedded credentials")
+    return text
+
+
+def validate_external_downloader_options(
+    *, downloader="", connections=0, splits=0, min_split_size="",
+):
+    """Validate optional aria2c external-downloader routing for yt-dlp.
+
+    Only a fixed set of aria2c performance knobs is exposed; the argv is
+    generated from validated numeric/rate values, never from free-form user
+    text, so no aria2c control/RPC/exec option can be injected through this
+    surface. ``--downloader``/``--downloader-args`` are otherwise reserved
+    (see ``YTDLP_TEMPLATE_DENIED_OPTIONS``); this typed control owns them.
+    """
+    name = str(downloader or "").strip().lower()
+    if name and name not in EXTERNAL_DOWNLOADERS:
+        raise ValueError("External downloader must be aria2c or unset")
+    if not name:
+        return {"downloader": "", "downloader_args": "", "argv": []}
+
+    try:
+        connections = int(connections or 0)
+        splits = int(splits or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("aria2c connections and splits must be numbers") from error
+    if not 0 <= connections <= 16:
+        raise ValueError("aria2c connections must be between 1 and 16")
+    if not 0 <= splits <= 16:
+        raise ValueError("aria2c splits must be between 1 and 16")
+
+    min_split_size = _safe_argument(
+        min_split_size, "aria2c minimum split size", max_len=16
+    ).strip()
+    if min_split_size and not _RATE_RE.fullmatch(min_split_size):
+        raise ValueError("aria2c minimum split size must look like 1M or 512K")
+
+    tuned = []
+    if connections:
+        tuned.append(f"--max-connection-per-server={connections}")
+    if splits:
+        tuned.append(f"--split={splits}")
+    if min_split_size:
+        tuned.append(f"--min-split-size={min_split_size}")
+
+    downloader_args = ("aria2c:" + " ".join(tuned)) if tuned else ""
+    argv = ["--downloader", "aria2c"]
+    if downloader_args:
+        argv.extend(["--downloader-args", downloader_args])
+    return {
+        "downloader": "aria2c",
+        "downloader_args": downloader_args,
+        "argv": argv,
+    }
+
+
 def resolve_format_sort(*, preset="", custom=""):
     """Resolve a named format-sort preset or validated custom expression."""
     preset = str(preset or "").strip().lower()
@@ -435,6 +524,66 @@ def apply_ytdlp_transfer_options(worker, source=None, *, overrides=None):
     for name, value in normalized.items():
         setattr(worker, f"ytdlp_{name}", value)
     return normalized
+
+
+EXTERNAL_DOWNLOADER_FIELDS = (
+    "external_downloader",
+    "aria2c_connections",
+    "aria2c_splits",
+    "aria2c_min_split_size",
+)
+
+
+def resolve_external_downloader_options(source=None, *, overrides=None):
+    """Gather aria2c-routing field values from a config/object plus overrides."""
+    source = source or {}
+    overrides = overrides or {}
+    defaults = {
+        "external_downloader": "",
+        "aria2c_connections": 0,
+        "aria2c_splits": 0,
+        "aria2c_min_split_size": "",
+    }
+    values = {}
+    for name in EXTERNAL_DOWNLOADER_FIELDS:
+        key = f"ytdlp_{name}"
+        if key in overrides:
+            value = overrides[key]
+        elif isinstance(source, dict):
+            value = source.get(key, source.get(name, defaults[name]))
+        else:
+            value = getattr(source, key, defaults[name])
+        values[name] = value
+    return values
+
+
+def apply_external_downloader_options(worker, source=None, *, overrides=None):
+    """Resolve aria2c routing from config/overrides and apply it to a worker.
+
+    Invalid values disable external-downloader routing rather than raising, so
+    a stale or hand-edited config key never blocks job creation. The command
+    builder re-validates and generates the argv at download time.
+    """
+    try:
+        values = resolve_external_downloader_options(source, overrides=overrides)
+        # validate_external_downloader_options raises on anything unsafe.
+        validate_external_downloader_options(
+            downloader=values["external_downloader"],
+            connections=values["aria2c_connections"],
+            splits=values["aria2c_splits"],
+            min_split_size=values["aria2c_min_split_size"],
+        )
+        name = str(values["external_downloader"] or "").strip().lower()
+        connections = int(values["aria2c_connections"] or 0)
+        splits = int(values["aria2c_splits"] or 0)
+        min_split = str(values["aria2c_min_split_size"] or "").strip()
+    except (ValueError, TypeError):
+        name, connections, splits, min_split = "", 0, 0, ""
+    worker.ytdlp_external_downloader = name
+    worker.ytdlp_aria2c_connections = connections
+    worker.ytdlp_aria2c_splits = splits
+    worker.ytdlp_aria2c_min_split_size = min_split
+    return name
 
 
 def validate_subtitle_options(

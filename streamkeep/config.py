@@ -83,6 +83,7 @@ _STRING_CONFIG_KEYS = frozenset({
     "ytdlp_retries", "ytdlp_fragment_retries", "ytdlp_retry_sleep",
     "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
     "ytdlp_wait_for_video",
+    "ytdlp_external_downloader", "ytdlp_aria2c_min_split_size",
     "pp_convert_video_format", "pp_convert_video_codec",
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",
@@ -108,6 +109,7 @@ _INT_CONFIG_KEYS = frozenset({
     "segment_idx", "parallel_connections", "parallel_autorecords",
     "max_concurrent_downloads", "chunk_length_secs", "chat_render_width",
     "ytdlp_concurrent_fragments",
+    "ytdlp_aria2c_connections", "ytdlp_aria2c_splits",
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
 })
