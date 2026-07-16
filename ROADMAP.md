@@ -12,12 +12,97 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.31.4.
+- Current package version: v4.31.7.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
 
 ## Active Roadmap
+
+### 0. Versatility Program (2026-07-16 research — active drain queue)
+
+Mission: any video or audio, from any website, in any format, at any quality the source offers, with full user control. See `RESEARCH.md` 2026-07-16 pass for the capability matrix and evidence. DRM circumvention is out of bounds throughout.
+
+#### VP-P0 — Depth of control (yt-dlp passthrough + UI)
+
+- [ ] V1 — Per-download Format & Output control
+  What: raw yt-dlp format-spec override field; format-sort presets (prefer-AV1/cap-res/smallest via -S); container choice mp4/mkv/webm/original (--merge-output-format); first-class audio-extract mode (-x --audio-format best/mp3/m4a/opus/flac/wav + --audio-quality) at download time, GUI + CLI.
+  Verify: real yt-dlp download lands in chosen container; audio mode produces the chosen codec (ffprobe-checked); raw spec passes through verbatim; tests cover cmd construction.
+  Effort: M
+
+- [ ] V2 — Subtitle suite
+  What: subtitle language multi-select fed from resolve() listing, auto-subs toggle, --convert-subs target (srt/vtt/ass), embed vs sidecar choice; replace hardcoded `en.*,en`.
+  Verify: download with two languages produces both; convert honored; embed vs sidecar honored; tests on cmd builder.
+  Effort: S-M
+
+- [ ] V3 — SponsorBlock category matrix
+  What: per-category mark vs remove (13 categories), custom API URL; replace fixed remove of sponsor,selfpromo,interaction.
+  Verify: cmd contains selected --sponsorblock-mark/-remove sets; chapters appear on a real marked download.
+  Effort: S
+
+- [ ] V4 — Playlist ranges, filters, and archive sync
+  What: --playlist-items ranges, date before/after, --match-filters, --max-downloads on playlist/channel expansion; per-source --download-archive + --break-on-existing for incremental channel sync (GUI + monitors).
+  Verify: item-range download fetches exactly the range; second sync run downloads nothing new; tests.
+  Effort: M
+
+- [ ] V5 — Fragment concurrency + retry matrix + live depth
+  What: -N concurrent-fragments, --retries/--fragment-retries/--retry-sleep, skip-vs-abort unavailable-fragments policy, --throttled-rate; --live-from-start toggle; --wait-for-video for scheduled streams; --embed-chapters/--embed-metadata/--embed-thumbnail toggles.
+  Verify: flags present in built cmd per settings; a real -N4 download succeeds; tests.
+  Effort: M
+
+- [ ] V6 — Named argument templates + export-as-command
+  What: user-managed named yt-dlp raw-arg snippets attachable per download/monitor (deny-list dangerous flags: --exec, --external-downloader-args shell forms); per-job "copy as yt-dlp/ffmpeg command" including cookies/headers.
+  Verify: template args appear in cmd; deny-listed flags rejected with message; exported command reproduces the download standalone.
+  Effort: M
+
+#### VP-P1 — Breadth (new source classes)
+
+- [ ] V7 — HLS rendition groups + DASH multi-representation track table
+  What: parse EXT-X-MEDIA audio/subtitle renditions and all DASH Representations; track-table multi-select (video+audio+subs); mux selected tracks; fixtures for live rollover/discontinuity/alt renditions.
+  Effort: L
+
+- [ ] V8 — Clear-key override for mis-declared HLS (non-DRM)
+  What: expert fields mapping to yt-dlp generic:hls_key=URI|KEY[,IV] and native AES-128 key/IV override; document non-DRM scope.
+  Effort: S
+
+- [ ] V9 — Raw-protocol capture jobs (leapfrog)
+  What: job types for RTSP (cameras, transport tcp/udp), RTMP-listen (receive OBS pushes), SRT caller/listener (+passphrase), UDP/RTP multicast (IPTV), ICY internet radio with now-playing capture and per-track splitting; ffmpeg reconnect family; duration caps; version-gate ffmpeg 8 options.
+  Verify: real capture of a public RTSP/SRT test feed and an ICY radio stream with track split.
+  Effort: L
+
+- [ ] V10 — gallery-dl second engine
+  What: route image/gallery/social-post URLs (Twitter media, Instagram posts, Pixiv, boorus) to optional gallery-dl with shared folder/archive config; graceful absent-dep messaging.
+  Effort: M
+
+- [ ] V11 — User-guided extraction (leapfrog; Downie-class)
+  What: visible Playwright window; user navigates/logs in/plays; response sniffer surfaces manifests/media with variant picker; queue with captured request headers/cookies; refuse when EME/DRM session detected.
+  Effort: L
+
+- [ ] V12 — Extension network sniffer + header handoff
+  What: MV3 webRequest capture of m3u8/mpd/media URLs + request headers on the active tab; one-click send-to-StreamKeep with full request context.
+  Effort: M
+
+- [ ] V13 — streamlink live engine (optional)
+  What: in-process streamlink for Twitch/Kick live: mandatory ad-filtering, low-latency mode, DVR rewind (--hls-start-offset/--hls-live-restart), stream-up polling for monitors.
+  Effort: L
+
+- [ ] V14 — MSE buffer recorder (DRM-free only)
+  What: Playwright init-script hook on SourceBuffer.appendBuffer teeing segments to disk; ffmpeg concat/remux; hard-refuse on any EME session; tab-open/playback-speed limitations documented.
+  Effort: L
+
+#### VP-P2 — Automation, lifecycle, and reach
+
+- [ ] V15 — Rules engine (Packagizer-class): ordered match(site/uploader/title-regex/duration/type) → set folder/template/preset/priority/proxy/auto-start. Effort: L
+- [ ] V16 — URL-pattern → profile auto-selection + zero-dialog Smart Mode toggle. Effort: M
+- [ ] V17 — Quality-upgrade redownload pass + retention policies (delete after N days / after watched / keep-last). Effort: M
+- [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
+- [ ] V19 — YouTube health doctor: Deno/EJS runtime detect, PO-token provider status, player_client strategy presets, degraded-capability warnings. Effort: M
+- [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
+- [ ] V21 — aria2c external-downloader routing with mandatory URL sanitization (CVE-2026-50574). Effort: S
+- [ ] V22 — HAR import (media/manifest URLs + headers → link table). Effort: S-M
+- [ ] V23 — streamkeep:// protocol handler + bookmarklet + documented iOS Shortcut. Effort: S
+- [ ] V24 — Queue-complete power actions (notify/sleep/shutdown/run-hook). Effort: S
+- [ ] V25 — lux fallback routing for CN platforms (bilibili/douyin/youku). Effort: M
 
 ### 1. Security and Reliability Hardening
 
