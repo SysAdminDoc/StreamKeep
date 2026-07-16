@@ -1,7 +1,7 @@
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QSplitter
+from PyQt6.QtWidgets import QFrame, QLineEdit, QSplitter
 
 from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, QualityInfo
 
@@ -134,6 +134,8 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 "Archive headers"
             ) >= 0
             assert window.copy_command_btn.isEnabled() is False
+            assert window.adv_hls_key_input.echoMode() == QLineEdit.EchoMode.Password
+            assert window.adv_hls_iv_input.echoMode() == QLineEdit.EchoMode.Password
             assert window.track_table.columnCount() == 5
             assert window.track_section.isVisible() is False
             from streamkeep.ui.tabs.download import _populate_track_table

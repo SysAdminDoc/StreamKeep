@@ -4,11 +4,43 @@ from streamkeep.download_options import (
     apply_ytdlp_transfer_options,
     format_command_argv, normalize_ytdlp_arg_templates,
     parse_ytdlp_template_text, resolve_ytdlp_arg_template,
-    validate_download_options, validate_playlist_options,
+    validate_download_options, validate_hls_key_override,
+    validate_playlist_options,
     validate_sponsorblock_options,
     validate_subtitle_options, validate_ytdlp_template_args,
     validate_ytdlp_transfer_options,
 )
+
+
+def test_hls_clear_key_override_normalizes_key_and_iv():
+    options = validate_hls_key_override(
+        "00112233445566778899aabbccddeeff", "abc",
+    )
+    assert options["value"] == "00112233445566778899AABBCCDDEEFF"
+    assert options["iv"] == "0x00000000000000000000000000000ABC"
+    assert options["extractor_arg"] == (
+        "generic:hls_key=00112233445566778899AABBCCDDEEFF,"
+        "0x00000000000000000000000000000ABC"
+    )
+
+
+def test_hls_clear_key_override_accepts_http_key_uri():
+    uri = "https://keys.example.com/aes.key?token=opaque"
+    options = validate_hls_key_override(uri)
+    assert options["value"] == uri
+    assert options["extractor_arg"] == f"generic:hls_key={uri}"
+
+
+@pytest.mark.parametrize("key,iv", [
+    ("short", ""),
+    ("00112233445566778899aabbccddeeff", "not-hex"),
+    ("file:///tmp/key", ""),
+    ("https://user:secret@keys.example/key", ""),
+    ("", "01"),
+])
+def test_hls_clear_key_override_rejects_unsafe_or_invalid_values(key, iv):
+    with pytest.raises(ValueError):
+        validate_hls_key_override(key, iv)
 
 
 def test_raw_format_spec_is_preserved_verbatim():

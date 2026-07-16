@@ -89,6 +89,8 @@ def _window_with_advanced_controls():
     win.adv_ytdlp_template_combo.addItem(
         "Authenticated archive", userData="Authenticated archive"
     )
+    win.adv_hls_key_input = QLineEdit()
+    win.adv_hls_iv_input = QLineEdit()
     win.adv_override_badge = QLabel()
     return win
 
@@ -193,3 +195,14 @@ def test_named_ytdlp_template_builds_override_payload():
     assert get_adv_overrides(win)["ytdlp_template_name"] == (
         "Authenticated archive"
     )
+
+
+def test_hls_clear_key_fields_build_job_local_override_payload():
+    win = _window_with_advanced_controls()
+    win.adv_hls_key_input.setText("00112233445566778899aabbccddeeff")
+    win.adv_hls_iv_input.setText("0x01")
+
+    overrides = get_adv_overrides(win)
+
+    assert overrides["hls_key_override"].endswith("ddeeff")
+    assert overrides["hls_key_iv"] == "0x01"

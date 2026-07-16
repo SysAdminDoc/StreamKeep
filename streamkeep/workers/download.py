@@ -77,6 +77,10 @@ class DownloadWorker(QThread):
         self.ytdlp_embed_thumbnail = None
         self.ytdlp_template_name = ""
         self.ytdlp_template_args = ()
+        # Per-job clear AES-128 override for HLS playlists that advertise the
+        # wrong key URI/value. Never copied into resume/config persistence.
+        self.hls_key_override = ""
+        self.hls_key_iv = ""
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -104,6 +108,16 @@ class DownloadWorker(QThread):
         already listed is considered complete and skipped (after verifying
         the file still exists on disk).
         """
+        if state is not None and self.hls_key_override:
+            # A literal key or signed key URI is credential-like. Persisting
+            # it would leak into the plaintext sidecar; persisting an
+            # incomplete job would create a resume action that cannot work.
+            self._resume_state = None
+            clear_resume_state(self.output_dir)
+            self.log.emit(
+                "[HLS] Resume sidecar disabled for this clear-key job."
+            )
+            return
         self._resume_state = state
         if state is not None:
             # Pull shape from the worker so the sidecar is self-contained.
@@ -171,6 +185,7 @@ class DownloadWorker(QThread):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
+            validate_hls_key_override,
             validate_sponsorblock_options, validate_subtitle_options,
             validate_ytdlp_template_args, validate_ytdlp_transfer_options,
         )
@@ -212,20 +227,25 @@ class DownloadWorker(QThread):
             embed_metadata=self.ytdlp_embed_metadata,
             embed_thumbnail=self.ytdlp_embed_thumbnail,
         )
+        hls_key_options = validate_hls_key_override(
+            self.hls_key_override, self.hls_key_iv,
+        )
         format_spec = options["format_spec"]
         if options["audio_format"] and not self.ytdlp_format:
             format_spec = "bestaudio/best"
-        if not format_spec:
+        if not format_spec and not hls_key_options["value"]:
             raise ValueError("yt-dlp format specification is empty")
 
-        cmd = (["yt-dlp"] if export else ytdlp_command()) + [
-            "-f", format_spec,
+        cmd = list(["yt-dlp"] if export else ytdlp_command())
+        if format_spec:
+            cmd.extend(["-f", format_spec])
+        cmd.extend([
             "--no-part",
             "--newline",
             "--progress",
             "-o", outfile,
             "--no-playlist",
-        ]
+        ])
         if not export:
             ffmpeg_path = self._ffmpeg_path or resolve_tool_command("ffmpeg")
             cmd.extend(["--ffmpeg-location", str(Path(ffmpeg_path).parent)])
@@ -314,6 +334,10 @@ class DownloadWorker(QThread):
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
         cmd.extend(validate_ytdlp_template_args(self.ytdlp_template_args or ()))
+        if hls_key_options["extractor_arg"]:
+            cmd.extend([
+                "--extractor-args", hls_key_options["extractor_arg"],
+            ])
         if impersonate:
             cmd.extend(ytdlp_impersonate_args())
         try:
@@ -323,7 +347,7 @@ class DownloadWorker(QThread):
                 ytdlp_runtime_args,
                 ytdlp_runtime_status,
             )
-            if _is_youtube_url(self.ytdlp_source):
+            if _is_youtube_url(self._effective_ytdlp_source()):
                 runtime_status = ytdlp_runtime_status()
                 warning = format_ytdlp_runtime_warning(runtime_status)
                 if warning:
@@ -331,8 +355,22 @@ class DownloadWorker(QThread):
                 cmd.extend(ytdlp_runtime_args(runtime_status))
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
-        cmd.append(self.ytdlp_source)
+        cmd.append(self._effective_ytdlp_source())
         return cmd
+
+    def _effective_ytdlp_source(self):
+        if self.hls_key_override and self.playlist_url:
+            return self.ytdlp_source or self.playlist_url
+        return self.ytdlp_source
+
+    def _uses_ytdlp_download(self):
+        if self.hls_key_override:
+            return bool(self._effective_ytdlp_source())
+        return bool(
+            self.format_type == "ytdlp_direct"
+            and self.ytdlp_source
+            and (self.ytdlp_format or self.ytdlp_audio_format)
+        )
 
     def _build_ffmpeg_download_cmd(
         self, outfile, start, duration, *, executable=None,
@@ -485,11 +523,7 @@ class DownloadWorker(QThread):
             raise ValueError("download has no segments to export")
         _index, segment_label, start, duration = self.segments[0]
         label = str(label or segment_label)
-        is_ytdlp = (
-            self.format_type == "ytdlp_direct"
-            and self.ytdlp_source
-            and (self.ytdlp_format or self.ytdlp_audio_format)
-        )
+        is_ytdlp = self._uses_ytdlp_download()
         if is_ytdlp:
             outfile, _expected = self._ytdlp_output_paths(label)
             return self._build_ytdlp_download_cmd(outfile, export=True)
@@ -776,11 +810,7 @@ class DownloadWorker(QThread):
                 # Leave the sidecar in place — the user may resume.
                 return
 
-            is_ytdlp = (
-                self.format_type == "ytdlp_direct"
-                and self.ytdlp_source
-                and (self.ytdlp_format or self.ytdlp_audio_format)
-            )
+            is_ytdlp = self._uses_ytdlp_download()
             expected_ytdlp_outfile = ""
             if is_ytdlp:
                 outfile, expected_ytdlp_outfile = self._ytdlp_output_paths(label)

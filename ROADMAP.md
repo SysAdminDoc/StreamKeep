@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.31.7.
+- Current package version: v4.32.0.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -25,46 +25,7 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P0 — Depth of control (yt-dlp passthrough + UI)
 
-- [ ] V1 — Per-download Format & Output control
-  What: raw yt-dlp format-spec override field; format-sort presets (prefer-AV1/cap-res/smallest via -S); container choice mp4/mkv/webm/original (--merge-output-format); first-class audio-extract mode (-x --audio-format best/mp3/m4a/opus/flac/wav + --audio-quality) at download time, GUI + CLI.
-  Verify: real yt-dlp download lands in chosen container; audio mode produces the chosen codec (ffprobe-checked); raw spec passes through verbatim; tests cover cmd construction.
-  Implementation notes (verified 2026-07-16): wire per-download controls into the existing Advanced-overrides panel (`streamkeep/ui/tabs/download.py:452-519`, `get_adv_overrides`/`_reset_adv_overrides` pattern; worker config at ~line 1955). Worker `workers/download.py` `run()` hardcodes outfile `{label}.mp4` (line 319) — container/audio modes must change the expected extension; `_reconcile_output` already adopts sibling containers; "best" audio format has no predictable ext, so use `-o base.%(ext)s` + post-run file discovery. Scope to `ytdlp_direct` format type (HLS/ffmpeg path stays mp4). Extend audio extensions into `verify.py` MEDIA_EXTS, `storage.py`, `gallery.py:118`, `intelligence/thumbnail.py`, `integrations/media_server.py` sets or audio outputs are invisible to verify/storage scans. CLI wiring point: `cli.py:194` (DownloadWorker construction).
-  Effort: M
-
-- [ ] V2 — Subtitle suite
-  What: subtitle language multi-select fed from resolve() listing, auto-subs toggle, --convert-subs target (srt/vtt/ass), embed vs sidecar choice; replace hardcoded `en.*,en`.
-  Verify: download with two languages produces both; convert honored; embed vs sidecar honored; tests on cmd builder.
-  Effort: S-M
-
-- [ ] V3 — SponsorBlock category matrix
-  What: per-category mark vs remove (13 categories), custom API URL; replace fixed remove of sponsor,selfpromo,interaction.
-  Verify: cmd contains selected --sponsorblock-mark/-remove sets; chapters appear on a real marked download.
-  Effort: S
-
-- [ ] V4 — Playlist ranges, filters, and archive sync
-  What: --playlist-items ranges, date before/after, --match-filters, --max-downloads on playlist/channel expansion; per-source --download-archive + --break-on-existing for incremental channel sync (GUI + monitors).
-  Verify: item-range download fetches exactly the range; second sync run downloads nothing new; tests.
-  Effort: M
-
-- [ ] V5 — Fragment concurrency + retry matrix + live depth
-  What: -N concurrent-fragments, --retries/--fragment-retries/--retry-sleep, skip-vs-abort unavailable-fragments policy, --throttled-rate; --live-from-start toggle; --wait-for-video for scheduled streams; --embed-chapters/--embed-metadata/--embed-thumbnail toggles.
-  Verify: flags present in built cmd per settings; a real -N4 download succeeds; tests.
-  Effort: M
-
-- [ ] V6 — Named argument templates + export-as-command
-  What: user-managed named yt-dlp raw-arg snippets attachable per download/monitor (deny-list dangerous flags: --exec, --external-downloader-args shell forms); per-job "copy as yt-dlp/ffmpeg command" including cookies/headers.
-  Verify: template args appear in cmd; deny-listed flags rejected with message; exported command reproduces the download standalone.
-  Effort: M
-
 #### VP-P1 — Breadth (new source classes)
-
-- [ ] V7 — HLS rendition groups + DASH multi-representation track table
-  What: parse EXT-X-MEDIA audio/subtitle renditions and all DASH Representations; track-table multi-select (video+audio+subs); mux selected tracks; fixtures for live rollover/discontinuity/alt renditions.
-  Effort: L
-
-- [ ] V8 — Clear-key override for mis-declared HLS (non-DRM)
-  What: expert fields mapping to yt-dlp generic:hls_key=URI|KEY[,IV] and native AES-128 key/IV override; document non-DRM scope.
-  Effort: S
 
 - [ ] V9 — Raw-protocol capture jobs (leapfrog)
   What: job types for RTSP (cameras, transport tcp/udp), RTMP-listen (receive OBS pushes), SRT caller/listener (+passphrase), UDP/RTP multicast (IPTV), ICY internet radio with now-playing capture and per-track splitting; ffmpeg reconnect family; duration caps; version-gate ffmpeg 8 options.
@@ -151,69 +112,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 ## Research-Driven Additions
 
 ### P0 — Now
-
-- [ ] P0 — Unify credential storage and produce secret-free exports/backups
-  Why: Tokens, webhooks, media-server credentials, `config.json`, and `cookies.txt` can bypass the DPAPI/keyring boundary and leave the machine in plaintext exports or backups.
-  Evidence: `streamkeep/accounts.py`, `streamkeep/secrets.py`, `streamkeep/backup.py:20-33`, `streamkeep/ui/tabs/settings.py:378-430,753`, `streamkeep/ui/main_window.py:709`; DPAPI and RFC 9106.
-  Touches: `streamkeep/config.py`, `streamkeep/secrets.py`, `streamkeep/accounts.py`, `streamkeep/backup.py`, `streamkeep/cookies.py`, settings/main-window credential fields, migration tests.
-  Acceptance: No credential value appears in `config.json`, logs, diagnostics, normal JSON exports, or default `.skbackup` files; legacy plaintext migrates atomically; ordinary restore excludes auth state; an explicit portable-secret backup uses Argon2id plus authenticated encryption and wrong-password/tamper tests.
-  Complexity: L
-
-- [ ] P0 — Bind parallel HTTP resume parts to one representation
-  Why: Size-only part reuse can join byte ranges from different origin representations into a corrupt file that appears complete.
-  Evidence: `streamkeep/http.py:345-439`; RFC 9110 range/validator semantics and RFC 9530 content digests.
-  Touches: `streamkeep/http.py`, persisted part metadata, `tests/test_http.py`.
-  Acceptance: Resume captures a strong ETag or Last-Modified value, sends `If-Range`, requires exact `206` and `Content-Range`, invalidates all old parts on validator/length change, refuses old-part resume without a safe validator, and verifies `Content-Digest`/`Repr-Digest` when present.
-  Complexity: M
-
-- [ ] P0 — Quarantine executable behavior during configuration import
-  Why: An imported JSON dictionary is applied immediately and can activate `shell=True` hooks and outbound automation without a trust review.
-  Evidence: `streamkeep/ui/tabs/settings.py:378-430`; `streamkeep/hooks.py:27-58`.
-  Touches: `streamkeep/config.py`, `streamkeep/hooks.py`, `streamkeep/ui/tabs/settings.py`, config-import tests.
-  Acceptance: Imports enforce a versioned schema plus byte/depth/count limits, show a diff, quarantine hooks/webhooks/proxies/auto-imports as disabled, require explicit per-capability activation, never interpolate remote metadata into commands, and leave the pre-import config untouched on validation failure.
-  Complexity: M
-
-- [ ] P0 — Establish a frozen-executable startup and process-isolation contract
-  Why: Source/offscreen tests pass while one-file builds observed on 2026-07-15 crashed or spawned multiple visible windows; release correctness must be tested at the artifact boundary.
-  Evidence: 2026-07-15 packaged failures; `StreamKeep.py`, `StreamKeep.spec`, `streamkeep/ui/main_window.py`, `streamkeep/ui/tabs/history.py`; recurring frozen re-entry commits in the last 200 commits.
-  Touches: launcher/boot lifecycle, `StreamKeep.spec`, release scripts, `tests/test_gui_smoke.py`, new artifact-level tests.
-  Acceptance: An isolated one-file build starts non-interactively with empty, migrated, and populated databases; initializes history/thumbnails and embedded yt-dlp; exposes exactly one application instance with no child re-entry/window fanout; supports windowed CLI streams safely; emits a machine-readable ready marker; and exits cleanly under a timeout.
-  Complexity: M
-
-- [ ] P0 — Enforce toolchain security floors through one runtime capability registry
-  Why: The bundled lower bounds and PATH tools can silently select releases affected by media-parser, downloader, and transport advisories published through 2026-07-15 or incomplete YouTube runtime support.
-  Evidence: `requirements.txt`, `streamkeep/bootstrap.py:24-84`, `streamkeep/diagnostics.py`, `streamkeep/extractors/ytdlp.py`; yt-dlp 2026.06.09, Pillow 12.3.0, FFmpeg and curl security advisories, and yt-dlp EJS requirements.
-  Touches: dependency manifests, launcher/onboarding/Settings diagnostics, `streamkeep/bootstrap.py`, extractor/worker command resolution, release tooling.
-  Acceptance: The exact executable/module used is recorded with path, semantic version, provenance, and capabilities; release floors are at least yt-dlp 2026.06.09, Pillow 12.3.0, curl 8.21.0, and FFmpeg 8.1.2; matching Deno/EJS is deterministic; vulnerable tools block risky paths with repair guidance; startup never runs implicit `pip install`.
-  Complexity: L
-
-- [ ] P0 — Make updates publisher-authenticated, downgrade-resistant, and self-rolling-back
-  Why: A hash from the same release channel authenticates bytes but not the publisher, and the updater verified on 2026-07-15 has no automatic escape path from a startup-regressing build.
-  Evidence: `streamkeep/updater.py`; USENIX Security 2026 desktop-updater findings; Microsoft MSIX signing guidance (https://learn.microsoft.com/en-us/windows/msix/package/sign-msix-package-guide).
-  Touches: `streamkeep/updater.py`, boot health markers, release signing/stamping, database pre-update snapshots, updater tests.
-  Acceptance: Updates require an offline-signed manifest and valid portable-EXE/MSIX signature, reject replay/downgrade and path substitution, stage replacement atomically, snapshot migration-sensitive state, mark healthy only after full initialization, and restore the last-known-good binary/state with a visible recovery log after failed startup.
-  Complexity: L
-
-- [ ] P0 — Repair launcher CLI dispatch and configuration-root binding
-  Why: Implemented `db` and `snapshot` commands enter the GUI path, while `server --config-dir` changes the root after module constants are already bound.
-  Evidence: `StreamKeep.py:40-45`, `streamkeep/cli.py:302-309,413-468,510-518`, `streamkeep/config.py:12`, `streamkeep/db.py:25`.
-  Touches: `StreamKeep.py`, `streamkeep/cli.py`, paths/config/database initialization, `tests/test_cli.py`.
-  Acceptance: Every parser command dispatches identically through source and frozen launchers; alternate config roots bind before importing stateful modules; commands never initialize/show the GUI; subprocess tests prove filesystem isolation and exit/output contracts.
-  Complexity: S
-
-- [ ] P0 — Turn headless service acknowledgements into durable executed jobs
-  Why: As verified on 2026-07-15, the server reports accepted URLs while only printing them, so remote clients can receive false success and no usable state/library response.
-  Evidence: `streamkeep/cli.py:335-337`; `streamkeep/local_server.py`; refines the existing “Remote/headless management polish” item; MeTube and MyJDownloader API behavior.
-  Touches: `streamkeep/cli.py`, queue repository, download/finalize orchestration, `streamkeep/local_server.py`, service integration tests.
-  Acceptance: `/api/queue` persists then executes jobs through the same state machine as the GUI; restart resumes eligible work; status/library/failure endpoints reflect SQLite truth; cancellation and recovery are durable; every acknowledgement carries a job ID with observable terminal outcome.
-  Complexity: L
-
-- [ ] P0 — Define a safe opt-in LAN control boundary
-  Why: Plain HTTP bearer control and command-line token exposure are incompatible with operations that queue, recover, or publish local media.
-  Evidence: `streamkeep/local_server.py`, `streamkeep/cli.py --token`, browser-extension pairing; existing local-server security roadmap direction.
-  Touches: local server auth/origin code, CLI secret input, Settings pairing UI, browser extension, threat-model tests.
-  Acceptance: Loopback remains default; tokens are generated with at least 128 bits, stored in the secure store, never required in argv/URLs/logs, scoped and rotatable; LAN mode requires explicit pairing plus an HTTPS/reverse-proxy trust boundary; CSRF/origin/Host/replay tests cover every mutating endpoint.
-  Complexity: L
 
 ### P1 — Next
 
@@ -332,3 +230,72 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Touches: rebuildable local index schema, scene/OCR/audio embedding workers, search ranking/UI, resource controls, privacy/export tests.
   Acceptance: Users explicitly opt in per library; FTS remains available without models; local-only indexing returns timestamped transcript/scene/OCR results with provenance and confidence; indexes are cancellable, size-bounded, versioned, rebuildable, and excluded from portable backups by default.
   Complexity: XL
+
+### 2026-07-16 Scope Corrections to Existing Items
+
+- Audit-deferred base64 fallback: new secrets already fail closed because `allow_insecure_fallback` defaults to false; scope the item to deleting or explicitly labeling legacy/test-only fallback paths.
+- Plugin isolation: the plugin parent is appended, not prepended, so the remaining work is eliminating global `sys.path` mutation and containing trusted in-process execution, not a proven current stdlib-prepend shadow.
+- Browser clip handoff: manifest permissions are now exact loopback origins; retain the item for the unconnected `clip_received` desktop signal and end-to-end pairing/clip validation only.
+- Secure upload delivery: SFTP exists through Paramiko; replace the stale “not implemented” premise with mandatory known-host verification, certificate-verified FTPS/WebDAV HTTPS, and explicit disabling of insecure FTP/HTTP defaults.
+
+#### P0 — Now
+
+#### P1 — Next
+
+- [ ] P1 — Make one versioned DownloadJobSpec authoritative across every surface
+  Why: Seven construction sites manually copy a mutable worker property bag, causing GUI/CLI/headless/monitor/queue/resume option drift and making V5/V6 riskier.
+  Evidence: `streamkeep/workers/download.py:39-83`; constructors in `cli.py`, `headless_service.py`, `ui/main_window.py`, `ui/tabs/download.py`, and `ui/tabs/monitor.py`.
+  Touches: shared models/options, command planning, queue DB payloads, resume migration, all job builders, fixtures.
+  Acceptance: An immutable schema-versioned job spec is built and validated once, serializes without secrets, rejects unsupported future versions, migrates existing queue/resume payloads, and produces equivalent sanitized command plans from GUI, CLI, REST/headless, and monitor fixtures; workers receive the spec instead of field-by-field mutation.
+  Complexity: L
+
+- [ ] P1 — Centralize bounded remote-image acquisition and decoding
+  Why: Metadata thumbnails and chat emotes can follow redirects or decode attacker-controlled images without one effective byte/type/pixel/frame/allocation policy.
+  Evidence: `streamkeep/metadata.py`, `postprocess/emote_cache.py`, `postprocess/chat_render_worker.py`, `intelligence/thumbnail.py`; https://pillow.readthedocs.io/en/stable/handbook/security.html.
+  Touches: shared HTTP/image helper, metadata and emote caches, chat/smart-thumbnail rendering, Qt thumbnail loaders, tests.
+  Acceptance: All remote images use HTTP(S)-only redirects, strict byte/time limits, partial-file cleanup, content magic and allowlisted formats, Pillow decompression warnings as errors, dimension/frame/allocation caps, bounded cache quotas, and redacted diagnostics; oversized, truncated, animated-bomb, spoofed-type, redirect, and cancellation fixtures fail without a published file.
+  Complexity: M
+
+- [ ] P1 — Split portable and MSIX build/update contracts
+  Why: The tracked spec produces one-file output, the MSIX builder requires a directory, and the updater self-replaces `sys.executable` even though MSIX content is package-managed.
+  Evidence: `StreamKeep.spec`, `packaging/msix/build_msix.py`, `streamkeep/updater.py`; https://learn.microsoft.com/en-us/windows/msix/app-installer/auto-update-and-repair--overview.
+  Touches: PyInstaller targets, MSIX/App Installer manifests, updater/update runtime, signing/SBOM/version stamping, artifact smokes.
+  Acceptance: Portable EXE retains signed last-known-good self-replacement; MSIX is built from an explicit signed onedir target and updates only through signed App Installer/Store semantics; each artifact reports its channel, refuses the other's updater, and passes clean install, upgrade, interrupted-update, repair, rollback, and uninstall smoke tests.
+  Complexity: L
+
+- [ ] P1 — Replace raw shell hooks with structured, bounded actions
+  Why: `streamkeep/hooks.py` intentionally uses `shell=True`; V24 would expand that trusted-code boundary and complicate timeout/cancellation of descendant processes.
+  Evidence: `streamkeep/hooks.py:52-80`; https://github.com/yt-dlp/yt-dlp/releases/tag/2026.06.09; https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html.
+  Touches: hook config/schema/import quarantine, settings UI, action runner, V24 power actions, migration and tests.
+  Acceptance: New hooks store an executable plus argument array with no shell, minimal allowlisted environment, bounded stdout/stderr, timeout and process-tree cancellation; remote values remain data-only environment fields; legacy shell strings stay disabled until individually migrated with a redacted preview; config import cannot activate actions implicitly.
+  Complexity: M
+
+- [ ] P1 — Add live credential and cookie-profile validation
+  Why: Settings currently reports stored-value presence as “authenticated,” so private/age-restricted failures are discovered only after queueing and are hard to distinguish from extractor/network failure.
+  Evidence: `streamkeep/accounts.py::credential_status`, `streamkeep/ui/tabs/settings.py::_update_cookies_status`; https://github.com/JunkFood02/Seal/issues/2026; https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp; extends V19/V20 without replacing them.
+  Touches: account/cookie services, platform-specific safe probes, Settings and pre-queue status, diagnostics, secret-redaction tests.
+  Acceptance: A cancellable non-downloading probe reports valid, expired/revoked, insufficient scope, rate-limited, unsupported, or network failure for configured Twitch/YouTube/Kick/cookie profiles; it records only redacted time/status metadata, never secrets or signed URLs, and V20 can surface the result before queueing while offline operation remains available.
+  Complexity: M
+
+#### P2 — Later
+
+- [ ] P2 — Add an operations view over queue, monitor, and failure state
+  Why: Durable jobs and retries exist, but operators lack one filterable view of failed-only work, retry reasons, source health, totals, and next actions.
+  Evidence: `streamkeep/db.py` queue/failed-job tables, `streamkeep/ui/tabs/download.py`, `ui/tabs/monitor.py`; Parabolic failed filtering and TubeSync task visibility.
+  Touches: typed job/event queries, queue/monitor UI model, local server reads, thumbnails, batch actions and tests.
+  Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
+  Complexity: L
+
+- [ ] P2 — Normalize YouTube live-chat replay into the existing chat pipeline
+  Why: StreamKeep captures Twitch/Kick chat and Twitch VOD replay, but YouTube replay cannot feed its chat highlights, overlay renderer, or archive exports.
+  Evidence: `streamkeep/chat/`, `streamkeep/extractors/twitch.py`, `workers/finalize.py`; imsyy/yt-dlp-gui YouTube live-chat replay export.
+  Touches: yt-dlp subtitle/chat extraction, normalized chat model, finalize/resume, JSONL/CSV export, filters and fixtures.
+  Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; timestamps, author/channel-owner/member flags, message text, and supported emotes normalize to `chat.jsonl`; regex/user filters and CSV export work; partial/unavailable replay is non-fatal; existing spike/highlight/render tools consume the result unchanged.
+  Complexity: M
+
+- [ ] P2 — Add bilingual subtitle merge and LRC export
+  Why: The current SRT/VTT/ASS workflow lacks two concrete archive/listening outputs already exposed by a comparable yt-dlp GUI.
+  Evidence: `streamkeep/download_options.py`, `workers/download.py`, subtitle UI; imsyy/yt-dlp-gui bilingual subtitle and LRC features; current WebVTT recommendation.
+  Touches: subtitle parser/model, post-processing, per-job UI/CLI/job spec, sidecar naming, fixtures.
+  Acceptance: Users select primary/secondary tracks and a deterministic overlap/alignment policy; merged SRT/ASS preserves language labels and cue order; LRC emits validated monotonic timestamps for audio; malformed cues isolate rather than abort the download; originals are retained by default and outputs round-trip Unicode in frozen builds.
+  Complexity: M

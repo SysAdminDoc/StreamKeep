@@ -138,6 +138,56 @@ def test_native_download_exports_equivalent_ffmpeg_plan(tmp_path):
     assert argv[argv.index("-t") + 1] == "30"
 
 
+def test_hls_clear_key_exports_native_ytdlp_override(tmp_path):
+    source = "https://cdn.example.com/media.m3u8"
+    worker = DownloadWorker(
+        source, [(0, "capture", 0, 30)], str(tmp_path), "hls"
+    )
+    worker.hls_key_override = "00112233445566778899aabbccddeeff"
+    worker.hls_key_iv = "01"
+
+    argv = worker.build_export_argv()
+
+    assert argv[0] == "yt-dlp"
+    assert "-f" not in argv
+    assert argv[-1] == source
+    assert argv[argv.index("--extractor-args") + 1] == (
+        "generic:hls_key=00112233445566778899AABBCCDDEEFF,"
+        "0x00000000000000000000000000000001"
+    )
+
+
+def test_hls_clear_key_uses_ytdlp_download_path(tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 0, 30)], str(tmp_path), "hls",
+    )
+    worker.hls_key_override = "00112233445566778899aabbccddeeff"
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True,
+    ), mock.patch.object(
+        worker, "_ensure_supported_ytdlp", return_value=True,
+    ), mock.patch.object(
+        worker, "_download_with_ytdlp", return_value=True,
+    ) as download:
+        worker.run()
+
+    download.assert_called_once()
+
+
+def test_hls_clear_key_is_never_written_to_resume_sidecar(tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 0, 30)], str(tmp_path), "hls",
+    )
+    worker.hls_key_override = "00112233445566778899aabbccddeeff"
+    worker.attach_resume_state(ResumeState(output_dir=str(tmp_path)))
+
+    assert worker._resume_state is None
+    assert not (tmp_path / ".streamkeep_resume.json").exists()
+
+
 def test_selected_tracks_build_explicit_multi_representation_mux(tmp_path):
     manifest = "https://cdn.example.com/main.mpd"
     worker = DownloadWorker(

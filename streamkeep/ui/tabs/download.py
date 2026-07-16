@@ -93,6 +93,8 @@ def _reset_adv_overrides(win):
     win.adv_ytdlp_embed_metadata_combo.setCurrentIndex(0)
     win.adv_ytdlp_embed_thumbnail_combo.setCurrentIndex(0)
     win.adv_ytdlp_template_combo.setCurrentIndex(0)
+    win.adv_hls_key_input.clear()
+    win.adv_hls_iv_input.clear()
     win.adv_override_badge.setVisible(False)
 
 
@@ -216,6 +218,12 @@ def get_adv_overrides(win):
     template_name = template_combo.currentData() or "" if template_combo else ""
     if template_name:
         overrides["ytdlp_template_name"] = template_name
+    hls_key = win.adv_hls_key_input.text().strip()
+    hls_iv = win.adv_hls_iv_input.text().strip()
+    if hls_key:
+        overrides["hls_key_override"] = hls_key
+    if hls_iv:
+        overrides["hls_key_iv"] = hls_iv
     return overrides
 
 
@@ -1068,12 +1076,35 @@ def build_download_tab(win):
     adv_lay.addWidget(win.adv_ytdlp_template_combo, 23, 1)
     _populate_adv_ytdlp_templates(win)
 
+    adv_lay.addWidget(QLabel("HLS clear key:"), 24, 0)
+    hls_key_row = QHBoxLayout()
+    win.adv_hls_key_input = QLineEdit()
+    win.adv_hls_key_input.setMaxLength(4096)
+    win.adv_hls_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+    win.adv_hls_key_input.setPlaceholderText(
+        "Authorized key URI or 32-digit AES-128 key"
+    )
+    win.adv_hls_key_input.setToolTip(
+        "Expert non-DRM recovery only. Overrides a wrong EXT-X-KEY URI/value "
+        "through yt-dlp's native HLS downloader and is not persisted."
+    )
+    hls_key_row.addWidget(win.adv_hls_key_input, 2)
+    win.adv_hls_iv_input = QLineEdit()
+    win.adv_hls_iv_input.setMaxLength(66)
+    win.adv_hls_iv_input.setEchoMode(QLineEdit.EchoMode.Password)
+    win.adv_hls_iv_input.setPlaceholderText("Optional IV (hex)")
+    win.adv_hls_iv_input.setToolTip(
+        "Optional 1-32 digit hexadecimal initialization vector"
+    )
+    hls_key_row.addWidget(win.adv_hls_iv_input, 1)
+    adv_lay.addLayout(hls_key_row, 24, 1)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 24, 1)
+    adv_lay.addWidget(adv_reset_btn, 25, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -1111,6 +1142,8 @@ def build_download_tab(win):
         )
     )
     win.adv_audio_quality_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_hls_key_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_hls_iv_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_subtitle_mode_combo.currentIndexChanged.connect(
         lambda _: _refresh_adv_subtitle_controls(win)
     )
@@ -2577,6 +2610,7 @@ class DownloadTabMixin:
             return False
         try:
             from ...download_options import (
+                validate_hls_key_override,
                 resolve_ytdlp_arg_template,
                 resolve_ytdlp_transfer_options,
                 validate_download_options, validate_sponsorblock_options,
@@ -2637,10 +2671,38 @@ class DownloadTabMixin:
                 self._config.get("ytdlp_arg_templates", {}),
                 ytdlp_template_name,
             )
+            hls_key_options = validate_hls_key_override(
+                _dl_overrides.get("hls_key_override", ""),
+                _dl_overrides.get("hls_key_iv", ""),
+            )
         except ValueError as error:
             self._log(f"[OUTPUT] Invalid per-download settings: {error}")
             self._set_status(str(error), "warning")
             return False
+
+        if hls_key_options["value"]:
+            if fmt_type not in {"hls", "ytdlp_direct"}:
+                self._set_status(
+                    "The clear-key override applies only to non-DRM HLS sources.",
+                    "warning",
+                )
+                return False
+            selected_urls = {
+                track.url for track in selected_tracks if track.url
+            }
+            from ...models import default_media_tracks
+            default_ids = {
+                track.id for track in default_media_tracks(q_data)
+            } if q_data else set()
+            selected_ids = {track.id for track in selected_tracks}
+            if (len(selected_urls) > 1
+                    or (default_ids and selected_ids != default_ids)):
+                self._set_status(
+                    "Clear-key recovery supports the default tracks from one HLS "
+                    "media playlist; load that playlist directly for custom tracks.",
+                    "warning",
+                )
+                return False
 
         if (subtitle_mode == "custom" and ytdlp_options["audio_format"]
                 and subtitle_options["embed"]):
@@ -2679,7 +2741,8 @@ class DownloadTabMixin:
             return False
 
         seg_secs = self._get_segment_secs()
-        single_segment = (is_live_capture or fmt_type in ("mp4", "ytdlp_direct")
+        single_segment = (is_live_capture or hls_key_options["value"]
+                          or fmt_type in ("mp4", "ytdlp_direct")
                           or seg_secs == 0 or total_secs <= seg_secs)
         segments = []
         for i, cb in enumerate(self._segment_checks):
@@ -2784,12 +2847,20 @@ class DownloadTabMixin:
         )
         self.download_worker.ytdlp_template_name = ytdlp_template_name
         self.download_worker.ytdlp_template_args = ytdlp_template_args
+        self.download_worker.hls_key_override = hls_key_options["value"]
+        self.download_worker.hls_key_iv = hls_key_options["iv"]
         self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
-        if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
+        if ((fmt_type == "ytdlp_direct" or hls_key_options["value"])
+                and (crop_start or crop_end)):
             cs = self._fmt_crop_time(crop_start) if crop_start else "0:00:00"
             ce = self._fmt_crop_time(crop_end) if crop_end else ""
             self.download_worker.download_sections = f"*{cs}-{ce}" if ce else f"*{cs}-"
+        if hls_key_options["value"]:
+            self._log(
+                "[HLS] Authorized clear-key override enabled for this job; "
+                "the value will not be persisted."
+            )
         if audio_url:
             self._log("Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":

@@ -71,6 +71,7 @@ _RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
 _WAIT_FOR_VIDEO_RE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 _RETRY_SLEEP_RE = re.compile(r"[A-Za-z0-9_.:+*/=,-]+")
 _TEMPLATE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
+_HEX_RE = re.compile(r"[0-9A-Fa-f]+")
 YTDLP_TRANSFER_FIELDS = (
     "concurrent_fragments",
     "retries",
@@ -252,6 +253,54 @@ def validate_download_options(
         "container": normalized_container,
         "audio_format": normalized_audio,
         "audio_quality": quality,
+    }
+
+
+def validate_hls_key_override(key_or_uri="", iv=""):
+    """Validate an explicit clear AES-128 key/URI for non-DRM HLS.
+
+    The returned ``extractor_arg`` is one structured yt-dlp argv value. The
+    key is intentionally job-local; callers must not persist it to config,
+    SQLite, logs, or resume sidecars.
+    """
+    value = _safe_argument(
+        key_or_uri, "HLS key URI or key", max_len=4096
+    ).strip()
+    iv = _safe_argument(iv, "HLS initialization vector", max_len=66).strip()
+    if not value:
+        if iv:
+            raise ValueError("HLS IV requires a key URI or key")
+        return {"value": "", "iv": "", "extractor_arg": ""}
+
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme:
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("HLS key URI must be an HTTP or HTTPS URL")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ValueError(
+                "HLS key URI cannot contain user-info credentials or a fragment"
+            )
+        normalized_value = value
+    else:
+        raw_key = value[2:] if value.lower().startswith("0x") else value
+        if len(raw_key) != 32 or not _HEX_RE.fullmatch(raw_key):
+            raise ValueError("HLS AES-128 key must be exactly 32 hexadecimal digits")
+        normalized_value = raw_key.upper()
+
+    normalized_iv = ""
+    if iv:
+        raw_iv = iv[2:] if iv.lower().startswith("0x") else iv
+        if not 1 <= len(raw_iv) <= 32 or not _HEX_RE.fullmatch(raw_iv):
+            raise ValueError("HLS IV must be 1-32 hexadecimal digits")
+        normalized_iv = "0x" + raw_iv.upper().zfill(32)
+
+    extractor_value = normalized_value
+    if normalized_iv:
+        extractor_value += "," + normalized_iv
+    return {
+        "value": normalized_value,
+        "iv": normalized_iv,
+        "extractor_arg": "generic:hls_key=" + extractor_value,
     }
 
 
