@@ -11,6 +11,7 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 
 from . import db
 from .config import write_log_line
+from .models import default_media_tracks
 from .utils import default_output_dir, fmt_size, safe_filename
 from .workers import DownloadWorker, FetchWorker, FinalizeWorker
 
@@ -291,6 +292,7 @@ class HeadlessJobService(QObject):
         worker = DownloadWorker(playlist_url or "", segments, output_dir, format_type)
         if quality:
             worker.audio_url = quality.audio_url
+            worker.selected_tracks = default_media_tracks(quality)
             worker.ytdlp_source = quality.ytdlp_source
             worker.ytdlp_format = quality.ytdlp_format
         worker.parallel_connections = self.parallel_connections

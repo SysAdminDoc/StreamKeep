@@ -100,6 +100,42 @@ def _sanitize_completed(value):
     return cleaned
 
 
+def _sanitize_selected_tracks(value):
+    if not isinstance(value, (list, tuple)):
+        return []
+    cleaned = []
+    for item in value[:32]:
+        if not isinstance(item, dict):
+            continue
+        kind = _sanitize_text(item.get("kind", ""), max_len=16).lower()
+        url = _sanitize_text(item.get("url", ""), max_len=4096)
+        if kind not in {"video", "audio", "subtitle"} or not url:
+            continue
+        cleaned.append({
+            "id": _sanitize_text(item.get("id", ""), max_len=256),
+            "kind": kind,
+            "label": _sanitize_text(item.get("label", ""), max_len=256),
+            "language": _sanitize_text(item.get("language", ""), max_len=64),
+            "url": url,
+            "group_id": _sanitize_text(item.get("group_id", ""), max_len=128),
+            "codec": _sanitize_text(item.get("codec", ""), max_len=128),
+            "bandwidth": _sanitize_int_range(
+                item.get("bandwidth", 0), 0, 10**12
+            ),
+            "resolution": _sanitize_text(
+                item.get("resolution", ""), max_len=32
+            ),
+            "stream_index": _sanitize_int_range(
+                item.get("stream_index", 0), 0, 255
+            ),
+            "default": _sanitize_bool(item.get("default", False)),
+            "autoselect": _sanitize_bool(item.get("autoselect", False)),
+            "forced": _sanitize_bool(item.get("forced", False)),
+            "period_id": _sanitize_text(item.get("period_id", ""), max_len=128),
+        })
+    return cleaned
+
+
 def _sanitize_resume_payload(data, output_dir):
     if not isinstance(data, dict):
         return None
@@ -118,6 +154,9 @@ def _sanitize_resume_payload(data, output_dir):
         "playlist_url": _sanitize_text(data.get("playlist_url", "")),
         "format_type": _sanitize_text(data.get("format_type", "hls"), max_len=32) or "hls",
         "audio_url": _sanitize_text(data.get("audio_url", "")),
+        "selected_tracks": _sanitize_selected_tracks(
+            data.get("selected_tracks", [])
+        ),
         "ytdlp_source": _sanitize_text(data.get("ytdlp_source", "")),
         "ytdlp_format": _sanitize_text(data.get("ytdlp_format", ""), max_len=1024),
         "ytdlp_format_sort": _sanitize_text(

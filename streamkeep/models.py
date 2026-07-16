@@ -6,6 +6,25 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class MediaTrackInfo:
+    """One selectable video, audio, or subtitle representation."""
+    id: str = ""
+    kind: str = ""                  # video, audio, subtitle
+    label: str = ""
+    language: str = ""
+    url: str = ""
+    group_id: str = ""
+    codec: str = ""
+    bandwidth: int = 0
+    resolution: str = ""
+    stream_index: int = 0
+    default: bool = False
+    autoselect: bool = False
+    forced: bool = False
+    period_id: str = ""
+
+
+@dataclass
 class QualityInfo:
     name: str = ""
     url: str = ""
@@ -15,6 +34,36 @@ class QualityInfo:
     audio_url: str = ""             # If set, video is video-only and needs audio merge
     ytdlp_source: str = ""          # Original page URL for ytdlp_direct downloads
     ytdlp_format: str = ""          # Format spec (e.g. "137+140")
+    tracks: list[MediaTrackInfo] = field(default_factory=list)
+    primary_track_id: str = ""
+
+
+def default_media_tracks(quality):
+    """Return the primary representation plus default companion tracks."""
+    tracks = list(getattr(quality, "tracks", []) or [])
+    if not tracks:
+        return []
+    selected = []
+    primary_id = str(getattr(quality, "primary_track_id", "") or "")
+    primary = next((track for track in tracks if track.id == primary_id), None)
+    if primary is not None:
+        selected.append(primary)
+    elif tracks:
+        selected.append(tracks[0])
+    primary_kind = primary.kind if primary is not None else selected[0].kind
+    if primary_kind != "audio":
+        audio_tracks = [track for track in tracks if track.kind == "audio"]
+        default_audio = next(
+            (track for track in audio_tracks if track.default),
+            audio_tracks[0] if audio_tracks else None,
+        )
+        if default_audio is not None:
+            selected.append(default_audio)
+    selected.extend(
+        track for track in tracks
+        if track.kind == "subtitle" and track.default
+    )
+    return selected
 
 
 @dataclass
@@ -157,6 +206,7 @@ class ResumeState:
     playlist_url: str = ""
     format_type: str = "hls"
     audio_url: str = ""
+    selected_tracks: list[dict[str, object]] = field(default_factory=list)
     ytdlp_source: str = ""
     ytdlp_format: str = ""
     ytdlp_format_sort: str = ""

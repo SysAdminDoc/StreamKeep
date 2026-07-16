@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"
+     mediaPresentationDuration="PT4M30S" minBufferTime="PT2S">
+  <Period id="main">
+    <AdaptationSet id="video" mimeType="video/mp4" contentType="video" codecs="avc1.640028">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <SegmentTemplate media="video/$RepresentationID$/$Number$.m4s" initialization="video/$RepresentationID$/init.mp4"/>
+      <Representation id="v1080" width="1920" height="1080" bandwidth="5200000"/>
+      <Representation id="v720" width="1280" height="720" bandwidth="2600000"/>
+    </AdaptationSet>
+    <AdaptationSet id="audio-en" mimeType="audio/mp4" contentType="audio" lang="en" codecs="mp4a.40.2">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <SegmentTemplate media="audio/en/$RepresentationID$/$Number$.m4s" initialization="audio/en/$RepresentationID$/init.mp4"/>
+      <Representation id="a-en" bandwidth="128000"><Label>English stereo</Label></Representation>
+    </AdaptationSet>
+    <AdaptationSet id="audio-es" mimeType="audio/mp4" contentType="audio" lang="es" codecs="mp4a.40.2">
+      <SegmentTemplate media="audio/es/$RepresentationID$/$Number$.m4s" initialization="audio/es/$RepresentationID$/init.mp4"/>
+      <Representation id="a-es" bandwidth="128000"><Label>Español stereo</Label></Representation>
+    </AdaptationSet>
+    <AdaptationSet id="text-en" mimeType="text/vtt" contentType="text" lang="en" codecs="wvtt">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <SegmentTemplate media="text/en/$Number$.m4s" initialization="text/en/init.mp4"/>
+      <Representation id="s-en" bandwidth="8000"><Label>English captions</Label></Representation>
+    </AdaptationSet>
+    <AdaptationSet id="text-es" mimeType="application/mp4" contentType="text" lang="es" codecs="stpp">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="forced-subtitle"/>
+      <SegmentTemplate media="text/es/$Number$.m4s" initialization="text/es/init.mp4"/>
+      <Representation id="s-es" bandwidth="8000"><Label>Español forced</Label></Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from streamkeep.dash import parse_mpd_xml
 from streamkeep.hls import parse_hls_master, parse_hls_duration
+from streamkeep.models import default_media_tracks
 
 FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
 
@@ -42,6 +43,29 @@ class DashStaticMPDTests(unittest.TestCase):
         has_p2 = any("period2" in u for u in urls)
         self.assertTrue(has_p1, "Period 1 representations missing")
         self.assertTrue(has_p2, "Period 2 representations missing")
+
+    def test_multi_representation_tracks_are_selectable_together(self):
+        qualities = parse_mpd_xml(
+            _read("multi_representation.mpd"),
+            "https://cdn.example.com/live/main.mpd",
+        )
+        self.assertEqual(len(qualities), 6)
+        video = next(q for q in qualities if q.resolution == "1920x1080")
+        self.assertEqual(
+            [track.kind for track in video.tracks],
+            ["video", "video", "audio", "audio", "subtitle", "subtitle"],
+        )
+        self.assertTrue(all(
+            track.url == "https://cdn.example.com/live/main.mpd"
+            for track in video.tracks
+        ))
+        self.assertEqual(
+            [(track.kind, track.language) for track in default_media_tracks(video)],
+            [("video", ""), ("audio", "en"), ("subtitle", "en")],
+        )
+        forced = next(track for track in video.tracks if track.language == "es"
+                      and track.kind == "subtitle")
+        self.assertTrue(forced.forced)
 
 
 class DashDynamicMPDTests(unittest.TestCase):
@@ -101,6 +125,27 @@ class HLSMasterPlaylistTests(unittest.TestCase):
                 f"Variant URL not resolved: {q.url}",
             )
 
+    def test_alternate_audio_and_subtitle_renditions_are_attached(self):
+        qualities = parse_hls_master(
+            _read("alt_renditions.m3u8"),
+            "https://cdn.example.com/live/master.m3u8",
+        )
+        self.assertEqual(len(qualities), 2)
+        tracks = qualities[0].tracks
+        self.assertEqual(
+            [track.kind for track in tracks],
+            ["video", "audio", "audio", "subtitle", "subtitle"],
+        )
+        self.assertEqual(
+            next(track.url for track in tracks if track.language == "es"
+                 and track.kind == "audio"),
+            "https://cdn.example.com/live/audio/es.m3u8",
+        )
+        self.assertEqual(
+            [(track.kind, track.language) for track in default_media_tracks(qualities[0])],
+            [("video", ""), ("audio", "en"), ("subtitle", "en")],
+        )
+
 
 class HLSMediaPlaylistTests(unittest.TestCase):
     def test_media_playlist_duration_and_segments(self):
@@ -113,6 +158,14 @@ class HLSMediaPlaylistTests(unittest.TestCase):
         total, _, seg_count = parse_hls_duration(_read("ll_hls.m3u8"))
         self.assertEqual(seg_count, 2)
         self.assertAlmostEqual(total, 8.0, places=1)
+
+    def test_live_rollover_and_discontinuity_keep_duration_and_count(self):
+        total, start_time, seg_count = parse_hls_duration(
+            _read("live_rollover.m3u8")
+        )
+        self.assertEqual(seg_count, 3)
+        self.assertAlmostEqual(total, 17.5, places=1)
+        self.assertEqual(start_time, "2026-07-16T14:00:00.000Z")
 
 
 if __name__ == "__main__":

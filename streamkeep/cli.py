@@ -22,6 +22,7 @@ from PyQt6.QtCore import QCoreApplication
 from . import VERSION
 from .capabilities import CapabilityUnavailableError, require_capability
 from .extractors.base import Extractor as _ExtBase
+from .models import default_media_tracks
 
 
 def _get_output_stream():
@@ -330,6 +331,7 @@ def _run_download(args):
         # Start download
         dw = DownloadWorker(qi.url, segments, output_dir, qi.format_type)
         dw.audio_url = qi.audio_url
+        dw.selected_tracks = default_media_tracks(qi)
         dw.ytdlp_source = qi.ytdlp_source
         dw.ytdlp_format = (
             output_options["format_spec"]

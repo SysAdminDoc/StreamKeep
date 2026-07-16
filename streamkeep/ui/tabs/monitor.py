@@ -27,6 +27,7 @@ from ...extractors import Extractor
 from ...workers import SeedArchiveWorker, AutoRecordResolveWorker, DownloadWorker
 from ...chat import ChatWorker
 from ...monitor import entry_in_schedule_window
+from ...models import default_media_tracks
 from ...utils import default_output_dir as _default_output_dir
 from ...resume import clear_resume_state
 
@@ -1159,6 +1160,7 @@ class MonitorTabMixin:
         segments = [(0, "live_recording", 0, 0)]
         worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
         worker.audio_url = q.audio_url
+        worker.selected_tracks = default_media_tracks(q)
         worker.ytdlp_source = q.ytdlp_source
         worker.ytdlp_format = q.ytdlp_format
         worker.parallel_connections = self._parallel_connections

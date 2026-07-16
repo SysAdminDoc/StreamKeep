@@ -3,7 +3,7 @@ from unittest import mock
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFrame, QSplitter
 
-from streamkeep.models import HistoryEntry, MonitorEntry
+from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, QualityInfo
 
 
 def _ready_ytdlp_status():
@@ -134,6 +134,40 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 "Archive headers"
             ) >= 0
             assert window.copy_command_btn.isEnabled() is False
+            assert window.track_table.columnCount() == 5
+            assert window.track_section.isVisible() is False
+            from streamkeep.ui.tabs.download import _populate_track_table
+            selectable = QualityInfo(
+                name="1080p", url="https://cdn.example.com/main.mpd",
+                format_type="dash", primary_track_id="v0",
+                tracks=[
+                    MediaTrackInfo(
+                        id="v0", kind="video", label="1080p",
+                        url="https://cdn.example.com/main.mpd", default=True,
+                    ),
+                    MediaTrackInfo(
+                        id="v1", kind="video", label="720p",
+                        url="https://cdn.example.com/main.mpd",
+                        stream_index=1,
+                    ),
+                    MediaTrackInfo(
+                        id="a0", kind="audio", label="English",
+                        language="en", url="https://cdn.example.com/main.mpd",
+                        default=True,
+                    ),
+                ],
+            )
+            window.quality_combo.clear()
+            window.quality_combo.addItem("1080p", selectable)
+            _populate_track_table(window)
+            assert window.track_table.rowCount() == 3
+            assert not window.track_section.isHidden()
+            assert [check.isChecked() for check, _track in window._track_checks] == [
+                True, False, True,
+            ]
+            window._track_checks[1][0].setChecked(True)
+            assert [check.isChecked() for check, track in window._track_checks
+                    if track.kind == "video"] == [False, True]
             assert "border-radius: 999px" not in window.status_pill.styleSheet()
             metric_labels = [
                 getattr(window, f"download_{key}_{suffix}")

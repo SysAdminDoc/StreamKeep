@@ -53,6 +53,25 @@ class ResumeTests(unittest.TestCase):
                         "sponsorblock_api": "https://sponsor.example/api",
                         "download_archive": "C:/archives/source.txt",
                         "break_on_existing": True,
+                        "selected_tracks": [
+                            {
+                                "id": "dash-main-video-v1",
+                                "kind": "video",
+                                "label": "1080p",
+                                "url": "https://cdn.example.com/main.mpd",
+                                "stream_index": 1,
+                                "bandwidth": 5000000,
+                            },
+                            {
+                                "id": "bad-kind",
+                                "kind": "data",
+                                "url": "https://cdn.example.com/main.mpd",
+                            },
+                            {
+                                "id": "missing-url",
+                                "kind": "audio",
+                            },
+                        ],
                         "ytdlp_concurrent_fragments": 4,
                         "ytdlp_retries": "8",
                         "ytdlp_fragment_retries": "infinite",
@@ -96,6 +115,11 @@ class ResumeTests(unittest.TestCase):
                 state.download_archive, "C:/archives/source.txt"
             )
             self.assertTrue(state.break_on_existing)
+            self.assertEqual(len(state.selected_tracks), 1)
+            self.assertEqual(
+                state.selected_tracks[0]["id"], "dash-main-video-v1"
+            )
+            self.assertEqual(state.selected_tracks[0]["stream_index"], 1)
             self.assertEqual(state.ytdlp_concurrent_fragments, 4)
             self.assertEqual(state.ytdlp_retries, "8")
             self.assertEqual(state.ytdlp_fragment_retries, "infinite")

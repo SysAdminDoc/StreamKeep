@@ -13,8 +13,10 @@ import os
 import subprocess
 from unittest import mock
 
+import pytest
+
 from streamkeep.capabilities import CapabilityUnavailableError
-from streamkeep.models import ResumeState
+from streamkeep.models import MediaTrackInfo, ResumeState
 from streamkeep.workers.download import DownloadWorker
 
 
@@ -134,6 +136,65 @@ def test_native_download_exports_equivalent_ffmpeg_plan(tmp_path):
     assert argv[argv.index("-ss") + 1] == "12"
     assert argv[argv.index("-i") + 1] == worker.playlist_url
     assert argv[argv.index("-t") + 1] == "30"
+
+
+def test_selected_tracks_build_explicit_multi_representation_mux(tmp_path):
+    manifest = "https://cdn.example.com/main.mpd"
+    worker = DownloadWorker(
+        manifest, [(0, "capture", 12, 30)], str(tmp_path), "dash"
+    )
+    worker.selected_tracks = [
+        MediaTrackInfo(kind="video", url=manifest, stream_index=1),
+        MediaTrackInfo(kind="audio", language="en", url=manifest, stream_index=0),
+        MediaTrackInfo(kind="audio", language="es", url=manifest, stream_index=1),
+        MediaTrackInfo(kind="subtitle", language="en", url=manifest, stream_index=0),
+    ]
+
+    argv = worker.build_export_argv()
+
+    assert argv.count("-i") == 1
+    assert [argv[i + 1] for i, value in enumerate(argv) if value == "-map"] == [
+        "0:v:1", "0:a:0", "0:a:1", "0:s:0",
+    ]
+    assert argv.count("-ss") == 1
+    assert "language=en" in argv
+    assert "language=es" in argv
+    assert argv[argv.index("-c:s") + 1] == "mov_text"
+
+
+def test_selected_hls_renditions_use_distinct_inputs_and_dedupe(tmp_path):
+    video = "https://cdn.example.com/video.m3u8"
+    audio = "https://cdn.example.com/audio.m3u8"
+    worker = DownloadWorker(
+        video, [(0, "capture", 0, 10)], str(tmp_path), "hls"
+    )
+    worker.selected_tracks = [
+        MediaTrackInfo(kind="video", url=video),
+        MediaTrackInfo(kind="audio", language="en", url=audio),
+        MediaTrackInfo(kind="subtitle", language="en", url=video),
+    ]
+
+    argv = worker.build_export_argv()
+
+    inputs = [argv[i + 1] for i, value in enumerate(argv) if value == "-i"]
+    assert inputs == [video, audio]
+    assert [argv[i + 1] for i, value in enumerate(argv) if value == "-map"] == [
+        "0:v:0", "1:a:0", "0:s:0",
+    ]
+
+
+def test_selected_tracks_reject_multiple_video_representations(tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/main.mpd",
+        [(0, "capture", 0, 10)], str(tmp_path), "dash",
+    )
+    worker.selected_tracks = [
+        MediaTrackInfo(kind="video", url=worker.playlist_url, stream_index=0),
+        MediaTrackInfo(kind="video", url=worker.playlist_url, stream_index=1),
+    ]
+
+    with pytest.raises(ValueError, match="at most one video"):
+        worker.build_export_argv()
 
 
 def test_resume_sidecar_keeps_template_secret_in_secure_config(tmp_path):

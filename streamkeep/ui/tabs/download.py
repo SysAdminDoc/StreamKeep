@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QListWidget, QMenu, QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
-    QVBoxLayout, QWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ...theme import CAT
@@ -283,6 +283,75 @@ def _populate_adv_subtitles(win, info=None):
         if tracks else "Fetch a yt-dlp source to list its subtitle languages"
     )
     _refresh_adv_subtitle_controls(win)
+
+
+def _on_track_toggled(win, checkbox, track, checked):
+    if not checked or getattr(track, "kind", "") != "video":
+        return
+    for other_checkbox, other_track in win._track_checks:
+        if (other_checkbox is not checkbox
+                and getattr(other_track, "kind", "") == "video"
+                and other_checkbox.isChecked()):
+            other_checkbox.setChecked(False)
+
+
+def _populate_track_table(win):
+    """Show the selected quality's HLS/DASH representation matrix."""
+    if not hasattr(win, "track_table"):
+        return
+    quality = win.quality_combo.currentData() if hasattr(win, "quality_combo") else None
+    tracks = list(getattr(quality, "tracks", []) or [])
+    win.track_table.setRowCount(0)
+    win._track_checks = []
+    win.track_section.setVisible(bool(tracks))
+    if not tracks:
+        return
+    from ...models import default_media_tracks
+    selected_ids = {track.id for track in default_media_tracks(quality)}
+    win.track_table.setRowCount(len(tracks))
+    for row, track in enumerate(tracks):
+        checkbox = QCheckBox()
+        checkbox.setChecked(track.id in selected_ids)
+        checkbox.toggled.connect(
+            lambda checked, cb=checkbox, item=track:
+            _on_track_toggled(win, cb, item, checked)
+        )
+        holder = QWidget()
+        holder_lay = QHBoxLayout(holder)
+        holder_lay.setContentsMargins(0, 0, 0, 0)
+        holder_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        holder_lay.addWidget(checkbox)
+        win.track_table.setCellWidget(row, 0, holder)
+        win.track_table.setItem(row, 1, QTableWidgetItem(track.kind.title()))
+        win.track_table.setItem(
+            row, 2, QTableWidgetItem(track.language or "—")
+        )
+        flags = []
+        if track.default:
+            flags.append("default")
+        if track.forced:
+            flags.append("forced")
+        label = track.label or track.id
+        if flags:
+            label += f" ({', '.join(flags)})"
+        win.track_table.setItem(row, 3, QTableWidgetItem(label))
+        detail = track.codec or ""
+        if track.resolution:
+            detail = f"{track.resolution}  {detail}".strip()
+        if track.bandwidth:
+            detail += f"  {track.bandwidth // 1000} kbps"
+        win.track_table.setItem(row, 4, QTableWidgetItem(detail.strip() or "—"))
+        win._track_checks.append((checkbox, track))
+    win.track_summary_label.setText(
+        f"{len(tracks)} representation(s); select one video and any audio/subtitle tracks."
+    )
+
+
+def get_selected_media_tracks(win):
+    return [
+        track for checkbox, track in getattr(win, "_track_checks", [])
+        if checkbox.isChecked()
+    ]
 
 
 def build_download_tab(win):
@@ -651,6 +720,44 @@ def build_download_tab(win):
     controls_lay.setColumnStretch(3, 2)
     crop_block.setVisible(False)
     root.addWidget(controls_card)
+
+    win.track_section = QFrame()
+    win.track_section.setObjectName("workSection")
+    track_lay = QVBoxLayout(win.track_section)
+    track_lay.setContentsMargins(14, 12, 14, 12)
+    track_lay.setSpacing(8)
+    track_header = QHBoxLayout()
+    track_title = QLabel("Media tracks")
+    track_title.setObjectName("sectionTitle")
+    track_header.addWidget(track_title)
+    track_header.addStretch(1)
+    win.track_summary_label = QLabel("")
+    win.track_summary_label.setObjectName("tableHint")
+    track_header.addWidget(win.track_summary_label)
+    track_lay.addLayout(track_header)
+    win.track_table = QTableWidget()
+    win.track_table.setColumnCount(5)
+    win.track_table.setHorizontalHeaderLabels(
+        ["Use", "Type", "Language", "Track", "Codec / rate"]
+    )
+    track_header_view = win.track_table.horizontalHeader()
+    track_header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+    track_header_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+    track_header_view.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+    track_header_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+    track_header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+    win.track_table.setColumnWidth(0, 48)
+    win.track_table.setColumnWidth(1, 90)
+    win.track_table.setColumnWidth(2, 100)
+    win.track_table.verticalHeader().setVisible(False)
+    win.track_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    win.track_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    win.track_table.setMaximumHeight(240)
+    style_table(win.track_table, 36)
+    track_lay.addWidget(win.track_table)
+    win.track_section.setVisible(False)
+    win._track_checks = []
+    root.addWidget(win.track_section)
 
     # ── Per-Download Settings Override (F18) ──────────────────────
     adv_toggle_row = QHBoxLayout()
@@ -1259,7 +1366,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QFileDialog, QProgressBar, QTableWidgetItem,
+    QFileDialog, QProgressBar,
 )
 from PyQt6.QtGui import QColor, QDesktopServices
 
@@ -1614,6 +1721,7 @@ class DownloadTabMixin:
             self.quality_combo.setCurrentIndex(selected_idx)
         self.quality_combo.setEnabled(len(qualities) > 0)
         self.quality_combo.blockSignals(False)
+        _populate_track_table(self)
         if not qualities:
             self._log("[WARN] No playable qualities found for this URL.")
 
@@ -2076,6 +2184,9 @@ class DownloadTabMixin:
 
         worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         worker.audio_url = audio_url
+        if selected_q:
+            from ...models import default_media_tracks
+            worker.selected_tracks = default_media_tracks(selected_q)
         worker.ytdlp_source = ytdlp_source
         worker.ytdlp_format = ytdlp_format
         worker.cookies_browser = YtDlpExtractor.cookies_browser
@@ -2337,6 +2448,7 @@ class DownloadTabMixin:
 
     def _on_quality_changed(self, idx):
         """Rebuild size estimates in the segment table when quality changes."""
+        _populate_track_table(self)
         if not self.stream_info or not hasattr(self, "_segment_progress"):
             return
         total_secs = self.stream_info.total_secs
@@ -2410,6 +2522,7 @@ class DownloadTabMixin:
         is_live_capture = bool(self.stream_info.is_live or total_secs <= 0)
 
         q_data = self.quality_combo.currentData()
+        selected_tracks = get_selected_media_tracks(self)
         audio_url = ""
         ytdlp_source = ""
         ytdlp_format = ""
@@ -2419,6 +2532,14 @@ class DownloadTabMixin:
             audio_url = q_data.audio_url
             ytdlp_source = q_data.ytdlp_source
             ytdlp_format = q_data.ytdlp_format
+            if q_data.tracks and not any(
+                track.kind in {"video", "audio"} for track in selected_tracks
+            ):
+                self._log("[ERROR] No playable media tracks selected")
+                self._set_status(
+                    "Select at least one video or audio track.", "warning"
+                )
+                return False
         elif self.stream_info.url:
             playlist_url = self.stream_info.url
             fmt_type = "hls"
@@ -2637,6 +2758,7 @@ class DownloadTabMixin:
         )
         self.download_worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         self.download_worker.audio_url = audio_url
+        self.download_worker.selected_tracks = selected_tracks
         self.download_worker.ytdlp_source = ytdlp_source
         self.download_worker.ytdlp_format = ytdlp_format
         self.download_worker.ytdlp_format_sort = ytdlp_options["format_sort"]
@@ -3670,6 +3792,9 @@ class DownloadTabMixin:
         self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
         worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         worker.audio_url = audio_url
+        if q_data:
+            from ...models import default_media_tracks
+            worker.selected_tracks = default_media_tracks(q_data)
         worker.ytdlp_source = ytdlp_source
         worker.ytdlp_format = ytdlp_format
         worker.cookies_browser = YtDlpExtractor.cookies_browser

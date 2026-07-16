@@ -1686,6 +1686,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             # every 24h) get refreshed before ffmpeg hits them with a 403.
             refreshed_url = state.playlist_url
             refreshed_audio = state.audio_url
+            refreshed_tracks = list(state.selected_tracks or [])
             if state.source_url:
                 ext = Extractor.detect(state.source_url)
                 if ext:
@@ -1704,8 +1705,22 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
                                 break
                         refreshed_url = chosen.url or refreshed_url
                         refreshed_audio = chosen.audio_url or refreshed_audio
+                        fresh_tracks = {
+                            track.id: track
+                            for track in list(getattr(chosen, "tracks", []) or [])
+                            if getattr(track, "id", "")
+                        }
+                        if refreshed_tracks and fresh_tracks:
+                            refreshed_tracks = [
+                                fresh_tracks.get(str(track.get("id", ""))) or track
+                                for track in refreshed_tracks
+                            ]
                         state.playlist_url = refreshed_url
                         state.audio_url = refreshed_audio
+                        state.selected_tracks = [
+                            DownloadWorker._track_record(track)
+                            for track in refreshed_tracks
+                        ]
                         save_resume_state(state)
             remaining = remaining_segments(state)
             if not remaining:
@@ -1732,6 +1747,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
                 format_type=state.format_type or "hls",
             )
             worker.audio_url = refreshed_audio or ""
+            worker.selected_tracks = refreshed_tracks
             worker.ytdlp_source = state.ytdlp_source or ""
             worker.ytdlp_format = state.ytdlp_format or ""
             worker.ytdlp_format_sort = state.ytdlp_format_sort or ""

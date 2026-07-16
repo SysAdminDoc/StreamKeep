@@ -43,6 +43,7 @@ class DownloadWorker(QThread):
         self.output_dir = output_dir
         self.format_type = format_type
         self.audio_url = ""
+        self.selected_tracks = []
         self.ytdlp_source = ""
         self.ytdlp_format = ""
         self.ytdlp_format_sort = ""
@@ -109,6 +110,9 @@ class DownloadWorker(QThread):
             state.playlist_url = self.playlist_url
             state.format_type = self.format_type
             state.audio_url = self.audio_url or ""
+            state.selected_tracks = [
+                self._track_record(track) for track in self.selected_tracks
+            ]
             state.ytdlp_source = self.ytdlp_source or ""
             state.ytdlp_format = self.ytdlp_format or ""
             state.ytdlp_format_sort = self.ytdlp_format_sort or ""
@@ -336,6 +340,10 @@ class DownloadWorker(QThread):
         """Build the native FFmpeg plan used by execution and command export."""
         executable = executable or self._ffmpeg_path or resolve_tool_command("ffmpeg")
         is_live_capture = duration <= 0
+        if self.selected_tracks:
+            return self._build_selected_track_cmd(
+                outfile, start, duration, executable=executable,
+            )
         chunk_mode = (
             is_live_capture
             and self.chunk_length_secs > 0
@@ -377,6 +385,98 @@ class DownloadWorker(QThread):
         if not is_live_capture:
             cmd.extend(["-t", str(duration)])
         cmd.extend(["-y", outfile])
+        return cmd
+
+    @staticmethod
+    def _track_record(track):
+        fields = (
+            "id", "kind", "label", "language", "url", "group_id", "codec",
+            "bandwidth", "resolution", "stream_index", "default",
+            "autoselect", "forced", "period_id",
+        )
+        if isinstance(track, dict):
+            return {name: track.get(name) for name in fields}
+        return {name: getattr(track, name, None) for name in fields}
+
+    def _build_selected_track_cmd(
+        self, outfile, start, duration, *, executable,
+    ):
+        records = [self._track_record(track) for track in self.selected_tracks]
+        if len(records) > 32:
+            raise ValueError("at most 32 media tracks can be muxed")
+        allowed = {"video": "v", "audio": "a", "subtitle": "s"}
+        for record in records:
+            kind = str(record.get("kind") or "")
+            url = str(record.get("url") or "")
+            if kind not in allowed or not url:
+                raise ValueError("selected media tracks require a kind and URL")
+            try:
+                stream_index = int(record.get("stream_index") or 0)
+            except (TypeError, ValueError) as error:
+                raise ValueError("media track stream index must be an integer") from error
+            if not 0 <= stream_index <= 255:
+                raise ValueError("media track stream index must be between 0 and 255")
+            record["stream_index"] = stream_index
+        if sum(record["kind"] == "video" for record in records) > 1:
+            raise ValueError("select at most one video representation")
+        if not any(record["kind"] in {"video", "audio"} for record in records):
+            raise ValueError("select at least one video or audio representation")
+
+        records = [record for _index, record in sorted(
+            enumerate(records),
+            key=lambda item: (
+                {"video": 0, "audio": 1, "subtitle": 2}[item[1]["kind"]],
+                item[0],
+            ),
+        )]
+        inputs = []
+        input_indexes = {}
+        for record in records:
+            url = str(record["url"])
+            if url not in input_indexes:
+                input_indexes[url] = len(inputs)
+                inputs.append(url)
+
+        cmd = [
+            executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+        ]
+        for url in inputs:
+            if start > 0:
+                cmd.extend(["-ss", str(start)])
+            cmd.extend(["-i", url])
+        output_indexes = {"audio": 0, "subtitle": 0}
+        for record in records:
+            kind = record["kind"]
+            selector = allowed[kind]
+            input_index = input_indexes[str(record["url"])]
+            cmd.extend([
+                "-map", f"{input_index}:{selector}:{record['stream_index']}"
+            ])
+            language = str(record.get("language") or "").strip()
+            if language and kind in output_indexes:
+                output_index = output_indexes[kind]
+                cmd.extend([
+                    f"-metadata:s:{selector}:{output_index}",
+                    f"language={language}",
+                ])
+            if kind in output_indexes:
+                output_indexes[kind] += 1
+        if any(record["kind"] == "video" for record in records):
+            cmd.extend(["-c:v", "copy"])
+        if any(record["kind"] == "audio" for record in records):
+            cmd.extend(["-c:a", "copy"])
+        if any(record["kind"] == "subtitle" for record in records):
+            cmd.extend(["-c:s", "mov_text"])
+        if duration > 0:
+            cmd.extend(["-t", str(duration)])
+        if duration <= 0 and self.chunk_length_secs > 0:
+            base = os.path.splitext(outfile)[0] + "_part%03d.mp4"
+            cmd.extend([
+                "-f", "segment", "-segment_time", str(int(self.chunk_length_secs)),
+                "-reset_timestamps", "1", "-strftime", "0", "-y", base,
+            ])
+        else:
+            cmd.extend(["-y", outfile])
         return cmd
 
     def build_export_argv(self, label=None):
@@ -740,6 +840,7 @@ class DownloadWorker(QThread):
 
             # Multi-connection parallel download for direct MP4 URLs
             if (self.format_type == "mp4" and not self.audio_url
+                    and not self.selected_tracks
                     and self.parallel_connections > 1):
                 worker_ref = self
 
