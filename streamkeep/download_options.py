@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import os
+import shlex
+import subprocess
 import urllib.parse
 from datetime import datetime
 
@@ -67,6 +70,7 @@ _AUDIO_QUALITY_RE = re.compile(
 _RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
 _WAIT_FOR_VIDEO_RE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 _RETRY_SLEEP_RE = re.compile(r"[A-Za-z0-9_.:+*/=,-]+")
+_TEMPLATE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
 YTDLP_TRANSFER_FIELDS = (
     "concurrent_fragments",
     "retries",
@@ -112,12 +116,74 @@ def validate_ytdlp_template_args(args):
         if not arg:
             raise ValueError("yt-dlp template arguments cannot be empty")
         option = arg.split("=", 1)[0].lower()
+        if option == "--":
+            raise ValueError("yt-dlp template cannot end option parsing with --")
         if option in YTDLP_TEMPLATE_DENIED_OPTIONS:
             raise ValueError(f"yt-dlp template option is not allowed: {option}")
         if option.startswith("-a") and option != "--":
             raise ValueError("yt-dlp template option is not allowed: -a")
         validated.append(arg)
     return tuple(validated)
+
+
+def normalize_ytdlp_arg_templates(templates):
+    """Validate a bounded ``name -> argv`` template registry.
+
+    Names are display labels. Values remain argument arrays throughout the
+    application and are never parsed as shell command strings.
+    """
+    if templates in (None, {}):
+        return {}
+    if not isinstance(templates, dict):
+        raise ValueError("yt-dlp argument templates must be an object")
+    if len(templates) > 32:
+        raise ValueError("at most 32 yt-dlp argument templates are supported")
+    normalized = {}
+    for raw_name, raw_args in templates.items():
+        if not isinstance(raw_name, str):
+            raise ValueError("yt-dlp template names must be strings")
+        name = raw_name.strip()
+        if not _TEMPLATE_NAME_RE.fullmatch(name):
+            raise ValueError(
+                "yt-dlp template names must be 1-64 letters, numbers, spaces, "
+                "dots, underscores, or hyphens"
+            )
+        normalized[name] = list(validate_ytdlp_template_args(raw_args))
+    return normalized
+
+
+def parse_ytdlp_template_text(text):
+    """Parse the settings editor's one-argument-per-line representation."""
+    if not isinstance(text, str):
+        raise ValueError("yt-dlp template editor value must be text")
+    args = [line.strip() for line in text.splitlines() if line.strip()]
+    if not args:
+        raise ValueError("yt-dlp template must contain at least one argument")
+    return validate_ytdlp_template_args(args)
+
+
+def resolve_ytdlp_arg_template(templates, name):
+    """Return one validated named template, or an empty tuple for no template."""
+    name = str(name or "").strip()
+    if not name:
+        return ()
+    normalized = normalize_ytdlp_arg_templates(templates)
+    try:
+        return tuple(normalized[name])
+    except KeyError as error:
+        raise ValueError(f"Unknown yt-dlp argument template: {name}") from error
+
+
+def format_command_argv(argv, *, windows=None):
+    """Format a generated argv for the host shell without evaluating it."""
+    if isinstance(argv, (str, bytes)) or not isinstance(argv, (list, tuple)):
+        raise ValueError("command must be a structured argument list")
+    values = [str(value) for value in argv]
+    if not values or any(not value for value in values):
+        raise ValueError("command arguments cannot be empty")
+    if windows is None:
+        windows = os.name == "nt"
+    return subprocess.list2cmdline(values) if windows else shlex.join(values)
 
 
 def resolve_format_sort(*, preset="", custom=""):

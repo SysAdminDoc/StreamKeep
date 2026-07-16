@@ -275,6 +275,73 @@ def _on_pp_preset_delete(win):
 class SettingsTabMixin:
     """Settings-tab handler methods, mixed into ``StreamKeep``."""
 
+    def _refresh_ytdlp_template_editor(self, selected=""):
+        from ...download_options import normalize_ytdlp_arg_templates
+        try:
+            templates = normalize_ytdlp_arg_templates(
+                self._config.get("ytdlp_arg_templates", {})
+            )
+        except ValueError:
+            templates = {}
+        self._config["ytdlp_arg_templates"] = templates
+        combo = self.ytdlp_template_editor_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("New template", userData="")
+        for name in sorted(templates, key=str.casefold):
+            combo.addItem(name, userData=name)
+        index = combo.findData(selected)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+        self._on_ytdlp_template_selected()
+        if hasattr(self, "adv_ytdlp_template_combo"):
+            from .download import _populate_adv_ytdlp_templates
+            _populate_adv_ytdlp_templates(self)
+
+    def _on_ytdlp_template_selected(self):
+        name = self.ytdlp_template_editor_combo.currentData() or ""
+        templates = self._config.get("ytdlp_arg_templates", {})
+        self.ytdlp_template_name_input.setText(name)
+        self.ytdlp_template_args_edit.setPlainText(
+            "\n".join(templates.get(name, [])) if name else ""
+        )
+        self.ytdlp_template_delete_btn.setEnabled(bool(name))
+
+    def _on_ytdlp_template_save(self):
+        from ...download_options import (
+            normalize_ytdlp_arg_templates, parse_ytdlp_template_text,
+        )
+        name = self.ytdlp_template_name_input.text().strip()
+        try:
+            args = list(parse_ytdlp_template_text(
+                self.ytdlp_template_args_edit.toPlainText()
+            ))
+            templates = dict(self._config.get("ytdlp_arg_templates", {}))
+            templates[name] = args
+            templates = normalize_ytdlp_arg_templates(templates)
+        except ValueError as error:
+            self._set_status(str(error), "warning")
+            return
+        self._config["ytdlp_arg_templates"] = templates
+        self._refresh_ytdlp_template_editor(name)
+        self._persist_config()
+        self._set_status(f'Saved yt-dlp argument template "{name}".', "success")
+
+    def _on_ytdlp_template_delete(self):
+        name = self.ytdlp_template_editor_combo.currentData() or ""
+        if not name:
+            return
+        templates = dict(self._config.get("ytdlp_arg_templates", {}))
+        templates.pop(name, None)
+        self._config["ytdlp_arg_templates"] = templates
+        monitor = getattr(self, "monitor", None)
+        for entry in getattr(monitor, "entries", []):
+            if getattr(entry, "ytdlp_template_name", "") == name:
+                entry.ytdlp_template_name = ""
+        self._refresh_ytdlp_template_editor()
+        self._persist_config()
+        self._set_status(f'Deleted yt-dlp argument template "{name}".', "success")
+
     # ── Manual converter ─────────────────────────────────────────────
 
     def _on_convert_files_clicked(self):
@@ -2075,6 +2142,50 @@ def build_settings_tab(win):
         setattr(win, f"ytdlp_embed_{name}_combo", combo)
         embed_row.addWidget(combo)
     network_lay.addLayout(embed_row)
+
+    template_hint = QLabel(
+        "Named yt-dlp argument templates use one argv element per line. "
+        "They never run through a shell; command/config delegation and link "
+        "writers are rejected. Templates can be attached in Download Advanced "
+        "or a monitor channel profile."
+    )
+    template_hint.setObjectName("subtleText")
+    template_hint.setWordWrap(True)
+    network_lay.addWidget(template_hint)
+
+    template_pick_row = QHBoxLayout()
+    template_pick_row.addWidget(QLabel("Argument template:"))
+    win.ytdlp_template_editor_combo = QComboBox()
+    win.ytdlp_template_editor_combo.currentIndexChanged.connect(
+        win._on_ytdlp_template_selected
+    )
+    template_pick_row.addWidget(win.ytdlp_template_editor_combo, 1)
+    win.ytdlp_template_name_input = QLineEdit()
+    win.ytdlp_template_name_input.setMaxLength(64)
+    win.ytdlp_template_name_input.setPlaceholderText("Template name")
+    template_pick_row.addWidget(win.ytdlp_template_name_input, 1)
+    network_lay.addLayout(template_pick_row)
+
+    win.ytdlp_template_args_edit = QPlainTextEdit()
+    win.ytdlp_template_args_edit.setMaximumHeight(120)
+    win.ytdlp_template_args_edit.setPlaceholderText(
+        "--add-header\nReferer: https://example.com/\n--user-agent\nArchive workstation"
+    )
+    network_lay.addWidget(win.ytdlp_template_args_edit)
+    template_action_row = QHBoxLayout()
+    template_action_row.addStretch(1)
+    win.ytdlp_template_delete_btn = QPushButton("Delete template")
+    win.ytdlp_template_delete_btn.setObjectName("ghost")
+    win.ytdlp_template_delete_btn.clicked.connect(
+        win._on_ytdlp_template_delete
+    )
+    template_action_row.addWidget(win.ytdlp_template_delete_btn)
+    win.ytdlp_template_save_btn = QPushButton("Save template")
+    win.ytdlp_template_save_btn.setObjectName("secondary")
+    win.ytdlp_template_save_btn.clicked.connect(win._on_ytdlp_template_save)
+    template_action_row.addWidget(win.ytdlp_template_save_btn)
+    network_lay.addLayout(template_action_row)
+    win._refresh_ytdlp_template_editor()
 
     proxy_row = QHBoxLayout()
     proxy_row.setSpacing(8)

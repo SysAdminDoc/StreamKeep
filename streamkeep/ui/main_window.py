@@ -561,7 +561,9 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self._parallel_connections = max(1, min(16, conns))
         if hasattr(self, "parallel_spin"):
             self.parallel_spin.setValue(self._parallel_connections)
-        from streamkeep.download_options import validate_ytdlp_transfer_options
+        from streamkeep.download_options import (
+            normalize_ytdlp_arg_templates, validate_ytdlp_transfer_options,
+        )
         try:
             transfer_options = validate_ytdlp_transfer_options(
                 concurrent_fragments=cfg.get("ytdlp_concurrent_fragments", 0),
@@ -582,6 +584,15 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             transfer_options = validate_ytdlp_transfer_options()
         for name, value in transfer_options.items():
             setattr(YtDlpExtractor, f"ytdlp_{name}", value)
+        try:
+            self._config["ytdlp_arg_templates"] = normalize_ytdlp_arg_templates(
+                cfg.get("ytdlp_arg_templates", {})
+            )
+        except ValueError:
+            self._config["ytdlp_arg_templates"] = {}
+        if hasattr(self, "adv_ytdlp_template_combo"):
+            from streamkeep.ui.tabs.download import _populate_adv_ytdlp_templates
+            _populate_adv_ytdlp_templates(self)
         # v4.15.0: parallel auto-records + chunked live captures.
         try:
             par_ar = int(cfg.get("parallel_autorecords", 2))
@@ -1740,6 +1751,12 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.break_on_existing = bool(state.break_on_existing)
             from streamkeep.download_options import apply_ytdlp_transfer_options
             apply_ytdlp_transfer_options(worker, state)
+            worker.ytdlp_template_name = state.ytdlp_template_name or ""
+            from streamkeep.download_options import resolve_ytdlp_arg_template
+            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}),
+                worker.ytdlp_template_name,
+            )
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy

@@ -320,6 +320,26 @@ class HeadlessJobService(QObject):
         )
         from .download_options import apply_ytdlp_transfer_options
         apply_ytdlp_transfer_options(worker, self.config)
+        template_name = str(job.get("arg_template", "") or "")
+        if template_name and format_type != "ytdlp_direct":
+            self._fail_job(
+                job_id, "download",
+                "yt-dlp argument templates require a yt-dlp direct source",
+                info=info, output_dir=output_dir,
+            )
+            return
+        try:
+            from .download_options import resolve_ytdlp_arg_template
+            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+                self.config.get("ytdlp_arg_templates", {}), template_name,
+            )
+            worker.ytdlp_template_name = template_name
+        except ValueError as error:
+            self._fail_job(
+                job_id, "download", str(error), info=info,
+                output_dir=output_dir,
+            )
+            return
         if bool(self.config.get("chunk_long_captures", False)):
             try:
                 worker.chunk_length_secs = max(

@@ -190,6 +190,9 @@ def _sanitize_resume_payload(data, output_dir):
         "ytdlp_embed_thumbnail": _sanitize_optional_bool(
             data.get("ytdlp_embed_thumbnail")
         ),
+        "ytdlp_template_name": _sanitize_text(
+            data.get("ytdlp_template_name", ""), max_len=64
+        ),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),
         "completed": _sanitize_completed(data.get("completed", [])),

@@ -291,6 +291,7 @@ class ChannelMonitor(QObject):
             "retention_keep_last": int(e.retention_keep_last or 0),
             "filter_keywords": e.filter_keywords or "",
             "override_pp_preset": e.override_pp_preset or "",
+            "ytdlp_template_name": e.ytdlp_template_name or "",
             "auto_upgrade": bool(e.auto_upgrade),
             "min_upgrade_quality": e.min_upgrade_quality or "",
         }
@@ -312,6 +313,7 @@ class ChannelMonitor(QObject):
                 "retention_keep_last": int(e.retention_keep_last or 0),
                 "filter_keywords": e.filter_keywords or "",
                 "override_pp_preset": e.override_pp_preset or "",
+                "ytdlp_template_name": e.ytdlp_template_name or "",
                 "auto_upgrade": bool(e.auto_upgrade),
                 "min_upgrade_quality": e.min_upgrade_quality or "",
             }
@@ -361,6 +363,9 @@ class ChannelMonitor(QObject):
                         e.retention_keep_last = 0
                     e.filter_keywords = str(ch.get("filter_keywords", "") or "")
                     e.override_pp_preset = str(ch.get("override_pp_preset", "") or "")
+                    e.ytdlp_template_name = str(
+                        ch.get("ytdlp_template_name", "") or ""
+                    )
                     e.auto_upgrade = bool(ch.get("auto_upgrade", False))
                     e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
                     break

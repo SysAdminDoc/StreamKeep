@@ -111,6 +111,7 @@ _INT_CONFIG_KEYS = frozenset({
 _DICT_CONFIG_KEYS = frozenset({
     "bandwidth_rule", "speed_schedule", "quality_defaults", "pp_presets",
     "lifecycle", "media_server", "schedules", "storage_snapshots", "hooks",
+    "ytdlp_arg_templates",
 })
 _LIST_CONFIG_KEYS = frozenset({"recent_urls", "proxy_pool"})
 _FORBIDDEN_IMPORT_KEYS = frozenset({
@@ -383,6 +384,7 @@ def _validate_config_schema(config):
     _validate_proxy_pool_schema(config.get("proxy_pool", []))
     _validate_media_server_schema(config.get("media_server", {}))
     _validate_lifecycle_schema(config.get("lifecycle", {}))
+    _validate_ytdlp_templates_schema(config.get("ytdlp_arg_templates", {}))
     _reject_imported_secret_handles(config)
 
 
@@ -483,6 +485,16 @@ def _validate_lifecycle_schema(value):
             isinstance(value[key], bool) or not isinstance(value[key], (int, float))
         ):
             raise ConfigImportError(f"lifecycle.{key} must be numeric")
+
+
+def _validate_ytdlp_templates_schema(value):
+    if not value:
+        return
+    from .download_options import normalize_ytdlp_arg_templates
+    try:
+        normalize_ytdlp_arg_templates(value)
+    except ValueError as error:
+        raise ConfigImportError(str(error)) from error
 
 
 def _quarantine_import_capabilities(config):

@@ -138,6 +138,12 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     ])
     assert sponsor_args.sponsorblock_mark == "intro,chapter"
     assert sponsor_args.sponsorblock_remove == "sponsor"
+
+    template_args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--arg-template", "Authenticated archive",
+    ])
+    assert template_args.arg_template == "Authenticated archive"
     assert sponsor_args.sponsorblock_api == "https://sponsor.example/api"
 
     transfer_args = cli.build_parser().parse_args([

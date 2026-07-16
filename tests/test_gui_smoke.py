@@ -59,6 +59,11 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
         "output_dir": str(tmp_path),
         "check_for_updates": False,
         "companion_server_enabled": False,
+        "ytdlp_arg_templates": {
+            "Archive headers": [
+                "--add-header", "Referer: https://example.com/",
+            ],
+        },
     }
     recording_dir = tmp_path / "recording"
     recording_dir.mkdir()
@@ -122,6 +127,13 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.download_hero_title.text() == "New download"
             assert window.scan_lan_check.text() == "Allow LAN for this scan"
             assert not window.scan_lan_check.isChecked()
+            assert window.adv_ytdlp_template_combo.findData(
+                "Archive headers"
+            ) >= 0
+            assert window.ytdlp_template_editor_combo.findData(
+                "Archive headers"
+            ) >= 0
+            assert window.copy_command_btn.isEnabled() is False
             assert "border-radius: 999px" not in window.status_pill.styleSheet()
             metric_labels = [
                 getattr(window, f"download_{key}_{suffix}")
@@ -156,17 +168,22 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert current_language() == "es"
             assert install_translator("en", qt_application) is True
 
+            monitor_dialog = MonitorEntryDialog(
+                window,
+                MonitorEntry(
+                    url="https://example.com/channel",
+                    platform="Example",
+                    channel_id="example-channel",
+                    ytdlp_template_name="Archive headers",
+                ),
+                globals_preview=config,
+            )
+            assert monitor_dialog.ytdlp_template_combo.currentData() == (
+                "Archive headers"
+            )
             dialogs = [
                 NotificationLogDialog(window, window._notifications),
-                MonitorEntryDialog(
-                    window,
-                    MonitorEntry(
-                        url="https://example.com/channel",
-                        platform="Example",
-                        channel_id="example-channel",
-                    ),
-                    globals_preview=config,
-                ),
+                monitor_dialog,
                 RenameDialog(
                     window,
                     [

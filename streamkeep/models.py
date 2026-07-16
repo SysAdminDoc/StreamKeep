@@ -128,6 +128,7 @@ class MonitorEntry:
     retention_keep_last: int = 0          # 0 = keep everything
     filter_keywords: str = ""             # comma-separated keywords for title matching (F3)
     override_pp_preset: str = ""          # named post-processing preset (F7)
+    ytdlp_template_name: str = ""         # named structured argv template
     auto_upgrade: bool = False            # re-download when higher quality VOD appears (F25)
     min_upgrade_quality: str = ""         # minimum quality to trigger upgrade (e.g. "1080p")
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
@@ -184,6 +185,7 @@ class ResumeState:
     ytdlp_embed_chapters: bool | None = None
     ytdlp_embed_metadata: bool | None = None
     ytdlp_embed_thumbnail: bool | None = None
+    ytdlp_template_name: str = ""
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

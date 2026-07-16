@@ -26,7 +26,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _write_lock = threading.Lock()
 
@@ -55,6 +55,8 @@ def init_db() -> None:
                 _migrate_queue_v4(db)
             if v >= 1 and v < 5:
                 _migrate_queue_v5(db)
+            if v >= 1 and v < 6:
+                _migrate_monitor_v6(db)
             _apply_schema(db)
             try:
                 db.execute(
@@ -113,6 +115,7 @@ def _apply_schema(db):
             retention_keep_last         INTEGER NOT NULL DEFAULT 0,
             filter_keywords             TEXT    NOT NULL DEFAULT '',
             override_pp_preset          TEXT    NOT NULL DEFAULT '',
+            ytdlp_template_name         TEXT    NOT NULL DEFAULT '',
             auto_upgrade                INTEGER NOT NULL DEFAULT 0,
             min_upgrade_quality         TEXT    NOT NULL DEFAULT ''
         );
@@ -256,6 +259,22 @@ def _migrate_queue_v5(db):
         db.execute(
             "UPDATE download_queue SET job_id = ?, data = ? WHERE id = ?",
             (job_id, json.dumps(data, ensure_ascii=False), row[0]),
+        )
+
+
+def _migrate_monitor_v6(db):
+    """Add the named yt-dlp argument-template attachment to monitor jobs."""
+    existing_cols = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(monitor_channels)"
+        ).fetchall()
+    }
+    if not existing_cols:
+        return
+    if "ytdlp_template_name" not in existing_cols:
+        db.execute(
+            "ALTER TABLE monitor_channels ADD COLUMN "
+            "ytdlp_template_name TEXT NOT NULL DEFAULT ''"
         )
 
 
@@ -429,8 +448,8 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                      override_filename_template,
                      schedule_start_hhmm, schedule_end_hhmm, schedule_days_mask,
                      retention_keep_last, filter_keywords, override_pp_preset,
-                     auto_upgrade, min_upgrade_quality)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     ytdlp_template_name, auto_upgrade, min_upgrade_quality)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("url", "")),
                 str(entry_dict.get("platform", "")),
@@ -448,6 +467,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                 int(entry_dict.get("retention_keep_last", 0) or 0),
                 str(entry_dict.get("filter_keywords", "") or ""),
                 str(entry_dict.get("override_pp_preset", "") or ""),
+                str(entry_dict.get("ytdlp_template_name", "") or ""),
                 int(bool(entry_dict.get("auto_upgrade", False))),
                 str(entry_dict.get("min_upgrade_quality", "") or ""),
             ))
@@ -473,8 +493,8 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                          schedule_start_hhmm, schedule_end_hhmm,
                          schedule_days_mask, retention_keep_last,
                          filter_keywords, override_pp_preset,
-                         auto_upgrade, min_upgrade_quality)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ytdlp_template_name, auto_upgrade, min_upgrade_quality)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     str(d.get("url", "")),
                     str(d.get("platform", "")),
@@ -492,6 +512,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                     int(d.get("retention_keep_last", 0) or 0),
                     str(d.get("filter_keywords", "") or ""),
                     str(d.get("override_pp_preset", "") or ""),
+                    str(d.get("ytdlp_template_name", "") or ""),
                     int(bool(d.get("auto_upgrade", False))),
                     str(d.get("min_upgrade_quality", "") or ""),
                 ))
@@ -1266,6 +1287,7 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                 "retention_keep_last": ch.get("retention_keep_last", 0),
                 "filter_keywords": ch.get("filter_keywords", ""),
                 "override_pp_preset": ch.get("override_pp_preset", ""),
+                "ytdlp_template_name": ch.get("ytdlp_template_name", ""),
                 "auto_upgrade": ch.get("auto_upgrade", False),
                 "min_upgrade_quality": ch.get("min_upgrade_quality", ""),
             })

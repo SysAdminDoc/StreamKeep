@@ -7,6 +7,47 @@ from streamkeep import db
 
 
 class DbMigrationTests(unittest.TestCase):
+    def test_monitor_argument_template_attachment_persists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.save_monitor_channel({
+                    "url": "https://example.com/channel",
+                    "ytdlp_template_name": "Authenticated archive",
+                })
+                channels = db.load_monitor_channels()
+            self.assertEqual(
+                channels[0]["ytdlp_template_name"], "Authenticated archive"
+            )
+
+    def test_v5_monitor_schema_migrates_template_column(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("""
+                CREATE TABLE monitor_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL UNIQUE
+                )
+            """)
+            conn.execute("PRAGMA user_version = 5")
+            conn.commit()
+            conn.close()
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                conn = sqlite3.connect(str(db_path))
+                columns = {
+                    row[1] for row in conn.execute(
+                        "PRAGMA table_info(monitor_channels)"
+                    ).fetchall()
+                }
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+                conn.close()
+            self.assertIn("ytdlp_template_name", columns)
+            self.assertEqual(version, db.SCHEMA_VERSION)
+
     def test_migrate_from_config_skips_when_non_history_tables_already_have_data(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"

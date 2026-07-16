@@ -153,6 +153,7 @@ def _run_download(args):
         getattr(args, name, None) is not None
         for name in ("embed_chapters", "embed_metadata", "embed_thumbnail")
     )
+    template_requested = bool(getattr(args, "arg_template", ""))
     requested_ytdlp_output = any((
         getattr(args, "format_spec", ""),
         getattr(args, "format_sort", ""),
@@ -163,6 +164,7 @@ def _run_download(args):
         subtitle_requested,
         sponsorblock_requested,
         transfer_requested,
+        template_requested,
     ))
     if getattr(args, "audio_format", "") and getattr(args, "container", ""):
         _print_line("Error: Choose either --container or --audio-format, not both.")
@@ -238,13 +240,19 @@ def _run_download(args):
         value = getattr(args, name, None)
         if value is not None:
             transfer_overrides[f"ytdlp_{name}"] = value
-    from .download_options import resolve_ytdlp_transfer_options
+    from .download_options import (
+        resolve_ytdlp_arg_template, resolve_ytdlp_transfer_options,
+    )
     try:
         transfer_options = resolve_ytdlp_transfer_options(
             cfg, overrides=transfer_overrides,
         )
+        ytdlp_template_args = resolve_ytdlp_arg_template(
+            cfg.get("ytdlp_arg_templates", {}),
+            getattr(args, "arg_template", ""),
+        )
     except ValueError as error:
-        _print_line(f"Error: Invalid yt-dlp transfer settings: {error}")
+        _print_line(f"Error: Invalid yt-dlp settings: {error}")
         sys.exit(2)
     output_dir = args.output or cfg.get("output_dir", "")
     if not output_dir:
@@ -342,6 +350,8 @@ def _run_download(args):
         dw.sponsorblock_api = sponsorblock_options["api_url"]
         for name, value in transfer_options.items():
             setattr(dw, f"ytdlp_{name}", value)
+        dw.ytdlp_template_name = getattr(args, "arg_template", "") or ""
+        dw.ytdlp_template_args = ytdlp_template_args
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
         state["dw"] = dw  # prevent GC while event loop runs
@@ -701,6 +711,10 @@ def build_parser():
     dl.add_argument(
         "--audio-quality", default="",
         help="Audio encoder quality (0-10 or bitrate such as 128K)",
+    )
+    dl.add_argument(
+        "--arg-template", default="",
+        help="Named structured yt-dlp argument template from Settings",
     )
     dl.add_argument(
         "--sub-langs", default="",

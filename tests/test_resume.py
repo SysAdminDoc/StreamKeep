@@ -64,6 +64,7 @@ class ResumeTests(unittest.TestCase):
                         "ytdlp_embed_chapters": True,
                         "ytdlp_embed_metadata": False,
                         "ytdlp_embed_thumbnail": True,
+                        "ytdlp_template_name": "Authenticated archive",
                     }
                 ),
                 encoding="utf-8",
@@ -106,6 +107,7 @@ class ResumeTests(unittest.TestCase):
             self.assertTrue(state.ytdlp_embed_chapters)
             self.assertFalse(state.ytdlp_embed_metadata)
             self.assertTrue(state.ytdlp_embed_thumbnail)
+            self.assertEqual(state.ytdlp_template_name, "Authenticated archive")
 
 
 if __name__ == "__main__":

@@ -251,6 +251,29 @@ class MonitorEntryDialog(QDialog):
         self.pp_preset_combo.currentIndexChanged.connect(self._update_summary)
         content.addWidget(self.pp_preset_combo)
 
+        content.addWidget(self._field_label("yt-dlp argument template"))
+        args_hint = QLabel(
+            "Attach a validated named argv template from Settings when this "
+            "channel resolves through yt-dlp."
+        )
+        args_hint.setObjectName("fieldHint")
+        args_hint.setWordWrap(True)
+        content.addWidget(args_hint)
+        self.ytdlp_template_combo = QComboBox()
+        self.ytdlp_template_combo.addItem("No argument template", userData="")
+        templates = self._globals_preview.get("ytdlp_arg_templates", {})
+        for name in sorted(templates, key=str.casefold):
+            self.ytdlp_template_combo.addItem(name, userData=name)
+        current_template = self.entry.ytdlp_template_name or ""
+        if current_template and self.ytdlp_template_combo.findData(current_template) < 0:
+            self.ytdlp_template_combo.addItem(
+                f"{current_template} (missing)", userData=current_template
+            )
+        template_index = self.ytdlp_template_combo.findData(current_template)
+        self.ytdlp_template_combo.setCurrentIndex(max(0, template_index))
+        self.ytdlp_template_combo.currentIndexChanged.connect(self._update_summary)
+        content.addWidget(self.ytdlp_template_combo)
+
         self.auto_upgrade_check = QCheckBox("Auto-upgrade when a better quality VOD appears")
         self.auto_upgrade_check.setChecked(bool(self.entry.auto_upgrade))
         self.auto_upgrade_check.toggled.connect(self._update_summary)
@@ -334,6 +357,10 @@ class MonitorEntryDialog(QDialog):
             parts.append("keyword filtered")
         if (self.pp_preset_combo.currentData() or ""):
             parts.append(f"preset {self.pp_preset_combo.currentData()}")
+        if (self.ytdlp_template_combo.currentData() or ""):
+            parts.append(
+                f"yt-dlp args {self.ytdlp_template_combo.currentData()}"
+            )
         if self.auto_upgrade_check.isChecked():
             parts.append("auto-upgrade")
         if int(self.retention_spin.value() or 0) > 0:
@@ -382,6 +409,7 @@ class MonitorEntryDialog(QDialog):
 
         entry.filter_keywords = self.keywords_input.text().strip()
         entry.override_pp_preset = self.pp_preset_combo.currentData() or ""
+        entry.ytdlp_template_name = self.ytdlp_template_combo.currentData() or ""
         entry.auto_upgrade = self.auto_upgrade_check.isChecked()
         entry.min_upgrade_quality = self.min_upgrade_combo.currentData() or ""
         entry.retention_keep_last = int(self.retention_spin.value())

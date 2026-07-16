@@ -74,6 +74,8 @@ class DownloadWorker(QThread):
         self.ytdlp_embed_chapters = None
         self.ytdlp_embed_metadata = None
         self.ytdlp_embed_thumbnail = None
+        self.ytdlp_template_name = ""
+        self.ytdlp_template_args = ()
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -139,6 +141,7 @@ class DownloadWorker(QThread):
             state.ytdlp_embed_chapters = self.ytdlp_embed_chapters
             state.ytdlp_embed_metadata = self.ytdlp_embed_metadata
             state.ytdlp_embed_thumbnail = self.ytdlp_embed_thumbnail
+            state.ytdlp_template_name = self.ytdlp_template_name or ""
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -158,12 +161,14 @@ class DownloadWorker(QThread):
                 except OSError:
                     pass
 
-    def _build_ytdlp_download_cmd(self, outfile, impersonate=False):
+    def _build_ytdlp_download_cmd(
+        self, outfile, impersonate=False, *, export=False,
+    ):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
             validate_sponsorblock_options, validate_subtitle_options,
-            validate_ytdlp_transfer_options,
+            validate_ytdlp_template_args, validate_ytdlp_transfer_options,
         )
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
@@ -209,16 +214,17 @@ class DownloadWorker(QThread):
         if not format_spec:
             raise ValueError("yt-dlp format specification is empty")
 
-        ffmpeg_path = self._ffmpeg_path or resolve_tool_command("ffmpeg")
-        cmd = ytdlp_command() + [
+        cmd = (["yt-dlp"] if export else ytdlp_command()) + [
             "-f", format_spec,
             "--no-part",
             "--newline",
             "--progress",
             "-o", outfile,
             "--no-playlist",
-            "--ffmpeg-location", str(Path(ffmpeg_path).parent),
         ]
+        if not export:
+            ffmpeg_path = self._ffmpeg_path or resolve_tool_command("ffmpeg")
+            cmd.extend(["--ffmpeg-location", str(Path(ffmpeg_path).parent)])
         if options["format_sort"]:
             cmd.extend(["-S", options["format_sort"]])
         if options["audio_format"]:
@@ -303,6 +309,7 @@ class DownloadWorker(QThread):
                 cmd.append("--break-on-existing")
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
+        cmd.extend(validate_ytdlp_template_args(self.ytdlp_template_args or ()))
         if impersonate:
             cmd.extend(ytdlp_impersonate_args())
         try:
@@ -322,6 +329,81 @@ class DownloadWorker(QThread):
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         cmd.append(self.ytdlp_source)
         return cmd
+
+    def _build_ffmpeg_download_cmd(
+        self, outfile, start, duration, *, executable=None,
+    ):
+        """Build the native FFmpeg plan used by execution and command export."""
+        executable = executable or self._ffmpeg_path or resolve_tool_command("ffmpeg")
+        is_live_capture = duration <= 0
+        chunk_mode = (
+            is_live_capture
+            and self.chunk_length_secs > 0
+            and not self.audio_url
+            and self.format_type != "ytdlp_direct"
+        )
+        if chunk_mode:
+            base = os.path.splitext(outfile)[0] + "_part%03d.mp4"
+            return [
+                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                "-i", self.playlist_url, "-c", "copy", "-f", "segment",
+                "-segment_time", str(int(self.chunk_length_secs)),
+                "-reset_timestamps", "1", "-strftime", "0", "-y", base,
+            ]
+        if self.audio_url:
+            if self.format_type == "mp4":
+                return [
+                    executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                    "-i", self.playlist_url, "-i", self.audio_url,
+                    "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+                    "-y", outfile,
+                ]
+            cmd = [
+                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                "-ss", str(start), "-i", self.playlist_url,
+                "-ss", str(start), "-i", self.audio_url,
+                "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+            ]
+        elif self.format_type == "mp4":
+            return [
+                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                "-i", self.playlist_url, "-c", "copy", "-y", outfile,
+            ]
+        else:
+            cmd = [
+                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
+            ]
+        if not is_live_capture:
+            cmd.extend(["-t", str(duration)])
+        cmd.extend(["-y", outfile])
+        return cmd
+
+    def build_export_argv(self, label=None):
+        """Return a standalone yt-dlp or FFmpeg argv for the first job segment."""
+        if not self.segments:
+            raise ValueError("download has no segments to export")
+        _index, segment_label, start, duration = self.segments[0]
+        label = str(label or segment_label)
+        is_ytdlp = (
+            self.format_type == "ytdlp_direct"
+            and self.ytdlp_source
+            and (self.ytdlp_format or self.ytdlp_audio_format)
+        )
+        if is_ytdlp:
+            outfile, _expected = self._ytdlp_output_paths(label)
+            return self._build_ytdlp_download_cmd(outfile, export=True)
+        outfile = os.path.join(self.output_dir, f"{label}.mp4")
+        return self._build_ffmpeg_download_cmd(
+            outfile, start, duration, executable="ffmpeg",
+        )
+
+    def export_command(self, label=None, *, windows=None):
+        """Return the standalone command text for explicit user export."""
+        from ..download_options import format_command_argv
+        return format_command_argv(
+            self.build_export_argv(label), windows=windows,
+        )
 
     def _download_with_ytdlp(
         self, seg_idx, label, outfile, expected_outfile=None
@@ -729,17 +811,9 @@ class DownloadWorker(QThread):
                 and self.format_type != "ytdlp_direct"
             )
             if chunk_mode:
-                base = os.path.join(self.output_dir, f"{label}_part%03d.mp4")
-                cmd = [
-                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                    "-i", self.playlist_url,
-                    "-c", "copy",
-                    "-f", "segment",
-                    "-segment_time", str(int(self.chunk_length_secs)),
-                    "-reset_timestamps", "1",
-                    "-strftime", "0",
-                    "-y", base,
-                ]
+                cmd = self._build_ffmpeg_download_cmd(
+                    outfile, start, duration,
+                )
                 self.log.emit(
                     f"[CHUNK] Live capture will be split every "
                     f"{self.chunk_length_secs}s into {label}_partNNN.mp4"
@@ -809,39 +883,8 @@ class DownloadWorker(QThread):
                     return
                 continue  # next segment (but live is always single-seg)
 
-            # Build ffmpeg command with optional audio merge
-            if self.audio_url:
-                if self.format_type == "mp4":
-                    cmd = [
-                        self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                        "-i", self.playlist_url, "-i", self.audio_url,
-                        "-map", "0:v:0", "-map", "1:a:0",
-                        "-c", "copy", "-y", outfile,
-                    ]
-                else:
-                    cmd = [
-                        self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                        "-ss", str(start), "-i", self.playlist_url,
-                        "-ss", str(start), "-i", self.audio_url,
-                        "-map", "0:v:0", "-map", "1:a:0",
-                        "-c", "copy",
-                    ]
-                    if not is_live_capture:
-                        cmd.extend(["-t", str(duration)])
-                    cmd.extend(["-y", outfile])
-            elif self.format_type == "mp4":
-                cmd = [
-                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                    "-i", self.playlist_url, "-c", "copy", "-y", outfile,
-                ]
-            else:
-                cmd = [
-                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                    "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
-                ]
-                if not is_live_capture:
-                    cmd.extend(["-t", str(duration)])
-                cmd.extend(["-y", outfile])
+            # Build ffmpeg command with optional audio merge.
+            cmd = self._build_ffmpeg_download_cmd(outfile, start, duration)
 
             # Retry loop for transient ffmpeg failures
             attempts = self.max_retries + 1

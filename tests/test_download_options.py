@@ -2,6 +2,8 @@ import pytest
 
 from streamkeep.download_options import (
     apply_ytdlp_transfer_options,
+    format_command_argv, normalize_ytdlp_arg_templates,
+    parse_ytdlp_template_text, resolve_ytdlp_arg_template,
     validate_download_options, validate_playlist_options,
     validate_sponsorblock_options,
     validate_subtitle_options, validate_ytdlp_template_args,
@@ -50,6 +52,41 @@ def test_ytdlp_template_args_reject_link_and_command_boundaries(option):
 def test_ytdlp_template_args_reject_shell_strings():
     with pytest.raises(ValueError, match="structured list"):
         validate_ytdlp_template_args("--retries 3")
+
+
+def test_named_ytdlp_templates_round_trip_as_structured_argv():
+    registry = normalize_ytdlp_arg_templates({
+        "Authenticated archive": [
+            "--add-header", "Referer: https://example.com/watch",
+            "--user-agent=StreamKeep Archive",
+        ],
+    })
+    assert resolve_ytdlp_arg_template(
+        registry, "Authenticated archive"
+    ) == (
+        "--add-header", "Referer: https://example.com/watch",
+        "--user-agent=StreamKeep Archive",
+    )
+    assert parse_ytdlp_template_text(
+        "--add-header\nReferer: https://example.com/watch\n"
+    ) == ("--add-header", "Referer: https://example.com/watch")
+
+
+@pytest.mark.parametrize("args", [
+    ["--exec", "calc"], ["--external-downloader-args=cmd /c whoami"], ["--"],
+])
+def test_named_ytdlp_templates_reject_command_boundaries(args):
+    with pytest.raises(ValueError):
+        normalize_ytdlp_arg_templates({"Unsafe": args})
+
+
+def test_command_export_quotes_each_argv_element_for_windows():
+    command = format_command_argv(
+        ["yt-dlp", "--add-header", "Referer: https://example.com/a b"],
+        windows=True,
+    )
+    assert command.startswith("yt-dlp --add-header ")
+    assert '"Referer: https://example.com/a b"' in command
 
 
 @pytest.mark.parametrize("value", ["-1", "11", "lossless", "0\n--exec x"])

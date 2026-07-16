@@ -33,6 +33,27 @@ def _populate_adv_pp(win):
     combo.blockSignals(False)
 
 
+def _populate_adv_ytdlp_templates(win):
+    """Refresh named structured yt-dlp templates in Download Advanced."""
+    from ...download_options import normalize_ytdlp_arg_templates
+    combo = win.adv_ytdlp_template_combo
+    current = combo.currentData() or ""
+    try:
+        templates = normalize_ytdlp_arg_templates(
+            getattr(win, "_config", {}).get("ytdlp_arg_templates", {})
+        )
+    except ValueError:
+        templates = {}
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("No argument template", userData="")
+    for name in sorted(templates, key=str.casefold):
+        combo.addItem(name, userData=name)
+    index = combo.findData(current)
+    combo.setCurrentIndex(max(0, index))
+    combo.blockSignals(False)
+
+
 def _reset_adv_overrides(win):
     """Clear all per-download override fields."""
     win.adv_pp_combo.setCurrentIndex(0)
@@ -71,6 +92,7 @@ def _reset_adv_overrides(win):
     win.adv_ytdlp_embed_chapters_combo.setCurrentIndex(0)
     win.adv_ytdlp_embed_metadata_combo.setCurrentIndex(0)
     win.adv_ytdlp_embed_thumbnail_combo.setCurrentIndex(0)
+    win.adv_ytdlp_template_combo.setCurrentIndex(0)
     win.adv_override_badge.setVisible(False)
 
 
@@ -190,6 +212,10 @@ def get_adv_overrides(win):
         value = combo.currentData()
         if value is not None:
             overrides[f"ytdlp_{name}"] = value
+    template_combo = getattr(win, "adv_ytdlp_template_combo", None)
+    template_name = template_combo.currentData() or "" if template_combo else ""
+    if template_name:
+        overrides["ytdlp_template_name"] = template_name
     return overrides
 
 
@@ -927,12 +953,20 @@ def build_download_tab(win):
         transfer_embed_row.addWidget(combo)
     adv_lay.addLayout(transfer_embed_row, 22, 1)
 
+    adv_lay.addWidget(QLabel("yt-dlp arguments:"), 23, 0)
+    win.adv_ytdlp_template_combo = QComboBox()
+    win.adv_ytdlp_template_combo.setToolTip(
+        "Attach a named structured argv template managed in Settings"
+    )
+    adv_lay.addWidget(win.adv_ytdlp_template_combo, 23, 1)
+    _populate_adv_ytdlp_templates(win)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 23, 1)
+    adv_lay.addWidget(adv_reset_btn, 24, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -1026,6 +1060,7 @@ def build_download_tab(win):
         win.adv_ytdlp_embed_chapters_combo,
         win.adv_ytdlp_embed_metadata_combo,
         win.adv_ytdlp_embed_thumbnail_combo,
+        win.adv_ytdlp_template_combo,
     ):
         combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
 
@@ -1114,6 +1149,14 @@ def build_download_tab(win):
     win.schedule_btn.setToolTip("Queue the URL and start it at a future time")
     win.schedule_btn.clicked.connect(win._on_schedule_url)
     dl_row.addWidget(win.schedule_btn)
+    win.copy_command_btn = QPushButton("Copy command")
+    win.copy_command_btn.setObjectName("secondary")
+    win.copy_command_btn.setEnabled(False)
+    win.copy_command_btn.setToolTip(
+        "Copy the exact standalone yt-dlp or FFmpeg command for the latest job"
+    )
+    win.copy_command_btn.clicked.connect(win._on_copy_download_command)
+    dl_row.addWidget(win.copy_command_btn)
     win.download_btn = QPushButton("Download Selected")
     win.download_btn.setObjectName("primary")
     win.download_btn.setEnabled(False)
@@ -2324,6 +2367,20 @@ class DownloadTabMixin:
         if d:
             self.output_input.setText(d)
 
+    def _on_copy_download_command(self):
+        command = str(getattr(self, "_export_command_text", "") or "")
+        if not command:
+            self._set_status(
+                "Start a prepared download before copying its command.", "info"
+            )
+            return
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(command)
+        self._set_status(
+            "Standalone command copied. It may include cookie paths or headers.",
+            "success",
+        )
+
 
     # ── Download core ───────────────────────────────────────────
 
@@ -2399,6 +2456,7 @@ class DownloadTabMixin:
             return False
         try:
             from ...download_options import (
+                resolve_ytdlp_arg_template,
                 resolve_ytdlp_transfer_options,
                 validate_download_options, validate_sponsorblock_options,
                 validate_subtitle_options,
@@ -2450,6 +2508,13 @@ class DownloadTabMixin:
                 )
             transfer_options = resolve_ytdlp_transfer_options(
                 YtDlpExtractor, overrides=_dl_overrides,
+            )
+            ytdlp_template_name = _dl_overrides.get(
+                "ytdlp_template_name", ""
+            )
+            ytdlp_template_args = resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}),
+                ytdlp_template_name,
             )
         except ValueError as error:
             self._log(f"[OUTPUT] Invalid per-download settings: {error}")
@@ -2595,6 +2660,8 @@ class DownloadTabMixin:
             self.download_worker,
             transfer_options,
         )
+        self.download_worker.ytdlp_template_name = ytdlp_template_name
+        self.download_worker.ytdlp_template_args = ytdlp_template_args
         self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
         if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
@@ -2630,6 +2697,17 @@ class DownloadTabMixin:
                     f"{sponsorblock_options['mark'] or 'none'} | Remove: "
                     f"{sponsorblock_options['remove'] or 'none'}"
                 )
+            if ytdlp_template_name:
+                self._log(
+                    f"[ARGS] Named yt-dlp template: {ytdlp_template_name}"
+                )
+        try:
+            self._export_command_text = self.download_worker.export_command()
+            self.copy_command_btn.setEnabled(True)
+        except (TypeError, ValueError) as error:
+            self._export_command_text = ""
+            self.copy_command_btn.setEnabled(False)
+            self._log(f"[EXPORT] Could not build standalone command: {error}")
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
@@ -3246,6 +3324,9 @@ class DownloadTabMixin:
             vod_platform=vod_platform,
             vod_title=vod_title or title,
             vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+            ytdlp_template_name=(
+                self.adv_ytdlp_template_combo.currentData() or ""
+            ),
         )
         if added:
             self._set_status(f"Queued: {title or queue_url[:60]}", "success")
@@ -3309,6 +3390,9 @@ class DownloadTabMixin:
             vod_platform=vod_platform,
             vod_title=vod_title or title,
             vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+            ytdlp_template_name=(
+                self.adv_ytdlp_template_combo.currentData() or ""
+            ),
         )
         if added:
             self._set_status(
@@ -3365,6 +3449,9 @@ class DownloadTabMixin:
                 item.get("download_archive", "") or ""
             ),
             "break_on_existing": bool(item.get("break_on_existing", False)),
+            "ytdlp_template_name": str(
+                item.get("ytdlp_template_name", "") or ""
+            ),
         }
         vod_date = str(item.get("vod_date", "") or "")
         if vod_date:
@@ -3390,6 +3477,7 @@ class DownloadTabMixin:
         vod_channel="",
         download_archive="",
         break_on_existing=False,
+        ytdlp_template_name="",
     ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
@@ -3402,6 +3490,15 @@ class DownloadTabMixin:
             and q.get("status") not in ("failed", "cancelled")
             for q in self._download_queue
         ):
+            return False
+        try:
+            from ...download_options import resolve_ytdlp_arg_template
+            resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}),
+                ytdlp_template_name,
+            )
+        except ValueError as error:
+            self._set_status(str(error), "warning")
             return False
         self._download_queue.append(self._normalize_queue_item({
             "url": url,
@@ -3417,6 +3514,7 @@ class DownloadTabMixin:
             "vod_channel": vod_channel,
             "download_archive": download_archive,
             "break_on_existing": break_on_existing,
+            "ytdlp_template_name": ytdlp_template_name,
         }))
         self._persist_config()
         if hasattr(self, "queue_table"):
@@ -3603,8 +3701,29 @@ class DownloadTabMixin:
         worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
-        from ...download_options import apply_ytdlp_transfer_options
+        from ...download_options import (
+            apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
+        )
         apply_ytdlp_transfer_options(worker, YtDlpExtractor)
+        worker.ytdlp_template_name = str(
+            item.get("ytdlp_template_name", "") or ""
+        )
+        try:
+            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}),
+                worker.ytdlp_template_name,
+            )
+        except ValueError as error:
+            failure_id = self._record_failed_job(
+                stage="download", error=str(error), item=item,
+                info=info, out_dir=out_dir,
+            )
+            if failure_id:
+                item["failure_id"] = failure_id
+            self._set_queue_item_status(item, "failed", str(error))
+            self._log(f"[QUEUE] {error}")
+            self._advance_queue()
+            return
         worker.download_archive = str(item.get("download_archive", "") or "")
         worker.break_on_existing = bool(item.get("break_on_existing", False))
         worker.parallel_connections = self._parallel_connections

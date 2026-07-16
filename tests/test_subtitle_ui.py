@@ -84,6 +84,11 @@ def _window_with_advanced_controls():
         combo.addItem("on", userData=True)
         combo.addItem("off", userData=False)
         setattr(win, f"adv_ytdlp_embed_{name}_combo", combo)
+    win.adv_ytdlp_template_combo = QComboBox()
+    win.adv_ytdlp_template_combo.addItem("none", userData="")
+    win.adv_ytdlp_template_combo.addItem(
+        "Authenticated archive", userData="Authenticated archive"
+    )
     win.adv_override_badge = QLabel()
     return win
 
@@ -180,3 +185,11 @@ def test_ytdlp_transfer_controls_build_override_payload():
     assert overrides["ytdlp_live_from_start"] is True
     assert overrides["ytdlp_embed_chapters"] is True
     assert overrides["ytdlp_embed_metadata"] is False
+
+
+def test_named_ytdlp_template_builds_override_payload():
+    win = _window_with_advanced_controls()
+    win.adv_ytdlp_template_combo.setCurrentIndex(1)
+    assert get_adv_overrides(win)["ytdlp_template_name"] == (
+        "Authenticated archive"
+    )

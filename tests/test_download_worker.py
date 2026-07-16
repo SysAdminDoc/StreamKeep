@@ -8,11 +8,13 @@ its file-exists check and reported "yt-dlp download failed" despite yt-dlp
 exiting 0.
 """
 
+import json
 import os
 import subprocess
 from unittest import mock
 
 from streamkeep.capabilities import CapabilityUnavailableError
+from streamkeep.models import ResumeState
 from streamkeep.workers.download import DownloadWorker
 
 
@@ -90,6 +92,65 @@ def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
     assert cmd[cmd.index("-S") + 1] == raw_sort
     assert cmd[cmd.index("--merge-output-format") + 1] == "webm"
     assert cmd[cmd.index("--remux-video") + 1] == "webm"
+
+
+def test_named_template_and_credentials_appear_in_standalone_export(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker.cookies_browser = "firefox"
+    worker.ytdlp_template_name = "Referrer"
+    worker.ytdlp_template_args = (
+        "--add-header", "Referer: https://example.com/library",
+    )
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+
+    runtime_argv = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    argv = worker.build_export_argv()
+    command = worker.export_command(windows=True)
+
+    assert argv[0] == "yt-dlp"
+    assert argv[-1] == "https://example.com/video"
+    assert argv[argv.index("--cookies-from-browser") + 1] == "firefox"
+    assert argv[argv.index("--add-header") + 1] == (
+        "Referer: https://example.com/library"
+    )
+    assert runtime_argv[runtime_argv.index("--add-header") + 1] == (
+        "Referer: https://example.com/library"
+    )
+    assert '"Referer: https://example.com/library"' in command
+
+
+def test_native_download_exports_equivalent_ffmpeg_plan(tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 12, 30)],
+        str(tmp_path),
+        "hls",
+    )
+    argv = worker.build_export_argv()
+    assert argv[0] == "ffmpeg"
+    assert argv[argv.index("-ss") + 1] == "12"
+    assert argv[argv.index("-i") + 1] == worker.playlist_url
+    assert argv[argv.index("-t") + 1] == "30"
+
+
+def test_resume_sidecar_keeps_template_secret_in_secure_config(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_template_name = "Authenticated archive"
+    worker.ytdlp_template_args = (
+        "--add-header", "Authorization: Bearer never-write-this",
+    )
+    state = ResumeState(output_dir=str(tmp_path))
+
+    worker.attach_resume_state(state)
+
+    payload = json.loads(
+        (tmp_path / ".streamkeep_resume.json").read_text(encoding="utf-8")
+    )
+    assert payload["ytdlp_template_name"] == "Authenticated archive"
+    assert "never-write-this" not in json.dumps(payload)
 
 
 def test_ytdlp_audio_cmd_extracts_requested_codec_and_quality(tmp_path):

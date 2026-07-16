@@ -46,6 +46,7 @@ SENSITIVE_FIELDS = frozenset({
     "oauth_token",
     "access_token",
     "refresh_token",
+    "ytdlp_arg_templates",
 })
 
 SECRET_REF_PREFIX = "secretref:"

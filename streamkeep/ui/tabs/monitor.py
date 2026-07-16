@@ -886,6 +886,9 @@ class MonitorTabMixin:
         globals_preview = {
             "output_dir": self.output_input.text().strip() or str(_default_output_dir()),
             "file_template": self._file_template or "",
+            "ytdlp_arg_templates": self._config.get(
+                "ytdlp_arg_templates", {}
+            ),
         }
         dlg = MonitorEntryDialog(self, entry, globals_preview=globals_preview)
         if dlg.exec():
@@ -900,6 +903,8 @@ class MonitorTabMixin:
                 desc.append(f"window {entry.schedule_start_hhmm}-{entry.schedule_end_hhmm}")
             if entry.retention_keep_last:
                 desc.append(f"keep last {entry.retention_keep_last}")
+            if entry.ytdlp_template_name:
+                desc.append(f"args={entry.ytdlp_template_name}")
             self._set_status(
                 f"Updated profile for {entry.channel_id}"
                 + (f" — {', '.join(desc)}." if desc else " — cleared overrides."),
@@ -1154,10 +1159,27 @@ class MonitorTabMixin:
         segments = [(0, "live_recording", 0, 0)]
         worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
         worker.audio_url = q.audio_url
+        worker.ytdlp_source = q.ytdlp_source
+        worker.ytdlp_format = q.ytdlp_format
         worker.parallel_connections = self._parallel_connections
-        from ...download_options import apply_ytdlp_transfer_options
+        from ...download_options import (
+            apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
+        )
         from ...extractors.ytdlp import YtDlpExtractor
         apply_ytdlp_transfer_options(worker, YtDlpExtractor)
+        worker.cookies_browser = YtDlpExtractor.cookies_browser
+        worker.rate_limit = YtDlpExtractor.rate_limit
+        worker.proxy = YtDlpExtractor.proxy
+        template_name = target.ytdlp_template_name or ""
+        try:
+            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}), template_name,
+            )
+            worker.ytdlp_template_name = template_name
+        except ValueError as error:
+            worker.ytdlp_template_args = ()
+            worker.ytdlp_template_name = ""
+            self._log(f"[AUTO-RECORD] Ignoring argument template: {error}")
         # Live auto-split: when enabled, long live captures are chunked.
         if self._chunk_long_captures:
             worker.chunk_length_secs = int(self._chunk_length_secs or 0)
@@ -1396,9 +1418,11 @@ class MonitorTabMixin:
         so they get downloaded in the background."""
         added = 0
         source_url = ""
+        template_name = ""
         for entry in self.monitor.entries:
             if entry.channel_id == channel_id:
                 source_url = entry.url
+                template_name = entry.ytdlp_template_name or ""
                 break
         archive_path = ""
         if source_url:
@@ -1420,6 +1444,7 @@ class MonitorTabMixin:
                 vod_channel=v.channel,
                 download_archive=archive_path,
                 break_on_existing=bool(archive_path),
+                ytdlp_template_name=template_name,
             ):
                 if self._download_queue:
                     self._download_queue[-1]["vod_date"] = v.date

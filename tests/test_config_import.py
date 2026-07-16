@@ -44,6 +44,10 @@ def test_export_config_is_versioned_and_secret_free():
     (_envelope({"output_dir": []}), "config.output_dir must be a string"),
     (_envelope({"history": []}), "cannot contain library state"),
     (_envelope({"hooks": {"unknown_event": "echo no"}}), "unsupported hook event"),
+    (
+        _envelope({"ytdlp_arg_templates": {"Unsafe": ["--exec", "calc"]}}),
+        "not allowed",
+    ),
     (_envelope({"hf_token": "secretref:config:webhook_url"}), "local secret handles"),
 ])
 def test_import_rejects_unversioned_or_invalid_schema(payload, message):

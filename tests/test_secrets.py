@@ -57,6 +57,11 @@ class SecretsTests(unittest.TestCase):
             "hf_token": "hf_private",
             "companion_token": "companion-master-token-must-stay-private",
             "proxy_pool": [{"url": "socks5://user:pass@proxy"}],
+            "ytdlp_arg_templates": {
+                "Authenticated": [
+                    "--add-header", "Authorization: Bearer template-secret",
+                ],
+            },
             "media_server": {
                 "url": "https://media.internal",
                 "token": "media-token",
@@ -75,6 +80,7 @@ class SecretsTests(unittest.TestCase):
         self.assertNotIn("hf_private", serialized)
         self.assertNotIn("media-token", serialized)
         self.assertNotIn("companion-master-token", serialized)
+        self.assertNotIn("template-secret", serialized)
         self.assertTrue(stored["hf_token"].startswith("secretref:"))
         self.assertTrue(stored["companion_token"].startswith("secretref:"))
         self.assertEqual(resolved, cfg)
@@ -82,6 +88,7 @@ class SecretsTests(unittest.TestCase):
         self.assertEqual(exported["proxy_pool"], [])
         self.assertEqual(exported["media_server"]["token"], "")
         self.assertEqual(exported["companion_token"], "")
+        self.assertEqual(exported["ytdlp_arg_templates"], {})
         self.assertNotIn("signed-value", exported["recent_urls"][0])
         self.assertGreaterEqual(len(store), 5)
 
