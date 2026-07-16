@@ -411,15 +411,18 @@ def _reject_imported_secret_handles(config):
 def _validate_hooks_schema(hooks):
     if not hooks:
         return
-    from .hooks import HOOK_EVENTS
+    from .hooks import HOOK_EVENTS, MAX_LEGACY_HOOK_CHARS, normalize_hook
     allowed = set(HOOK_EVENTS)
-    for event, command in hooks.items():
+    for event, value in hooks.items():
         if event not in allowed:
             raise ConfigImportError(f"unsupported hook event: {event}")
-        if not isinstance(command, str) or not command.strip():
-            raise ConfigImportError(f"hook {event} must be a command string")
-        if len(command) > 2048:
-            raise ConfigImportError(f"hook {event} exceeds 2048 characters")
+        kind, data = normalize_hook(value)
+        if kind == "invalid":
+            raise ConfigImportError(f"hook {event} is invalid: {data}")
+        if kind == "legacy" and len(str(value)) > MAX_LEGACY_HOOK_CHARS:
+            raise ConfigImportError(
+                f"hook {event} exceeds {MAX_LEGACY_HOOK_CHARS} characters"
+            )
 
 
 def _validate_proxy_pool_schema(entries):

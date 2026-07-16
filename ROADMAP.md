@@ -249,13 +249,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Portable EXE retains signed last-known-good self-replacement; MSIX is built from an explicit signed onedir target and updates only through signed App Installer/Store semantics; each artifact reports its channel, refuses the other's updater, and passes clean install, upgrade, interrupted-update, repair, rollback, and uninstall smoke tests.
   Complexity: L
 
-- [ ] P1 — Replace raw shell hooks with structured, bounded actions
-  Why: `streamkeep/hooks.py` intentionally uses `shell=True`; V24 would expand that trusted-code boundary and complicate timeout/cancellation of descendant processes.
-  Evidence: `streamkeep/hooks.py:52-80`; https://github.com/yt-dlp/yt-dlp/releases/tag/2026.06.09; https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html.
-  Touches: hook config/schema/import quarantine, settings UI, action runner, V24 power actions, migration and tests.
-  Acceptance: New hooks store an executable plus argument array with no shell, minimal allowlisted environment, bounded stdout/stderr, timeout and process-tree cancellation; remote values remain data-only environment fields; legacy shell strings stay disabled until individually migrated with a redacted preview; config import cannot activate actions implicitly.
-  Complexity: M
-
 - [ ] P1 — Add live credential and cookie-profile validation
   Why: Settings currently reports stored-value presence as “authenticated,” so private/age-restricted failures are discovered only after queueing and are hard to distinguish from extractor/network failure.
   Evidence: `streamkeep/accounts.py::credential_status`, `streamkeep/ui/tabs/settings.py::_update_cookies_status`; https://github.com/JunkFood02/Seal/issues/2026; https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp; extends V19/V20 without replacing them.

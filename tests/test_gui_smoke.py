@@ -192,6 +192,28 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.crop_start_input.text() == "0:00:30"
             assert window.crop_end_input.text() == "0:05:00"
 
+            # Structured event hooks: author one through the editor and confirm
+            # it persists as an executable + argument array (no shell).
+            hook_event = window.hooks_event_combo.itemData(0)
+            window.hooks_event_combo.setCurrentIndex(0)
+            window.hook_executable_input.setText("/usr/bin/notify")
+            window.hook_args_edit.setPlainText("--title\n%SK_TITLE%")
+            window.hook_enabled_check.setChecked(True)
+            window._on_hook_save()
+            qt_application.processEvents()
+            saved_hook = window._config["hooks"][hook_event]
+            assert saved_hook == {
+                "executable": "/usr/bin/notify",
+                "args": ["--title", "%SK_TITLE%"],
+                "enabled": True,
+            }
+            # A legacy shell string surfaces as disabled and blanks the fields.
+            window._config["hooks"][hook_event] = "echo legacy"
+            window._refresh_hook_editor(hook_event)
+            qt_application.processEvents()
+            assert not window.hook_executable_input.isEnabled()
+            assert "disabled" in window.hook_status_label.text().lower()
+
             qt_application.processEvents()
             leaked_windows = [
                 widget for widget in qt_application.topLevelWidgets()

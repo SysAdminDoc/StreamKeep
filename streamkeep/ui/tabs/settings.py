@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHeaderView, QHBoxLayout, QLabel,
@@ -341,6 +341,101 @@ class SettingsTabMixin:
         self._refresh_ytdlp_template_editor()
         self._persist_config()
         self._set_status(f'Deleted yt-dlp argument template "{name}".', "success")
+
+    # ── Event hooks (structured, no-shell actions) ───────────────────
+
+    def _refresh_hook_editor(self, selected=""):
+        from ...hooks import HOOK_EVENTS
+        combo = getattr(self, "hooks_event_combo", None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        for event in HOOK_EVENTS:
+            combo.addItem(event, userData=event)
+        index = combo.findData(selected)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+        self._on_hook_event_selected()
+
+    def _on_hook_event_selected(self):
+        from ...hooks import normalize_hook
+        combo = getattr(self, "hooks_event_combo", None)
+        if combo is None:
+            return
+        event = combo.currentData() or ""
+        hooks = self._config.get("hooks", {})
+        kind, data = normalize_hook(hooks.get(event))
+        legacy = kind == "legacy"
+        self.hook_executable_input.setEnabled(not legacy)
+        self.hook_args_edit.setEnabled(not legacy)
+        self.hook_enabled_check.setEnabled(not legacy)
+        self.hook_save_btn.setEnabled(True)
+        if kind == "structured":
+            self.hook_executable_input.setText(data["executable"])
+            self.hook_args_edit.setPlainText("\n".join(data["args"]))
+            self.hook_enabled_check.setChecked(data["enabled"])
+            self.hook_status_label.setText(
+                "Enabled structured action."
+                if data["enabled"] else "Structured action (disabled)."
+            )
+        elif legacy:
+            # A legacy shell string is retained but never executed. Show a
+            # redacted preview and let the user replace it with a structured
+            # action; saving overwrites the legacy value.
+            from ...diagnostics import redact_text
+            preview = redact_text(str(data))[:120]
+            self.hook_executable_input.clear()
+            self.hook_args_edit.clear()
+            self.hook_enabled_check.setChecked(False)
+            self.hook_status_label.setText(
+                "Legacy shell command is disabled and will not run: "
+                f"“{preview}”. Enter an executable and arguments, "
+                "then Save to migrate it."
+            )
+        else:
+            self.hook_executable_input.clear()
+            self.hook_args_edit.clear()
+            self.hook_enabled_check.setChecked(True)
+            self.hook_status_label.setText(
+                "No action configured for this event."
+            )
+
+    def _on_hook_save(self):
+        from ...hooks import (
+            normalize_hook, parse_hook_args_text, structured_hook,
+        )
+        combo = getattr(self, "hooks_event_combo", None)
+        if combo is None:
+            return
+        event = combo.currentData() or ""
+        executable = self.hook_executable_input.text().strip()
+        args = parse_hook_args_text(self.hook_args_edit.toPlainText())
+        hooks = dict(self._config.get("hooks", {}))
+        if not executable:
+            # Clearing the executable removes any action (including a disabled
+            # legacy string) for this event.
+            hooks.pop(event, None)
+            self._config["hooks"] = hooks
+            self._refresh_hook_editor(event)
+            self._persist_config()
+            self._set_status(f"Cleared the {event} hook.", "success")
+            return
+        candidate = structured_hook(
+            executable, args, self.hook_enabled_check.isChecked()
+        )
+        kind, data = normalize_hook(candidate)
+        if kind != "structured":
+            self._set_status(
+                f"Hook is invalid: {data}", "warning"
+            )
+            return
+        hooks[event] = data
+        self._config["hooks"] = hooks
+        self._refresh_hook_editor(event)
+        self._persist_config()
+        state = "enabled" if data["enabled"] else "disabled"
+        self._set_status(f"Saved {state} {event} action.", "success")
 
     # ── Manual converter ─────────────────────────────────────────────
 
@@ -996,15 +1091,8 @@ class SettingsTabMixin:
         self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
         # Apply webhook
         self._webhook_url = self.webhook_input.text().strip()
-        # Apply event hooks (F24)
-        if hasattr(self, "hooks_table"):
-            hooks = {}
-            for i in range(self.hooks_table.rowCount()):
-                evt = self.hooks_table.item(i, 0).text()
-                cmd = (self.hooks_table.item(i, 1).text() or "").strip()
-                if cmd:
-                    hooks[evt] = cmd
-            self._config["hooks"] = hooks
+        # Event hooks (F24) are structured actions persisted immediately by the
+        # per-event editor (_on_hook_save); nothing to collect on general save.
         # Apply duplicate detection
         self._check_duplicates = self.dup_check.isChecked()
         # Apply lifecycle policies (F32)
@@ -2959,28 +3047,57 @@ def build_settings_tab(win):
     _update_webhook_indicator(win, win._webhook_url)
     card_lay.addWidget(hook_block)
 
-    # ── Event Hooks (F24) ─────────────────────────────────────────
-    from ...hooks import HOOK_EVENTS
+    # ── Event Hooks (F24) — structured, no-shell actions ──────────
     evt_block, evt_lay = make_field_block(
         "Event Hooks",
-        "Run shell commands on lifecycle events. Context is passed as "
-        "environment variables ($SK_TITLE, $SK_CHANNEL, $SK_PLATFORM, "
-        "$SK_PATH, $SK_URL, $SK_EVENT).",
+        "Run a program on lifecycle events. Each hook is an executable plus "
+        "an explicit argument list — no shell. Context is passed only as "
+        "environment variables ($SK_EVENT, $SK_TITLE, $SK_CHANNEL, "
+        "$SK_PLATFORM, $SK_PATH, $SK_URL, $SK_QUALITY, $SK_ERROR). Legacy "
+        "shell-command hooks are disabled until you re-create them here.",
     )
-    hooks_cfg = win._config.get("hooks", {})
-    win.hooks_table = QTableWidget(len(HOOK_EVENTS), 2)
-    win.hooks_table.setHorizontalHeaderLabels(["Event", "Command"])
-    win.hooks_table.horizontalHeader().setStretchLastSection(True)
-    win.hooks_table.setColumnWidth(0, 180)
-    win.hooks_table.verticalHeader().setVisible(False)
-    for i, evt in enumerate(HOOK_EVENTS):
-        name_item = QTableWidgetItem(evt)
-        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        win.hooks_table.setItem(i, 0, name_item)
-        win.hooks_table.setItem(i, 1, QTableWidgetItem(hooks_cfg.get(evt, "")))
-    win.hooks_table.setFixedHeight(min(210, 30 * (len(HOOK_EVENTS) + 1)))
-    evt_lay.addWidget(win.hooks_table)
+    hook_pick_row = QHBoxLayout()
+    hook_pick_row.addWidget(QLabel("Event:"))
+    win.hooks_event_combo = QComboBox()
+    win.hooks_event_combo.currentIndexChanged.connect(
+        lambda _idx: win._on_hook_event_selected()
+    )
+    hook_pick_row.addWidget(win.hooks_event_combo, 1)
+    win.hook_enabled_check = QCheckBox("Enabled")
+    win.hook_enabled_check.setChecked(True)
+    hook_pick_row.addWidget(win.hook_enabled_check)
+    evt_lay.addLayout(hook_pick_row)
+
+    hook_exe_row = QHBoxLayout()
+    hook_exe_row.addWidget(QLabel("Executable:"))
+    win.hook_executable_input = QLineEdit()
+    win.hook_executable_input.setMaxLength(4096)
+    win.hook_executable_input.setPlaceholderText(
+        "Full path to a program (e.g. C:/Tools/notify.exe)"
+    )
+    hook_exe_row.addWidget(win.hook_executable_input, 1)
+    evt_lay.addLayout(hook_exe_row)
+
+    win.hook_args_edit = QPlainTextEdit()
+    win.hook_args_edit.setPlaceholderText(
+        "One argument per line. Use $SK_* environment variables for context, "
+        "e.g.\n--title\n%SK_TITLE%"
+    )
+    win.hook_args_edit.setFixedHeight(96)
+    evt_lay.addWidget(win.hook_args_edit)
+
+    hook_action_row = QHBoxLayout()
+    win.hook_status_label = QLabel("")
+    win.hook_status_label.setObjectName("subtleText")
+    win.hook_status_label.setWordWrap(True)
+    hook_action_row.addWidget(win.hook_status_label, 1)
+    win.hook_save_btn = QPushButton("Save action")
+    win.hook_save_btn.setObjectName("secondary")
+    win.hook_save_btn.clicked.connect(win._on_hook_save)
+    hook_action_row.addWidget(win.hook_save_btn)
+    evt_lay.addLayout(hook_action_row)
     card_lay.addWidget(evt_block)
+    win._refresh_hook_editor()
 
     # ── Duplicate detection ────────────────────────────────────────
     dup_block, dup_lay = make_field_block(
