@@ -181,6 +181,17 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 for label in metric_labels
             )
             assert not window._download_metric_state.isVisible()
+
+            # A browser clip handoff prefills the crop range before the fetch
+            # that follows reads it (V-clip-handoff).
+            window.crop_start_input.clear()
+            window.crop_end_input.clear()
+            window._on_companion_clip("https://example.com/clip", 30.0, 300.0)
+            qt_application.processEvents()
+            assert window.url_input.text() == "https://example.com/clip"
+            assert window.crop_start_input.text() == "0:00:30"
+            assert window.crop_end_input.text() == "0:05:00"
+
             qt_application.processEvents()
             leaked_windows = [
                 widget for widget in qt_application.topLevelWidgets()

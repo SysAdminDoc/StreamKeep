@@ -4971,3 +4971,39 @@ class DownloadTabMixin:
                 self._log(f"[COMPANION] Queue failed: {e}")
         else:
             self._on_fetch()
+
+    def _on_companion_clip(self, url, start_secs, end_secs):
+        """The extension sent validated clip bounds alongside a URL. Prefill the
+        crop range and present the main window so the fetch that immediately
+        follows (via ``url_received``) opens a ready-to-clip workflow once.
+
+        The local server emits ``clip_received`` before ``url_received``, so the
+        crop fields are populated before the fetch reads them at download time.
+        """
+        try:
+            start = max(0.0, float(start_secs or 0.0))
+            end = max(0.0, float(end_secs or 0.0))
+        except (TypeError, ValueError):
+            return
+        self._present_main_window(0)
+        try:
+            if url:
+                self.url_input.setText(url)
+        except Exception:
+            pass
+        try:
+            self.crop_start_input.setText(
+                self._fmt_crop_time(start) if start > 0 else ""
+            )
+            self.crop_end_input.setText(
+                self._fmt_crop_time(end) if end > 0 else ""
+            )
+        except Exception:
+            pass
+        span = ""
+        if end > start:
+            span = f" ({self._fmt_crop_time(start)}-{self._fmt_crop_time(end)})"
+        self._log(f"[COMPANION] Clip range received{span}")
+        self._set_status(
+            "Browser clip range prefilled; fetching the source.", "info"
+        )

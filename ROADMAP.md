@@ -157,13 +157,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: One token/component stylesheet owns type, spacing, borders, density, focus, and states; System/Dark/Light/High Contrast plus density/accent settings are reachable and persistent; no fixed dimensions clip at the supported minimum or 200% scale; screenshot matrices detect theme/layout regressions.
   Complexity: M
 
-- [ ] P1 — Complete browser clip-range and pairing handoff end to end
-  Why: The extension sends clip bounds and the server emits them, but the GUI never connects the signal; advertised non-loopback host entry also exceeds manifest permissions.
-  Evidence: `browser-extension/popup.js`, `browser-extension/manifest.json`, `streamkeep/local_server.py:72,475`, `streamkeep/ui/tabs/settings.py:1176-1181`.
-  Touches: extension permissions/pairing, local server signals, main-window/download/clip flow, extension and GUI integration tests.
-  Acceptance: A paired browser action can send URL-only or URL plus validated start/end; the desktop opens the correct prefilled workflow once; unsupported/expired pairing is actionable; host permissions exactly match supported origins and never request broad browsing access.
-  Complexity: S
-
 - [ ] P1 — Make HLS variant and resume semantics standards-complete
   Why: The parser ignores rendition groups, codecs, frame rate, HDR, and average bandwidth, while resume identity is not tied to manifest validators and discontinuity/media sequence.
   Evidence: `streamkeep/hls.py`, `streamkeep/resume.py`; RFC 8216 (https://www.rfc-editor.org/info/rfc8216/); refines existing extractor/protocol resilience work.

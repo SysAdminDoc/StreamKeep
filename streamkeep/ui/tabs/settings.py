@@ -1484,6 +1484,7 @@ class SettingsTabMixin:
                 )
                 srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)
+                srv.clip_received.connect(self._on_companion_clip)
                 srv.failed_job_retry_requested.connect(self._retry_failed_job)
                 srv.failed_job_discard_requested.connect(self._discard_failed_job)
                 srv.start()

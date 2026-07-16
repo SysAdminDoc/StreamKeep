@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtCore import QCoreApplication, Qt
 
 from streamkeep import db
 from streamkeep.local_server import (
@@ -680,6 +680,26 @@ class LocalServerTests(unittest.TestCase):
             data={"url": "https://example.com/video", "action": "fetch"},
         )
         self.assertTrue(payload["ok"])
+
+    def test_clip_range_emits_clip_received_signal(self):
+        received = []
+        # DirectConnection so the slot runs synchronously in the server thread;
+        # this unittest has no running Qt event loop to drain a queued signal.
+        self.server.clip_received.connect(
+            lambda url, start, end: received.append((url, start, end)),
+            Qt.ConnectionType.DirectConnection,
+        )
+        payload, _ = self._open_json(
+            "/send_url", token=self.server.token, method="POST",
+            data={
+                "url": "https://example.com/video",
+                "action": "fetch",
+                "clip_start": "0:30",
+                "clip_end": "5:00",
+            },
+        )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(received, [("https://example.com/video", 30.0, 300.0)])
 
     def test_headless_server_with_fixed_token(self):
         """Smoke test: server with a fixed token works like service mode."""
