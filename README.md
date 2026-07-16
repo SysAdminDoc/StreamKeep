@@ -65,6 +65,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Upload finished media to S3-compatible storage, Backblaze B2/MinIO, FTP/SFTP, and WebDAV.
 - Create secret-free `.skbackup` archives containing preferences, database/archive state, tags, notifications, and optional redacted logs. Account credentials and cookies are excluded from ordinary create/restore operations.
 - Transfer authentication state only with an explicit `.sksbackup` protected by Argon2id and AES-256-GCM; wrong passwords and modified backups fail authentication before restore.
+- Export/import preferences through a versioned, size-bounded JSON format. Imports show a redacted diff and keep hooks, webhooks, proxies, cookie sources, control servers, media-server auto-import, and lifecycle cleanup disabled until each capability is approved separately.
 - Load plugin manifests only after trust consent; untrusted plugins are skipped.
 
 Plugins live under the active config directory in `plugins/`. A plugin is a package or module directory containing `plugin.json`:

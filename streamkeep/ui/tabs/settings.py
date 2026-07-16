@@ -397,9 +397,7 @@ class SettingsTabMixin:
             self._set_status(f"Export failed: {e}", "error")
 
     def _on_import_config(self):
-        """Replace current config with the contents of a chosen JSON file."""
-        from ... import db as _db
-
+        """Validate, review, quarantine, then apply a versioned config export."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Import StreamKeep Config",
             str(Path.home()),
@@ -408,16 +406,73 @@ class SettingsTabMixin:
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                new_cfg = json.load(f)
-            if not isinstance(new_cfg, dict):
-                self._set_status("Import failed: not a valid config file.", "error")
-                return
+            from ...config import (
+                finalize_config_import,
+                get_import_capability_info,
+                prepare_config_import,
+            )
+            preview = prepare_config_import(Path(path).read_bytes(), self._config)
         except Exception as e:
             self._log(f"[CONFIG] Import failed: {e}")
             self._set_status(f"Import failed: {e}", "error")
             return
-        # Replace config and re-apply
+
+        shown_diff = list(preview.diff_lines[:14])
+        if len(preview.diff_lines) > len(shown_diff):
+            shown_diff.append(
+                f"... {len(preview.diff_lines) - len(shown_diff)} more change(s)"
+            )
+        held_labels = [
+            get_import_capability_info(capability)[0]
+            for capability in preview.capabilities
+        ]
+        held_summary = (
+            "\n\nHeld disabled for separate review: " + ", ".join(held_labels) + "."
+            if held_labels else "\n\nNo executable or outbound capabilities were detected."
+        )
+        if not ask_premium_confirmation(
+            self,
+            title="Review configuration import",
+            body=(
+                "StreamKeep validated this versioned export. Review the bounded "
+                "preference diff before replacing the current configuration."
+            ),
+            eyebrow="CONFIGURATION",
+            badge_text="Import review",
+            tone="warning" if held_labels else "info",
+            summary_title=f"{len(preview.diff_lines)} preference change(s)",
+            summary_body="\n".join(shown_diff) + held_summary,
+            primary_label="Continue review",
+            secondary_label="Cancel import",
+            default_action="secondary",
+        ):
+            self._set_status("Config import cancelled; no changes were applied.", "idle")
+            return
+
+        approved = []
+        for capability in preview.capabilities:
+            label, consequence = get_import_capability_info(capability)
+            if ask_premium_confirmation(
+                self,
+                title=f"Enable imported {label}?",
+                body=consequence,
+                eyebrow="CAPABILITY REVIEW",
+                badge_text="Disabled by default",
+                tone="warning",
+                summary_title=f"Imported {label} remain quarantined",
+                summary_body=(
+                    "Choose Enable only if you trust the source and intend this "
+                    "specific behavior. Other imported capabilities are reviewed separately."
+                ),
+                primary_label=f"Enable {label}",
+                secondary_label="Keep disabled",
+                default_action="secondary",
+            ):
+                approved.append(capability)
+        new_cfg = finalize_config_import(preview, approved)
+
+        # Persist before mutating runtime/UI state. A failed save leaves the
+        # pre-import config and all active behavior untouched.
         if not _save_config(new_cfg):
             from ...config import get_last_config_error
             detail = get_last_config_error() or "secure credential storage unavailable"
@@ -428,11 +483,9 @@ class SettingsTabMixin:
         # Clear mutable state that _apply_config appends to
         self._history.clear()
         self.monitor.entries.clear()
-        # If the imported config has monitor_channels, migrate and load
-        _db.migrate_from_config(new_cfg)
+        # Library/monitor/queue state is forbidden in config exports and remains
+        # in the existing SQLite database.
         self.monitor.load_from_db()
-        if not self.monitor.entries:
-            self.monitor.load_from_config(new_cfg)
         # Re-apply config to all UI elements
         self._apply_config()
         # Refresh derived views
@@ -444,7 +497,15 @@ class SettingsTabMixin:
         if hasattr(self, "queue_table"):
             self._refresh_queue_table()
         self._log(f"[CONFIG] Imported from {path}")
-        self._set_status(f"Config imported from {path}. Some changes may require a restart.", "success")
+        held_count = len(preview.capabilities) - len(approved)
+        suffix = (
+            f" {held_count} capability/capabilities remain disabled."
+            if held_count else ""
+        )
+        self._set_status(
+            f"Config imported from {path}.{suffix} Some changes may require a restart.",
+            "success",
+        )
 
     # ── Settings helpers ─────────────────────────────────────────────
 
