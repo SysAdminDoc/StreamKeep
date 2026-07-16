@@ -17,7 +17,7 @@ from .paths import _CREATE_NO_WINDOW
 
 
 MINIMUM_VERSIONS = {
-    "yt_dlp": "2026.06.09",
+    "yt_dlp": "2026.07.04",
     "pillow": "12.3.0",
     "curl": "8.21.0",
     "ffmpeg": "8.1.2",
@@ -212,7 +212,10 @@ def _probe_module(name, distribution, module, minimum, capabilities, repair):
 
 def _probe_yt_dlp():
     minimum = MINIMUM_VERSIONS["yt_dlp"]
-    repair = 'Install or update the signed dependency set with "yt-dlp[default]>=2026.06.09".'
+    repair = (
+        'Install or update the signed dependency set with '
+        '"yt-dlp[default]>=2026.07.04".'
+    )
     module_record = _probe_module(
         "yt_dlp", "yt-dlp", "yt_dlp", minimum,
         ["site-extraction", "direct-download", "youtube"], repair,

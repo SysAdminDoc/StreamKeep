@@ -50,6 +50,9 @@ def test_source_startup_contract_is_offscreen_and_isolated(
     assert marker["history_loaded"] == expected_count
     assert marker["history_table_rows"] == expected_count
     assert marker["checks"]["embedded_ytdlp_available"] is True
+    assert marker["checks"]["embedded_ytdlp_supported"] is True
+    assert marker["checks"]["embedded_ytdlp_ejs_compatible"] is True
+    assert marker["ytdlp_minimum_version"] == "2026.07.04"
     assert marker["checks"]["embedded_ytdlp_runner"] is True
     assert marker["checks"]["thumbnail_loader_initialized"] is True
     if expected_count:

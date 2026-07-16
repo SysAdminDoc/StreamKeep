@@ -3,7 +3,7 @@ import pytest
 from streamkeep.download_options import (
     validate_download_options, validate_playlist_options,
     validate_sponsorblock_options,
-    validate_subtitle_options,
+    validate_subtitle_options, validate_ytdlp_template_args,
 )
 
 
@@ -25,6 +25,29 @@ def test_named_format_sort_presets_resolve_to_ytdlp_expressions():
 def test_raw_format_spec_rejects_control_characters(value):
     with pytest.raises(ValueError, match="control characters"):
         validate_download_options(format_spec=value)
+
+
+def test_ytdlp_template_args_remain_structured_and_preserve_safe_values():
+    assert validate_ytdlp_template_args([
+        "--concurrent-fragments", "4", "--retry-sleep=fragment:exp=1:20",
+    ]) == (
+        "--concurrent-fragments", "4", "--retry-sleep=fragment:exp=1:20",
+    )
+
+
+@pytest.mark.parametrize("option", [
+    "--write-link", "--write-url-link=yes", "--write-desktop-link",
+    "--write-webloc-link", "--exec=calc", "--external-downloader-args",
+    "--netrc-cmd", "--config-locations", "-afile.txt",
+])
+def test_ytdlp_template_args_reject_link_and_command_boundaries(option):
+    with pytest.raises(ValueError, match="not allowed"):
+        validate_ytdlp_template_args([option])
+
+
+def test_ytdlp_template_args_reject_shell_strings():
+    with pytest.raises(ValueError, match="structured list"):
+        validate_ytdlp_template_args("--retries 3")
 
 
 @pytest.mark.parametrize("value", ["-1", "11", "lossless", "0\n--exec x"])

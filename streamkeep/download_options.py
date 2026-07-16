@@ -36,6 +36,31 @@ SPONSORBLOCK_CATEGORIES = {
 SPONSORBLOCK_NON_REMOVABLE = frozenset({"poi_highlight", "chapter"})
 SPONSORBLOCK_LEGACY_REMOVE = "sponsor,selfpromo,interaction"
 
+# Named/raw argument templates are deliberately narrower than yt-dlp itself.
+# Shortcut writers were the affected surface for CVE-2026-55404, while the
+# remaining options below introduce a second command/config parser or an
+# executable boundary.  Higher-level StreamKeep controls own those behaviors.
+YTDLP_TEMPLATE_DENIED_OPTIONS = frozenset({
+    "--batch-file",
+    "--config-locations",
+    "--downloader",
+    "--downloader-args",
+    "--exec",
+    "--exec-before-download",
+    "--external-downloader",
+    "--external-downloader-args",
+    "--load-info-json",
+    "--netrc-cmd",
+    "--postprocessor-args",
+    "--ppa",
+    "--use-postprocessor",
+    "--write-desktop-link",
+    "--write-link",
+    "--write-url-link",
+    "--write-webloc-link",
+    "-a",
+})
+
 _AUDIO_QUALITY_RE = re.compile(
     r"(?:10|[0-9](?:\.\d+)?)|(?:[1-9][0-9]*(?:\.[0-9]+)?[kKmM])"
 )
@@ -51,6 +76,32 @@ def _safe_argument(value, label, *, max_len=1024):
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise ValueError(f"{label} cannot contain control characters")
     return value
+
+
+def validate_ytdlp_template_args(args):
+    """Validate a structured yt-dlp argument template.
+
+    Templates are argv lists, never shell strings.  Options that create
+    executable shortcut files, load more arguments/configuration, or delegate
+    to another command boundary are reserved for typed StreamKeep features.
+    """
+    if isinstance(args, (str, bytes)) or not isinstance(args, (list, tuple)):
+        raise ValueError("yt-dlp template arguments must be a structured list")
+    if len(args) > 128:
+        raise ValueError("yt-dlp template has too many arguments (maximum 128)")
+
+    validated = []
+    for raw_arg in args:
+        arg = _safe_argument(raw_arg, "yt-dlp template argument", max_len=4096)
+        if not arg:
+            raise ValueError("yt-dlp template arguments cannot be empty")
+        option = arg.split("=", 1)[0].lower()
+        if option in YTDLP_TEMPLATE_DENIED_OPTIONS:
+            raise ValueError(f"yt-dlp template option is not allowed: {option}")
+        if option.startswith("-a") and option != "--":
+            raise ValueError("yt-dlp template option is not allowed: -a")
+        validated.append(arg)
+    return tuple(validated)
 
 
 def resolve_format_sort(*, preset="", custom=""):

@@ -27,7 +27,7 @@ def _record(name, *, supported=True, available=True, version="1.0.0",
 class CapabilityRegistryTests(unittest.TestCase):
     def test_security_floors_are_release_contract(self):
         self.assertEqual(capabilities.MINIMUM_VERSIONS, {
-            "yt_dlp": "2026.06.09",
+            "yt_dlp": "2026.07.04",
             "pillow": "12.3.0",
             "curl": "8.21.0",
             "ffmpeg": "8.1.2",
@@ -35,7 +35,8 @@ class CapabilityRegistryTests(unittest.TestCase):
         })
 
     def test_calendar_and_semantic_versions_compare_numerically(self):
-        self.assertTrue(capabilities.version_at_least("2026.7.4", "2026.06.09"))
+        self.assertTrue(capabilities.version_at_least("2026.7.4", "2026.07.04"))
+        self.assertFalse(capabilities.version_at_least("2026.6.9", "2026.07.04"))
         self.assertTrue(capabilities.version_at_least("ffmpeg 8.1.2-full", "8.1.2"))
         self.assertFalse(capabilities.version_at_least("curl 8.19.0", "8.21.0"))
         self.assertFalse(capabilities.version_at_least("unknown", "8.21.0"))
@@ -165,7 +166,7 @@ class CapabilityRegistryTests(unittest.TestCase):
 
     def test_source_and_frozen_ytdlp_commands_are_explicit(self):
         module = _record(
-            "yt_dlp", version="2026.7.4", minimum="2026.06.09",
+            "yt_dlp", version="2026.7.4", minimum="2026.07.04",
             path=r"C:\Python\yt_dlp\__init__.py",
         )
         with mock.patch.object(capabilities, "_probe_module", return_value=dict(module)), \
@@ -210,11 +211,13 @@ class ReleaseFloorTests(unittest.TestCase):
             root / "packaging" / "flatpak" /
             "com.github.SysAdminDoc.StreamKeep.yml"
         ).read_text(encoding="utf-8")
+        spec = (root / "StreamKeep.spec").read_text(encoding="utf-8")
 
         self.assertIn("Pillow>=12.3.0", requirements)
-        self.assertIn("yt-dlp[default]>=2026.06.09", requirements)
-        self.assertIn("'yt-dlp[default]>=2026.06.09'", flatpak)
+        self.assertIn("yt-dlp[default]>=2026.07.04", requirements)
+        self.assertIn("'yt-dlp[default]>=2026.07.04'", flatpak)
         self.assertIn("'Pillow>=12.3.0'", flatpak)
+        self.assertIn("copy_metadata('yt-dlp-ejs')", spec)
         self.assertIn("ffmpeg-8.1.2.tar.xz", flatpak)
         self.assertIn(
             "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",

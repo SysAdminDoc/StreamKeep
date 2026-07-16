@@ -1,7 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_submodules,
+    copy_metadata,
+)
 
 
 ROOT = Path(SPECPATH).resolve()
@@ -35,6 +39,7 @@ datas += collect_tree('browser-extension', 'browser-extension')
 datas += collect_tree('packaging', 'packaging')
 datas += collect_tree('streamkeep/i18n', 'streamkeep/i18n')
 datas += collect_data_files('yt_dlp_ejs')
+datas += copy_metadata('yt-dlp-ejs')
 
 
 a = Analysis(

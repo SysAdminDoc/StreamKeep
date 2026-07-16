@@ -38,7 +38,7 @@ modules:
   - name: streamkeep
     buildsystem: simple
     build-commands:
-      - pip3 install --no-index --find-links=. --prefix=/app 'yt-dlp[default]>=2026.06.09' send2trash websocket-client keyring 'Pillow>=12.3.0'
+      - pip3 install --no-index --find-links=. --prefix=/app 'yt-dlp[default]>=2026.07.04' send2trash websocket-client keyring 'Pillow>=12.3.0'
       - pip3 install --no-index --prefix=/app .
       - install -Dm644 packaging/flatpak/com.github.SysAdminDoc.StreamKeep.desktop /app/share/applications/com.github.SysAdminDoc.StreamKeep.desktop
       - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.github.SysAdminDoc.StreamKeep.png

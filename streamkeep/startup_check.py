@@ -132,6 +132,11 @@ def run_startup_check(*, ready_file, fixture="empty"):
         app = QApplication.instance() or QApplication(["StreamKeep", "startup-check"])
 
         from . import db
+        from .capabilities import (
+            MINIMUM_VERSIONS,
+            get_runtime_capabilities,
+            version_at_least,
+        )
         from .extractors.ytdlp import ytdlp_command
         from .ui.main_window import StreamKeep
         from yt_dlp.version import __version__ as ytdlp_version
@@ -164,6 +169,9 @@ def run_startup_check(*, ready_file, fixture="empty"):
             for key in ("history", "monitor_channels", "download_queue")
         )
         command = ytdlp_command()
+        runtime_registry = get_runtime_capabilities(refresh=True)
+        ytdlp_record = runtime_registry["yt_dlp"]
+        ejs_record = runtime_registry["yt_dlp_ejs"]
 
         checks = {
             "database_path_bound": Path(diagnostics.get("path", "")).resolve()
@@ -181,6 +189,13 @@ def run_startup_check(*, ready_file, fixture="empty"):
             "thumbnail_rendered": thumbnail_rendered if expected["history"] else True,
             "legacy_config_migrated": legacy_keys_removed,
             "embedded_ytdlp_available": bool(str(ytdlp_version or "").strip()),
+            "embedded_ytdlp_supported": (
+                ytdlp_record.get("supported") is True
+                and version_at_least(
+                    ytdlp_version, MINIMUM_VERSIONS["yt_dlp"]
+                )
+            ),
+            "embedded_ytdlp_ejs_compatible": ejs_record.get("supported") is True,
             "embedded_ytdlp_runner": (
                 "--internal-ytdlp" in command
                 if getattr(sys, "frozen", False)
@@ -203,6 +218,9 @@ def run_startup_check(*, ready_file, fixture="empty"):
             "top_level_widgets": len(top_levels),
             "visible_top_level_widgets": len(visible_top_levels),
             "ytdlp_version": str(ytdlp_version),
+            "ytdlp_minimum_version": MINIMUM_VERSIONS["yt_dlp"],
+            "ytdlp_ejs_version": ejs_record.get("version", ""),
+            "ytdlp_ejs_requirement": ejs_record.get("required_by_ytdlp", ""),
             "ytdlp_command": command,
         })
     except Exception as exc:
