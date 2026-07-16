@@ -7,8 +7,10 @@ For native extractors, provides subtitle discovery + download helpers.
 Normalizes TTML/SBV/VTT to SRT for maximum player compatibility.
 """
 
+import html
 import os
 import re
+from dataclasses import dataclass
 
 
 # ── Format conversion ───────────────────────────────────────────────
@@ -216,3 +218,214 @@ def ytdlp_sub_args(enabled=True, langs="en"):
         "--convert-subs", "srt",
     ]
     return args
+
+
+# ── Cue model, bilingual merge, and LRC export ─────────────────────
+
+_SRT_TS = r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"
+_SRT_LINE_RE = re.compile(_SRT_TS + r"\s*-->\s*" + _SRT_TS)
+# WebVTT allows minute-only (MM:SS.mmm) as well as HH:MM:SS.mmm.
+_VTT_TS = r"(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})"
+_VTT_LINE_RE = re.compile(_VTT_TS + r"\s*-->\s*" + _VTT_TS)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+@dataclass
+class SubtitleCue:
+    start: float
+    end: float
+    text: str
+
+
+def _clean_cue_text(text):
+    return html.unescape(_TAG_RE.sub("", text)).strip()
+
+
+def parse_srt(text):
+    """Parse SRT text into a list of ``SubtitleCue`` (malformed cues skipped)."""
+    cues = []
+    for block in re.split(r"\n\s*\n", str(text or "").strip()):
+        lines = block.strip().split("\n")
+        ts_idx = match = None
+        for i, line in enumerate(lines):
+            match = _SRT_LINE_RE.search(line)
+            if match:
+                ts_idx = i
+                break
+        if match is None:
+            continue
+        g = [int(x) for x in match.groups()]
+        start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
+        end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
+        body = _clean_cue_text(" ".join(lines[ts_idx + 1:]))
+        if body:
+            cues.append(SubtitleCue(start, end, body))
+    return cues
+
+
+def _vtt_secs(hours, minutes, seconds, millis):
+    return (
+        (int(hours) if hours else 0) * 3600
+        + int(minutes) * 60 + int(seconds) + int(millis) / 1000
+    )
+
+
+def parse_vtt(text):
+    """Parse WebVTT text into a list of ``SubtitleCue`` (spec timestamp forms)."""
+    cues = []
+    content = str(text or "").replace("﻿", "").strip()
+    for block in re.split(r"\n\s*\n", content):
+        lines = block.strip().split("\n")
+        if not lines:
+            continue
+        if lines[0].strip().upper().startswith(
+            ("WEBVTT", "NOTE", "STYLE", "REGION")
+        ):
+            continue
+        ts_idx = match = None
+        for i, line in enumerate(lines):
+            match = _VTT_LINE_RE.match(line.strip())
+            if match:
+                ts_idx = i
+                break
+        if match is None:
+            continue
+        g = match.groups()
+        start = _vtt_secs(g[0], g[1], g[2], g[3])
+        end = _vtt_secs(g[4], g[5], g[6], g[7])
+        body = _clean_cue_text(" ".join(lines[ts_idx + 1:]))
+        if body:
+            cues.append(SubtitleCue(start, end, body))
+    return cues
+
+
+def parse_subtitle_text(text, fmt):
+    return parse_vtt(text) if str(fmt or "").lower().lstrip(".") == "vtt" else parse_srt(text)
+
+
+def parse_subtitle_file(path):
+    """Parse an .srt/.vtt file by extension into cues."""
+    ext = str(path).lower().rsplit(".", 1)[-1]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return parse_subtitle_text(handle.read(), ext)
+    except OSError:
+        return []
+
+
+def _fmt_srt_ts(secs):
+    millis = int(round(max(0.0, float(secs)) * 1000))
+    hours, millis = divmod(millis, 3600_000)
+    minutes, millis = divmod(millis, 60_000)
+    seconds, millis = divmod(millis, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _fmt_ass_ts(secs):
+    cents = int(round(max(0.0, float(secs)) * 100))
+    hours, cents = divmod(cents, 360_000)
+    minutes, cents = divmod(cents, 6000)
+    seconds, cents = divmod(cents, 100)
+    return f"{hours:d}:{minutes:02d}:{seconds:02d}.{cents:02d}"
+
+
+def _fmt_lrc_ts(secs):
+    cents = int(round(max(0.0, float(secs)) * 100))
+    minutes, cents = divmod(cents, 6000)
+    seconds, cents = divmod(cents, 100)
+    return f"[{minutes:02d}:{seconds:02d}.{cents:02d}]"
+
+
+def _overlap(a_start, a_end, b_start, b_end):
+    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def merge_bilingual_cues(primary, secondary):
+    """Anchor on *primary* cues, stacking overlapping *secondary* text below.
+
+    Deterministic overlap policy: each primary cue keeps its own timing and
+    order; secondary cues whose window overlaps it (most-overlap first) are
+    appended underneath. Cue order and count follow the primary track.
+    """
+    merged = []
+    for cue in primary:
+        matches = sorted(
+            (
+                (_overlap(cue.start, cue.end, s.start, s.end), idx, s)
+                for idx, s in enumerate(secondary)
+            ),
+            key=lambda item: (-item[0], item[1]),
+        )
+        extra = [s.text for overlap, _idx, s in matches if overlap > 0]
+        text = cue.text + ("\n" + " ".join(extra) if extra else "")
+        merged.append(SubtitleCue(cue.start, cue.end, text))
+    return merged
+
+
+def render_srt(cues):
+    """Render cues to SRT text."""
+    parts = []
+    for index, cue in enumerate(cues, start=1):
+        parts.append(
+            f"{index}\n{_fmt_srt_ts(cue.start)} --> {_fmt_srt_ts(cue.end)}\n"
+            f"{cue.text}\n"
+        )
+    return "\n".join(parts)
+
+
+_ASS_HEADER = (
+    "[Script Info]\n"
+    "ScriptType: v4.00+\n"
+    "Collisions: Normal\n"
+    "PlayResX: 1920\n"
+    "PlayResY: 1080\n\n"
+    "[V4+ Styles]\n"
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+    "MarginL, MarginR, MarginV, Encoding\n"
+    "Style: Primary,Arial,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+    "0,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1\n"
+    "Style: Secondary,Arial,40,&H00A0E0FF,&H000000FF,&H00000000,&H00000000,"
+    "0,1,0,0,100,100,0,0,1,2,1,2,10,10,90,1\n\n"
+    "[Events]\n"
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+    "Effect, Text\n"
+)
+
+
+def render_bilingual_ass(primary, secondary):
+    """Render primary + secondary tracks to ASS with distinct styles so each
+    language keeps its own placement and cue order."""
+    lines = [_ASS_HEADER]
+
+    def _dialogue(style, cue):
+        text = cue.text.replace("\n", "\\N")
+        return (
+            f"Dialogue: 0,{_fmt_ass_ts(cue.start)},{_fmt_ass_ts(cue.end)},"
+            f"{style},,0,0,0,,{text}\n"
+        )
+
+    for cue in primary:
+        lines.append(_dialogue("Primary", cue))
+    for cue in secondary:
+        lines.append(_dialogue("Secondary", cue))
+    return "".join(lines)
+
+
+def export_lrc(cues, *, metadata=None):
+    """Render cues to an LRC lyric file with validated monotonic timestamps.
+
+    Cues are sorted by start time so timestamps never decrease. Optional
+    *metadata* maps LRC ID tags (ti/ar/al/by/offset) to values.
+    """
+    lines = []
+    for key in ("ti", "ar", "al", "by", "offset"):
+        value = (metadata or {}).get(key)
+        if value:
+            lines.append(f"[{key}:{value}]")
+    for cue in sorted(cues, key=lambda c: c.start):
+        text = cue.text.replace("\n", " ").strip()
+        if text:
+            lines.append(f"{_fmt_lrc_ts(cue.start)}{text}")
+    return "\n".join(lines) + ("\n" if lines else "")

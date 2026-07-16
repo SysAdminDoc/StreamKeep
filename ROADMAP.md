@@ -238,9 +238,9 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; timestamps, author/channel-owner/member flags, message text, and supported emotes normalize to `chat.jsonl`; regex/user filters and CSV export work; partial/unavailable replay is non-fatal; existing spike/highlight/render tools consume the result unchanged.
   Complexity: M
 
-- [ ] P2 — Add bilingual subtitle merge and LRC export
-  Why: The current SRT/VTT/ASS workflow lacks two concrete archive/listening outputs already exposed by a comparable yt-dlp GUI.
-  Evidence: `streamkeep/download_options.py`, `workers/download.py`, subtitle UI; imsyy/yt-dlp-gui bilingual subtitle and LRC features; current WebVTT recommendation.
-  Touches: subtitle parser/model, post-processing, per-job UI/CLI/job spec, sidecar naming, fixtures.
-  Acceptance: Users select primary/secondary tracks and a deterministic overlap/alignment policy; merged SRT/ASS preserves language labels and cue order; LRC emits validated monotonic timestamps for audio; malformed cues isolate rather than abort the download; originals are retained by default and outputs round-trip Unicode in frozen builds.
-  Complexity: M
+- [ ] P3 — Surface bilingual-subtitle and LRC options in the Settings post-processing UI
+  Why: The bilingual-merge and LRC-export transforms, config keys, and PostProcessor step are implemented and persist via `pp_bilingual_*`/`pp_lrc_*`, but there are no Settings checkboxes/inputs to toggle them from the GUI yet.
+  Evidence: `streamkeep/subtitles.py` (merge/LRC), `streamkeep/postprocess/processor.py::_run_subtitle_processing`, `streamkeep/ui/main_window.py` PostProcessor snapshot.
+  Touches: Settings post-processing panel (checkboxes + language inputs + format combo), config save wiring, offscreen GUI smoke.
+  Acceptance: Settings exposes enable toggles, primary/secondary language fields, SRT/ASS format choice, and LRC language; values persist and drive the existing PostProcessor step.
+  Complexity: S

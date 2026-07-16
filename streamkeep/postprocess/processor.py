@@ -49,6 +49,15 @@ class PostProcessor:
     convert_audio_samplerate = "original"
     convert_delete_source = False
 
+    # Subtitle post-processing (bilingual merge + LRC export) — pure text,
+    # no ffmpeg.
+    bilingual_subs = False
+    bilingual_primary_lang = "en"
+    bilingual_secondary_lang = ""
+    bilingual_format = "srt"        # srt | ass
+    lrc_export = False
+    lrc_lang = "en"
+
     @classmethod
     def has_any_preset(cls):
         return (
@@ -56,6 +65,7 @@ class PostProcessor:
             or cls.reencode_h265 or cls.contact_sheet
             or cls.split_by_chapter or cls.remove_silence
             or cls.convert_video or cls.convert_audio
+            or cls.bilingual_subs or cls.lrc_export
         )
 
     @classmethod
@@ -106,6 +116,77 @@ class PostProcessor:
         for src in audio_files:
             if cls.convert_audio:
                 cls._run_audio_convert(src, log_fn)
+
+        if cls.bilingual_subs or cls.lrc_export:
+            cls._run_subtitle_processing(out_dir, log_fn)
+
+    @classmethod
+    def _run_subtitle_processing(cls, out_dir, log_fn=None):
+        """Merge bilingual subtitles and/or export an LRC from sidecars.
+
+        Pure text transforms over already-downloaded ``.srt``/``.vtt`` files;
+        originals are always preserved. A missing track is non-fatal.
+        """
+        from ..subtitles import (
+            export_lrc, find_subtitles, merge_bilingual_cues,
+            parse_subtitle_file, render_bilingual_ass, render_srt,
+        )
+
+        found = find_subtitles(out_dir)
+        by_lang = {}
+        for path, lang, _fmt in found:
+            by_lang.setdefault(str(lang or "").lower(), path)
+
+        def _cues_for(lang):
+            path = by_lang.get(str(lang or "").lower())
+            return parse_subtitle_file(path) if path else []
+
+        if cls.bilingual_subs and cls.bilingual_secondary_lang:
+            primary = _cues_for(cls.bilingual_primary_lang)
+            secondary = _cues_for(cls.bilingual_secondary_lang)
+            if primary and secondary:
+                base = os.path.join(
+                    out_dir,
+                    f"subtitles.{cls.bilingual_primary_lang}-"
+                    f"{cls.bilingual_secondary_lang}.bilingual",
+                )
+                try:
+                    if str(cls.bilingual_format).lower() == "ass":
+                        text = render_bilingual_ass(primary, secondary)
+                        dest = base + ".ass"
+                    else:
+                        text = render_srt(merge_bilingual_cues(primary, secondary))
+                        dest = base + ".srt"
+                    with open(dest, "w", encoding="utf-8") as handle:
+                        handle.write(text)
+                    if log_fn:
+                        log_fn(f"[POST] Bilingual subtitles -> {os.path.basename(dest)}")
+                except OSError as e:
+                    if log_fn:
+                        log_fn(f"[POST] Bilingual subtitle merge failed: {e}")
+            elif log_fn:
+                log_fn(
+                    "[POST] Bilingual merge skipped — both language tracks "
+                    "were not found."
+                )
+
+        if cls.lrc_export:
+            cues = _cues_for(cls.lrc_lang)
+            if cues:
+                dest = os.path.join(out_dir, f"lyrics.{cls.lrc_lang}.lrc")
+                try:
+                    with open(dest, "w", encoding="utf-8") as handle:
+                        handle.write(export_lrc(cues))
+                    if log_fn:
+                        log_fn(f"[POST] LRC export -> {os.path.basename(dest)}")
+                except OSError as e:
+                    if log_fn:
+                        log_fn(f"[POST] LRC export failed: {e}")
+            elif log_fn:
+                log_fn(
+                    f"[POST] LRC export skipped — no '{cls.lrc_lang}' subtitle "
+                    "track found."
+                )
 
     @staticmethod
     def _ffmpeg_run(cmd, log_fn, label):

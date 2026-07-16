@@ -87,6 +87,8 @@ _STRING_CONFIG_KEYS = frozenset({
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",
     "pp_convert_audio_bitrate", "pp_convert_audio_samplerate",
+    "pp_bilingual_primary_lang", "pp_bilingual_secondary_lang",
+    "pp_bilingual_format", "pp_lrc_lang",
 })
 _BOOL_CONFIG_KEYS = frozenset({
     "check_duplicates", "write_nfo", "download_twitch_chat",
@@ -99,6 +101,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "pp_extract_audio", "pp_normalize_loudness", "pp_reencode_h265",
     "pp_contact_sheet", "pp_split_by_chapter", "pp_remove_silence",
     "pp_convert_video", "pp_convert_audio", "pp_convert_delete_source",
+    "pp_bilingual_subs", "pp_lrc_export",
     "first_run_complete",
 })
 _INT_CONFIG_KEYS = frozenset({

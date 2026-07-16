@@ -649,6 +649,12 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         PostProcessor.convert_audio_bitrate = cfg.get("pp_convert_audio_bitrate") or "192k"
         PostProcessor.convert_audio_samplerate = cfg.get("pp_convert_audio_samplerate") or "original"
         PostProcessor.convert_delete_source = bool(cfg.get("pp_convert_delete_source", False))
+        PostProcessor.bilingual_subs = bool(cfg.get("pp_bilingual_subs", False))
+        PostProcessor.bilingual_primary_lang = cfg.get("pp_bilingual_primary_lang") or "en"
+        PostProcessor.bilingual_secondary_lang = cfg.get("pp_bilingual_secondary_lang") or ""
+        PostProcessor.bilingual_format = cfg.get("pp_bilingual_format") or "srt"
+        PostProcessor.lrc_export = bool(cfg.get("pp_lrc_export", False))
+        PostProcessor.lrc_lang = cfg.get("pp_lrc_lang") or "en"
         if hasattr(self, "pp_audio_check"):
             self.pp_audio_check.setChecked(PostProcessor.extract_audio)
             self.pp_loud_check.setChecked(PostProcessor.normalize_loudness)
