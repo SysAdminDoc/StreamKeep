@@ -196,6 +196,17 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self.clipboard_monitor = ClipboardMonitor()
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
+        # History is restored by _apply_config(), which immediately refreshes
+        # the table and may queue thumbnails for existing recordings.  Create
+        # every loader before applying persisted state so non-empty libraries
+        # are safe on startup.
+        from .thumb_loader import ThumbLoader, PreviewLoader
+        self._history_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
+        self._history_thumb_loader.thumb_ready.connect(self._on_history_thumb_ready)
+        self._storage_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
+        self._storage_thumb_loader.thumb_ready.connect(self._on_storage_thumb_ready)
+        self._preview_loader = PreviewLoader(self)
+        self._preview_loader.frame_ready.connect(self._on_preview_frame)
         self._config_save_timer = QTimer(self)
         self._config_save_timer.setSingleShot(True)
         self._config_save_timer.timeout.connect(self._persist_config)
@@ -239,15 +250,6 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
                 self.monitor_table.model().rowsMoved.connect(self._on_monitor_rows_moved)
         except Exception:
             pass
-        # Thumbnail loaders for History and Storage tables (lazy-filled).
-        from .thumb_loader import ThumbLoader, PreviewLoader
-        self._history_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
-        self._history_thumb_loader.thumb_ready.connect(self._on_history_thumb_ready)
-        self._storage_thumb_loader = ThumbLoader(self, max_concurrent=2, size=(160, 90))
-        self._storage_thumb_loader.thumb_ready.connect(self._on_storage_thumb_ready)
-        # Hover preview loader (F46)
-        self._preview_loader = PreviewLoader(self)
-        self._preview_loader.frame_ready.connect(self._on_preview_frame)
         self._resume_candidates = []
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
@@ -1232,18 +1234,18 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
 
     def _set_status(self, message, tone="idle"):
         tones = {
-            "idle": ("Standby", CAT["panelSoft"], CAT["subtext1"], CAT["stroke"]),
-            "working": ("Working", CAT["accent"], "#081120", CAT["accent"]),
-            "processing": ("Finalizing", CAT["accentSoft"], "#081120", CAT["accent"]),
-            "success": ("Ready", CAT["accentSoft"], "#081120", CAT["accentSoft"]),
-            "warning": ("Alert", CAT["gold"], "#081120", CAT["gold"]),
-            "error": ("Error", CAT["red"], "#081120", CAT["red"]),
+            "idle": ("Ready", CAT["muted"]),
+            "working": ("Working", CAT["accent"]),
+            "processing": ("Finalizing", CAT["accent"]),
+            "success": ("Ready", CAT["accentSoft"]),
+            "warning": ("Attention", CAT["gold"]),
+            "error": ("Error", CAT["red"]),
         }
-        pill, bg, fg, border = tones.get(tone, tones["idle"])
-        self.status_pill.setText(pill)
+        label, color = tones.get(tone, tones["idle"])
+        self.status_pill.setText(label)
         self.status_pill.setStyleSheet(
-            f"background-color: {bg}; color: {fg}; border: 1px solid {border}; "
-            "border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700;"
+            f"color: {color}; background: transparent; border: none; "
+            "padding: 0; font-size: 13px; font-weight: 700;"
         )
         self.status_label.setText(message)
         self.status_label.setToolTip(message)
@@ -1255,7 +1257,6 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             return
 
         queued = len(self._download_queue)
-        monitored = len(getattr(self.monitor, "entries", []))
         archived = len(self._history)
         active_jobs = sum(
             1 for q in self._download_queue
@@ -1287,9 +1288,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
 
         self.shell_snapshot_value.setText(headline)
         self.shell_snapshot_detail.setText(detail)
-        self.shell_snapshot_meta.setText(
-            f"Desktop v{VERSION} • {queued} queued • {monitored} monitored • {archived} archived"
-        )
+        self.shell_snapshot_meta.setText(f"{active_jobs} active  •  {queued} queued")
 
 
     # Download-tab handlers moved to DownloadTabMixin in
@@ -1301,77 +1300,66 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         central.setObjectName("chrome")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(16)
+        root.setContentsMargins(24, 12, 24, 10)
+        root.setSpacing(10)
 
         header_card = QFrame()
-        header_card.setObjectName("shellCard")
+        header_card.setObjectName("appHeader")
         header_lay = QVBoxLayout(header_card)
-        header_lay.setContentsMargins(22, 20, 22, 20)
-        header_lay.setSpacing(16)
+        header_lay.setContentsMargins(0, 0, 0, 0)
+        header_lay.setSpacing(0)
 
         header_top = QHBoxLayout()
-        header_top.setSpacing(20)
-        title_col = QVBoxLayout()
-        title_col.setSpacing(4)
-        eyebrow = QLabel("Capture Suite")
-        eyebrow.setObjectName("eyebrow")
+        header_top.setContentsMargins(0, 0, 0, 10)
+        header_top.setSpacing(18)
         title = QLabel("StreamKeep")
-        title.setObjectName("title")
-        subtitle = QLabel(
-            "Archive live streams, queue batches, and keep every capture organized from one desktop workspace."
+        title.setObjectName("appBrand")
+        title.setMinimumWidth(190)
+        header_top.addWidget(title)
+
+        self._global_search = QLineEdit()
+        self._global_search.setPlaceholderText("Search downloads, URLs, channels, or podcasts…")
+        self._global_search.setClearButtonEnabled(True)
+        self._global_search.setObjectName("globalSearch")
+        self._global_search.setMinimumHeight(42)
+        self._global_search.setMaximumWidth(760)
+        self._global_search_timer = QTimer(self)
+        self._global_search_timer.setSingleShot(True)
+        self._global_search_timer.setInterval(300)
+        self._global_search_timer.timeout.connect(self._on_global_search)
+        self._global_search.textChanged.connect(
+            lambda: self._global_search_timer.start()
         )
-        subtitle.setObjectName("heroBody")
-        subtitle.setWordWrap(True)
-        title_col.addWidget(eyebrow)
-        title_col.addWidget(title)
-        title_col.addWidget(subtitle)
-        header_top.addLayout(title_col, 1)
-
-        shell_meta = QFrame()
-        shell_meta.setObjectName("shellMetaCard")
-        shell_meta.setMaximumWidth(310)
-        shell_meta_lay = QVBoxLayout(shell_meta)
-        shell_meta_lay.setContentsMargins(16, 14, 16, 14)
-        shell_meta_lay.setSpacing(6)
-
-        shell_meta_top = QHBoxLayout()
-        shell_meta_top.setSpacing(8)
-        shell_meta_label = QLabel("Live Snapshot")
-        shell_meta_label.setObjectName("fieldLabel")
-        shell_meta_top.addWidget(shell_meta_label)
-        shell_meta_top.addStretch(1)
+        self._global_search.returnPressed.connect(self._on_global_search)
+        header_top.addWidget(self._global_search, 1)
 
         self.notif_button = QPushButton("Alerts 0")
-        self.notif_button.setObjectName("secondary")
-        self.notif_button.setMinimumWidth(104)
+        self.notif_button.setObjectName("ghost")
+        self.notif_button.setMinimumWidth(86)
         self.notif_button.setToolTip("Recent notifications")
         self.notif_button.clicked.connect(self._on_show_notifications)
-        shell_meta_top.addWidget(self.notif_button)
-        shell_meta_lay.addLayout(shell_meta_top)
+        header_top.addWidget(self.notif_button)
 
-        self.shell_snapshot_value = QLabel("Ready to capture")
-        self.shell_snapshot_value.setObjectName("shellStatValue")
-        self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}")
-        self.shell_snapshot_detail.setObjectName("shellStatBody")
-        self.shell_snapshot_detail.setWordWrap(True)
-        self.shell_snapshot_meta = QLabel("0 queued • 0 monitored • 0 archived")
-        self.shell_snapshot_meta.setObjectName("shellStatMeta")
-        self.shell_snapshot_meta.setWordWrap(True)
-        shell_meta_lay.addWidget(self.shell_snapshot_value)
-        shell_meta_lay.addWidget(self.shell_snapshot_detail)
-        shell_meta_lay.addWidget(self.shell_snapshot_meta)
-        header_top.addWidget(shell_meta)
+        settings_quick = QPushButton("Settings")
+        settings_quick.setObjectName("ghost")
+        settings_quick.clicked.connect(lambda: self._switch_tab(5))
+        header_top.addWidget(settings_quick)
         header_lay.addLayout(header_top)
 
-        shell_controls = QHBoxLayout()
-        shell_controls.setSpacing(12)
+        # These labels retain the existing overview state contract without
+        # turning operational counts into a dashboard card.
+        self.shell_snapshot_value = QLabel("Ready to capture", header_card)
+        self.shell_snapshot_value.setVisible(False)
+        self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}", header_card)
+        self.shell_snapshot_detail.setVisible(False)
+        self.shell_snapshot_meta = QLabel("0 active  •  0 queued")
+        self.shell_snapshot_meta.setObjectName("footerMeta")
 
         tab_shell = QFrame()
-        tab_shell.setObjectName("toolbar")
+        tab_shell.setObjectName("appNav")
         tab_lay = QHBoxLayout(tab_shell)
-        tab_lay.setContentsMargins(12, 10, 12, 10)
-        tab_lay.setSpacing(10)
+        tab_lay.setContentsMargins(0, 0, 0, 0)
+        tab_lay.setSpacing(22)
 
         self._tab_btns = []
         self._tab_names = ["Download", "Monitor", "History", "Storage", "Analytics", "Settings"]
@@ -1383,37 +1371,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
         tab_lay.addStretch(1)
-        shell_controls.addWidget(tab_shell, 1)
-
-        search_shell = QFrame()
-        search_shell.setObjectName("toolbar")
-        search_shell.setMinimumWidth(320)
-        search_lay = QVBoxLayout(search_shell)
-        search_lay.setContentsMargins(14, 12, 14, 12)
-        search_lay.setSpacing(8)
-        search_label = QLabel("Search Everything")
-        search_label.setObjectName("fieldLabel")
-        search_lay.addWidget(search_label)
-
-        self._global_search = QLineEdit()
-        self._global_search.setPlaceholderText(
-            "Search history, queue, storage, monitor, and transcripts…"
-        )
-        self._global_search.setClearButtonEnabled(True)
-        self._global_search.setObjectName("shellSearch")
-        self._global_search.setMinimumHeight(40)
-        self._global_search_timer = QTimer(self)
-        self._global_search_timer.setSingleShot(True)
-        self._global_search_timer.setInterval(300)
-        self._global_search_timer.timeout.connect(self._on_global_search)
-        self._global_search.textChanged.connect(
-            lambda: self._global_search_timer.start()
-        )
-        self._global_search.returnPressed.connect(self._on_global_search)
-        search_lay.addWidget(self._global_search)
-        shell_controls.addWidget(search_shell, 0)
-
-        header_lay.addLayout(shell_controls)
+        header_lay.addWidget(tab_shell)
         root.addWidget(header_card)
 
         # Global search results dropdown (hidden until needed)
@@ -1426,7 +1384,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         root.addWidget(self._global_results)
 
         self._stack = QStackedWidget()
-        self._stack.addWidget(self._wrap_scroll_page(build_download_tab(self)))
+        self._download_scroll = self._wrap_scroll_page(build_download_tab(self))
+        self._stack.addWidget(self._download_scroll)
         self._stack.addWidget(self._wrap_scroll_page(build_monitor_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_history_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
@@ -1436,10 +1395,10 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         root.addWidget(self._stack, 1)
 
         footer = QFrame()
-        footer.setObjectName("footerBar")
+        footer.setObjectName("statusBar")
         footer_lay = QHBoxLayout(footer)
-        footer_lay.setContentsMargins(16, 12, 16, 12)
-        footer_lay.setSpacing(12)
+        footer_lay.setContentsMargins(0, 8, 0, 0)
+        footer_lay.setSpacing(10)
 
         self.status_pill = QLabel("Standby")
         footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignTop)
@@ -1473,9 +1432,12 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self.trim_btn.setVisible(False)
         self.trim_btn.clicked.connect(self._on_trim_last)
         footer_lay.addWidget(self.trim_btn)
+
+        footer_lay.addWidget(self.shell_snapshot_meta)
         root.addWidget(footer)
 
-        self._set_status("Paste a URL to inspect a stream or VOD.", "idle")
+        self._set_status("Paste a URL to begin.", "idle")
+        QTimer.singleShot(0, lambda: self._download_scroll.verticalScrollBar().setValue(0))
 
     def _switch_tab(self, idx):
         self._stack.setCurrentIndex(idx)

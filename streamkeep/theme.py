@@ -9,18 +9,18 @@ dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
 CAT_MOCHA = {
-    "base": "#1e1e2e", "mantle": "#181825", "crust": "#11111b",
-    "surface0": "#313244", "surface1": "#45475a", "surface2": "#585b70",
-    "overlay0": "#6c7086", "overlay1": "#7f849c",
-    "text": "#cdd6f4", "subtext0": "#a6adc8", "subtext1": "#bac2de",
+    "base": "#081723", "mantle": "#09131f", "crust": "#06101a",
+    "surface0": "#132a3a", "surface1": "#1a3547", "surface2": "#244559",
+    "overlay0": "#597184", "overlay1": "#73899a",
+    "text": "#eef3f6", "subtext0": "#9fb0be", "subtext1": "#c2ced6",
     "lavender": "#b4befe", "blue": "#89b4fa", "sapphire": "#74c7ec",
     "sky": "#89dceb", "teal": "#94e2d5", "green": "#a6e3a1",
     "yellow": "#f9e2af", "peach": "#fab387", "maroon": "#eba0ac",
     "red": "#f38ba8", "mauve": "#cba6f7", "pink": "#f5c2e7",
     "flamingo": "#f2cdcd", "rosewater": "#f5e0dc",
-    "panel": "#131b2f", "panelHi": "#1a2440", "panelSoft": "#10192b",
-    "stroke": "#2b3652", "muted": "#8f9ab8", "accent": "#7dd3fc",
-    "accentSoft": "#6ee7b7", "gold": "#f8d38a",
+    "panel": "#0b1d2b", "panelHi": "#102536", "panelSoft": "#0a1825",
+    "stroke": "#294354", "muted": "#8fa4b4", "accent": "#35c5ef",
+    "accentSoft": "#70d7b2", "gold": "#f0c77a",
 }
 
 CAT_LATTE = {
@@ -93,7 +93,7 @@ def _detect_system_theme():
     except Exception:
         return "dark"
 
-def build_stylesheet(p=None):
+def _build_legacy_stylesheet(p=None):
     """Build the full QSS string from a palette dict."""
     if p is None:
         p = CAT
@@ -719,6 +719,323 @@ QSplitter::handle {{
     height: 1px;
     margin: 6px 0;
 }}
+"""
+
+
+def build_stylesheet(p=None):
+    """Build StreamKeep's restrained, text-led visual system.
+
+    Containers use spacing and hairline dividers for hierarchy. Borders are
+    reserved for editable controls, tables use open rows, and only primary
+    actions receive a saturated fill.
+    """
+    if p is None:
+        p = CAT
+    return f"""
+QMainWindow, QDialog {{
+    background-color: {p['base']};
+}}
+QWidget {{
+    color: {p['text']};
+    font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+    font-size: 14px;
+}}
+QWidget#chrome, QAbstractScrollArea#chrome,
+QAbstractScrollArea#chrome > QWidget#chrome {{
+    background-color: transparent;
+    border: none;
+}}
+QFrame#appHeader, QFrame#pageHeader {{
+    background-color: transparent;
+    border: none;
+}}
+QFrame#appNav {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QFrame#composerCard {{
+    background-color: {p['panel']};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame#optionsRow, QFrame#workSection, QFrame#fieldBlock,
+QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}}
+QFrame#card, QFrame#panel, QFrame#heroCard, QFrame#shellCard,
+QFrame#shellMetaCard, QFrame#footerBar {{
+    background-color: {p['panelSoft']};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame#statusBar {{
+    background-color: transparent;
+    border: none;
+    border-top: 1px solid {p['stroke']};
+}}
+QFrame#dialogHero, QFrame#dialogSection, QFrame#dialogStatus,
+QFrame#emptyStateCard {{
+    background-color: {p['panel']};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame#dialogStatus[tone="info"] {{ border-left: 3px solid {p['accent']}; }}
+QFrame#dialogStatus[tone="success"] {{ border-left: 3px solid {p['green']}; }}
+QFrame#dialogStatus[tone="warning"] {{ border-left: 3px solid {p['yellow']}; }}
+QFrame#dialogStatus[tone="error"] {{ border-left: 3px solid {p['red']}; }}
+QFrame#updateBanner, QFrame#resumeBanner, QFrame#activeRecordings {{
+    background-color: {p['panelHi']};
+    border: none;
+    border-left: 3px solid {p['accent']};
+    border-radius: 8px;
+}}
+QFrame#resumeBanner {{ border-left-color: {p['peach']}; }}
+QFrame#activeRecordings {{ border-left-color: {p['green']}; }}
+QFrame#playerMetaBar, QFrame#playerSidebar, QFrame#playerTransportBar,
+QFrame#playerSlotCard, QFrame#playerPipShell, QFrame#playerPipTitleBar {{
+    background-color: {p['panel']};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame#playerVideoCanvas {{
+    background-color: {p['crust']};
+    border: none;
+    border-radius: 10px;
+}}
+QLabel {{
+    color: {p['text']};
+    background-color: transparent;
+    border: none;
+}}
+QLabel#appBrand {{
+    color: {p['text']};
+    font-size: 22px;
+    font-weight: 750;
+}}
+QLabel#title {{
+    color: {p['text']};
+    font-size: 25px;
+    font-weight: 750;
+}}
+QLabel#heroTitle {{
+    color: {p['text']};
+    font-size: 28px;
+    font-weight: 750;
+}}
+QLabel#heroBody, QLabel#dialogBody {{
+    color: {p['subtext0']};
+    font-size: 15px;
+}}
+QLabel#sectionTitle {{
+    color: {p['text']};
+    font-size: 17px;
+    font-weight: 700;
+}}
+QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint,
+QLabel#subtleText, QLabel#statusBody {{
+    color: {p['muted']};
+    font-size: 13px;
+}}
+QLabel#fieldLabel, QLabel#metricLabel {{
+    color: {p['subtext0']};
+    font-size: 13px;
+    font-weight: 650;
+}}
+QLabel#metricValue, QLabel#shellStatValue {{
+    color: {p['text']};
+    font-size: 17px;
+    font-weight: 700;
+}}
+QLabel#metricSubvalue, QLabel#shellStatBody, QLabel#shellStatMeta,
+QLabel#footerMeta, QLabel#statusLabel {{
+    color: {p['muted']};
+    font-size: 13px;
+}}
+QLabel#dialogEyebrow, QLabel#eyebrow {{
+    color: {p['accent']};
+    font-size: 12px;
+    font-weight: 700;
+}}
+QLabel#dialogTitle {{
+    color: {p['text']};
+    font-size: 23px;
+    font-weight: 750;
+}}
+QLabel#statusTitle, QLabel#emptyStateTitle {{
+    color: {p['text']};
+    font-size: 15px;
+    font-weight: 700;
+}}
+QLabel#emptyStateBody {{ color: {p['muted']}; font-size: 13px; }}
+QLabel#pillBadge, QLabel#playerBadgeMuted {{
+    color: {p['subtext1']};
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 650;
+}}
+QLabel#streamInfo {{
+    color: {p['subtext1']};
+    background-color: {p['panelHi']};
+    border: none;
+    border-left: 3px solid {p['accent']};
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-size: 13px;
+}}
+QLabel#playerKicker {{ color: {p['accent']}; font-size: 11px; font-weight: 700; }}
+QLabel#playerTitle {{ color: {p['text']}; font-size: 18px; font-weight: 700; }}
+QLabel#playerMeta, QLabel#playerHint, QLabel#playerTinyLabel {{ color: {p['muted']}; font-size: 12px; }}
+QLabel#playerSectionTitle, QLabel#playerMiniTitle {{ color: {p['text']}; font-size: 13px; font-weight: 700; }}
+QLabel#playerMiniMeta {{ color: {p['muted']}; font-size: 11px; }}
+QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
+    background-color: {p['base']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+    min-height: 20px;
+    selection-background-color: {p['accent']};
+    selection-color: {p['crust']};
+}}
+QLineEdit#globalSearch {{ background-color: {p['panel']}; }}
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover,
+QTimeEdit:hover, QDateEdit:hover {{ border-color: {p['overlay0']}; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+QTimeEdit:focus, QDateEdit:focus {{ border-color: {p['accent']}; }}
+QPushButton {{
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border: none;
+    border-radius: 8px;
+    padding: 8px 13px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton:hover {{ background-color: {p['surface1']}; }}
+QPushButton:pressed {{ background-color: {p['surface2']}; }}
+QPushButton:disabled {{ background-color: {p['panelSoft']}; color: {p['overlay0']}; }}
+QPushButton#primary {{
+    background-color: {p['accent']};
+    color: {p['crust']};
+    font-weight: 750;
+}}
+QPushButton#primary:hover {{ background-color: {p['sky']}; }}
+QPushButton#primary:disabled {{
+    background-color: {p['surface0']};
+    color: {p['overlay0']};
+}}
+QPushButton#secondary {{ background-color: {p['surface0']}; }}
+QPushButton#ghost {{ background-color: transparent; color: {p['subtext1']}; }}
+QPushButton#ghost:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#toggleAccent {{ background-color: transparent; color: {p['subtext1']}; }}
+QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {p['accent']}; }}
+QPushButton#danger {{ background-color: {p['red']}; color: {p['crust']}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox QAbstractItemView {{
+    background-color: {p['panel']};
+    color: {p['text']};
+    selection-background-color: {p['surface1']};
+    border: 1px solid {p['stroke']};
+    padding: 4px;
+}}
+QTableWidget {{
+    background-color: transparent;
+    alternate-background-color: {p['panelSoft']};
+    color: {p['text']};
+    border: none;
+    gridline-color: transparent;
+    selection-background-color: {p['surface0']};
+    selection-color: {p['text']};
+    font-size: 14px;
+}}
+QTableWidget::item {{
+    padding: 8px 9px;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QHeaderView::section {{
+    background-color: {p['panelSoft']};
+    color: {p['muted']};
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+    padding: 8px 9px;
+    font-size: 13px;
+    font-weight: 700;
+}}
+QTableCornerButton::section {{
+    background-color: {p['panelSoft']};
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QTextEdit, QPlainTextEdit {{
+    background-color: transparent;
+    color: {p['text']};
+    border: none;
+    border-radius: 0;
+    padding: 4px;
+    selection-background-color: {p['surface1']};
+}}
+QTextEdit#log {{
+    color: {p['subtext0']};
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 12px;
+}}
+QListWidget, QListWidget#globalResults, QListWidget#playerChapterList {{
+    background-color: {p['panel']};
+    color: {p['text']};
+    border: none;
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+}}
+QListWidget::item {{ padding: 8px 10px; border-radius: 6px; }}
+QListWidget::item:hover, QListWidget::item:selected {{ background-color: {p['surface0']}; }}
+QMenu {{
+    background-color: {p['panel']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
+    padding: 5px;
+}}
+QMenu::item {{ padding: 7px 12px; border-radius: 5px; }}
+QMenu::item:selected {{ background-color: {p['surface0']}; }}
+QToolTip {{
+    background-color: {p['panelHi']};
+    color: {p['text']};
+    border: 1px solid {p['stroke']};
+    padding: 6px 8px;
+}}
+QProgressBar {{
+    background-color: {p['surface0']};
+    border: none;
+    border-radius: 4px;
+    height: 8px;
+    color: transparent;
+}}
+QProgressBar::chunk {{ background-color: {p['accent']}; border-radius: 4px; }}
+QCheckBox, QRadioButton {{ color: {p['text']}; spacing: 7px; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border-radius: 3px;
+    border: 1px solid {p['stroke']}; background-color: {p['base']};
+}}
+QCheckBox::indicator:checked {{ background-color: {p['accent']}; border-color: {p['accent']}; }}
+QRadioButton::indicator {{
+    width: 16px; height: 16px; border-radius: 8px;
+    border: 1px solid {p['stroke']}; background-color: {p['base']};
+}}
+QRadioButton::indicator:checked {{ background-color: {p['accent']}; border-color: {p['accent']}; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {p['surface2']}; border-radius: 4px; min-height: 28px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
+QScrollBar::handle:horizontal {{ background: {p['surface2']}; border-radius: 4px; min-width: 28px; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QSplitter::handle {{ background-color: {p['stroke']}; width: 1px; height: 1px; }}
 """
 
 

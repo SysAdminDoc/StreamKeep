@@ -4,13 +4,13 @@ from PyQt6.QtCore import Qt, QUrl, QStringListModel
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
+    QMenu, QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir
-from ..widgets import make_field_block, make_metric_card, path_label, style_table
+from ..widgets import make_field_block, path_label, style_table
 
 
 def _populate_adv_pp(win):
@@ -72,68 +72,45 @@ def build_download_tab(win):
     page = QWidget()
     root = QVBoxLayout(page)
     root.setContentsMargins(0, 0, 0, 0)
-    root.setSpacing(14)
+    root.setSpacing(12)
 
     hero = QFrame()
-    hero.setObjectName("heroCard")
+    hero.setObjectName("pageHeader")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(18, 18, 18, 18)
-    hero_lay.setSpacing(14)
+    hero_lay.setContentsMargins(4, 12, 4, 4)
+    hero_lay.setSpacing(3)
 
-    hero_top = QHBoxLayout()
-    hero_top.setSpacing(14)
-    hero_copy = QVBoxLayout()
-    hero_copy.setSpacing(4)
-    hero_kicker = QLabel("Downloader")
-    hero_kicker.setObjectName("eyebrow")
-    win.download_hero_title = QLabel("Capture streams and VODs with cleaner control")
+    win.download_hero_title = QLabel("New download")
     win.download_hero_title.setObjectName("heroTitle")
     win.download_hero_title.setWordWrap(True)
-    win.download_hero_body = QLabel(
-        "Paste a source URL to inspect quality options, split recordings "
-        "into segments, and keep output folders tidy."
-    )
+    win.download_hero_body = QLabel("Paste a stream, VOD, podcast, or media URL.")
     win.download_hero_body.setObjectName("heroBody")
     win.download_hero_body.setWordWrap(True)
-    hero_copy.addWidget(hero_kicker)
-    hero_copy.addWidget(win.download_hero_title)
-    hero_copy.addWidget(win.download_hero_body)
-    hero_top.addLayout(hero_copy, 1)
+    hero_lay.addWidget(win.download_hero_title)
+    hero_lay.addWidget(win.download_hero_body)
 
-    source_card, win.download_platform_value, win.download_platform_sub = make_metric_card(
-        "Source", "Auto detect", "Waiting for a supported URL"
-    )
-    source_card.setMaximumWidth(190)
-    hero_top.addWidget(source_card)
-    hero_lay.addLayout(hero_top)
-
-    metrics_row = QHBoxLayout()
-    metrics_row.setSpacing(12)
-    duration_card, win.download_duration_value, win.download_duration_sub = make_metric_card(
-        "Duration", "Waiting", "Metadata not loaded yet"
-    )
-    selection_card, win.download_selection_value, win.download_selection_sub = make_metric_card(
-        "Selection", "Not ready", "segments appear after fetch"
-    )
-    output_card, win.download_output_value, win.download_output_sub = make_metric_card(
-        "Output", path_label(str(_default_output_dir())), ""
-    )
-    finalize_card, win.download_finalize_value, win.download_finalize_sub = make_metric_card(
-        "Finalize", "Idle", "Metadata and post-processing will queue here"
-    )
-    speed_card, win.download_speed_value, win.download_speed_sub = make_metric_card(
-        "Speed", "—", "Starts during download"
-    )
-    eta_card, win.download_eta_value, win.download_eta_sub = make_metric_card(
-        "ETA", "—", "Estimated time remaining"
-    )
-    metrics_row.addWidget(duration_card)
-    metrics_row.addWidget(selection_card)
-    metrics_row.addWidget(speed_card)
-    metrics_row.addWidget(eta_card)
-    metrics_row.addWidget(output_card, 1)
-    metrics_row.addWidget(finalize_card)
-    hero_lay.addLayout(metrics_row)
+    # Existing workers update these labels; they remain state holders instead
+    # of becoming six competing dashboard cards above the primary action.
+    # Keep them under an invisible parent: a parentless QLabel becomes a
+    # top-level window when set_metric() later makes its detail text visible.
+    win._download_metric_state = QWidget(page)
+    win._download_metric_state.setObjectName("downloadMetricState")
+    win._download_metric_state.setVisible(False)
+    for key, value, detail in (
+        ("platform", "Auto detect", "Waiting for a URL"),
+        ("duration", "Waiting", "Metadata not loaded"),
+        ("selection", "Not ready", "Segments appear after fetch"),
+        ("output", path_label(str(_default_output_dir())), ""),
+        ("finalize", "Idle", "No background tasks"),
+        ("speed", "—", ""),
+        ("eta", "—", ""),
+    ):
+        value_label = QLabel(value, win._download_metric_state)
+        detail_label = QLabel(detail, win._download_metric_state)
+        value_label.setVisible(False)
+        detail_label.setVisible(False)
+        setattr(win, f"download_{key}_value", value_label)
+        setattr(win, f"download_{key}_sub", detail_label)
     root.addWidget(hero)
 
     # Update banner — shown only after a successful release-check when a
@@ -198,23 +175,16 @@ def build_download_tab(win):
     root.addWidget(win.chat_dock)
 
     url_card = QFrame()
-    url_card.setObjectName("card")
+    url_card.setObjectName("composerCard")
     url_lay = QVBoxLayout(url_card)
-    url_lay.setContentsMargins(18, 18, 18, 18)
-    url_lay.setSpacing(12)
+    url_lay.setContentsMargins(16, 14, 16, 14)
+    url_lay.setSpacing(10)
 
     url_header = QVBoxLayout()
     url_header.setSpacing(4)
-    sec1 = QLabel("Stream URL")
+    sec1 = QLabel("Source URL")
     sec1.setObjectName("sectionTitle")
-    sec1_body = QLabel(
-        "Inspect a channel, VOD, or direct media URL to unlock quality "
-        "choices and segment controls."
-    )
-    sec1_body.setObjectName("sectionBody")
-    sec1_body.setWordWrap(True)
     url_header.addWidget(sec1)
-    url_header.addWidget(sec1_body)
     url_lay.addLayout(url_header)
 
     url_row = QHBoxLayout()
@@ -252,13 +222,10 @@ def build_download_tab(win):
     url_lay.addLayout(url_row)
 
     utility_bar = QFrame()
-    utility_bar.setObjectName("toolbar")
+    utility_bar.setObjectName("optionsRow")
     utility_lay = QHBoxLayout(utility_bar)
-    utility_lay.setContentsMargins(12, 10, 12, 10)
+    utility_lay.setContentsMargins(0, 0, 0, 0)
     utility_lay.setSpacing(8)
-    utility_label = QLabel("Utilities")
-    utility_label.setObjectName("fieldLabel")
-    utility_lay.addWidget(utility_label)
 
     win.batch_import_btn = QPushButton("Import URLs")
     win.batch_import_btn.setObjectName("secondary")
@@ -266,40 +233,41 @@ def build_download_tab(win):
     win.batch_import_btn.clicked.connect(win._on_batch_url_import)
     utility_lay.addWidget(win.batch_import_btn)
 
-    win.expand_btn = QPushButton("Expand Playlist")
-    win.expand_btn.setObjectName("secondary")
-    win.expand_btn.setToolTip("For playlist/channel URLs, queue every video via yt-dlp")
-    win.expand_btn.clicked.connect(win._on_expand_playlist)
-    utility_lay.addWidget(win.expand_btn)
+    paste_btn = QPushButton("Paste")
+    paste_btn.setObjectName("secondary")
+    paste_btn.setToolTip("Paste a URL from the clipboard")
+    paste_btn.clicked.connect(win.url_input.paste)
+    utility_lay.addWidget(paste_btn)
 
-    win.scan_btn = QPushButton("Scan Page")
+    win.scan_btn = QPushButton("Scan page")
     win.scan_btn.setObjectName("secondary")
     win.scan_btn.setToolTip("Fetch the URL as HTML and extract all video/media links it references")
     win.scan_btn.clicked.connect(win._on_scan_page)
     utility_lay.addWidget(win.scan_btn)
 
-    win.recover_btn = QPushButton("Recover VOD")
-    win.recover_btn.setObjectName("secondary")
-    win.recover_btn.setToolTip(
-        "Attempt to recover deleted / expired Twitch VODs from CDN cache"
-    )
-    win.recover_btn.clicked.connect(win._on_recover_vod)
-    utility_lay.addWidget(win.recover_btn)
+    win.queue_btn = QPushButton("Queue")
+    win.queue_btn.setObjectName("secondary")
+    win.queue_btn.setToolTip("Add the current URL to the download queue")
+    win.queue_btn.clicked.connect(win._on_queue_url)
+    utility_lay.addWidget(win.queue_btn)
 
     utility_lay.addStretch(1)
 
-    win.clip_btn = QPushButton("Clipboard Watch")
-    win.clip_btn.setObjectName("toggleAccent")
+    more_btn = QPushButton("More")
+    more_btn.setObjectName("ghost")
+    more_menu = QMenu(more_btn)
+    win.expand_btn = more_menu.addAction("Expand playlist")
+    win.expand_btn.setToolTip("Queue every item from a playlist or channel")
+    win.expand_btn.triggered.connect(win._on_expand_playlist)
+    win.recover_btn = more_menu.addAction("Recover Twitch VOD")
+    win.recover_btn.triggered.connect(win._on_recover_vod)
+    more_menu.addSeparator()
+    win.clip_btn = more_menu.addAction("Clipboard watch")
     win.clip_btn.setCheckable(True)
-    win.clip_btn.clicked.connect(win._on_toggle_clipboard)
-    utility_lay.addWidget(win.clip_btn)
+    win.clip_btn.triggered.connect(win._on_toggle_clipboard)
+    more_btn.setMenu(more_menu)
+    utility_lay.addWidget(more_btn)
     url_lay.addWidget(utility_bar)
-
-    url_hint = QLabel(
-        "Press Enter to fetch. Clipboard watch can auto-load the next copied URL for fast triage."
-    )
-    url_hint.setObjectName("subtleText")
-    url_lay.addWidget(url_hint)
 
     win.info_label = QLabel("")
     win.info_label.setObjectName("streamInfo")
@@ -387,24 +355,20 @@ def build_download_tab(win):
 
     # Controls card — quality / segment / output folder
     controls_card = QFrame()
-    controls_card.setObjectName("card")
+    controls_card.setObjectName("optionsRow")
     controls_lay = QGridLayout(controls_card)
-    controls_lay.setContentsMargins(18, 18, 18, 18)
-    controls_lay.setHorizontalSpacing(12)
-    controls_lay.setVerticalSpacing(12)
+    controls_lay.setContentsMargins(4, 4, 4, 6)
+    controls_lay.setHorizontalSpacing(18)
+    controls_lay.setVerticalSpacing(8)
 
-    quality_block, quality_lay = make_field_block(
-        "Quality", "Choose the best available rendition after metadata loads."
-    )
+    quality_block, quality_lay = make_field_block("Quality")
     win.quality_combo = QComboBox()
     win.quality_combo.setEnabled(False)
     win.quality_combo.currentIndexChanged.connect(win._on_quality_changed)
     quality_lay.addWidget(win.quality_combo)
-    controls_lay.addWidget(quality_block, 0, 0)
+    controls_lay.addWidget(quality_block, 0, 2)
 
-    segment_block, segment_lay = make_field_block(
-        "Segment Length", "Split long recordings into predictable export chunks."
-    )
+    segment_block, segment_lay = make_field_block("Segments")
     win.segment_combo = QComboBox()
     win._segment_options = [
         ("15 minutes", 900), ("30 minutes", 1800), ("1 hour", 3600),
@@ -415,13 +379,10 @@ def build_download_tab(win):
     win.segment_combo.setCurrentIndex(2)
     win.segment_combo.currentIndexChanged.connect(win._on_segment_length_changed)
     segment_lay.addWidget(win.segment_combo)
-    controls_lay.addWidget(segment_block, 0, 1)
+    controls_lay.addWidget(segment_block, 0, 3)
 
     # Time-range crop (F21) — optional start/end for partial downloads
-    crop_block, crop_lay = make_field_block(
-        "Time Range (optional)",
-        "Download only a portion. Leave blank for full download.",
-    )
+    crop_block, crop_lay = make_field_block("Time range (optional)")
     crop_row = QHBoxLayout()
     crop_row.setSpacing(8)
     crop_start_label = QLabel("Start:")
@@ -442,37 +403,45 @@ def build_download_tab(win):
     crop_row.addWidget(win.crop_end_input)
     crop_row.addStretch(1)
     crop_lay.addLayout(crop_row)
-    controls_lay.addWidget(crop_block, 1, 0)
+    controls_lay.addWidget(crop_block, 1, 0, 1, 4)
 
-    output_block, output_lay = make_field_block(
-        "Output Folder", "Downloads are saved exactly where you point the app."
-    )
+    output_block, output_lay = make_field_block("Output folder")
     output_row = QHBoxLayout()
     output_row.setSpacing(8)
     win.output_input = QLineEdit(str(_default_output_dir()))
     win.output_input.setClearButtonEnabled(True)
     win.output_input.textChanged.connect(win._refresh_download_summary)
     output_row.addWidget(win.output_input, 1)
-    browse_btn = QPushButton("Browse")
+    browse_btn = QPushButton("…")
     browse_btn.setObjectName("secondary")
+    browse_btn.setFixedWidth(42)
+    browse_btn.setToolTip("Choose output folder")
     browse_btn.clicked.connect(win._on_browse)
     output_row.addWidget(browse_btn)
     output_lay.addLayout(output_row)
-    controls_lay.addWidget(output_block, 1, 1)
-    controls_lay.setColumnStretch(0, 1)
-    controls_lay.setColumnStretch(1, 1)
+    controls_lay.addWidget(output_block, 0, 0, 1, 2)
+    controls_lay.setColumnStretch(0, 2)
+    controls_lay.setColumnStretch(1, 2)
+    controls_lay.setColumnStretch(2, 2)
+    controls_lay.setColumnStretch(3, 2)
+    crop_block.setVisible(False)
     root.addWidget(controls_card)
 
     # ── Per-Download Settings Override (F18) ──────────────────────
     adv_toggle_row = QHBoxLayout()
     adv_toggle_row.setSpacing(6)
-    win.adv_toggle_btn = QPushButton("▸ Advanced per-download overrides")
+    range_toggle_btn = QPushButton("Time range")
+    range_toggle_btn.setObjectName("ghost")
+    range_toggle_btn.setCheckable(True)
+    range_toggle_btn.toggled.connect(crop_block.setVisible)
+    adv_toggle_row.addWidget(range_toggle_btn)
+    win.adv_toggle_btn = QPushButton("Advanced")
     win.adv_toggle_btn.setObjectName("ghost")
     win.adv_toggle_btn.setCheckable(True)
     win.adv_override_badge = QLabel("")
     win.adv_override_badge.setStyleSheet(
-        f"background:{CAT['peach']}; color:{CAT['crust']}; border-radius:8px; "
-        f"font-size:10px; font-weight:bold; padding:2px 8px;"
+        f"background:transparent; color:{CAT['peach']}; border:none; "
+        f"font-size:12px; font-weight:700; padding:0 4px;"
     )
     win.adv_override_badge.setVisible(False)
     adv_toggle_row.addWidget(win.adv_toggle_btn)
@@ -481,7 +450,7 @@ def build_download_tab(win):
     root.addLayout(adv_toggle_row)
 
     win.adv_frame = QFrame()
-    win.adv_frame.setObjectName("subtleCard")
+    win.adv_frame.setObjectName("optionsRow")
     win.adv_frame.setVisible(False)
     adv_lay = QGridLayout(win.adv_frame)
     adv_lay.setContentsMargins(14, 14, 14, 14)
@@ -532,10 +501,7 @@ def build_download_tab(win):
 
     def _on_adv_toggle(checked):
         win.adv_frame.setVisible(checked)
-        win.adv_toggle_btn.setText(
-            "▾ Advanced per-download overrides" if checked
-            else "▸ Advanced per-download overrides"
-        )
+        win.adv_toggle_btn.setText("Hide advanced" if checked else "Advanced")
     win.adv_toggle_btn.toggled.connect(_on_adv_toggle)
 
     # Populate PP preset choices and wire badge updates
@@ -544,7 +510,7 @@ def build_download_tab(win):
     def _update_adv_badge():
         active = bool(get_adv_overrides(win))
         win.adv_override_badge.setVisible(active)
-        win.adv_override_badge.setText("Overrides active" if active else "")
+        win.adv_override_badge.setText("Modified" if active else "")
 
     win.adv_pp_combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
     win.adv_rate_input.textChanged.connect(lambda _: _update_adv_badge())
@@ -557,20 +523,17 @@ def build_download_tab(win):
     splitter.setChildrenCollapsible(False)
 
     table_frame = QFrame()
-    table_frame.setObjectName("card")
+    table_frame.setObjectName("workSection")
     table_lay = QVBoxLayout(table_frame)
-    table_lay.setContentsMargins(18, 18, 18, 18)
-    table_lay.setSpacing(10)
+    table_lay.setContentsMargins(4, 10, 4, 4)
+    table_lay.setSpacing(8)
 
     table_header = QHBoxLayout()
     table_copy = QVBoxLayout()
     table_copy.setSpacing(3)
     sec2 = QLabel("Segments")
     sec2.setObjectName("sectionTitle")
-    sec2_body = QLabel("Review the generated cuts before exporting them.")
-    sec2_body.setObjectName("sectionBody")
     table_copy.addWidget(sec2)
-    table_copy.addWidget(sec2_body)
     table_header.addLayout(table_copy, 1)
 
     win.segment_summary_label = QLabel("Segments will appear after metadata is loaded.")
@@ -605,20 +568,17 @@ def build_download_tab(win):
     splitter.addWidget(table_frame)
 
     log_frame = QFrame()
-    log_frame.setObjectName("card")
+    log_frame.setObjectName("workSection")
     log_lay = QVBoxLayout(log_frame)
-    log_lay.setContentsMargins(18, 18, 18, 18)
-    log_lay.setSpacing(10)
+    log_lay.setContentsMargins(18, 10, 4, 4)
+    log_lay.setSpacing(8)
 
     log_header = QHBoxLayout()
     log_copy = QVBoxLayout()
     log_copy.setSpacing(3)
-    sec3 = QLabel("Runtime Log")
+    sec3 = QLabel("Activity")
     sec3.setObjectName("sectionTitle")
-    sec3_body = QLabel("Live extractor output, progress details, and troubleshooting context.")
-    sec3_body.setObjectName("sectionBody")
     log_copy.addWidget(sec3)
-    log_copy.addWidget(sec3_body)
     log_header.addLayout(log_copy, 1)
     clear_log_btn = QPushButton("Clear Log")
     clear_log_btn.setObjectName("ghost")
@@ -629,6 +589,7 @@ def build_download_tab(win):
     win.log_text = QTextEdit()
     win.log_text.setObjectName("log")
     win.log_text.setReadOnly(True)
+    win.log_text.setPlainText("Ready")
     log_lay.addWidget(win.log_text)
     splitter.addWidget(log_frame)
     splitter.setSizes([450, 220])
@@ -636,15 +597,7 @@ def build_download_tab(win):
 
     # Download action row
     dl_row = QHBoxLayout()
-    dl_hint = QLabel("Download the selected segments after the source is ready.")
-    dl_hint.setObjectName("subtleText")
-    dl_row.addWidget(dl_hint)
     dl_row.addStretch(1)
-    win.queue_btn = QPushButton("Queue URL")
-    win.queue_btn.setObjectName("secondary")
-    win.queue_btn.setToolTip("Add the current URL to the download queue instead of downloading now")
-    win.queue_btn.clicked.connect(win._on_queue_url)
-    dl_row.addWidget(win.queue_btn)
     win.schedule_btn = QPushButton("Schedule...")
     win.schedule_btn.setObjectName("secondary")
     win.schedule_btn.setToolTip("Queue the URL and start it at a future time")
@@ -659,12 +612,12 @@ def build_download_tab(win):
 
     # Queue panel — shows pending items
     queue_card = QFrame()
-    queue_card.setObjectName("card")
+    queue_card.setObjectName("workSection")
     qcard_lay = QVBoxLayout(queue_card)
-    qcard_lay.setContentsMargins(18, 14, 18, 14)
+    qcard_lay.setContentsMargins(4, 10, 18, 4)
     qcard_lay.setSpacing(8)
     queue_header = QHBoxLayout()
-    qt = QLabel("Download Queue")
+    qt = QLabel("Queue")
     qt.setObjectName("sectionTitle")
     queue_header.addWidget(qt)
     queue_header.addStretch()
@@ -693,10 +646,49 @@ def build_download_tab(win):
     win.queue_table.verticalHeader().setVisible(False)
     win.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    win.queue_table.setMaximumHeight(180)
     style_table(win.queue_table, 36)
     qcard_lay.addWidget(win.queue_table)
+    win.queue_empty_state = QFrame()
+    empty_lay = QVBoxLayout(win.queue_empty_state)
+    empty_lay.setContentsMargins(12, 28, 12, 12)
+    empty_lay.setSpacing(5)
+    empty_lay.addStretch(1)
+    empty_title = QLabel("No downloads in the queue")
+    empty_title.setObjectName("emptyStateTitle")
+    empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    empty_lay.addWidget(empty_title)
+    empty_body = QLabel("Add a URL above to get started.")
+    empty_body.setObjectName("emptyStateBody")
+    empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    empty_lay.addWidget(empty_body)
+    empty_lay.addStretch(2)
+    qcard_lay.addWidget(win.queue_empty_state, 1)
     root.addWidget(queue_card)
+
+    # Main working surface: queue and activity share the viewport. Segment
+    # details remain available below once metadata has been fetched.
+    work_index = root.indexOf(splitter)
+    root.removeWidget(splitter)
+    root.removeWidget(queue_card)
+    table_frame.setParent(None)
+    log_frame.setParent(None)
+    splitter.deleteLater()
+
+    work_surface = QSplitter(Qt.Orientation.Horizontal)
+    work_surface.setObjectName("workSurface")
+    work_surface.setChildrenCollapsible(False)
+    queue_card.setMinimumWidth(560)
+    log_frame.setMinimumWidth(320)
+    log_frame.setMinimumHeight(240)
+    work_surface.addWidget(queue_card)
+    work_surface.addWidget(log_frame)
+    work_surface.setStretchFactor(0, 2)
+    work_surface.setStretchFactor(1, 1)
+    work_surface.setSizes([860, 420])
+    root.insertWidget(work_index, work_surface, 1)
+    win.segments_section = table_frame
+    win.segments_section.setVisible(False)
+    root.addWidget(table_frame)
 
     win._refresh_download_summary()
     win._refresh_queue_table()
@@ -713,7 +705,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QFileDialog, QMenu, QProgressBar, QTableWidgetItem,
+    QFileDialog, QProgressBar, QTableWidgetItem,
 )
 from PyQt6.QtGui import QColor, QDesktopServices
 
@@ -765,7 +757,7 @@ class DownloadTabMixin:
 
         url = self.url_input.text().strip() if hasattr(self, "url_input") else ""
         if self.stream_info:
-            title = self.stream_info.title or "Source ready"
+            title = self.stream_info.title or "Ready to download"
             summary_parts = []
             if self.stream_info.platform:
                 summary_parts.append(self.stream_info.platform)
@@ -775,17 +767,17 @@ class DownloadTabMixin:
                 summary_parts.append(self.stream_info.duration_str)
             if self.stream_info.is_live:
                 summary_parts.append("Live capture")
-            body = " | ".join(summary_parts) if summary_parts else "Metadata loaded and ready for download."
+            body = "  •  ".join(summary_parts) if summary_parts else "Metadata loaded."
         elif url:
             ext = Extractor.detect(url)
-            title = "Source detected" if ext else "Paste a supported URL"
+            title = "Source detected" if ext else "New download"
             if ext:
-                body = f"{ext.NAME} recognized. Click Fetch to inspect quality options and segment timing."
+                body = f"{ext.NAME} link recognized. Fetch when ready."
             else:
-                body = "Kick, Twitch, Rumble, podcasts, audio sources, and yt-dlp compatible links are supported."
+                body = "Paste a supported stream, VOD, podcast, or media URL."
         else:
-            title = "Capture streams and VODs with cleaner control"
-            body = "Paste a source URL to inspect quality options, split recordings into segments, and keep output folders tidy."
+            title = "New download"
+            body = "Paste a stream, VOD, podcast, or media URL."
 
         self.download_hero_title.setText(title)
         self.download_hero_body.setText(body)
@@ -1002,6 +994,8 @@ class DownloadTabMixin:
         self.quality_combo.clear()
         self.quality_combo.setEnabled(False)
         self.table.setRowCount(0)
+        if hasattr(self, "segments_section"):
+            self.segments_section.setVisible(False)
         self._segment_checks = []
         self._segment_progress = []
         self.info_label.setVisible(False)
@@ -1704,6 +1698,8 @@ class DownloadTabMixin:
                     pos = end
 
         self.table.setRowCount(len(segments))
+        if hasattr(self, "segments_section"):
+            self.segments_section.setVisible(bool(segments))
         self._segment_checks = []
         self._segment_progress = []
 
@@ -2981,7 +2977,16 @@ class DownloadTabMixin:
     def _refresh_queue_table(self):
         if not hasattr(self, "queue_table"):
             return
-        self.queue_table.setRowCount(len(self._download_queue))
+        queue_count = len(self._download_queue)
+        self.queue_table.setRowCount(queue_count)
+        if hasattr(self, "queue_empty_state"):
+            self.queue_empty_state.setVisible(queue_count == 0)
+        if queue_count:
+            self.queue_table.setMinimumHeight(220)
+            self.queue_table.setMaximumHeight(16777215)
+        else:
+            self.queue_table.setMinimumHeight(48)
+            self.queue_table.setMaximumHeight(58)
         now = datetime.now()
         for i, q in enumerate(self._download_queue):
             # Compute effective status: "scheduled" if start_at is in the future

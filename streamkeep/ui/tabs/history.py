@@ -400,7 +400,7 @@ class HistoryTabMixin:
             # Queue a thumb request (skip orphans — no file to thumbnail).
             if not orphan:
                 media = self._first_media_file(h.path) if h.path else ""
-                if media:
+                if media and hasattr(self, "_history_thumb_loader"):
                     self._history_thumb_loader.request((h.path, h.title), media)
         self._refresh_history_summary()
 

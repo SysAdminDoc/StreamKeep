@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QFrame, QSplitter
 
 from streamkeep.models import HistoryEntry, MonitorEntry
 
@@ -35,6 +36,8 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
     }
     recording_dir = tmp_path / "recording"
     recording_dir.mkdir()
+    recording_media = recording_dir / "capture.mp4"
+    recording_media.write_bytes(b"thumbnail fixture")
 
     with mock.patch.object(main_window, "_load_config", return_value=dict(config)), \
             mock.patch.object(main_window, "_save_config"), \
@@ -48,6 +51,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             mock.patch.object(settings_tab, "available_video_codec_keys", return_value=["h264"]), \
             mock.patch.object(main_window.QSystemTrayIcon, "isSystemTrayAvailable", return_value=False), \
             mock.patch.object(main_window.QTimer, "singleShot", lambda *args, **kwargs: None), \
+            mock.patch("streamkeep.ui.thumb_loader.ThumbLoader.request") as thumb_request, \
             mock.patch("streamkeep.search.index_all_async", lambda *args, **kwargs: None), \
             mock.patch(
                 "streamkeep.ui.onboarding.subprocess.run",
@@ -60,11 +64,53 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             mock.patch("streamkeep.ui.tabs.settings.ytdlp_runtime_status", _ready_ytdlp_status), \
             mock.patch("streamkeep.ui.onboarding.ytdlp_runtime_status", _ready_ytdlp_status):
         main_window._db.init_db()
+        main_window._db.save_history_entry(
+            HistoryEntry(
+                date="2026-07-15 19:00",
+                platform="yt-dlp",
+                title="Existing YouTube download",
+                quality="1080p",
+                size="1.0 GB",
+                path=str(recording_dir),
+                url="https://www.youtube.com/watch?v=fixture",
+            ).to_dict()
+        )
 
         window = main_window.StreamKeep()
         try:
+            thumb_request.assert_any_call(
+                (str(recording_dir), "Existing YouTube download"),
+                str(recording_media),
+            )
             assert window._stack.count() == len(window._tab_names) == 6
             assert [button.text() for button in window._tab_btns] == window._tab_names
+
+            # The compact visual system keeps navigation and the primary
+            # capture controls above the queue/activity working surface.
+            assert window.findChild(QFrame, "appHeader") is not None
+            assert window.findChild(QFrame, "appNav") is not None
+            assert window.findChild(QFrame, "composerCard") is not None
+            work_surface = window.findChild(QSplitter, "workSurface")
+            assert work_surface is not None
+            assert work_surface.orientation() == Qt.Orientation.Horizontal
+            assert window.download_hero_title.text() == "New download"
+            assert "border-radius: 999px" not in window.status_pill.styleSheet()
+            metric_labels = [
+                getattr(window, f"download_{key}_{suffix}")
+                for key in ("platform", "duration", "selection", "output", "finalize", "speed", "eta")
+                for suffix in ("value", "sub")
+            ]
+            assert all(
+                label.parentWidget() is window._download_metric_state
+                for label in metric_labels
+            )
+            assert not window._download_metric_state.isVisible()
+            qt_application.processEvents()
+            leaked_windows = [
+                widget for widget in qt_application.topLevelWidgets()
+                if widget is not window and widget.isVisible()
+            ]
+            assert leaked_windows == []
 
             for index, name in enumerate(window._tab_names):
                 window._switch_tab(index)

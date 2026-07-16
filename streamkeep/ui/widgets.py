@@ -53,38 +53,31 @@ PLATFORM_BADGES = _BadgeLookup()
 
 
 def TAB_STYLE():
-    """Build tab stylesheet from the live CAT dict (theme-safe)."""
+    """Build the compact, text-led navigation style from the live theme."""
     return f"""
 QPushButton#tab {{
-    background-color: qlineargradient(
-        x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {CAT['panelSoft']},
-        stop: 1 {CAT['panel']}
-    );
+    background-color: transparent;
     color: {CAT['subtext1']};
-    border: 1px solid {CAT['stroke']};
-    padding: 11px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 0 9px 0;
     font-weight: 600;
-    font-size: 13px;
-    border-radius: 14px;
+    font-size: 14px;
+    border-radius: 0;
 }}
 QPushButton#tab:hover {{
     color: {CAT['text']};
-    border-color: {CAT['accent']};
-    background-color: {CAT['panelHi']};
+    background-color: transparent;
 }}
 QPushButton#tabActive {{
-    background-color: qlineargradient(
-        x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 {CAT['accent']},
-        stop: 1 {CAT['sky']}
-    );
-    color: #081120;
-    border: 1px solid rgba(255, 255, 255, 40);
-    padding: 11px 18px;
+    background-color: transparent;
+    color: {CAT['accent']};
+    border: none;
+    border-bottom: 2px solid {CAT['accent']};
+    padding: 10px 0 9px 0;
     font-weight: 700;
-    font-size: 13px;
-    border-radius: 14px;
+    font-size: 14px;
+    border-radius: 0;
 }}
 """
 
@@ -104,13 +97,13 @@ def path_label(path_text, fallback="Choose folder"):
 
 
 def make_metric_card(label_text, value_text="--", sub_text=""):
-    """Build a dashboard metric card. Returns (card, value_label, sub_label)."""
+    """Build a compact inline metric. Returns (container, value, detail)."""
     card = QFrame()
     card.setObjectName("metricCard")
-    card.setMinimumHeight(102)
+    card.setMinimumHeight(68)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(16, 14, 16, 14)
-    lay.setSpacing(6)
+    lay.setContentsMargins(10, 8, 10, 8)
+    lay.setSpacing(2)
 
     label = QLabel(label_text)
     label.setObjectName("metricLabel")
@@ -130,23 +123,19 @@ def make_metric_card(label_text, value_text="--", sub_text=""):
 
 
 def make_field_block(title, hint=""):
-    """Build a Settings-style titled container. Returns (card, vbox_layout)."""
+    """Build a dense field group; longer guidance is available as a tooltip."""
     card = QFrame()
-    card.setObjectName("subtleCard")
-    card.setMinimumHeight(108)
+    card.setObjectName("fieldBlock")
+    card.setMinimumHeight(70)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(14, 12, 14, 12)
-    lay.setSpacing(8)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(6)
 
     label = QLabel(title)
     label.setObjectName("fieldLabel")
-    lay.addWidget(label)
-
     if hint:
-        hint_label = QLabel(hint)
-        hint_label.setObjectName("fieldHint")
-        hint_label.setWordWrap(True)
-        lay.addWidget(hint_label)
+        label.setToolTip(hint)
+    lay.addWidget(label)
 
     return card, lay
 
