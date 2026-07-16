@@ -11,11 +11,11 @@ Usage::
     stats = get_channel_stats("xqc", weeks=8)
 """
 
-import sqlite3
 import time
 from datetime import datetime, timedelta
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 
 DB_PATH = CONFIG_DIR / "library.db"
 
@@ -23,7 +23,7 @@ DB_PATH = CONFIG_DIR / "library.db"
 def _ensure_table():
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
         db.executescript("""
             CREATE TABLE IF NOT EXISTS channel_polls (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +51,7 @@ def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""
     """
     _ensure_table()
     try:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
         db.execute(
             "INSERT INTO channel_polls (channel_id, platform, timestamp, status, viewers, title, game) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -80,7 +80,7 @@ def get_channel_stats(channel_id, weeks=8):
     _ensure_table()
     cutoff = time.time() - weeks * 7 * 86400
     try:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
         rows = db.execute(
             "SELECT timestamp, status, viewers, title, game FROM channel_polls "
             "WHERE channel_id=? AND timestamp>=? ORDER BY timestamp ASC",
@@ -166,7 +166,7 @@ def get_all_channel_summaries(weeks=4):
     """Return a dict of channel_id -> summary stats for all tracked channels."""
     _ensure_table()
     try:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
         channels = db.execute(
             "SELECT DISTINCT channel_id FROM channel_polls"
         ).fetchall()

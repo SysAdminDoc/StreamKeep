@@ -79,7 +79,7 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(
                     set(capabilities),
                     {
-                        "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
+                        "sqlite", "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
                         "pillow", "curl", "ffmpeg", "ffprobe",
                     },
                 )

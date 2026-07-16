@@ -13,6 +13,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .sqlite_runtime import connect as sqlite_connect
+
 
 SNAPSHOT_FILES = (
     "config.json",
@@ -52,9 +54,14 @@ def _atomic_json(path, value):
 def _snapshot_sqlite(source, destination):
     source_db = destination_db = None
     try:
-        source_db = sqlite3.connect(str(Path(source).resolve()), timeout=10)
+        source_db = sqlite_connect(
+            str(Path(source).resolve()), timeout=10, readonly=True,
+            configure_journal=False,
+        )
         source_db.execute("PRAGMA query_only=ON")
-        destination_db = sqlite3.connect(str(destination), timeout=10)
+        destination_db = sqlite_connect(
+            str(destination), timeout=10, configure_journal=False,
+        )
         source_db.backup(destination_db)
         destination_db.commit()
     finally:

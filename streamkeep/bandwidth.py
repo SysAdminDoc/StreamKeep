@@ -11,11 +11,11 @@ Usage::
     print(tracker.today_bytes, tracker.month_bytes)
 """
 
-import sqlite3
 import threading
 from datetime import date
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 
 DB_PATH = CONFIG_DIR / "library.db"
 _lock = threading.Lock()
@@ -37,7 +37,7 @@ class BandwidthTracker:
     def _ensure_table(self):
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+            db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
             try:
                 db.execute("""
                     CREATE TABLE IF NOT EXISTS bandwidth_daily (
@@ -55,7 +55,7 @@ class BandwidthTracker:
         key = date.today().isoformat()
         self._today_key = key
         try:
-            db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+            db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
             try:
                 row = db.execute(
                     "SELECT bytes FROM bandwidth_daily WHERE day=?", (key,)
@@ -91,7 +91,7 @@ class BandwidthTracker:
 
     def _persist(self):
         try:
-            db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+            db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
             try:
                 db.execute(
                     "INSERT OR REPLACE INTO bandwidth_daily (day, bytes) VALUES (?, ?)",
@@ -112,7 +112,7 @@ class BandwidthTracker:
         """Sum of all days in the current month."""
         month_prefix = date.today().strftime("%Y-%m")
         try:
-            db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+            db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
             try:
                 row = db.execute(
                     "SELECT COALESCE(SUM(bytes), 0) FROM bandwidth_daily "
@@ -152,7 +152,7 @@ class BandwidthTracker:
     def daily_history(self, days=30):
         """Return list of (day_str, bytes) for the last N days."""
         try:
-            db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=5)
+            db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
             rows = db.execute(
                 "SELECT day, bytes FROM bandwidth_daily ORDER BY day DESC LIMIT ?",
                 (days,),

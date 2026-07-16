@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 from .paths import _CREATE_NO_WINDOW
+from .sqlite_runtime import runtime_status as sqlite_runtime_status
 
 
 MINIMUM_VERSIONS = {
@@ -125,6 +126,7 @@ def capability_state(record):
 
 
 def _probe_registry():
+    sqlite = _probe_sqlite_runtime()
     yt_dlp = _probe_yt_dlp()
     pillow = _probe_module(
         "pillow", "Pillow", "PIL", MINIMUM_VERSIONS["pillow"],
@@ -150,6 +152,7 @@ def _probe_registry():
     javascript = _probe_javascript_runtime()
     youtube = _aggregate_youtube(yt_dlp, ejs, javascript)
     return {
+        "sqlite": sqlite,
         "yt_dlp": yt_dlp,
         "yt_dlp_ejs": ejs,
         "javascript": javascript,
@@ -159,6 +162,29 @@ def _probe_registry():
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
     }
+
+
+def _probe_sqlite_runtime():
+    status = sqlite_runtime_status()
+    record = _base_record(
+        "sqlite", "SQLite", "python-runtime", status["minimum"],
+        ["library-database", "backup", "search", "queue"],
+        "Use a StreamKeep build bundled with a fixed SQLite runtime.",
+        path=sys.executable,
+        version=status["version"],
+        available=True,
+        supported=status["supported"],
+        provenance="bundled" if status["frozen"] else "python-runtime",
+        detail=status["detail"],
+    )
+    record.update({
+        "wal_reset_fixed": status["wal_reset_fixed"],
+        "degraded": status["degraded"],
+        "journal_mode": status["journal_mode"],
+    })
+    if status["degraded"]:
+        record["state"] = "degraded"
+    return record
 
 
 def _base_record(

@@ -163,14 +163,14 @@ python StreamKeep.py
 | Linux | `$XDG_CONFIG_HOME/StreamKeep` or `~/.config/StreamKeep` |
 | macOS | `~/Library/Application Support/StreamKeep` |
 
-History, monitor channels, queue data, failed-job recovery records, and archive integrity manifests are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
+History, monitor channels, queue data, failed-job recovery records, and archive integrity manifests are stored in SQLite. WAL is enabled only when the runtime contains SQLite's WAL-reset fix; older source runtimes automatically use safe rollback journaling and report that degraded mode in diagnostics. Frozen releases refuse to start with an unsafe SQLite. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
 Credential values are stored outside `config.json` in the operating-system credential store (with a Windows DPAPI-protected fallback); config and account rows contain only `secretref:` handles. Legacy plaintext values migrate only after secure storage succeeds.
 
 ## Packaging Notes
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- PyInstaller single-file builds for Windows with `python -m PyInstaller --clean StreamKeep.spec`.
+- PyInstaller single-file builds for Windows with `python packaging/build.py --clean --noconfirm`. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
 - MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
 - Flatpak packaging under `packaging/flatpak/`.
 - Browser companion extension packaging from `browser-extension/`.
@@ -213,7 +213,7 @@ python -m pyflakes StreamKeep.py streamkeep tests
 For a Windows one-file release, build and run the hidden artifact-boundary smoke suite:
 
 ```powershell
-python -m PyInstaller --clean --noconfirm StreamKeep.spec
+python packaging/build.py --clean --noconfirm
 python packaging\artifact_smoke.py --executable .\dist\StreamKeep.exe
 ```
 

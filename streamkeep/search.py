@@ -12,6 +12,7 @@ import sqlite3
 import threading
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 
 DB_PATH = CONFIG_DIR / "search.db"
 SCHEMA_VERSION = 2
@@ -20,8 +21,7 @@ _SCHEMA_LOCK = threading.Lock()
 
 def _connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(DB_PATH))
-    db.execute("PRAGMA journal_mode=WAL")
+    db = sqlite_connect(str(DB_PATH))
     with _SCHEMA_LOCK:
         _ensure_schema(db)
     return db

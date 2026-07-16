@@ -12,10 +12,10 @@ Supported platforms and their credential types:
 """
 
 import json
-import sqlite3
 import threading
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 from .secrets import (
     SECRET_REF_PREFIX,
     delete_secret_value,
@@ -51,7 +51,7 @@ def _decrypt(stored):
 
 def _ensure_table():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+    db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
     db.execute("""
         CREATE TABLE IF NOT EXISTS accounts (
             platform    TEXT PRIMARY KEY,
@@ -66,7 +66,7 @@ def _ensure_table():
 def get_credential(platform):
     """Return the decrypted credential for *platform*, or ''."""
     _ensure_table()
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+    db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
     try:
         row = db.execute(
             "SELECT credential FROM accounts WHERE platform=?", (platform,)
@@ -92,7 +92,7 @@ def set_credential(platform, value):
     _ensure_table()
     enc = _encrypt(value, platform)
     with _WRITE_LOCK:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:
             db.execute(
                 "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "
@@ -109,7 +109,7 @@ def delete_credential(platform):
     _ensure_table()
     delete_secret_value(f"account:{platform}")
     with _WRITE_LOCK:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:
             db.execute("DELETE FROM accounts WHERE platform=?", (platform,))
             db.commit()
@@ -120,7 +120,7 @@ def delete_credential(platform):
 def list_platforms():
     """Return a list of platforms that have stored credentials."""
     _ensure_table()
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+    db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
     try:
         rows = db.execute("SELECT platform FROM accounts ORDER BY platform").fetchall()
         return [r[0] for r in rows]
@@ -131,7 +131,7 @@ def list_platforms():
 def get_extra(platform):
     """Return the JSON extra data dict for *platform*."""
     _ensure_table()
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+    db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
     try:
         row = db.execute(
             "SELECT extra FROM accounts WHERE platform=?", (platform,)
@@ -167,7 +167,7 @@ def set_extra(platform, data):
         if data else ""
     )
     with _WRITE_LOCK:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
+        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:
             db.execute(
                 "INSERT INTO accounts (platform, credential, extra) VALUES (?,?,?) "

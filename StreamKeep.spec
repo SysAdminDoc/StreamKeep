@@ -1,4 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
+import ctypes
+import os
+import sqlite3
 from pathlib import Path
 
 from PyInstaller.utils.hooks import (
@@ -9,6 +12,32 @@ from PyInstaller.utils.hooks import (
 
 
 ROOT = Path(SPECPATH).resolve()
+
+
+def wal_reset_is_fixed(version):
+    version = tuple(version)
+    return (
+        version >= (3, 51, 3)
+        or version >= (3, 50, 7) and version[:2] == (3, 50)
+        or version >= (3, 44, 6) and version[:2] == (3, 44)
+    )
+
+
+sqlite_override = os.environ.get('STREAMKEEP_SQLITE_DLL', '').strip()
+if not wal_reset_is_fixed(sqlite3.sqlite_version_info) and not sqlite_override:
+    raise SystemExit(
+        'Frozen builds require fixed SQLite. Run python packaging/build.py '
+        '--clean --noconfirm or set STREAMKEEP_SQLITE_DLL.'
+    )
+if sqlite_override:
+    sqlite_override = str(Path(sqlite_override).resolve())
+    library = ctypes.WinDLL(sqlite_override)
+    library.sqlite3_libversion.restype = ctypes.c_char_p
+    sqlite_override_version = library.sqlite3_libversion().decode('ascii')
+    if not wal_reset_is_fixed(tuple(int(part) for part in sqlite_override_version.split('.'))):
+        raise SystemExit(
+            f'STREAMKEEP_SQLITE_DLL {sqlite_override_version} lacks the WAL-reset fix.'
+        )
 
 
 def collect_tree(relative, dest):
@@ -55,6 +84,12 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+if sqlite_override:
+    a.binaries = [
+        entry for entry in a.binaries
+        if Path(entry[0]).name.lower() != 'sqlite3.dll'
+    ]
+    a.binaries.append(('sqlite3.dll', sqlite_override, 'BINARY'))
 pyz = PYZ(a.pure)
 
 exe = EXE(

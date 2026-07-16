@@ -172,6 +172,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
         runtime_registry = get_runtime_capabilities(refresh=True)
         ytdlp_record = runtime_registry["yt_dlp"]
         ejs_record = runtime_registry["yt_dlp_ejs"]
+        sqlite_record = runtime_registry["sqlite"]
 
         checks = {
             "database_path_bound": Path(diagnostics.get("path", "")).resolve()
@@ -196,6 +197,11 @@ def run_startup_check(*, ready_file, fixture="empty"):
                 )
             ),
             "embedded_ytdlp_ejs_compatible": ejs_record.get("supported") is True,
+            "sqlite_runtime_safe": sqlite_record.get("supported") is True,
+            "frozen_sqlite_wal_reset_fixed": (
+                sqlite_record.get("wal_reset_fixed") is True
+                if getattr(sys, "frozen", False) else True
+            ),
             "embedded_ytdlp_runner": (
                 "--internal-ytdlp" in command
                 if getattr(sys, "frozen", False)

@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 
 # Files to include in backup (relative to CONFIG_DIR)
 BACKUP_FILES = [
@@ -214,8 +215,11 @@ def _snapshot_sqlite_db(source_path):
     src_db = None
     dst_db = None
     try:
-        src_db = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
-        dst_db = sqlite3.connect(str(tmp_path))
+        src_db = sqlite_connect(
+            f"file:{source_path}?mode=ro", uri=True, readonly=True,
+            configure_journal=False,
+        )
+        dst_db = sqlite_connect(str(tmp_path), configure_journal=False)
         src_db.backup(dst_db)
         dst_db.commit()
         if source_path.name == "library.db":
@@ -324,7 +328,7 @@ def _secret_free_sqlite_bytes(data):
     try:
         tmp.write(data)
         tmp.close()
-        connection = sqlite3.connect(str(path))
+        connection = sqlite_connect(str(path), configure_journal=False)
         try:
             _scrub_database_auth_state(connection)
         finally:

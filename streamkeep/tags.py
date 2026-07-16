@@ -10,6 +10,7 @@ Smart collections are JSON rule sets stored in ``config["collections"]``.
 import sqlite3
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
 
 DB_PATH = CONFIG_DIR / "tags.db"
 
@@ -24,8 +25,7 @@ _DURATION_BUCKETS = [
 
 def _connect():
     """Open (and initialize if needed) the tags database."""
-    db = sqlite3.connect(str(DB_PATH))
-    db.execute("PRAGMA journal_mode=WAL")
+    db = sqlite_connect(str(DB_PATH))
     db.executescript("""
         CREATE TABLE IF NOT EXISTS tags (
             id      INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -4,9 +4,9 @@ Replaces the list-of-dicts sections of config.json with properly indexed
 SQLite tables.  Config.json retains only user preferences and UI state.
 
 Database lives at ``%APPDATA%/StreamKeep/library.db`` (or ``data/library.db``
-in portable mode).  WAL journal, ``check_same_thread=False`` so worker
-threads can read.  All writes go through module-level functions that
-serialise behind a lock.
+in portable mode).  The central SQLite policy enables WAL only on runtimes
+with the WAL-reset fix and otherwise uses rollback journaling.  All writes go
+through module-level functions that serialise behind a lock.
 
 Schema version is stored in ``PRAGMA user_version`` and bumped on each
 migration so future schema changes are orderly.
@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .paths import CONFIG_DIR
+from .sqlite_runtime import connect as sqlite_connect
+from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
 SCHEMA_VERSION = 5
@@ -34,16 +36,13 @@ _write_lock = threading.Lock()
 def _connect(readonly=False):
     """Return a connection.  Caller is responsible for closing."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(
+    return sqlite_connect(
         str(DB_PATH),
         check_same_thread=False,
         timeout=10,
+        readonly=readonly,
+        row_factory=sqlite3.Row,
     )
-    db.row_factory = sqlite3.Row
-    if not readonly:
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA foreign_keys=ON")
-    return db
 
 
 def init_db() -> None:
@@ -1092,6 +1091,8 @@ def checkpoint_wal() -> tuple[bool, str]:
     """Force a WAL checkpoint (TRUNCATE mode). Returns (ok, detail)."""
     if not DB_PATH.is_file():
         return False, "Database file does not exist"
+    if runtime_status()["journal_mode"] != "wal":
+        return True, "Rollback journal active; no WAL checkpoint is required"
     with _write_lock:
         db = _connect()
         try:
@@ -1140,6 +1141,7 @@ def db_diagnostics() -> dict[str, Any]:
     result: dict[str, Any] = {
         "exists": DB_PATH.is_file(),
         "path": str(DB_PATH),
+        "sqlite_runtime": runtime_status(),
     }
     if not result["exists"]:
         return result

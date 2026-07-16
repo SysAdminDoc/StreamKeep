@@ -187,7 +187,7 @@ class CapabilityRegistryTests(unittest.TestCase):
         registry = {
             name: _record(name)
             for name in (
-                "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
+                "sqlite", "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
                 "pillow", "curl", "ffmpeg", "ffprobe",
             )
         }
@@ -201,6 +201,27 @@ class CapabilityRegistryTests(unittest.TestCase):
         }
         for record in found.values():
             self.assertTrue(required.issubset(record))
+
+    def test_vulnerable_source_sqlite_is_reported_as_safe_degraded_mode(self):
+        with mock.patch.object(
+                capabilities, "sqlite_runtime_status",
+                return_value={
+                    "version": "3.45.1",
+                    "minimum": "3.51.3 or patched 3.50.7/3.44.6",
+                    "supported": True,
+                    "frozen": False,
+                    "detail": "rollback journaling is enforced",
+                    "wal_reset_fixed": False,
+                    "degraded": True,
+                    "journal_mode": "delete",
+                },
+        ):
+            record = capabilities._probe_sqlite_runtime()
+
+        self.assertTrue(record["supported"])
+        self.assertEqual(record["state"], "degraded")
+        self.assertEqual(record["journal_mode"], "delete")
+        self.assertFalse(record["wal_reset_fixed"])
 
 
 class ReleaseFloorTests(unittest.TestCase):
@@ -218,6 +239,7 @@ class ReleaseFloorTests(unittest.TestCase):
         self.assertIn("'yt-dlp[default]>=2026.07.04'", flatpak)
         self.assertIn("'Pillow>=12.3.0'", flatpak)
         self.assertIn("copy_metadata('yt-dlp-ejs')", spec)
+        self.assertIn("Frozen builds require fixed SQLite", spec)
         self.assertIn("ffmpeg-8.1.2.tar.xz", flatpak)
         self.assertIn(
             "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
