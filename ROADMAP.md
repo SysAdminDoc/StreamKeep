@@ -61,7 +61,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 - [ ] V19 — YouTube health doctor: Deno/EJS runtime detect, PO-token provider status, player_client strategy presets, degraded-capability warnings. Effort: M
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
 - [ ] V23 — streamkeep:// protocol handler + bookmarklet + documented iOS Shortcut. Effort: S
-- [ ] V24 — Queue-complete power actions (notify/sleep/shutdown/run-hook). Effort: S
 - [ ] V25 — lux fallback routing for CN platforms (bilibili/douyin/youku). Effort: M
 
 ### 1. Security and Reliability Hardening

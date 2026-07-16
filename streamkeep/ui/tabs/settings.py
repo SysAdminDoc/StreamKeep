@@ -1028,6 +1028,11 @@ class SettingsTabMixin:
             self._config["chat_render_bg_opacity"] = self.chat_render_opacity_spin.value()
         if hasattr(self, "notif_sound_check"):
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
+        if hasattr(self, "queue_complete_action_combo"):
+            from ...power import normalize_power_action
+            self._config["queue_complete_action"] = normalize_power_action(
+                self.queue_complete_action_combo.currentData()
+            )
         # Apply bandwidth schedule rule
         self._bandwidth_rule = {
             "enabled": self.bw_enable_check.isChecked(),
@@ -2784,6 +2789,36 @@ def build_settings_tab(win):
     notif_row.addWidget(win.notif_sound_check)
     notif_row.addStretch(1)
     network_lay.addLayout(notif_row)
+
+    # Queue-complete power action (V24)
+    from ...power import POWER_ACTIONS
+    _POWER_ACTION_LABELS = {
+        "none": "Do nothing",
+        "notify": "Notify only",
+        "run-hook": "Run 'queue_complete' hook",
+        "lock": "Lock the workstation",
+        "sleep": "Sleep",
+        "hibernate": "Hibernate",
+        "shutdown": "Shut down (cancellable)",
+    }
+    power_row = QHBoxLayout()
+    power_row.setSpacing(8)
+    power_row.addWidget(QLabel("When the download queue finishes:"))
+    win.queue_complete_action_combo = QComboBox()
+    for _action in POWER_ACTIONS:
+        win.queue_complete_action_combo.addItem(
+            _POWER_ACTION_LABELS.get(_action, _action), _action
+        )
+    _saved_power = str(win._config.get("queue_complete_action", "none") or "none")
+    _power_idx = win.queue_complete_action_combo.findData(_saved_power)
+    win.queue_complete_action_combo.setCurrentIndex(max(0, _power_idx))
+    win.queue_complete_action_combo.setToolTip(
+        "Optional action to run once, after the whole queue drains. Sleep, "
+        "hibernate, and shutdown are issued with a native cancellable delay "
+        "(Windows: run 'shutdown /a' to abort). Default: do nothing."
+    )
+    power_row.addWidget(win.queue_complete_action_combo, 1)
+    network_lay.addLayout(power_row)
 
     # Auto-update checker (v4.16.0)
     update_row = QHBoxLayout()

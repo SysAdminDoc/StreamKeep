@@ -237,6 +237,15 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert current_language() == "es"
             assert install_translator("en", qt_application) is True
 
+            # Queue-complete power action (V24): the control exists, defaults
+            # to the safe "none", and its selection round-trips into config.
+            assert window.queue_complete_action_combo.currentData() == "none"
+            _lock_idx = window.queue_complete_action_combo.findData("lock")
+            assert _lock_idx >= 0
+            window.queue_complete_action_combo.setCurrentIndex(_lock_idx)
+            window._on_save_settings()
+            assert window._config["queue_complete_action"] == "lock"
+
             monitor_dialog = MonitorEntryDialog(
                 window,
                 MonitorEntry(

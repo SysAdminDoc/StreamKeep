@@ -1843,6 +1843,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         if self._drain_pending_auto_records():
             return
         self._advance_queue()
+        self._maybe_fire_queue_complete_power_action()
 
 
     # Download-tab handlers moved to DownloadTabMixin in

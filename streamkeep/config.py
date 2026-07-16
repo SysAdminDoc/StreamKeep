@@ -84,6 +84,7 @@ _STRING_CONFIG_KEYS = frozenset({
     "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
     "ytdlp_wait_for_video",
     "ytdlp_external_downloader", "ytdlp_aria2c_min_split_size",
+    "queue_complete_action",
     "pp_convert_video_format", "pp_convert_video_codec",
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",

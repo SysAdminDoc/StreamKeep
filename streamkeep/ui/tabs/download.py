@@ -3813,10 +3813,44 @@ class DownloadTabMixin:
         for item in ready:
             self._start_queue_item(item)
 
+    def _maybe_fire_queue_complete_power_action(self):
+        """Fire the configured power action once when the queue drains (V24)."""
+        if not getattr(self, "_power_action_armed", False):
+            return
+        if self._active_queue_download_count() > 0:
+            return
+        # If _advance_queue left nothing active, only future-scheduled items
+        # (if any) remain; the current batch is complete.
+        self._power_action_armed = False
+        from ...power import normalize_power_action, run_queue_complete_action
+
+        action = normalize_power_action(
+            self._config.get("queue_complete_action", "none")
+        )
+        if action == "none":
+            return
+
+        def _notify():
+            self._notify(
+                "StreamKeep — Queue complete",
+                "All queued downloads finished.",
+            )
+
+        def _hook():
+            self._fire_hook("queue_complete")
+
+        run_queue_complete_action(
+            action, notify_fn=_notify, hook_fn=_hook, log_fn=self._log,
+        )
+        if action != "notify":
+            self._log(f"[POWER] Queue-complete action '{action}' dispatched.")
+
     def _start_queue_item(self, item):
         """Launch a fetch→download pipeline for a single queue item using
         a dedicated FetchWorker (concurrent, doesn't touch the UI state)."""
         item_id = id(item)
+        # Arm the queue-complete power action for this batch (V24).
+        self._power_action_armed = True
         self._set_queue_item_status(item, "fetching")
         self._log(f"[QUEUE] Starting: {item.get('title', '')[:60]}")
         # Use a dedicated FetchWorker that doesn't share the foreground UI state
