@@ -89,10 +89,9 @@ class DownloadWorker(QThread):
                 except OSError:
                     pass
 
-    def _download_with_ytdlp(self, seg_idx, label, outfile):
-        """Download via yt-dlp directly. Handles URL refresh, DASH merge,
-        and format selection. Returns True on success."""
-        from ..extractors.ytdlp import ytdlp_command
+    def _build_ytdlp_download_cmd(self, outfile, impersonate=False):
+        """Assemble the yt-dlp download command for a single segment."""
+        from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
         cmd = ytdlp_command() + [
             "-f", self.ytdlp_format,
@@ -132,6 +131,8 @@ class DownloadWorker(QThread):
             cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
+        if impersonate:
+            cmd.extend(ytdlp_impersonate_args())
         try:
             from ..extractors.ytdlp import (
                 _is_youtube_url,
@@ -148,7 +149,51 @@ class DownloadWorker(QThread):
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         cmd.append(self.ytdlp_source)
+        return cmd
 
+    def _download_with_ytdlp(self, seg_idx, label, outfile):
+        """Download via yt-dlp directly. Handles DASH merge, format
+        selection, and a one-shot Cloudflare-impersonation retry. Returns
+        True on success."""
+        from ..extractors.ytdlp import (
+            _impersonation_available,
+            _looks_like_cloudflare,
+        )
+
+        attempted_impersonate = False
+        while True:
+            cmd = self._build_ytdlp_download_cmd(
+                outfile, impersonate=attempted_impersonate
+            )
+            outcome, output_lines = self._stream_ytdlp_download(
+                cmd, seg_idx, label, outfile
+            )
+            if outcome == "ok":
+                return True
+            if outcome == "cancel":
+                return False
+            # outcome == "fail": retry once behind Cloudflare with a real
+            # browser TLS fingerprint before surfacing the failure.
+            if (not attempted_impersonate and _impersonation_available()
+                    and _looks_like_cloudflare("\n".join(output_lines))):
+                attempted_impersonate = True
+                self.log.emit(
+                    "[RETRY] Site looks Cloudflare-protected - retrying "
+                    "download with browser impersonation..."
+                )
+                continue
+            err_tail = "\n".join(output_lines[-5:])
+            self.log.emit(f"[FAIL] {label}\n{err_tail}")
+            return False
+
+    def _stream_ytdlp_download(self, cmd, seg_idx, label, outfile):
+        """Run one yt-dlp download attempt, streaming progress.
+
+        Returns ``(outcome, output_lines)`` where *outcome* is ``"ok"`` on a
+        verified file, ``"cancel"`` when the user aborted, or ``"fail"`` for a
+        retryable failure. The caller owns the final ``[FAIL]`` log so it can
+        decide whether to retry first.
+        """
         try:
             with self._proc_lock:
                 self._proc = subprocess.Popen(
@@ -188,7 +233,7 @@ class DownloadWorker(QThread):
                         os.remove(outfile)
                     except OSError:
                         pass
-                return False
+                return "cancel", output_lines
 
             # Safety net: yt-dlp exited 0 but the exact .mp4 is missing.
             # A merge that could not honour --merge-output-format (rare exotic
@@ -205,23 +250,21 @@ class DownloadWorker(QThread):
                 self.segment_done.emit(seg_idx, fmt_size(size))
                 self._mark_segment_done(seg_idx)
                 self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
-                return True
+                return "ok", output_lines
 
             if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
                 try:
                     os.remove(outfile)
                 except OSError:
                     pass
-            err_tail = "\n".join(output_lines[-5:])
-            self.log.emit(f"[FAIL] {label}\n{err_tail}")
-            return False
+            return "fail", output_lines
 
         except FileNotFoundError:
             self.log.emit(f"[ERROR] {label}: bundled yt-dlp could not be started")
-            return False
+            return "fail", []
         except Exception as e:
             self.log.emit(f"[ERROR] {label}: {e}")
-            return False
+            return "fail", []
 
     def _reconcile_output(self, outfile):
         """Rename a merged file yt-dlp wrote under a different container.

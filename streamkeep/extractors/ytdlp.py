@@ -28,6 +28,38 @@ logger = logging.getLogger(__name__)
 _YTDLP_INSTALL_HINT = 'Install or update with: pip install -U "yt-dlp[default]"'
 _JS_RUNTIME_HINT = "Install Deno 2.3+ or Node.js 22+ for full YouTube support."
 
+# Signatures of a Cloudflare / anti-bot interstitial. An increasing number of
+# video hosts (Rumble, Bitchute, many PeerTube mirrors) gate their pages this
+# way; the fix is to repeat the request through curl_cffi TLS impersonation.
+_CLOUDFLARE_HINTS = (
+    "cloudflare", "just a moment", "enable javascript and cookies",
+    "http error 403", "403: forbidden", "403 forbidden",
+    "attention required", "checking your browser", "impersonate",
+    "cf-ray", "ddos-guard",
+)
+
+
+def _looks_like_cloudflare(text):
+    low = (text or "").lower()
+    return any(hint in low for hint in _CLOUDFLARE_HINTS)
+
+
+def _impersonation_available():
+    """True when yt-dlp can impersonate a browser TLS fingerprint."""
+    return _has_python_module("curl_cffi")
+
+
+def ytdlp_impersonate_args():
+    """CLI args that make yt-dlp impersonate a real Chrome client.
+
+    ``--impersonate chrome`` matches whatever Chrome target curl_cffi ships,
+    so it stays valid as the pinned versions move. Empty when curl_cffi is
+    absent, so callers can append unconditionally.
+    """
+    if not _impersonation_available():
+        return []
+    return ["--impersonate", "chrome"]
+
 
 def _parse_version_parts(text):
     match = re.search(r"v?(\d+(?:[.\-]\d+){1,3})", str(text or ""))
@@ -285,7 +317,7 @@ class YtDlpExtractor(Extractor):
             logger.debug("extract_channel_id failed for %r: %s", url, e)
             return "download"
 
-    def _build_cmd(self, url, include_runtime=False, runtime_status=None):
+    def _build_cmd(self, url, include_runtime=False, runtime_status=None, impersonate=False):
         cmd = ytdlp_command() + ["--dump-json", "--no-download"]
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
@@ -295,18 +327,37 @@ class YtDlpExtractor(Extractor):
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
+        if impersonate:
+            cmd.extend(ytdlp_impersonate_args())
         cmd.extend(["--", url])
         return cmd
 
+    # Phrases that genuinely indicate an authentication / cookie wall. Kept
+    # specific on purpose: a bare "age" used to match the "age" inside
+    # "webp\ **age**", so every "Unable to download webpage" error triggered
+    # the full multi-browser cookie scan (60s per browser) for no reason.
     _AUTH_ERRORS = [
-        "Sign in", "age", "confirm your age", "login", "cookies",
-        "authentication", "members-only", "private video",
-        "This video is available to this channel",
+        "sign in", "sign-in", "confirm your age", "age-restricted",
+        "age restricted", "age verification", "log in", "login",
+        "cookies", "authentication", "members-only", "members only",
+        "private video", "this video is available to this channel",
+        "join this channel", "requires payment", "purchase to watch",
+    ]
+    # Transport/availability failures that are NOT auth problems — retrying
+    # with browser cookies cannot fix these, so short-circuit the scan.
+    _NON_AUTH_ERRORS = [
+        "failed to resolve", "getaddrinfo", "temporary failure in name resolution",
+        "name or service not known", "connection refused", "connection reset",
+        "connection aborted", "timed out", "timeout", "network is unreachable",
+        "no route to host", "bad gateway", "service unavailable",
+        "gateway time-out", "http error 5",
     ]
 
     def _is_auth_error(self, stderr):
-        lower = stderr.lower()
-        return any(phrase.lower() in lower for phrase in self._AUTH_ERRORS)
+        lower = (stderr or "").lower()
+        if any(phrase in lower for phrase in self._NON_AUTH_ERRORS):
+            return False
+        return any(phrase in lower for phrase in self._AUTH_ERRORS)
 
     def _try_with_browser(self, url, browser_name, log_fn=None, runtime_status=None):
         """Attempt yt-dlp extraction with a specific browser's cookies.
@@ -617,6 +668,24 @@ class YtDlpExtractor(Extractor):
             if result.timed_out:
                 self._log(log_fn, "yt-dlp timed out")
                 return None
+            # Cloudflare / anti-bot wall: repeat once with TLS impersonation
+            # before giving up. Only when the first try failed for that reason
+            # and impersonation is actually available.
+            if (result.returncode != 0 and not self._is_auth_error(result.stderr)
+                    and _looks_like_cloudflare(result.stderr)
+                    and _impersonation_available()):
+                self._log(log_fn, "Site looks Cloudflare-protected - retrying with browser impersonation...")
+                retry = run_capture_interruptible(
+                    self._build_cmd(
+                        url, include_runtime=bool(log_fn),
+                        runtime_status=runtime_status, impersonate=True,
+                    ),
+                    timeout=90,
+                )
+                if retry.interrupted:
+                    return None
+                if retry.returncode == 0 and retry.stdout.strip():
+                    result = retry
             if result.returncode == 0:
                 data = json.loads(result.stdout)
             elif self._is_auth_error(result.stderr):
@@ -686,10 +755,14 @@ class YtDlpExtractor(Extractor):
         for fmt in data.get("formats", []):
             if fmt.get("vcodec") == "none":
                 continue
-            ext = fmt.get("ext", "?")
+            # Use ``or`` chains, not ``dict.get`` defaults: many extractors
+            # (TikTok, some DASH sites) set ``format_note``/``ext`` to an
+            # explicit ``None`` value, which a default argument would not
+            # replace — producing quality labels like "None (None)".
+            ext = fmt.get("ext") or "?"
             w = fmt.get("width") or 0
             h = fmt.get("height") or 0
-            note = fmt.get("format_note", fmt.get("format_id", "?"))
+            note = fmt.get("format_note") or fmt.get("format_id") or "?"
             fid = fmt.get("format_id", "")
             if not fid:
                 continue

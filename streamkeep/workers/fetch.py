@@ -28,6 +28,44 @@ class FetchWorker(QThread):
     def _interrupted(self):
         return self.isInterruptionRequested()
 
+    def _resolve_or_fallback(self, ext, url):
+        """Resolve *url* with the detected extractor, falling back to the
+        yt-dlp catch-all when a platform-specific extractor fails.
+
+        Native extractors (Kick, Twitch, Rumble, SoundCloud, …) exist for the
+        features yt-dlp lacks (live-check, VOD listing, clip recovery), but a
+        site can change its markup/API at any time and break them. yt-dlp is
+        broadly maintained and supports 1700+ sites, so treating it as a
+        second chance keeps a one-off native breakage from turning into a hard
+        "Failed to resolve" for the user. yt-dlp already runs directly for
+        catch-all URLs, so the fallback is skipped there to avoid double work.
+        """
+        info = None
+        try:
+            info = ext.resolve(url, log_fn=self.log.emit)
+        except Exception as e:  # noqa: BLE001 — any extractor failure is fallback-worthy
+            if self._interrupted():
+                raise
+            self.log.emit(f"[{ext.NAME}] resolve error: {e}")
+        if info or self._interrupted():
+            return info
+        if ext.NAME == "yt-dlp":
+            return None
+        self.log.emit(
+            f"[FALLBACK] {ext.NAME} could not resolve this URL - retrying with yt-dlp..."
+        )
+        from ..extractors.ytdlp import YtDlpExtractor
+        try:
+            info = YtDlpExtractor().resolve(url, log_fn=self.log.emit)
+        except Exception as e:  # noqa: BLE001
+            if self._interrupted():
+                raise
+            self.log.emit(f"[FALLBACK] yt-dlp also failed: {e}")
+            return None
+        if info:
+            self.log.emit("[FALLBACK] yt-dlp resolved the URL successfully.")
+        return info
+
     def run(self):
         try:
             with http_interruptible(self._interrupted):
@@ -72,7 +110,7 @@ class FetchWorker(QThread):
                 # single item — skip live-check / channel-wide VOD listing,
                 # which would target the channel rather than this URL.
                 if ext.is_direct_url(self.url):
-                    info = ext.resolve(self.url, log_fn=self.log.emit)
+                    info = self._resolve_or_fallback(ext, self.url)
                     if self._interrupted():
                         return
                     if info:
@@ -90,7 +128,7 @@ class FetchWorker(QThread):
                     if self._interrupted():
                         return
                     if is_live:
-                        info = ext.resolve(self.url, log_fn=self.log.emit)
+                        info = self._resolve_or_fallback(ext, self.url)
                         if self._interrupted():
                             return
                         if info:
@@ -114,7 +152,7 @@ class FetchWorker(QThread):
                             self.finished.emit(info)
                             return
 
-                info = ext.resolve(self.url, log_fn=self.log.emit)
+                info = self._resolve_or_fallback(ext, self.url)
                 if self._interrupted():
                     return
                 if info:
