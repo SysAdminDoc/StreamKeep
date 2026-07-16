@@ -1,8 +1,8 @@
 """Platform Account Manager — credential store for authenticated APIs (F48).
 
-Stores per-platform auth tokens/keys in the SQLite library.db with
-DPAPI on Windows or keyring on macOS/Linux. New credentials are not
-stored when secure storage is unavailable.
+Stores only secure-store references in SQLite. Credential values live in
+Windows Credential Manager/keyring or a DPAPI-protected local fallback and
+are never included in ordinary database backups.
 
 Supported platforms and their credential types:
   - Twitch:  OAuth token (for Schedule API, subscriber VODs)
@@ -16,7 +16,13 @@ import sqlite3
 import threading
 
 from .paths import CONFIG_DIR
-from .secrets import protect, unprotect
+from .secrets import (
+    SECRET_REF_PREFIX,
+    delete_secret_value,
+    get_secret_value,
+    set_secret_value,
+    unprotect,
+)
 
 DB_PATH = CONFIG_DIR / "library.db"
 _WRITE_LOCK = threading.Lock()
@@ -28,13 +34,16 @@ def _encrypt(plaintext, platform=""):
     """Encrypt *plaintext* using the shared secure-storage helper."""
     if not plaintext:
         return ""
-    return protect(plaintext, field_name=f"account:{platform}")
+    return set_secret_value(f"account:{platform}", plaintext)
 
 
 def _decrypt(stored):
     """Decrypt a value produced by ``_encrypt()``."""
     if not stored:
         return ""
+    if stored.startswith(SECRET_REF_PREFIX):
+        value = get_secret_value(stored[len(SECRET_REF_PREFIX):])
+        return str(value or "")
     return unprotect(stored)
 
 
@@ -63,7 +72,16 @@ def get_credential(platform):
             "SELECT credential FROM accounts WHERE platform=?", (platform,)
         ).fetchone()
         if row:
-            return _decrypt(row[0])
+            credential = _decrypt(row[0])
+            if credential and not str(row[0]).startswith(SECRET_REF_PREFIX):
+                reference = _encrypt(credential, platform)
+                with _WRITE_LOCK:
+                    db.execute(
+                        "UPDATE accounts SET credential=? WHERE platform=?",
+                        (reference, platform),
+                    )
+                    db.commit()
+            return credential
         return ""
     finally:
         db.close()
@@ -89,6 +107,7 @@ def set_credential(platform, value):
 def delete_credential(platform):
     """Remove the credential for *platform*."""
     _ensure_table()
+    delete_secret_value(f"account:{platform}")
     with _WRITE_LOCK:
         db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:
@@ -118,8 +137,21 @@ def get_extra(platform):
             "SELECT extra FROM accounts WHERE platform=?", (platform,)
         ).fetchone()
         if row:
+            raw = str(row[0] or "")
+            if raw.startswith(SECRET_REF_PREFIX):
+                value = get_secret_value(raw[len(SECRET_REF_PREFIX):])
+                return dict(value) if isinstance(value, dict) else {}
             try:
-                return json.loads(row[0] or "{}")
+                value = json.loads(raw or "{}")
+                if isinstance(value, dict) and value:
+                    reference = set_secret_value(f"account-extra:{platform}", value)
+                    with _WRITE_LOCK:
+                        db.execute(
+                            "UPDATE accounts SET extra=? WHERE platform=?",
+                            (reference, platform),
+                        )
+                        db.commit()
+                return value if isinstance(value, dict) else {}
             except (json.JSONDecodeError, TypeError):
                 return {}
         return {}
@@ -130,7 +162,10 @@ def get_extra(platform):
 def set_extra(platform, data):
     """Store extra JSON data alongside a credential."""
     _ensure_table()
-    payload = json.dumps(data, ensure_ascii=False)
+    payload = (
+        set_secret_value(f"account-extra:{platform}", dict(data))
+        if data else ""
+    )
     with _WRITE_LOCK:
         db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
         try:

@@ -387,8 +387,9 @@ class SettingsTabMixin:
         if not path:
             return
         try:
+            from ...config import export_config
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(self._config, f, indent=2)
+                json.dump(export_config(self._config), f, indent=2)
             self._log(f"[CONFIG] Exported to {path}")
             self._set_status(f"Config exported to {path}", "success")
         except Exception as e:
@@ -417,8 +418,13 @@ class SettingsTabMixin:
             self._set_status(f"Import failed: {e}", "error")
             return
         # Replace config and re-apply
+        if not _save_config(new_cfg):
+            from ...config import get_last_config_error
+            detail = get_last_config_error() or "secure credential storage unavailable"
+            self._log(f"[CONFIG] Import was not applied: {detail}")
+            self._set_status("Import failed: secure credential storage unavailable.", "error")
+            return
         self._config = new_cfg
-        _save_config(new_cfg)
         # Clear mutable state that _apply_config appends to
         self._history.clear()
         self.monitor.entries.clear()
@@ -835,7 +841,12 @@ class SettingsTabMixin:
         PostProcessor.convert_audio_bitrate = self.pp_convert_audio_bitrate.currentText()
         PostProcessor.convert_audio_samplerate = self.pp_convert_audio_samplerate.currentText()
         PostProcessor.convert_delete_source = self.pp_convert_delete_check.isChecked()
-        self._persist_config()
+        if not self._persist_config():
+            from ...config import get_last_config_error
+            detail = get_last_config_error() or "secure credential storage unavailable"
+            self._log(f"[SETTINGS] Settings were not saved: {detail}")
+            self._set_status("Settings not saved: secure credential storage unavailable.", "error")
+            return
         self._refresh_download_summary()
         self._set_status("Settings saved and applied to future downloads.", "success")
 

@@ -38,7 +38,7 @@ def _launcher_has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "db", "snapshot",
+        "download", "dl", "server", "extractors", "db", "snapshot", "backup",
         "startup-check",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
         "--internal-ytdlp",

@@ -66,3 +66,23 @@ def test_snapshot_command_accepts_config_root_before_subcommand(tmp_path):
     assert output.is_file()
     assert "Snapshot: OK" in result.stdout
     assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()
+
+
+def test_backup_command_is_headless_and_secret_free(tmp_path):
+    config_dir = tmp_path / "isolated"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"theme": "dark", "hf_token": "must-not-export"}),
+        encoding="utf-8",
+    )
+    output = tmp_path / "ordinary.skbackup"
+    result = _run_launcher(
+        "backup", "create", output, "--config-dir", config_dir,
+        appdata=tmp_path / "ambient-appdata",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.is_file()
+    assert b"must-not-export" not in output.read_bytes()
+    assert "Backup created" in result.stdout
+    assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()

@@ -15,6 +15,7 @@ from .paths import CONFIG_DIR, CONFIG_FILE, LOG_FILE, LOG_FILE_BACKUP, LOG_FILE_
 # clipboard monitor, download workers) so two writers can't corrupt the file.
 _SAVE_LOCK = threading.Lock()
 _LOG_LOCK = threading.Lock()
+_LAST_CONFIG_ERROR = ""
 
 
 def load_config():
@@ -32,7 +33,27 @@ def load_config():
                 continue
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                return data
+                from .secrets import (
+                    SecretStorageError,
+                    prepare_config_for_storage,
+                    resolve_config_secrets,
+                )
+                runtime = resolve_config_secrets(data)
+                try:
+                    stored, migrated = prepare_config_for_storage(data)
+                except SecretStorageError:
+                    return runtime
+                if migrated:
+                    try:
+                        with _SAVE_LOCK:
+                            _write_config_payload(stored, rotate_backup=False)
+                            try:
+                                CONFIG_FILE.with_suffix(".json.bak").unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+                return runtime
         except Exception:
             continue
     return {}
@@ -45,30 +66,16 @@ def save_config(cfg):
     crash leaves the previous config intact. Also rotates a last-known-good
     sibling `config.json.bak` before each successful replace.
     """
+    global _LAST_CONFIG_ERROR
+    from .secrets import prepare_config_for_storage
     with _SAVE_LOCK:
         try:
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = CONFIG_FILE.with_suffix(".json.tmp")
-            payload = json.dumps(cfg, indent=2, ensure_ascii=False)
-            # Write + fsync so a power loss doesn't leave a zero-byte tmp.
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(payload)
-                try:
-                    f.flush()
-                    os.fsync(f.fileno())
-                except (OSError, AttributeError):
-                    pass
-            # Keep a one-deep backup before the atomic replace.
-            if CONFIG_FILE.exists():
-                try:
-                    bak = CONFIG_FILE.with_suffix(".json.bak")
-                    if bak.exists():
-                        bak.unlink()
-                    CONFIG_FILE.replace(bak)
-                except OSError:
-                    pass
-            os.replace(tmp, CONFIG_FILE)
-        except Exception:
+            stored, _changed = prepare_config_for_storage(cfg)
+            _write_config_payload(stored, rotate_backup=True)
+            _LAST_CONFIG_ERROR = ""
+            return True
+        except Exception as error:
+            _LAST_CONFIG_ERROR = str(error)
             # Best-effort cleanup of stale tmp on failure.
             try:
                 tmp = CONFIG_FILE.with_suffix(".json.tmp")
@@ -76,6 +83,43 @@ def save_config(cfg):
                     tmp.unlink()
             except OSError:
                 pass
+            return False
+
+
+def get_last_config_error():
+    return _LAST_CONFIG_ERROR
+
+
+def export_config(cfg):
+    """Return a normal JSON-export copy with all authentication state removed."""
+    from .secrets import secret_free_config
+    return secret_free_config(cfg)
+
+
+def _write_config_payload(stored, *, rotate_backup):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_FILE.with_suffix(".json.tmp")
+    payload = json.dumps(stored, indent=2, ensure_ascii=False)
+    with open(tmp, "w", encoding="utf-8") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if rotate_backup and CONFIG_FILE.exists():
+        bak = CONFIG_FILE.with_suffix(".json.bak")
+        try:
+            existing = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                from .secrets import reference_only_config
+                safe_existing = reference_only_config(existing)
+                bak_tmp = bak.with_suffix(".bak.tmp")
+                with open(bak_tmp, "w", encoding="utf-8") as handle:
+                    json.dump(safe_existing, handle, indent=2, ensure_ascii=False)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(bak_tmp, bak)
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    os.replace(tmp, CONFIG_FILE)
 
 
 def write_log_line(msg):
@@ -98,8 +142,10 @@ def write_log_line(msg):
             except OSError:
                 pass
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            from .diagnostics import redact_text
+            safe_message = redact_text(str(msg or ""))
             with open(LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(f"[{ts}] {msg}\n")
+                f.write(f"[{ts}] {safe_message}\n")
         except Exception:
             pass
 

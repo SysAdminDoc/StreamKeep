@@ -9,6 +9,25 @@ from streamkeep.config import install_gui_logging
 
 
 class ConfigTests(unittest.TestCase):
+    def test_log_writer_redacts_credentials_and_signed_query_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            log_file = root / "streamkeep.log"
+            with (
+                mock.patch.object(config, "CONFIG_DIR", root),
+                mock.patch.object(config, "LOG_FILE", log_file),
+                mock.patch.object(config, "LOG_FILE_BACKUP", root / "streamkeep.log.1"),
+            ):
+                config.write_log_line(
+                    "proxy https://user:proxy-password@example.com/file"
+                    "?token=signed-secret"
+                )
+
+            written = log_file.read_text(encoding="utf-8")
+            self.assertNotIn("proxy-password", written)
+            self.assertNotIn("signed-secret", written)
+            self.assertIn("***REDACTED***", written)
+
     def test_load_config_falls_back_to_backup_when_primary_is_corrupt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)

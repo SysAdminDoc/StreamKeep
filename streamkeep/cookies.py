@@ -119,14 +119,8 @@ def import_from_file(source_path):
     if valid < 1:
         return False, "File doesn't look like Netscape cookies.txt format (expected tab-separated fields)."
 
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        COOKIES_FILE.write_text(content, encoding="utf-8")
-        _restrict_file_permissions(COOKIES_FILE)
-    except OSError as e:
-        return False, f"Failed to write cookies: {e}"
-
-    return True, f"Imported {valid} cookie(s) from file."
+    ok, message = restore_cookie_text(content)
+    return (True, f"Imported {valid} cookie(s) from file.") if ok else (ok, message)
 
 
 def clear_cookies():
@@ -171,8 +165,7 @@ def _write_cookies(cookie_list, source):
         return False, f"No relevant cookies found in {source} for supported platforms."
 
     try:
-        COOKIES_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        _restrict_file_permissions(COOKIES_FILE)
+        _write_cookie_text_atomic("\n".join(lines) + "\n")
     except OSError as e:
         return False, f"Failed to write cookies: {e}"
 
@@ -186,3 +179,42 @@ def _sanitize_cookie_field(value):
     cleaned = "".join(c if c >= " " or c == "\t" else " " for c in cleaned)
     cleaned = cleaned.replace("\t", " ")
     return " ".join(cleaned.split())
+
+
+def export_cookie_text():
+    """Return cookie content for an explicit encrypted portable backup."""
+    try:
+        return COOKIES_FILE.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def restore_cookie_text(content):
+    """Validate and atomically restore Netscape cookie text."""
+    content = str(content or "")
+    if not content:
+        return True, "No cookies in backup."
+    if len(content.encode("utf-8")) > 10 * 1024 * 1024:
+        return False, "Cookie payload exceeds 10 MB."
+    lines = [
+        line for line in content.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    if not lines or not any(len(line.split("\t")) >= 6 for line in lines):
+        return False, "Cookie payload is not Netscape format."
+    try:
+        _write_cookie_text_atomic(content)
+        return True, f"Restored {len(lines)} cookie row(s)."
+    except OSError as error:
+        return False, f"Failed to restore cookies: {error}"
+
+
+def _write_cookie_text_atomic(content):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = COOKIES_FILE.with_suffix(".txt.tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, COOKIES_FILE)
+    _restrict_file_permissions(COOKIES_FILE)

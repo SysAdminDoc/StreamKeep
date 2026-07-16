@@ -748,7 +748,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self.monitor.save_to_config(cfg)
         # Persist monitor channels + queue to SQLite (F41)
         self.monitor.save_to_db()
-        _save_config(cfg)
+        return _save_config(cfg)
 
     def _schedule_persist_config(self, delay_ms=500):
         timer = getattr(self, "_config_save_timer", None)

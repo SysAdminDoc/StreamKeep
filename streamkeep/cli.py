@@ -451,6 +451,38 @@ def _run_startup_check(args):
     sys.exit(0 if result.get("ready") else 1)
 
 
+def _run_backup(args):
+    """Create/restore ordinary or explicit portable-secret backups."""
+    action = str(args.action)
+    if action == "create":
+        from .backup import create_backup
+        ok, message = create_backup(args.path, include_logs=args.include_logs)
+    elif action == "restore":
+        from .backup import restore_backup
+        ok, message = restore_backup(args.path)
+    else:
+        password = os.environ.get("STREAMKEEP_PORTABLE_SECRET_PASSWORD", "")
+        if not password:
+            import getpass
+            password = getpass.getpass("Portable-secret backup password: ")
+            if action == "secrets-export":
+                confirmation = getpass.getpass("Confirm password: ")
+                if password != confirmation:
+                    _print_line("Backup failed: passwords do not match.")
+                    sys.exit(1)
+        from .portable_secrets import (
+            create_portable_secret_backup,
+            restore_portable_secret_backup,
+        )
+        if action == "secrets-export":
+            ok, message = create_portable_secret_backup(args.path, password)
+        else:
+            ok, message = restore_portable_secret_backup(args.path, password)
+    _print_line(message)
+    if not ok:
+        sys.exit(1)
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 def build_parser():
@@ -508,6 +540,24 @@ def build_parser():
                         help="Output path (default: streamkeep_diag_<timestamp>.zip)")
     diag_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
+
+    # -- secret-free and explicit encrypted backups --
+    backup_p = sub.add_parser("backup", help="Create or restore backups")
+    backup_p.add_argument(
+        "action",
+        choices=["create", "restore", "secrets-export", "secrets-import"],
+        help=(
+            "create/restore excludes auth; secrets-export/secrets-import uses "
+            "an Argon2id + AES-GCM password"
+        ),
+    )
+    backup_p.add_argument("path", help="Backup file path")
+    backup_p.add_argument(
+        "--include-logs", action="store_true",
+        help="Include redacted application logs in an ordinary backup",
+    )
+    backup_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                          help="Override the config/database directory")
 
     # -- packaged startup contract --
     startup_p = sub.add_parser(
@@ -581,6 +631,8 @@ def run_cli(argv=None):
         _run_db_maintenance(args)
     elif args.command == "snapshot":
         _run_snapshot(args)
+    elif args.command == "backup":
+        _run_backup(args)
     elif args.command == "startup-check":
         _run_startup_check(args)
     else:
@@ -593,7 +645,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "db", "snapshot",
+        "download", "dl", "server", "extractors", "db", "snapshot", "backup",
         "startup-check",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

@@ -63,8 +63,8 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 ### Uploads, Backup, and Plugins
 
 - Upload finished media to S3-compatible storage, Backblaze B2/MinIO, FTP/SFTP, and WebDAV.
-- Create `.skbackup` archives containing config, database, archive-manifest state, tags, notifications, plugin metadata, and local state.
-- Restore with a pre-restore backup and overwrite safety checks.
+- Create secret-free `.skbackup` archives containing preferences, database/archive state, tags, notifications, and optional redacted logs. Account credentials and cookies are excluded from ordinary create/restore operations.
+- Transfer authentication state only with an explicit `.sksbackup` protected by Argon2id and AES-256-GCM; wrong passwords and modified backups fail authentication before restore.
 - Load plugin manifests only after trust consent; untrusted plugins are skipped.
 
 Plugins live under the active config directory in `plugins/`. A plugin is a package or module directory containing `plugin.json`:
@@ -91,7 +91,13 @@ python StreamKeep.py --version
 python StreamKeep.py extractors
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
+python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup
+python StreamKeep.py backup restore C:\Backups\StreamKeep.skbackup
+python StreamKeep.py backup secrets-export C:\Backups\StreamKeep-secrets.sksbackup
+python StreamKeep.py backup secrets-import C:\Backups\StreamKeep-secrets.sksbackup
 ```
+
+Portable-secret commands prompt for a password. For non-interactive automation, provide it through `STREAMKEEP_PORTABLE_SECRET_PASSWORD`; passwords are never accepted in command-line arguments or written to logs.
 
 Legacy flat flags remain supported for automation:
 
@@ -121,7 +127,7 @@ Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are
 - Python 3.10 or newer.
 - `ffmpeg` and `ffprobe` in `PATH`.
 - `curl` in `PATH`.
-- Python dependencies from `requirements.txt`, including `keyring` for secure credential storage on non-Windows systems.
+- Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
 - For full YouTube fallback support through yt-dlp: install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`. Settings and onboarding report when yt-dlp, `yt-dlp-ejs`, or a JavaScript runtime is missing.
 - Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
 
@@ -147,6 +153,7 @@ python StreamKeep.py
 | macOS | `~/Library/Application Support/StreamKeep` |
 
 History, monitor channels, queue data, failed-job recovery records, and archive integrity manifests are stored in SQLite with WAL mode. Older JSON history/monitor/queue state migrates into SQLite on first launch when the database is empty.
+Credential values are stored outside `config.json` in the operating-system credential store (with a Windows DPAPI-protected fallback); config and account rows contain only `secretref:` handles. Legacy plaintext values migrate only after secure storage succeeds.
 
 ## Packaging Notes
 

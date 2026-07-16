@@ -27,14 +27,26 @@ _REDACT_PATTERNS = [
     re.compile(r"(cookie[\"'\s:=]+)\S+", re.I),
     re.compile(r"(dpapi:)\S+", re.I),
     re.compile(r"(kr:)\S+", re.I),
+    re.compile(
+        r"([?&](?:token|sig|signature|key|api[_-]?key|auth|oauth)[^=&#\s]*=)"
+        r"[^&#\s]+",
+        re.I,
+    ),
+    re.compile(r"(://[^/\s:@]+:)[^@/\s]+@", re.I),
+    re.compile(
+        r"(https://(?:discord(?:app)?\.com)/api/webhooks/\d+/)[^\s/?]+",
+        re.I,
+    ),
+    re.compile(r"(https://hooks\.slack\.com/services/)[^\s]+", re.I),
 ]
 
 _SENSITIVE_CONFIG_KEYS = frozenset({
-    "webhook_url", "proxy", "companion_token",
+    "webhook_url", "proxy", "proxy_pool", "hf_token", "companion_token",
     "media_server_token", "media_server_url",
     "youtube_api_key", "twitch_oauth_token",
     "token", "api_key", "secret", "password",
     "oauth_token", "access_token", "refresh_token",
+    "access_key", "secret_key",
 })
 
 
@@ -55,9 +67,14 @@ def redact_config(cfg):
         elif isinstance(value, dict):
             out[key] = redact_config(value)
         elif isinstance(value, list):
-            out[key] = list(value)
+            out[key] = [
+                redact_config(item) if isinstance(item, dict)
+                else redact_text(item) if isinstance(item, str)
+                else item
+                for item in value
+            ]
         else:
-            out[key] = value
+            out[key] = redact_text(value) if isinstance(value, str) else value
     return out
 
 

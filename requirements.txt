@@ -5,3 +5,5 @@ yt-dlp[default]>=2026.2.21
 send2trash>=1.8
 websocket-client>=1.7
 keyring>=25.0
+argon2-cffi>=25.1.0
+cryptography>=48.0.1
