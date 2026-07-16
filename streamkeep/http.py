@@ -7,8 +7,11 @@ module-level `NATIVE_PROXY` — the Settings tab updates it via
 
 from __future__ import annotations
 
+import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+import hashlib
 import json
 import logging
 import os
@@ -264,9 +267,31 @@ def curl_post_json(url: str, data: Any, headers: dict[str, str] | None = None, t
     return None
 
 
-def http_head(url, timeout=20):
-    """HEAD request returning (status, content_length, accepts_ranges).
-    Follows redirects and parses the final response block."""
+def _parse_final_response_headers(raw_headers):
+    """Return ``(status, headers)`` for the final HTTP response block."""
+    normalized = str(raw_headers or "").replace("\r\n", "\n")
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", normalized)
+              if block.strip()]
+    response_blocks = [block for block in blocks
+                       if block.lstrip().upper().startswith("HTTP/")]
+    final = response_blocks[-1] if response_blocks else ""
+    lines = final.splitlines()
+    status = 0
+    if lines:
+        match = re.match(r"HTTP/[^\s]+\s+(\d{3})\b", lines[0], re.IGNORECASE)
+        if match:
+            status = int(match.group(1))
+    headers = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        headers[name.strip().lower()] = value.strip()
+    return status, headers
+
+
+def http_head_details(url, timeout=20):
+    """HEAD request returning range, validator, and digest metadata."""
     connect_timeout = max(1, min(10, int(timeout or 20)))
     cmd = [
         "curl", "-sI", "-L",
@@ -283,22 +308,155 @@ def http_head(url, timeout=20):
     try:
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
         if result.returncode != 0:
-            return (0, 0, False)
-        blocks = [b for b in re.split(r"\r?\n\r?\n", result.stdout) if b.strip()]
-        last = blocks[-1] if blocks else result.stdout
-        status = 0
-        m = re.search(r"HTTP/[\d.]+\s+(\d+)", last)
-        if m:
-            status = int(m.group(1))
-        size = 0
-        m = re.search(r"(?im)^content-length:\s*(\d+)", last)
-        if m:
-            size = int(m.group(1))
-        accepts = bool(re.search(r"(?im)^accept-ranges:\s*bytes", last))
-        return (status, size, accepts)
+            return {}
+        status, headers = _parse_final_response_headers(result.stdout)
+        try:
+            size = int(headers.get("content-length", "0"))
+        except (TypeError, ValueError):
+            size = 0
+        return {
+            "status": status,
+            "content_length": size,
+            "accepts_ranges": headers.get("accept-ranges", "").lower() == "bytes",
+            "etag": headers.get("etag", ""),
+            "last_modified": headers.get("last-modified", ""),
+            "content_digest": headers.get("content-digest", ""),
+            "repr_digest": headers.get("repr-digest", ""),
+        }
     except Exception as e:
         logger.debug("http_head failed for %s: %s", url, e)
-        return (0, 0, False)
+        return {}
+
+
+def http_head(url, timeout=20):
+    """HEAD request returning ``(status, content_length, accepts_ranges)``."""
+    details = http_head_details(url, timeout=timeout)
+    return (
+        int(details.get("status", 0) or 0),
+        int(details.get("content_length", 0) or 0),
+        bool(details.get("accepts_ranges", False)),
+    )
+
+
+def _safe_if_range_validator(details):
+    """Select a strong ETag or syntactically valid Last-Modified value."""
+    etag = str(details.get("etag", "") or "").strip()
+    if etag and etag != "*" and not etag.lower().startswith("w/"):
+        return "etag", etag
+    last_modified = str(details.get("last_modified", "") or "").strip()
+    if last_modified:
+        try:
+            parsedate_to_datetime(last_modified)
+            return "last-modified", last_modified
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return "", ""
+
+
+def _parallel_resume_metadata(url, total, ranges, details):
+    validator_kind, validator = _safe_if_range_validator(details)
+    return {
+        "version": 1,
+        # Signed media URLs can contain short-lived credentials.  A digest is
+        # enough to bind resume state without persisting those query values.
+        "url_sha256": hashlib.sha256(str(url).encode("utf-8")).hexdigest(),
+        "content_length": int(total),
+        "validator_kind": validator_kind,
+        "validator": validator,
+        "content_digest": str(details.get("content_digest", "") or ""),
+        "repr_digest": str(details.get("repr_digest", "") or ""),
+        "ranges": [[int(start), int(end)] for _, start, end in ranges],
+    }
+
+
+def _load_parallel_resume_metadata(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _write_parallel_resume_metadata(path, data):
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, sort_keys=True, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        return True
+    except OSError:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return False
+
+
+def _clear_parallel_resume_files(tmp_dir):
+    try:
+        entries = list(os.scandir(tmp_dir))
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.is_file(follow_symlinks=False):
+            continue
+        if entry.name.startswith("part_") or entry.name in {
+            "resume.json", "resume.json.tmp",
+        }:
+            try:
+                os.remove(entry.path)
+            except OSError:
+                pass
+
+
+def _parse_digest_header(value):
+    supported = []
+    for item in str(value or "").split(","):
+        match = re.match(r"\s*(sha-256|sha-512)\s*=\s*:([^:]+):",
+                         item, re.IGNORECASE)
+        if not match:
+            continue
+        algorithm = match.group(1).lower()
+        try:
+            expected = base64.b64decode(match.group(2), validate=True)
+        except (ValueError, TypeError):
+            continue
+        supported.append((algorithm, expected))
+    return supported
+
+
+def _verify_response_digests(path, details):
+    digest_headers = [
+        ("Content-Digest", details.get("content_digest", "")),
+        ("Repr-Digest", details.get("repr_digest", "")),
+    ]
+    computed = {}
+    for header_name, value in digest_headers:
+        if not value:
+            continue
+        specs = _parse_digest_header(value)
+        if not specs:
+            return False, f"{header_name} has no supported valid digest"
+        for algorithm, expected in specs:
+            if algorithm not in computed:
+                hasher = hashlib.new(algorithm.replace("-", ""))
+                try:
+                    with open(path, "rb") as handle:
+                        while True:
+                            chunk = handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                except OSError as exc:
+                    return False, f"digest read failed: {exc}"
+                computed[algorithm] = hasher.digest()
+            if computed[algorithm] != expected:
+                return False, f"{header_name} {algorithm} mismatch"
+    return True, ""
 
 
 def http_probe(url, headers=None, timeout=20):
@@ -342,7 +500,10 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
     support, the file is too small to benefit from splitting, or any
     chunk fails — caller is expected to fall back to ffmpeg.
     """
-    status, total, accepts = http_head(url)
+    head = http_head_details(url)
+    status = int(head.get("status", 0) or 0)
+    total = int(head.get("content_length", 0) or 0)
+    accepts = bool(head.get("accepts_ranges", False))
     if status >= 400 or not accepts or total < min_size_mb * 1024 * 1024:
         if log_fn:
             log_fn(
@@ -368,6 +529,28 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         return False
 
     part_paths = [os.path.join(tmp_dir, f"part_{i:02d}") for i in range(connections)]
+    header_paths = [part + ".headers" for part in part_paths]
+    metadata_path = os.path.join(tmp_dir, "resume.json")
+    resume_metadata = _parallel_resume_metadata(url, total, ranges, head)
+    previous_metadata = _load_parallel_resume_metadata(metadata_path)
+    resume_allowed = bool(
+        resume_metadata["validator"]
+        and previous_metadata == resume_metadata
+    )
+    if not resume_allowed:
+        if previous_metadata and log_fn:
+            log_fn("[PARALLEL] invalidating stale or unverifiable range parts")
+        _clear_parallel_resume_files(tmp_dir)
+    if not _write_parallel_resume_metadata(metadata_path, resume_metadata):
+        if log_fn:
+            log_fn("[PARALLEL] could not persist representation metadata")
+        _clear_parallel_resume_files(tmp_dir)
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+        return False
+
     bytes_done = [0] * connections
     errors = []
     procs = {}
@@ -375,13 +558,17 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
 
     def worker(i, start, end):
         part = part_paths[i]
+        header_path = header_paths[i]
         expected = end - start + 1
-        if os.path.exists(part) and os.path.getsize(part) == expected:
+        if (resume_allowed and os.path.exists(part)
+                and os.path.getsize(part) == expected):
             bytes_done[i] = expected
             return
         try:
             if os.path.exists(part):
                 os.remove(part)
+            if os.path.exists(header_path):
+                os.remove(header_path)
         except OSError:
             pass
         cmd = [
@@ -389,9 +576,12 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             "--proto", "=http,https",
             "--max-redirs", "5",
             "--retry", "2", "--retry-delay", "1",
+            "-D", header_path,
             "-r", f"{start}-{end}",
             "-o", part,
         ]
+        if resume_metadata["validator"]:
+            cmd.extend(["-H", f"If-Range: {resume_metadata['validator']}"])
         if proxy_url:
             cmd.extend(["-x", proxy_url])
         _append_cookie_args(cmd)
@@ -437,6 +627,35 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                     logger.debug("Failed to read stderr for part %d: %s", i, e)
                 with lock:
                     errors.append(f"part {i}: curl exit {proc.returncode} {err}")
+            else:
+                try:
+                    with open(header_path, "r", encoding="iso-8859-1") as handle:
+                        response_status, response_headers = _parse_final_response_headers(
+                            handle.read()
+                        )
+                except OSError as exc:
+                    response_status, response_headers = 0, {}
+                    with lock:
+                        errors.append(f"part {i}: response headers unavailable: {exc}")
+                if response_status:
+                    content_range = response_headers.get("content-range", "")
+                    match = re.fullmatch(
+                        r"bytes\s+(\d+)-(\d+)/(\d+)",
+                        content_range.strip(),
+                        re.IGNORECASE,
+                    )
+                    valid_range = bool(
+                        match
+                        and int(match.group(1)) == start
+                        and int(match.group(2)) == end
+                        and int(match.group(3)) == total
+                    )
+                    if response_status != 206 or not valid_range:
+                        with lock:
+                            errors.append(
+                                f"part {i}: expected 206 bytes {start}-{end}/{total}, "
+                                f"got {response_status} {content_range or '<missing>'}"
+                            )
         except FileNotFoundError:
             with lock:
                 errors.append("curl not in PATH")
@@ -486,12 +705,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         t.join(timeout=5)
 
     def _cleanup_parts():
-        for p in part_paths:
-            try:
-                if os.path.exists(p):
-                    os.remove(p)
-            except OSError:
-                pass
+        _clear_parallel_resume_files(tmp_dir)
         try:
             os.rmdir(tmp_dir)
         except OSError:
@@ -532,6 +746,18 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         if log_fn:
             log_fn(f"[PARALLEL] concat failed: {e}")
         # Remove the partially-written output file as well as the parts
+        try:
+            if os.path.exists(outfile):
+                os.remove(outfile)
+        except OSError:
+            pass
+        _cleanup_parts()
+        return False
+
+    digest_ok, digest_error = _verify_response_digests(outfile, head)
+    if not digest_ok:
+        if log_fn:
+            log_fn(f"[PARALLEL] digest verification failed: {digest_error}")
         try:
             if os.path.exists(outfile):
                 os.remove(outfile)
