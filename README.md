@@ -30,6 +30,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Paste a supported URL, fetch stream metadata, choose a quality, and download HLS, DASH, MP4, audio, or podcast media. Native HLS and DASH sources expose a media-track table for selecting one video Representation plus multiple alternate audio and subtitle renditions; the same explicit track map is retained for resume and command export.
 - Queue multiple items, reorder pending work, batch-import URLs from text or a browser `.har` capture (media/manifest URLs are extracted automatically), and resume interrupted segmented downloads from sidecar state.
 - Optionally run a queue-complete power action once the whole queue drains: notify, run a hook, lock, sleep, hibernate, or shut down (destructive actions use a native cancellable delay). Defaults to doing nothing.
+- Send a page to StreamKeep from any browser via a one-click bookmarklet and the `streamkeep://` protocol handler (register per-user on Windows with `register-protocol`; `bookmarklet` prints the snippet). An iOS Shortcut can invoke the same `streamkeep://download?url=…` URI. The handler validates the target as an HTTP(S) URL before queueing.
 - Scan webpages in a sandboxed headless browser whose HTTP(S) requests are DNS-validated and pinned to globally routable addresses. The one-shot **Allow LAN for this scan** control permits only RFC1918/ULA targets; loopback, link-local, metadata, and other special addresses remain blocked.
 - Persist fetch, download, and finalize failures to a retryable recovery ledger that survives restart and is exposed in the queue and web remote.
 - Use parallel HTTP range downloads for direct files when the server supports ranges.
@@ -101,6 +102,9 @@ python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
 python StreamKeep.py import-har capture.har --headers
 python StreamKeep.py import-har capture.har --json
+python StreamKeep.py register-protocol
+python StreamKeep.py bookmarklet
+python StreamKeep.py "streamkeep://download?url=https://example.com/video"
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
 python StreamKeep.py server --trusted-proxy-origin https://streamkeep.example.lan --port 8765
 python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup

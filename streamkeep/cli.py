@@ -716,6 +716,30 @@ def _run_har_import(args):
                 _print_line(f"    {header_argv[i]} {header_argv[i + 1]!r}")
 
 
+def _run_protocol_register(args):
+    """Register the per-user streamkeep:// handler (Windows)."""
+    from .protocol import register_windows_protocol
+    ok, message = register_windows_protocol()
+    _print_line(message)
+    if not ok:
+        sys.exit(1)
+
+
+def _run_protocol_unregister(args):
+    """Remove the per-user streamkeep:// handler (Windows)."""
+    from .protocol import unregister_windows_protocol
+    ok, message = unregister_windows_protocol()
+    _print_line(message)
+    if not ok:
+        sys.exit(1)
+
+
+def _run_bookmarklet(args):
+    """Print a browser bookmarklet that hands the current page to StreamKeep."""
+    from .protocol import build_bookmarklet
+    _print_line(build_bookmarklet())
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 def build_parser():
@@ -935,6 +959,23 @@ def build_parser():
     har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- streamkeep:// protocol handler + bookmarklet (V23) --
+    sub.add_parser(
+        "register-protocol",
+        help="Register the per-user streamkeep:// handler (Windows)",
+    ).add_argument("--config-dir", default=argparse.SUPPRESS,
+                   help="Override the config/database directory")
+    sub.add_parser(
+        "unregister-protocol",
+        help="Remove the per-user streamkeep:// handler (Windows)",
+    ).add_argument("--config-dir", default=argparse.SUPPRESS,
+                   help="Override the config/database directory")
+    sub.add_parser(
+        "bookmarklet",
+        help="Print a browser bookmarklet that sends the current page to StreamKeep",
+    ).add_argument("--config-dir", default=argparse.SUPPRESS,
+                   help="Override the config/database directory")
+
     # -- packaged startup contract --
     startup_p = sub.add_parser(
         "startup-check",
@@ -964,6 +1005,22 @@ def build_parser():
 
 def run_cli(argv=None):
     """Parse args and dispatch to the appropriate handler."""
+    source_argv = list(sys.argv[1:] if argv is None else argv)
+    # A streamkeep:// URI (from the OS protocol handler) is translated into a
+    # download of its validated target before argparse sees it.
+    if source_argv:
+        from .protocol import is_protocol_uri, parse_streamkeep_uri
+        if is_protocol_uri(source_argv[0]):
+            try:
+                request = parse_streamkeep_uri(source_argv[0])
+            except ValueError as error:
+                _print_line(f"Error: {error}")
+                sys.exit(2)
+            rewritten = ["download", request["url"]]
+            if request.get("quality"):
+                rewritten += ["--quality", request["quality"]]
+            argv = rewritten
+
     p = build_parser()
     args = p.parse_args(argv)
 
@@ -1035,6 +1092,12 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "import-har":
         _run_har_import(args)
+    elif args.command == "register-protocol":
+        _run_protocol_register(args)
+    elif args.command == "unregister-protocol":
+        _run_protocol_unregister(args)
+    elif args.command == "bookmarklet":
+        _run_bookmarklet(args)
     elif args.command == "startup-check":
         _run_startup_check(args)
     else:
@@ -1048,7 +1111,12 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check",
+        "startup-check", "import-har",
+        "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
-    return any(arg in cli_triggers for arg in sys.argv[1:])
+    if any(arg in cli_triggers for arg in sys.argv[1:]):
+        return True
+    # A streamkeep:// URI (from the OS protocol handler) is a headless action.
+    from .protocol import is_protocol_uri
+    return is_protocol_uri(sys.argv[1])

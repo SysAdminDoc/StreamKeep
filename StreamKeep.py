@@ -38,12 +38,17 @@ def _launcher_has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check",
+        "startup-check", "import-har",
+        "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
         "--internal-ytdlp",
         "--internal-update-helper", "--update-transaction",
     }
-    return any(arg in cli_triggers for arg in sys.argv[1:])
+    if any(arg in cli_triggers for arg in sys.argv[1:]):
+        return True
+    # A streamkeep:// URI (OS protocol handler) is a headless download action.
+    first = sys.argv[1].strip().lower()
+    return first.startswith("streamkeep:")
 
 
 bootstrap(include_optional=not _launcher_has_cli_args())
