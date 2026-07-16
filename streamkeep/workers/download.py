@@ -53,6 +53,10 @@ class DownloadWorker(QThread):
         self.rate_limit = ""
         self.proxy = ""
         self.download_subs = False
+        self.subtitle_languages = "en.*,en"
+        self.subtitle_auto = True
+        self.subtitle_convert = ""
+        self.subtitle_embed = True
         self.sponsorblock = False
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
@@ -93,6 +97,11 @@ class DownloadWorker(QThread):
             state.ytdlp_container = self.ytdlp_container or "mp4"
             state.ytdlp_audio_format = self.ytdlp_audio_format or ""
             state.ytdlp_audio_quality = self.ytdlp_audio_quality or ""
+            state.download_subs = bool(self.download_subs)
+            state.subtitle_languages = self.subtitle_languages or ""
+            state.subtitle_auto = bool(self.subtitle_auto)
+            state.subtitle_convert = self.subtitle_convert or ""
+            state.subtitle_embed = bool(self.subtitle_embed)
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -114,7 +123,9 @@ class DownloadWorker(QThread):
 
     def _build_ytdlp_download_cmd(self, outfile, impersonate=False):
         """Assemble the yt-dlp download command for a single segment."""
-        from ..download_options import validate_download_options
+        from ..download_options import (
+            validate_download_options, validate_subtitle_options,
+        )
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
         options = validate_download_options(
@@ -123,6 +134,13 @@ class DownloadWorker(QThread):
             container=self.ytdlp_container,
             audio_format=self.ytdlp_audio_format,
             audio_quality=self.ytdlp_audio_quality,
+        )
+        subtitle_options = validate_subtitle_options(
+            enabled=self.download_subs,
+            languages=self.subtitle_languages,
+            automatic=self.subtitle_auto,
+            convert=self.subtitle_convert,
+            embed=self.subtitle_embed,
         )
         format_spec = options["format_spec"]
         if options["audio_format"] and not self.ytdlp_format:
@@ -166,11 +184,19 @@ class DownloadWorker(QThread):
             cmd.extend(["--limit-rate", self.rate_limit])
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
-        if self.download_subs:
+        if subtitle_options["enabled"]:
             cmd.extend([
-                "--write-subs", "--write-auto-subs",
-                "--sub-langs", "en.*,en", "--embed-subs",
+                "--write-subs",
+                "--sub-langs", subtitle_options["languages"],
             ])
+            cmd.append(
+                "--write-auto-subs" if subtitle_options["automatic"]
+                else "--no-write-auto-subs"
+            )
+            if subtitle_options["convert"]:
+                cmd.extend(["--convert-subs", subtitle_options["convert"]])
+            can_embed = subtitle_options["embed"] and not options["audio_format"]
+            cmd.append("--embed-subs" if can_embed else "--no-embed-subs")
         if self.sponsorblock:
             cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
         if self.download_sections:

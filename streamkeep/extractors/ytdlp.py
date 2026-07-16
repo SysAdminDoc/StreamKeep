@@ -17,7 +17,7 @@ import urllib.parse
 from pathlib import Path
 
 from ..http import http_interrupted, run_capture_interruptible
-from ..models import QualityInfo, StreamInfo
+from ..models import QualityInfo, StreamInfo, SubtitleInfo
 from ..utils import fmt_duration, scan_browser_cookies
 from .base import Extractor
 
@@ -182,6 +182,10 @@ class YtDlpExtractor(Extractor):
     rate_limit = ""
     proxy = ""
     download_subs = False
+    subtitle_languages = "en.*,en"
+    subtitle_auto = True
+    subtitle_convert = ""
+    subtitle_embed = True
     sponsorblock = False
 
     def _has_ytdlp(self):
@@ -620,6 +624,45 @@ class YtDlpExtractor(Extractor):
                 except (TypeError, ValueError):
                     continue
 
+        # yt-dlp exposes manual and automatically generated subtitle tables
+        # separately. Merge them by exact language code so the UI can offer
+        # one source-specific multi-select while still showing provenance.
+        manual_subs = data.get("subtitles")
+        auto_subs = data.get("automatic_captions")
+        manual_subs = manual_subs if isinstance(manual_subs, dict) else {}
+        auto_subs = auto_subs if isinstance(auto_subs, dict) else {}
+        language_codes = sorted(
+            set(manual_subs).union(auto_subs), key=lambda value: str(value).lower()
+        )[:500]
+        for raw_language in language_codes:
+            language = str(raw_language or "")[:64]
+            if (not language or "," in language
+                    or any(ord(char) < 32 or ord(char) == 127 for char in language)):
+                continue
+            manual_entries = manual_subs.get(raw_language)
+            auto_entries = auto_subs.get(raw_language)
+            manual_entries = manual_entries if isinstance(manual_entries, list) else []
+            auto_entries = auto_entries if isinstance(auto_entries, list) else []
+            formats = []
+            name = ""
+            for entry in (manual_entries + auto_entries)[:100]:
+                if not isinstance(entry, dict):
+                    continue
+                ext = str(entry.get("ext") or "")[:16].lower()
+                if ext and ext not in formats:
+                    formats.append(ext)
+                if not name:
+                    candidate = str(entry.get("name") or "")[:128]
+                    if candidate and not any(ord(char) < 32 for char in candidate):
+                        name = candidate
+            info.subtitles.append(SubtitleInfo(
+                language=language,
+                name=name,
+                manual=bool(manual_entries),
+                automatic=bool(auto_entries),
+                formats=formats,
+            ))
+
         # First pass — identify best audio-only format ID for pairing
         best_audio_id = ""
         best_audio_abr = 0
@@ -726,4 +769,9 @@ class YtDlpExtractor(Extractor):
         audio_count = sum(1 for q in info.qualities if q.resolution == "audio")
         if audio_count:
             self._log(log_fn, f"  {audio_count} audio-only format(s) available")
+        if info.subtitles:
+            self._log(
+                log_fn,
+                f"  {len(info.subtitles)} subtitle language(s) available",
+            )
         return info

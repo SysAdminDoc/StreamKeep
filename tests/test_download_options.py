@@ -1,6 +1,8 @@
 import pytest
 
-from streamkeep.download_options import validate_download_options
+from streamkeep.download_options import (
+    validate_download_options, validate_subtitle_options,
+)
 
 
 def test_raw_format_spec_is_preserved_verbatim():
@@ -32,3 +34,27 @@ def test_audio_quality_rejects_invalid_values(value):
 def test_audio_quality_requires_extract_mode():
     with pytest.raises(ValueError, match="requires audio-extract"):
         validate_download_options(audio_quality="128K")
+
+
+def test_subtitle_language_expression_is_preserved_verbatim():
+    expression = "en.*,es,-live_chat"
+    options = validate_subtitle_options(
+        enabled=True, languages=expression, automatic=False,
+        convert="srt", embed=False,
+    )
+    assert options == {
+        "enabled": True,
+        "languages": expression,
+        "automatic": False,
+        "convert": "srt",
+        "embed": False,
+    }
+
+
+def test_enabled_subtitles_require_languages_and_known_conversion():
+    with pytest.raises(ValueError, match="at least one"):
+        validate_subtitle_options(enabled=True)
+    with pytest.raises(ValueError, match="conversion"):
+        validate_subtitle_options(
+            enabled=True, languages="en", convert="ttml"
+        )

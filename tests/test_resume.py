@@ -42,6 +42,11 @@ class ResumeTests(unittest.TestCase):
                         "ytdlp_container": "webm",
                         "ytdlp_audio_format": "opus",
                         "ytdlp_audio_quality": "128K",
+                        "download_subs": True,
+                        "subtitle_languages": "en,es",
+                        "subtitle_auto": False,
+                        "subtitle_convert": "srt",
+                        "subtitle_embed": False,
                     }
                 ),
                 encoding="utf-8",
@@ -58,6 +63,11 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(state.ytdlp_container, "webm")
             self.assertEqual(state.ytdlp_audio_format, "opus")
             self.assertEqual(state.ytdlp_audio_quality, "128K")
+            self.assertTrue(state.download_subs)
+            self.assertEqual(state.subtitle_languages, "en,es")
+            self.assertFalse(state.subtitle_auto)
+            self.assertEqual(state.subtitle_convert, "srt")
+            self.assertFalse(state.subtitle_embed)
 
 
 if __name__ == "__main__":

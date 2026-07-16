@@ -93,6 +93,7 @@ python StreamKeep.py extractors
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
 python StreamKeep.py download "https://example.com/video" --format "bv*+ba/b" --format-sort-preset prefer-av1 --container mkv
 python StreamKeep.py download "https://example.com/video" --audio-format opus --audio-quality 128K
+python StreamKeep.py download "https://example.com/video" --sub-langs en,es --auto-subs --convert-subs srt --sub-delivery sidecar
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
 python StreamKeep.py server --trusted-proxy-origin https://streamkeep.example.lan --port 8765
 python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup
@@ -101,7 +102,7 @@ python StreamKeep.py backup secrets-export C:\Backups\StreamKeep-secrets.sksback
 python StreamKeep.py backup secrets-import C:\Backups\StreamKeep-secrets.sksbackup
 ```
 
-For sources resolved through yt-dlp direct mode, the desktop Advanced panel and `download` CLI also support verbatim `--format` specifications, custom or named format sorting, MP4/MKV/WebM/original containers, and best/MP3/M4A/Opus/FLAC/WAV audio extraction. Resolution-cap presets are available at 2160p, 1080p, and 720p; use `python StreamKeep.py download --help` for the complete option list. Native HLS/direct-media jobs continue to use their existing output path.
+For sources resolved through yt-dlp direct mode, the desktop Advanced panel and `download` CLI also support verbatim `--format` specifications, custom or named format sorting, MP4/MKV/WebM/original containers, and best/MP3/M4A/Opus/FLAC/WAV audio extraction. Resolution-cap presets are available at 2160p, 1080p, and 720p. Resolved manual and automatic subtitle languages appear in a per-download multi-select; subtitles can be converted to SRT/VTT/ASS and embedded or retained as sidecars. Use `python StreamKeep.py download --help` for the complete option list. Native HLS/direct-media jobs continue to use their existing output path.
 
 Portable-secret commands prompt for a password. For non-interactive automation, provide it through `STREAMKEEP_PORTABLE_SECRET_PASSWORD`; passwords are never accepted in command-line arguments or written to logs.
 

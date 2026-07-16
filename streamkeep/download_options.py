@@ -15,6 +15,7 @@ FORMAT_SORT_PRESETS = {
 
 VIDEO_CONTAINERS = ("mp4", "mkv", "webm", "original")
 AUDIO_FORMATS = ("best", "mp3", "m4a", "opus", "flac", "wav")
+SUBTITLE_CONVERSIONS = ("", "srt", "vtt", "ass")
 
 _AUDIO_QUALITY_RE = re.compile(
     r"(?:10|[0-9](?:\.\d+)?)|(?:[1-9][0-9]*(?:\.[0-9]+)?[kKmM])"
@@ -99,4 +100,24 @@ def validate_download_options(
         "container": normalized_container,
         "audio_format": normalized_audio,
         "audio_quality": quality,
+    }
+
+
+def validate_subtitle_options(
+    *, enabled=False, languages="", automatic=True, convert="", embed=True
+):
+    """Validate a yt-dlp subtitle policy and preserve its language expression."""
+    enabled = bool(enabled)
+    languages = _safe_argument(languages, "Subtitle languages")
+    conversion = str(convert or "").strip().lower()
+    if conversion not in SUBTITLE_CONVERSIONS:
+        raise ValueError("Subtitle conversion must be srt, vtt, ass, or unchanged")
+    if enabled and not languages:
+        raise ValueError("Select at least one subtitle language")
+    return {
+        "enabled": enabled,
+        "languages": languages,
+        "automatic": bool(automatic),
+        "convert": conversion,
+        "embed": bool(embed),
     }

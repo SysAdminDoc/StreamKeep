@@ -1706,10 +1706,14 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.ytdlp_container = state.ytdlp_container or "mp4"
             worker.ytdlp_audio_format = state.ytdlp_audio_format or ""
             worker.ytdlp_audio_quality = state.ytdlp_audio_quality or ""
+            worker.download_subs = bool(state.download_subs)
+            worker.subtitle_languages = state.subtitle_languages or ""
+            worker.subtitle_auto = bool(state.subtitle_auto)
+            worker.subtitle_convert = state.subtitle_convert or ""
+            worker.subtitle_embed = bool(state.subtitle_embed)
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy
-            worker.download_subs = YtDlpExtractor.download_subs
             worker.sponsorblock = YtDlpExtractor.sponsorblock
             worker.parallel_connections = self._parallel_connections
             worker.progress.connect(self._on_dl_progress)

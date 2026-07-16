@@ -298,6 +298,14 @@ class HeadlessJobService(QObject):
         worker.rate_limit = str(self.config.get("rate_limit", "") or "")
         worker.proxy = str(self.config.get("proxy", "") or "")
         worker.download_subs = bool(self.config.get("download_subs", False))
+        worker.subtitle_languages = str(
+            self.config.get("subtitle_languages", "en.*,en") or ""
+        )
+        worker.subtitle_auto = bool(self.config.get("subtitle_auto", True))
+        worker.subtitle_convert = str(
+            self.config.get("subtitle_convert", "") or ""
+        )
+        worker.subtitle_embed = bool(self.config.get("subtitle_embed", True))
         worker.sponsorblock = bool(self.config.get("sponsorblock", False))
         if bool(self.config.get("chunk_long_captures", False)):
             try:
@@ -618,6 +626,18 @@ class HeadlessJobService(QObject):
         YtDlpExtractor.proxy = str(self.config.get("proxy", "") or "")
         YtDlpExtractor.download_subs = bool(
             self.config.get("download_subs", False)
+        )
+        YtDlpExtractor.subtitle_languages = str(
+            self.config.get("subtitle_languages", "en.*,en") or ""
+        )
+        YtDlpExtractor.subtitle_auto = bool(
+            self.config.get("subtitle_auto", True)
+        )
+        YtDlpExtractor.subtitle_convert = str(
+            self.config.get("subtitle_convert", "") or ""
+        )
+        YtDlpExtractor.subtitle_embed = bool(
+            self.config.get("subtitle_embed", True)
         )
         YtDlpExtractor.sponsorblock = bool(self.config.get("sponsorblock", False))
         set_native_proxy(YtDlpExtractor.proxy)

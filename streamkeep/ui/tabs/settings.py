@@ -848,8 +848,28 @@ class SettingsTabMixin:
         }
         self._apply_bandwidth_schedule()
         # Apply YouTube extras
-        YtDlpExtractor.download_subs = self.subs_check.isChecked()
-        self._config["download_subs"] = YtDlpExtractor.download_subs
+        from ...download_options import validate_subtitle_options
+        try:
+            subtitle_options = validate_subtitle_options(
+                enabled=self.subs_check.isChecked(),
+                languages=self.subs_languages_input.text(),
+                automatic=self.subs_auto_check.isChecked(),
+                convert=self.subs_convert_combo.currentData() or "",
+                embed=self.subs_delivery_combo.currentData() == "embed",
+            )
+        except ValueError as error:
+            self._set_status(f"Subtitle settings: {error}", "warning")
+            return
+        YtDlpExtractor.download_subs = subtitle_options["enabled"]
+        YtDlpExtractor.subtitle_languages = subtitle_options["languages"]
+        YtDlpExtractor.subtitle_auto = subtitle_options["automatic"]
+        YtDlpExtractor.subtitle_convert = subtitle_options["convert"]
+        YtDlpExtractor.subtitle_embed = subtitle_options["embed"]
+        self._config["download_subs"] = subtitle_options["enabled"]
+        self._config["subtitle_languages"] = subtitle_options["languages"]
+        self._config["subtitle_auto"] = subtitle_options["automatic"]
+        self._config["subtitle_convert"] = subtitle_options["convert"]
+        self._config["subtitle_embed"] = subtitle_options["embed"]
         YtDlpExtractor.sponsorblock = self.sponsorblock_check.isChecked()
         self._config["sponsorblock"] = YtDlpExtractor.sponsorblock
         # Apply filename templates
@@ -2456,18 +2476,73 @@ def build_settings_tab(win):
 
     # ── YouTube extras ─────────────────────────────────────────────
     yt_block, yt_lay = make_field_block(
-        "YouTube Extras", "Optional yt-dlp features for YouTube videos."
+        "yt-dlp Extras", "Optional features for compatible yt-dlp sources."
     )
-    win.subs_check = QCheckBox("Download subtitles (English) and embed in video")
+    win.subs_check = QCheckBox("Download subtitles by default")
+    subs_languages_row = QHBoxLayout()
+    subs_languages_row.setSpacing(8)
+    subs_languages_label = QLabel("Languages:")
+    subs_languages_label.setFixedWidth(100)
+    subs_languages_row.addWidget(subs_languages_label)
+    win.subs_languages_input = QLineEdit(
+        str(win._config.get("subtitle_languages", "en.*,en") or "")
+    )
+    win.subs_languages_input.setPlaceholderText("yt-dlp expression, e.g. en.*,es")
+    win.subs_languages_input.setToolTip(
+        "Comma-separated language codes or yt-dlp regex patterns. "
+        "Per-download source languages are selectable in Advanced."
+    )
+    subs_languages_row.addWidget(win.subs_languages_input, 1)
+    win.subs_auto_check = QCheckBox("Include automatic captions")
+    win.subs_auto_check.setChecked(bool(win._config.get("subtitle_auto", True)))
+    subs_languages_row.addWidget(win.subs_auto_check)
+
+    subs_output_row = QHBoxLayout()
+    subs_output_row.setSpacing(8)
+    subs_output_label = QLabel("Output:")
+    subs_output_label.setFixedWidth(100)
+    subs_output_row.addWidget(subs_output_label)
+    win.subs_convert_combo = QComboBox()
+    win.subs_convert_combo.addItem("Keep source subtitle format", userData="")
+    for sub_format in ("srt", "vtt", "ass"):
+        win.subs_convert_combo.addItem(
+            f"Convert to {sub_format.upper()}", userData=sub_format
+        )
+    saved_sub_convert = str(win._config.get("subtitle_convert", "") or "")
+    for index in range(win.subs_convert_combo.count()):
+        if win.subs_convert_combo.itemData(index) == saved_sub_convert:
+            win.subs_convert_combo.setCurrentIndex(index)
+            break
+    subs_output_row.addWidget(win.subs_convert_combo, 1)
+    win.subs_delivery_combo = QComboBox()
+    win.subs_delivery_combo.addItem("Embed in video", userData="embed")
+    win.subs_delivery_combo.addItem("Keep as sidecar files", userData="sidecar")
+    if not bool(win._config.get("subtitle_embed", True)):
+        win.subs_delivery_combo.setCurrentIndex(1)
+    subs_output_row.addWidget(win.subs_delivery_combo, 1)
     win.sponsorblock_check = QCheckBox(
         "Skip SponsorBlock segments (sponsor / self-promo / interaction)"
     )
     yt_lay.addWidget(win.subs_check)
+    yt_lay.addLayout(subs_languages_row)
+    yt_lay.addLayout(subs_output_row)
     yt_lay.addWidget(win.sponsorblock_check)
 
-    if win._config.get("download_subs"):
-        win.subs_check.setChecked(True)
-        YtDlpExtractor.download_subs = True
+    win.subs_check.setChecked(bool(win._config.get("download_subs", False)))
+    YtDlpExtractor.download_subs = win.subs_check.isChecked()
+    YtDlpExtractor.subtitle_languages = win.subs_languages_input.text()
+    YtDlpExtractor.subtitle_auto = win.subs_auto_check.isChecked()
+    YtDlpExtractor.subtitle_convert = saved_sub_convert
+    YtDlpExtractor.subtitle_embed = (
+        win.subs_delivery_combo.currentData() == "embed"
+    )
+    def _toggle_subtitle_defaults(enabled):
+        win.subs_languages_input.setEnabled(enabled)
+        win.subs_auto_check.setEnabled(enabled)
+        win.subs_convert_combo.setEnabled(enabled)
+        win.subs_delivery_combo.setEnabled(enabled)
+    win.subs_check.toggled.connect(_toggle_subtitle_defaults)
+    _toggle_subtitle_defaults(win.subs_check.isChecked())
     if win._config.get("sponsorblock"):
         win.sponsorblock_check.setChecked(True)
         YtDlpExtractor.sponsorblock = True

@@ -119,3 +119,13 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     ])
     assert audio_args.audio_format == "opus"
     assert audio_args.audio_quality == "128K"
+
+    subtitle_args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--sub-langs", "en,es", "--auto-subs",
+        "--convert-subs", "srt", "--sub-delivery", "sidecar",
+    ])
+    assert subtitle_args.sub_langs == "en,es"
+    assert subtitle_args.auto_subs is True
+    assert subtitle_args.convert_subs == "srt"
+    assert subtitle_args.sub_delivery == "sidecar"

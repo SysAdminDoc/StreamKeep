@@ -18,6 +18,15 @@ class QualityInfo:
 
 
 @dataclass
+class SubtitleInfo:
+    language: str = ""
+    name: str = ""
+    manual: bool = False
+    automatic: bool = False
+    formats: list[str] = field(default_factory=list)
+
+
+@dataclass
 class StreamInfo:
     platform: str = ""
     channel: str = ""
@@ -32,6 +41,7 @@ class StreamInfo:
     segment_count: int = 0
     thumbnail_url: str = ""
     chapters: list[dict[str, str | float]] = field(default_factory=list)  # list of {title, start, end}
+    subtitles: list[SubtitleInfo] = field(default_factory=list)
 
 
 @dataclass
@@ -152,6 +162,11 @@ class ResumeState:
     ytdlp_container: str = "mp4"
     ytdlp_audio_format: str = ""
     ytdlp_audio_quality: str = ""
+    download_subs: bool = False
+    subtitle_languages: str = ""
+    subtitle_auto: bool = True
+    subtitle_convert: str = ""
+    subtitle_embed: bool = True
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

@@ -1600,6 +1600,41 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         self.assertEqual(info.chapters[0]["title"], "Intro")
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_resolve_merges_manual_and_automatic_subtitle_listing(self, mock_run):
+        yt_json = {
+            "title": "Subtitle Video",
+            "duration": 60,
+            "formats": [{
+                "format_id": "18", "ext": "mp4", "width": 640,
+                "height": 360, "vcodec": "avc1", "acodec": "aac",
+                "tbr": 500, "url": "https://example.com/video.mp4",
+            }],
+            "subtitles": {
+                "en": [{"ext": "vtt", "name": "English"}],
+                "es": [{"ext": "srt", "name": "Spanish"}],
+            },
+            "automatic_captions": {
+                "en": [{"ext": "json3", "name": "English"}],
+                "fr": [{"ext": "vtt", "name": "French"}],
+            },
+        }
+        mock_run.return_value = CommandResult(
+            returncode=0, stdout=json.dumps(yt_json)
+        )
+
+        info = self.ext.resolve("https://youtube.com/watch?v=subtitles")
+
+        tracks = {track.language: track for track in info.subtitles}
+        self.assertEqual(set(tracks), {"en", "es", "fr"})
+        self.assertTrue(tracks["en"].manual)
+        self.assertTrue(tracks["en"].automatic)
+        self.assertEqual(tracks["en"].formats, ["vtt", "json3"])
+        self.assertTrue(tracks["es"].manual)
+        self.assertFalse(tracks["es"].automatic)
+        self.assertFalse(tracks["fr"].manual)
+        self.assertTrue(tracks["fr"].automatic)
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_live_flag(self, mock_run):
         yt_json = {
             "title": "Live Stream",

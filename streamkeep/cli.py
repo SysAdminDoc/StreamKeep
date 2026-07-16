@@ -125,7 +125,15 @@ def _run_download(args):
             print(f"Error: {error}")
         sys.exit(1)
 
-    from .download_options import validate_download_options
+    from .download_options import (
+        validate_download_options, validate_subtitle_options,
+    )
+    subtitle_requested = any((
+        getattr(args, "sub_langs", ""),
+        getattr(args, "auto_subs", False),
+        getattr(args, "convert_subs", ""),
+        getattr(args, "sub_delivery", ""),
+    ))
     requested_ytdlp_output = any((
         getattr(args, "format_spec", ""),
         getattr(args, "format_sort", ""),
@@ -133,6 +141,7 @@ def _run_download(args):
         getattr(args, "container", ""),
         getattr(args, "audio_format", ""),
         getattr(args, "audio_quality", ""),
+        subtitle_requested,
     ))
     if getattr(args, "audio_format", "") and getattr(args, "container", ""):
         _print_line("Error: Choose either --container or --audio-format, not both.")
@@ -146,6 +155,18 @@ def _run_download(args):
             audio_format=getattr(args, "audio_format", ""),
             audio_quality=getattr(args, "audio_quality", ""),
         )
+        subtitle_options = validate_subtitle_options(
+            enabled=subtitle_requested,
+            languages=getattr(args, "sub_langs", ""),
+            automatic=getattr(args, "auto_subs", False),
+            convert=getattr(args, "convert_subs", ""),
+            embed=(getattr(args, "sub_delivery", "") or "embed") == "embed",
+        )
+        if (output_options["audio_format"] and subtitle_options["enabled"]
+                and subtitle_options["embed"]):
+            raise ValueError(
+                "Audio extraction cannot embed subtitles; use --sub-delivery sidecar"
+            )
     except ValueError as error:
         _print_line(f"Error: {error}")
         sys.exit(2)
@@ -196,6 +217,12 @@ def _run_download(args):
             f"Duration: {info.duration_str or 'live'}  |  "
             f"Qualities: {len(info.qualities)}"
         )
+        if getattr(info, "subtitles", None):
+            languages = ", ".join(
+                track.language for track in info.subtitles[:12]
+            )
+            more = "..." if len(info.subtitles) > 12 else ""
+            _print_line(f"Subtitles: {languages}{more}")
         if not info.qualities:
             _print_line("Error: No downloadable qualities found.")
             _record_cli_failure(args.url, "fetch", "No downloadable qualities found", output_dir, info)
@@ -209,7 +236,7 @@ def _run_download(args):
         _print_line("")
         if requested_ytdlp_output and qi.format_type != "ytdlp_direct":
             message = (
-                "Format/container/audio controls require a yt-dlp direct "
+                "Format/output/subtitle controls require a yt-dlp direct "
                 "source; the selected quality uses " + qi.format_type + "."
             )
             _print_line(f"Error: {message}")
@@ -239,6 +266,11 @@ def _run_download(args):
         dw.ytdlp_container = output_options["container"]
         dw.ytdlp_audio_format = output_options["audio_format"]
         dw.ytdlp_audio_quality = output_options["audio_quality"]
+        dw.download_subs = subtitle_options["enabled"]
+        dw.subtitle_languages = subtitle_options["languages"]
+        dw.subtitle_auto = subtitle_options["automatic"]
+        dw.subtitle_convert = subtitle_options["convert"]
+        dw.subtitle_embed = subtitle_options["embed"]
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
         state["dw"] = dw  # prevent GC while event loop runs
@@ -599,6 +631,22 @@ def build_parser():
         "--audio-quality", default="",
         help="Audio encoder quality (0-10 or bitrate such as 128K)",
     )
+    dl.add_argument(
+        "--sub-langs", default="",
+        help="Comma-separated subtitle languages or yt-dlp regexes (e.g. en,es)",
+    )
+    dl.add_argument(
+        "--auto-subs", action="store_true",
+        help="Include automatically generated captions for --sub-langs",
+    )
+    dl.add_argument(
+        "--convert-subs", default="", choices=["srt", "vtt", "ass"],
+        help="Convert downloaded subtitles to this format",
+    )
+    dl.add_argument(
+        "--sub-delivery", default="", choices=["embed", "sidecar"],
+        help="Embed subtitles or keep sidecar files (default: embed)",
+    )
     dl.add_argument("--config-dir", default=argparse.SUPPRESS,
                     help="Override the config/database directory")
 
@@ -718,10 +766,13 @@ def run_cli(argv=None):
             args.rate_limit = ""
         for name in (
             "format_spec", "format_sort", "format_sort_preset", "container",
-            "audio_format", "audio_quality",
+            "audio_format", "audio_quality", "sub_langs", "convert_subs",
+            "sub_delivery",
         ):
             if not hasattr(args, name):
                 setattr(args, name, "")
+        if not hasattr(args, "auto_subs"):
+            args.auto_subs = False
 
     if args.command in ("download", "dl"):
         _run_download(args)

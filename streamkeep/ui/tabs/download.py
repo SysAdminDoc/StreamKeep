@@ -4,7 +4,7 @@ from PyQt6.QtCore import Qt, QUrl, QStringListModel
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMenu, QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
+    QListWidget, QMenu, QPushButton, QSpinBox, QSplitter, QTableWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -45,6 +45,11 @@ def _reset_adv_overrides(win):
     win.adv_container_combo.setCurrentIndex(0)
     win.adv_audio_combo.setCurrentIndex(0)
     win.adv_audio_quality_input.clear()
+    win.adv_subtitle_mode_combo.setCurrentIndex(0)
+    win.adv_subtitle_list.clearSelection()
+    win.adv_subtitle_auto_check.setChecked(True)
+    win.adv_subtitle_convert_combo.setCurrentIndex(0)
+    win.adv_subtitle_delivery_combo.setCurrentIndex(0)
     win.adv_override_badge.setVisible(False)
 
 
@@ -84,7 +89,88 @@ def get_adv_overrides(win):
     audio_quality = win.adv_audio_quality_input.text().strip()
     if audio_quality:
         overrides["audio_quality"] = audio_quality
+    subtitle_mode = win.adv_subtitle_mode_combo.currentData() or ""
+    if subtitle_mode:
+        overrides["subtitle_mode"] = subtitle_mode
+        if subtitle_mode == "custom":
+            languages = [
+                str(win.adv_subtitle_list.item(index).data(
+                    Qt.ItemDataRole.UserRole
+                ) or "")
+                for index in range(win.adv_subtitle_list.count())
+                if win.adv_subtitle_list.item(index).isSelected()
+            ]
+            overrides["subtitle_languages"] = ",".join(
+                language for language in languages if language
+            )
+            overrides["subtitle_auto"] = win.adv_subtitle_auto_check.isChecked()
+            overrides["subtitle_convert"] = (
+                win.adv_subtitle_convert_combo.currentData() or ""
+            )
+            overrides["subtitle_embed"] = (
+                win.adv_subtitle_delivery_combo.currentData() == "embed"
+            )
     return overrides
+
+
+def _refresh_adv_subtitle_controls(win):
+    custom = (win.adv_subtitle_mode_combo.currentData() == "custom")
+    auto_enabled = custom and win.adv_subtitle_auto_check.isChecked()
+    win.adv_subtitle_list.setEnabled(custom)
+    win.adv_subtitle_auto_check.setEnabled(custom)
+    win.adv_subtitle_convert_combo.setEnabled(custom)
+    win.adv_subtitle_delivery_combo.setEnabled(custom)
+    manual_role = Qt.ItemDataRole.UserRole.value + 1
+    for index in range(win.adv_subtitle_list.count()):
+        item = win.adv_subtitle_list.item(index)
+        automatic_only = not bool(item.data(manual_role))
+        item.setHidden(custom and automatic_only and not auto_enabled)
+        if automatic_only and not auto_enabled:
+            item.setSelected(False)
+
+
+def _populate_adv_subtitles(win, info=None):
+    """Populate source-reported subtitle languages after a resolve."""
+    previous = {
+        str(item.data(Qt.ItemDataRole.UserRole) or "")
+        for item in win.adv_subtitle_list.selectedItems()
+    }
+    win.adv_subtitle_list.clear()
+    manual_role = Qt.ItemDataRole.UserRole.value + 1
+    tracks = list(getattr(info, "subtitles", []) or [])
+    for track in tracks:
+        language = str(getattr(track, "language", "") or "")
+        if not language:
+            continue
+        kinds = []
+        if getattr(track, "manual", False):
+            kinds.append("manual")
+        if getattr(track, "automatic", False):
+            kinds.append("auto")
+        formats = "/".join(getattr(track, "formats", []) or [])
+        detail = ", ".join(kinds)
+        if formats:
+            detail += ("; " if detail else "") + formats
+        name = str(getattr(track, "name", "") or "")
+        label = language + (f" — {name}" if name and name != language else "")
+        if detail:
+            label += f" ({detail})"
+        win.adv_subtitle_list.addItem(label)
+        item = win.adv_subtitle_list.item(win.adv_subtitle_list.count() - 1)
+        item.setData(Qt.ItemDataRole.UserRole, language)
+        item.setData(manual_role, bool(getattr(track, "manual", False)))
+        if language in previous:
+            item.setSelected(True)
+    custom_item = win.adv_subtitle_mode_combo.model().item(2)
+    if custom_item is not None:
+        custom_item.setEnabled(bool(tracks))
+    if not tracks and win.adv_subtitle_mode_combo.currentData() == "custom":
+        win.adv_subtitle_mode_combo.setCurrentIndex(0)
+    win.adv_subtitle_list.setToolTip(
+        f"{len(tracks)} language(s) reported by the current yt-dlp source"
+        if tracks else "Fetch a yt-dlp source to list its subtitle languages"
+    )
+    _refresh_adv_subtitle_controls(win)
 
 
 def build_download_tab(win):
@@ -559,12 +645,53 @@ def build_download_tab(win):
     audio_row.addWidget(win.adv_audio_quality_input, 1)
     adv_lay.addLayout(audio_row, 8, 1)
 
+    adv_lay.addWidget(QLabel("Subtitles:"), 9, 0)
+    win.adv_subtitle_mode_combo = QComboBox()
+    win.adv_subtitle_mode_combo.addItem("Use global setting", userData="")
+    win.adv_subtitle_mode_combo.addItem("No subtitles", userData="disabled")
+    win.adv_subtitle_mode_combo.addItem(
+        "Choose source languages", userData="custom"
+    )
+    win.adv_subtitle_mode_combo.model().item(2).setEnabled(False)
+    adv_lay.addWidget(win.adv_subtitle_mode_combo, 9, 1)
+
+    adv_lay.addWidget(QLabel("Subtitle languages:"), 10, 0)
+    win.adv_subtitle_list = QListWidget()
+    win.adv_subtitle_list.setSelectionMode(
+        QAbstractItemView.SelectionMode.MultiSelection
+    )
+    win.adv_subtitle_list.setMaximumHeight(105)
+    win.adv_subtitle_list.setEnabled(False)
+    win.adv_subtitle_list.setToolTip(
+        "Fetch a yt-dlp source to list its subtitle languages"
+    )
+    adv_lay.addWidget(win.adv_subtitle_list, 10, 1)
+
+    adv_lay.addWidget(QLabel("Subtitle output:"), 11, 0)
+    subtitle_output_row = QHBoxLayout()
+    win.adv_subtitle_auto_check = QCheckBox("Include automatic captions")
+    win.adv_subtitle_auto_check.setChecked(True)
+    subtitle_output_row.addWidget(win.adv_subtitle_auto_check)
+    win.adv_subtitle_convert_combo = QComboBox()
+    win.adv_subtitle_convert_combo.addItem("Keep format", userData="")
+    for sub_format in ("srt", "vtt", "ass"):
+        win.adv_subtitle_convert_combo.addItem(
+            f"Convert {sub_format.upper()}", userData=sub_format
+        )
+    subtitle_output_row.addWidget(win.adv_subtitle_convert_combo, 1)
+    win.adv_subtitle_delivery_combo = QComboBox()
+    win.adv_subtitle_delivery_combo.addItem("Embed", userData="embed")
+    win.adv_subtitle_delivery_combo.addItem("Sidecar", userData="sidecar")
+    subtitle_output_row.addWidget(win.adv_subtitle_delivery_combo, 1)
+    adv_lay.addLayout(subtitle_output_row, 11, 1)
+    _refresh_adv_subtitle_controls(win)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 9, 1)
+    adv_lay.addWidget(adv_reset_btn, 12, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -602,6 +729,23 @@ def build_download_tab(win):
         )
     )
     win.adv_audio_quality_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_subtitle_mode_combo.currentIndexChanged.connect(
+        lambda _: _refresh_adv_subtitle_controls(win)
+    )
+    win.adv_subtitle_mode_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_subtitle_list.itemSelectionChanged.connect(_update_adv_badge)
+    win.adv_subtitle_auto_check.toggled.connect(
+        lambda _: _refresh_adv_subtitle_controls(win)
+    )
+    win.adv_subtitle_auto_check.toggled.connect(lambda _: _update_adv_badge())
+    win.adv_subtitle_convert_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_subtitle_delivery_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
 
     # Splitter: segments table + runtime log
     splitter = QSplitter(Qt.Orientation.Vertical)
@@ -1078,6 +1222,7 @@ class DownloadTabMixin:
         self.overall_progress.setVisible(False)
         self.quality_combo.clear()
         self.quality_combo.setEnabled(False)
+        _populate_adv_subtitles(self, None)
         self.table.setRowCount(0)
         if hasattr(self, "segments_section"):
             self.segments_section.setVisible(False)
@@ -1123,6 +1268,7 @@ class DownloadTabMixin:
             self._on_fetch_error("Extractor returned no stream info")
             return
         self.stream_info = info
+        _populate_adv_subtitles(self, info)
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch")
         self._update_badge(info.platform)
@@ -1611,6 +1757,10 @@ class DownloadTabMixin:
         worker.rate_limit = YtDlpExtractor.rate_limit
         worker.proxy = YtDlpExtractor.proxy
         worker.download_subs = YtDlpExtractor.download_subs
+        worker.subtitle_languages = YtDlpExtractor.subtitle_languages
+        worker.subtitle_auto = YtDlpExtractor.subtitle_auto
+        worker.subtitle_convert = YtDlpExtractor.subtitle_convert
+        worker.subtitle_embed = YtDlpExtractor.subtitle_embed
         worker.sponsorblock = YtDlpExtractor.sponsorblock
         worker.parallel_connections = self._parallel_connections
         worker.progress.connect(self._on_dl_progress)
@@ -1937,7 +2087,7 @@ class DownloadTabMixin:
         _dl_overrides = get_adv_overrides(self)
         ytdlp_override_keys = {
             "format_spec", "format_sort_preset", "container",
-            "audio_format", "audio_quality",
+            "audio_format", "audio_quality", "subtitle_mode",
         }
         active_ytdlp_overrides = ytdlp_override_keys.intersection(_dl_overrides)
         if active_ytdlp_overrides and fmt_type != "ytdlp_direct":
@@ -1957,7 +2107,9 @@ class DownloadTabMixin:
             )
             return False
         try:
-            from ...download_options import validate_download_options
+            from ...download_options import (
+                validate_download_options, validate_subtitle_options,
+            )
             ytdlp_options = validate_download_options(
                 format_spec=_dl_overrides.get("format_spec", ""),
                 format_sort_preset=_dl_overrides.get("format_sort_preset", ""),
@@ -1965,9 +2117,36 @@ class DownloadTabMixin:
                 audio_format=_dl_overrides.get("audio_format", ""),
                 audio_quality=_dl_overrides.get("audio_quality", ""),
             )
+            subtitle_mode = _dl_overrides.get("subtitle_mode", "")
+            if subtitle_mode == "disabled":
+                subtitle_options = validate_subtitle_options(enabled=False)
+            elif subtitle_mode == "custom":
+                subtitle_options = validate_subtitle_options(
+                    enabled=True,
+                    languages=_dl_overrides.get("subtitle_languages", ""),
+                    automatic=_dl_overrides.get("subtitle_auto", True),
+                    convert=_dl_overrides.get("subtitle_convert", ""),
+                    embed=_dl_overrides.get("subtitle_embed", True),
+                )
+            else:
+                subtitle_options = validate_subtitle_options(
+                    enabled=YtDlpExtractor.download_subs,
+                    languages=YtDlpExtractor.subtitle_languages,
+                    automatic=YtDlpExtractor.subtitle_auto,
+                    convert=YtDlpExtractor.subtitle_convert,
+                    embed=YtDlpExtractor.subtitle_embed,
+                )
         except ValueError as error:
             self._log(f"[OUTPUT] Invalid per-download settings: {error}")
             self._set_status(str(error), "warning")
+            return False
+
+        if (subtitle_mode == "custom" and ytdlp_options["audio_format"]
+                and subtitle_options["embed"]):
+            self._set_status(
+                "Audio extraction cannot embed subtitles; choose Sidecar.",
+                "warning",
+            )
             return False
 
         if ytdlp_options["format_spec"]:
@@ -2087,7 +2266,11 @@ class DownloadTabMixin:
         self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
         self.download_worker.rate_limit = _dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit
         self.download_worker.proxy = YtDlpExtractor.proxy
-        self.download_worker.download_subs = YtDlpExtractor.download_subs
+        self.download_worker.download_subs = subtitle_options["enabled"]
+        self.download_worker.subtitle_languages = subtitle_options["languages"]
+        self.download_worker.subtitle_auto = subtitle_options["automatic"]
+        self.download_worker.subtitle_convert = subtitle_options["convert"]
+        self.download_worker.subtitle_embed = subtitle_options["embed"]
         self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
         self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
@@ -2110,6 +2293,14 @@ class DownloadTabMixin:
                 )
             if ytdlp_options["format_sort"]:
                 self._log(f"[OUTPUT] Format sort: {ytdlp_options['format_sort']}")
+            if subtitle_options["enabled"]:
+                delivery = "embedded" if subtitle_options["embed"] else "sidecar"
+                conversion = subtitle_options["convert"] or "source format"
+                auto = "+ auto" if subtitle_options["automatic"] else "manual only"
+                self._log(
+                    f"[SUBS] {subtitle_options['languages']} | {auto} | "
+                    f"{conversion} | {delivery}"
+                )
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
@@ -3016,6 +3207,10 @@ class DownloadTabMixin:
         worker.rate_limit = rl
         worker.proxy = YtDlpExtractor.proxy
         worker.download_subs = YtDlpExtractor.download_subs
+        worker.subtitle_languages = YtDlpExtractor.subtitle_languages
+        worker.subtitle_auto = YtDlpExtractor.subtitle_auto
+        worker.subtitle_convert = YtDlpExtractor.subtitle_convert
+        worker.subtitle_embed = YtDlpExtractor.subtitle_embed
         worker.sponsorblock = YtDlpExtractor.sponsorblock
         worker.parallel_connections = self._parallel_connections
         worker.log.connect(self._log)
@@ -3385,6 +3580,11 @@ class DownloadTabMixin:
                 state.ytdlp_container = worker.ytdlp_container or "mp4"
                 state.ytdlp_audio_format = worker.ytdlp_audio_format or ""
                 state.ytdlp_audio_quality = worker.ytdlp_audio_quality or ""
+                state.download_subs = bool(worker.download_subs)
+                state.subtitle_languages = worker.subtitle_languages or ""
+                state.subtitle_auto = bool(worker.subtitle_auto)
+                state.subtitle_convert = worker.subtitle_convert or ""
+                state.subtitle_embed = bool(worker.subtitle_embed)
                 state.output_dir = worker.output_dir
                 state.segments = [list(s) for s in worker.segments]
             else:

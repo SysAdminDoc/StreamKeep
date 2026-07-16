@@ -48,6 +48,10 @@ def _sanitize_text(value, max_len=2048):
     return str("" if value is None else value)[:max_len]
 
 
+def _sanitize_bool(value, default=False):
+    return value if isinstance(value, bool) else bool(default)
+
+
 def _sanitize_segments(value):
     if not isinstance(value, (list, tuple)):
         return []
@@ -116,6 +120,15 @@ def _sanitize_resume_payload(data, output_dir):
         "ytdlp_audio_quality": _sanitize_text(
             data.get("ytdlp_audio_quality", ""), max_len=32
         ),
+        "download_subs": _sanitize_bool(data.get("download_subs", False)),
+        "subtitle_languages": _sanitize_text(
+            data.get("subtitle_languages", ""), max_len=1024
+        ),
+        "subtitle_auto": _sanitize_bool(data.get("subtitle_auto", True), True),
+        "subtitle_convert": _sanitize_text(
+            data.get("subtitle_convert", ""), max_len=16
+        ),
+        "subtitle_embed": _sanitize_bool(data.get("subtitle_embed", True), True),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),
         "completed": _sanitize_completed(data.get("completed", [])),
