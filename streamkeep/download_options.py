@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import urllib.parse
 
 
 FORMAT_SORT_PRESETS = {
@@ -16,6 +17,23 @@ FORMAT_SORT_PRESETS = {
 VIDEO_CONTAINERS = ("mp4", "mkv", "webm", "original")
 AUDIO_FORMATS = ("best", "mp3", "m4a", "opus", "flac", "wav")
 SUBTITLE_CONVERSIONS = ("", "srt", "vtt", "ass")
+SPONSORBLOCK_CATEGORIES = {
+    "sponsor": "Sponsor",
+    "intro": "Intermission / intro",
+    "outro": "Endcards / credits",
+    "selfpromo": "Unpaid / self promotion",
+    "preview": "Preview / recap",
+    "filler": "Filler tangent",
+    "interaction": "Interaction reminder",
+    "music_offtopic": "Non-music section",
+    "hook": "Hook / greetings",
+    "poi_highlight": "Highlight",
+    "chapter": "Community chapter",
+    "all": "All categories",
+    "default": "yt-dlp default set",
+}
+SPONSORBLOCK_NON_REMOVABLE = frozenset({"poi_highlight", "chapter"})
+SPONSORBLOCK_LEGACY_REMOVE = "sponsor,selfpromo,interaction"
 
 _AUDIO_QUALITY_RE = re.compile(
     r"(?:10|[0-9](?:\.\d+)?)|(?:[1-9][0-9]*(?:\.[0-9]+)?[kKmM])"
@@ -120,4 +138,68 @@ def validate_subtitle_options(
         "automatic": bool(automatic),
         "convert": conversion,
         "embed": bool(embed),
+    }
+
+
+def _normalize_sponsorblock_categories(value, *, removal=False):
+    value = _safe_argument(
+        value, "SponsorBlock remove categories" if removal
+        else "SponsorBlock mark categories"
+    )
+    if not value:
+        return ""
+    normalized = []
+    for token in value.split(","):
+        token = token.strip()
+        excluded = token.startswith("-")
+        category = token[1:] if excluded else token
+        if category not in SPONSORBLOCK_CATEGORIES:
+            raise ValueError(f"Unknown SponsorBlock category: {category or token}")
+        if removal and category in SPONSORBLOCK_NON_REMOVABLE:
+            raise ValueError(f"SponsorBlock category {category} can only be marked")
+        rendered = ("-" if excluded else "") + category
+        if rendered not in normalized:
+            normalized.append(rendered)
+    return ",".join(normalized)
+
+
+def _normalize_sponsorblock_api(value):
+    value = _safe_argument(value, "SponsorBlock API URL", max_len=2048)
+    if not value:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("SponsorBlock API URL is invalid") from error
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("SponsorBlock API URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError(
+            "SponsorBlock API URL cannot contain credentials, a query, or a fragment"
+        )
+    if parsed.scheme == "http" and parsed.hostname.lower() not in {
+        "localhost", "127.0.0.1", "::1",
+    }:
+        raise ValueError(
+            "SponsorBlock API URL must use HTTPS (HTTP is allowed only on loopback)"
+        )
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("SponsorBlock API URL port is invalid")
+    return value.rstrip("/")
+
+
+def validate_sponsorblock_options(*, enabled=False, mark="", remove="", api_url=""):
+    """Validate SponsorBlock mark/remove categories and a custom API base."""
+    enabled = bool(enabled)
+    mark = _normalize_sponsorblock_categories(mark, removal=False)
+    remove = _normalize_sponsorblock_categories(remove, removal=True)
+    api_url = _normalize_sponsorblock_api(api_url)
+    if enabled and not mark and not remove:
+        raise ValueError("Choose at least one SponsorBlock category to mark or remove")
+    return {
+        "enabled": enabled,
+        "mark": mark,
+        "remove": remove,
+        "api_url": api_url,
     }

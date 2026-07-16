@@ -129,6 +129,16 @@ def _sanitize_resume_payload(data, output_dir):
             data.get("subtitle_convert", ""), max_len=16
         ),
         "subtitle_embed": _sanitize_bool(data.get("subtitle_embed", True), True),
+        "sponsorblock": _sanitize_bool(data.get("sponsorblock", False)),
+        "sponsorblock_mark": _sanitize_text(
+            data.get("sponsorblock_mark", ""), max_len=512
+        ),
+        "sponsorblock_remove": _sanitize_text(
+            data.get("sponsorblock_remove", ""), max_len=512
+        ),
+        "sponsorblock_api": _sanitize_text(
+            data.get("sponsorblock_api", ""), max_len=2048
+        ),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),
         "completed": _sanitize_completed(data.get("completed", [])),

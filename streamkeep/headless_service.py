@@ -307,6 +307,17 @@ class HeadlessJobService(QObject):
         )
         worker.subtitle_embed = bool(self.config.get("subtitle_embed", True))
         worker.sponsorblock = bool(self.config.get("sponsorblock", False))
+        worker.sponsorblock_mark = str(
+            self.config.get("sponsorblock_mark", "") or ""
+        )
+        worker.sponsorblock_remove = str(
+            self.config.get(
+                "sponsorblock_remove", "sponsor,selfpromo,interaction"
+            ) or ""
+        )
+        worker.sponsorblock_api = str(
+            self.config.get("sponsorblock_api", "") or ""
+        )
         if bool(self.config.get("chunk_long_captures", False)):
             try:
                 worker.chunk_length_secs = max(
@@ -640,4 +651,15 @@ class HeadlessJobService(QObject):
             self.config.get("subtitle_embed", True)
         )
         YtDlpExtractor.sponsorblock = bool(self.config.get("sponsorblock", False))
+        YtDlpExtractor.sponsorblock_mark = str(
+            self.config.get("sponsorblock_mark", "") or ""
+        )
+        YtDlpExtractor.sponsorblock_remove = str(
+            self.config.get(
+                "sponsorblock_remove", "sponsor,selfpromo,interaction"
+            ) or ""
+        )
+        YtDlpExtractor.sponsorblock_api = str(
+            self.config.get("sponsorblock_api", "") or ""
+        )
         set_native_proxy(YtDlpExtractor.proxy)

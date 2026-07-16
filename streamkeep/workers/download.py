@@ -58,6 +58,9 @@ class DownloadWorker(QThread):
         self.subtitle_convert = ""
         self.subtitle_embed = True
         self.sponsorblock = False
+        self.sponsorblock_mark = ""
+        self.sponsorblock_remove = ""
+        self.sponsorblock_api = ""
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -102,6 +105,10 @@ class DownloadWorker(QThread):
             state.subtitle_auto = bool(self.subtitle_auto)
             state.subtitle_convert = self.subtitle_convert or ""
             state.subtitle_embed = bool(self.subtitle_embed)
+            state.sponsorblock = bool(self.sponsorblock)
+            state.sponsorblock_mark = self.sponsorblock_mark or ""
+            state.sponsorblock_remove = self.sponsorblock_remove or ""
+            state.sponsorblock_api = self.sponsorblock_api or ""
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -124,7 +131,8 @@ class DownloadWorker(QThread):
     def _build_ytdlp_download_cmd(self, outfile, impersonate=False):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
-            validate_download_options, validate_subtitle_options,
+            SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
+            validate_sponsorblock_options, validate_subtitle_options,
         )
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
@@ -141,6 +149,15 @@ class DownloadWorker(QThread):
             automatic=self.subtitle_auto,
             convert=self.subtitle_convert,
             embed=self.subtitle_embed,
+        )
+        sponsorblock_remove = self.sponsorblock_remove
+        if self.sponsorblock and not self.sponsorblock_mark and not sponsorblock_remove:
+            sponsorblock_remove = SPONSORBLOCK_LEGACY_REMOVE
+        sponsorblock_options = validate_sponsorblock_options(
+            enabled=self.sponsorblock,
+            mark=self.sponsorblock_mark,
+            remove=sponsorblock_remove,
+            api_url=self.sponsorblock_api,
         )
         format_spec = options["format_spec"]
         if options["audio_format"] and not self.ytdlp_format:
@@ -197,8 +214,19 @@ class DownloadWorker(QThread):
                 cmd.extend(["--convert-subs", subtitle_options["convert"]])
             can_embed = subtitle_options["embed"] and not options["audio_format"]
             cmd.append("--embed-subs" if can_embed else "--no-embed-subs")
-        if self.sponsorblock:
-            cmd.extend(["--sponsorblock-remove", "sponsor,selfpromo,interaction"])
+        if sponsorblock_options["enabled"]:
+            if sponsorblock_options["mark"]:
+                cmd.extend([
+                    "--sponsorblock-mark", sponsorblock_options["mark"]
+                ])
+            if sponsorblock_options["remove"]:
+                cmd.extend([
+                    "--sponsorblock-remove", sponsorblock_options["remove"]
+                ])
+            if sponsorblock_options["api_url"]:
+                cmd.extend([
+                    "--sponsorblock-api", sponsorblock_options["api_url"]
+                ])
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
         if impersonate:

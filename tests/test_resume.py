@@ -47,6 +47,10 @@ class ResumeTests(unittest.TestCase):
                         "subtitle_auto": False,
                         "subtitle_convert": "srt",
                         "subtitle_embed": False,
+                        "sponsorblock": True,
+                        "sponsorblock_mark": "intro,chapter",
+                        "sponsorblock_remove": "sponsor",
+                        "sponsorblock_api": "https://sponsor.example/api",
                     }
                 ),
                 encoding="utf-8",
@@ -68,6 +72,12 @@ class ResumeTests(unittest.TestCase):
             self.assertFalse(state.subtitle_auto)
             self.assertEqual(state.subtitle_convert, "srt")
             self.assertFalse(state.subtitle_embed)
+            self.assertTrue(state.sponsorblock)
+            self.assertEqual(state.sponsorblock_mark, "intro,chapter")
+            self.assertEqual(state.sponsorblock_remove, "sponsor")
+            self.assertEqual(
+                state.sponsorblock_api, "https://sponsor.example/api"
+            )
 
 
 if __name__ == "__main__":

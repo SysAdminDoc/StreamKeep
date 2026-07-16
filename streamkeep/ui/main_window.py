@@ -1711,10 +1711,13 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.subtitle_auto = bool(state.subtitle_auto)
             worker.subtitle_convert = state.subtitle_convert or ""
             worker.subtitle_embed = bool(state.subtitle_embed)
+            worker.sponsorblock = bool(state.sponsorblock)
+            worker.sponsorblock_mark = state.sponsorblock_mark or ""
+            worker.sponsorblock_remove = state.sponsorblock_remove or ""
+            worker.sponsorblock_api = state.sponsorblock_api or ""
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy
-            worker.sponsorblock = YtDlpExtractor.sponsorblock
             worker.parallel_connections = self._parallel_connections
             worker.progress.connect(self._on_dl_progress)
             worker.segment_done.connect(self._on_segment_done)

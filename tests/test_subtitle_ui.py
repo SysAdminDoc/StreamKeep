@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QLabel, QLineEdit, QListWidget,
-    QSpinBox,
+    QSpinBox, QTableWidget,
 )
 
 from streamkeep.models import StreamInfo, SubtitleInfo
@@ -44,6 +44,20 @@ def _window_with_advanced_controls():
     win.adv_subtitle_delivery_combo = QComboBox()
     win.adv_subtitle_delivery_combo.addItem("embed", userData="embed")
     win.adv_subtitle_delivery_combo.addItem("sidecar", userData="sidecar")
+    win.adv_sponsorblock_mode_combo = QComboBox()
+    win.adv_sponsorblock_mode_combo.addItem("global", userData="")
+    win.adv_sponsorblock_mode_combo.addItem("disabled", userData="disabled")
+    win.adv_sponsorblock_mode_combo.addItem("custom", userData="custom")
+    win.adv_sponsorblock_table = QTableWidget()
+    win.adv_sponsorblock_action_combos = {}
+    for category in ("sponsor", "intro", "chapter"):
+        combo = QComboBox()
+        combo.addItem("ignore", userData="")
+        combo.addItem("mark", userData="mark")
+        if category != "chapter":
+            combo.addItem("remove", userData="remove")
+        win.adv_sponsorblock_action_combos[category] = combo
+    win.adv_sponsorblock_api_input = QLineEdit()
     win.adv_override_badge = QLabel()
     return win
 
@@ -81,3 +95,19 @@ def test_no_reported_subtitles_disables_custom_mode():
     win = _window_with_advanced_controls()
     _populate_adv_subtitles(win, StreamInfo())
     assert win.adv_subtitle_mode_combo.model().item(2).isEnabled() is False
+
+
+def test_sponsorblock_matrix_builds_custom_override_payload():
+    win = _window_with_advanced_controls()
+    win.adv_sponsorblock_mode_combo.setCurrentIndex(2)
+    win.adv_sponsorblock_action_combos["sponsor"].setCurrentIndex(2)
+    win.adv_sponsorblock_action_combos["intro"].setCurrentIndex(1)
+    win.adv_sponsorblock_action_combos["chapter"].setCurrentIndex(1)
+    win.adv_sponsorblock_api_input.setText("https://sponsor.example/api")
+
+    overrides = get_adv_overrides(win)
+
+    assert overrides["sponsorblock_mode"] == "custom"
+    assert overrides["sponsorblock_mark"] == "intro,chapter"
+    assert overrides["sponsorblock_remove"] == "sponsor"
+    assert overrides["sponsorblock_api"] == "https://sponsor.example/api"

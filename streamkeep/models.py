@@ -167,6 +167,10 @@ class ResumeState:
     subtitle_auto: bool = True
     subtitle_convert: str = ""
     subtitle_embed: bool = True
+    sponsorblock: bool = False
+    sponsorblock_mark: str = ""
+    sponsorblock_remove: str = ""
+    sponsorblock_api: str = ""
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

@@ -50,6 +50,10 @@ def _reset_adv_overrides(win):
     win.adv_subtitle_auto_check.setChecked(True)
     win.adv_subtitle_convert_combo.setCurrentIndex(0)
     win.adv_subtitle_delivery_combo.setCurrentIndex(0)
+    win.adv_sponsorblock_mode_combo.setCurrentIndex(0)
+    for combo in win.adv_sponsorblock_action_combos.values():
+        combo.setCurrentIndex(0)
+    win.adv_sponsorblock_api_input.clear()
     win.adv_override_badge.setVisible(False)
 
 
@@ -110,6 +114,23 @@ def get_adv_overrides(win):
             overrides["subtitle_embed"] = (
                 win.adv_subtitle_delivery_combo.currentData() == "embed"
             )
+    sponsorblock_mode = win.adv_sponsorblock_mode_combo.currentData() or ""
+    if sponsorblock_mode:
+        overrides["sponsorblock_mode"] = sponsorblock_mode
+        if sponsorblock_mode == "custom":
+            overrides["sponsorblock_mark"] = ",".join(
+                category for category, combo
+                in win.adv_sponsorblock_action_combos.items()
+                if combo.currentData() == "mark"
+            )
+            overrides["sponsorblock_remove"] = ",".join(
+                category for category, combo
+                in win.adv_sponsorblock_action_combos.items()
+                if combo.currentData() == "remove"
+            )
+            overrides["sponsorblock_api"] = (
+                win.adv_sponsorblock_api_input.text().strip()
+            )
     return overrides
 
 
@@ -127,6 +148,12 @@ def _refresh_adv_subtitle_controls(win):
         item.setHidden(custom and automatic_only and not auto_enabled)
         if automatic_only and not auto_enabled:
             item.setSelected(False)
+
+
+def _refresh_adv_sponsorblock_controls(win):
+    custom = (win.adv_sponsorblock_mode_combo.currentData() == "custom")
+    win.adv_sponsorblock_table.setEnabled(custom)
+    win.adv_sponsorblock_api_input.setEnabled(custom)
 
 
 def _populate_adv_subtitles(win, info=None):
@@ -686,12 +713,64 @@ def build_download_tab(win):
     adv_lay.addLayout(subtitle_output_row, 11, 1)
     _refresh_adv_subtitle_controls(win)
 
+    from ...download_options import (
+        SPONSORBLOCK_CATEGORIES, SPONSORBLOCK_NON_REMOVABLE,
+    )
+    adv_lay.addWidget(QLabel("SponsorBlock:"), 12, 0)
+    win.adv_sponsorblock_mode_combo = QComboBox()
+    win.adv_sponsorblock_mode_combo.addItem(
+        "Use global setting", userData=""
+    )
+    win.adv_sponsorblock_mode_combo.addItem("Disabled", userData="disabled")
+    win.adv_sponsorblock_mode_combo.addItem(
+        "Custom category actions", userData="custom"
+    )
+    adv_lay.addWidget(win.adv_sponsorblock_mode_combo, 12, 1)
+
+    adv_lay.addWidget(QLabel("Category actions:"), 13, 0)
+    win.adv_sponsorblock_table = QTableWidget(
+        len(SPONSORBLOCK_CATEGORIES), 2
+    )
+    win.adv_sponsorblock_table.setHorizontalHeaderLabels(
+        ["Category", "Action"]
+    )
+    sponsor_header = win.adv_sponsorblock_table.horizontalHeader()
+    sponsor_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    sponsor_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    win.adv_sponsorblock_table.verticalHeader().setVisible(False)
+    win.adv_sponsorblock_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    win.adv_sponsorblock_table.setMaximumHeight(270)
+    style_table(win.adv_sponsorblock_table, 34)
+    win.adv_sponsorblock_action_combos = {}
+    for row, (category, label) in enumerate(SPONSORBLOCK_CATEGORIES.items()):
+        item = QTableWidgetItem(label)
+        item.setToolTip(category)
+        win.adv_sponsorblock_table.setItem(row, 0, item)
+        combo = QComboBox()
+        combo.addItem("Ignore", userData="")
+        combo.addItem("Mark chapter", userData="mark")
+        if category not in SPONSORBLOCK_NON_REMOVABLE:
+            combo.addItem("Remove segment", userData="remove")
+        win.adv_sponsorblock_table.setCellWidget(row, 1, combo)
+        win.adv_sponsorblock_action_combos[category] = combo
+    adv_lay.addWidget(win.adv_sponsorblock_table, 13, 1)
+
+    adv_lay.addWidget(QLabel("SponsorBlock API:"), 14, 0)
+    win.adv_sponsorblock_api_input = QLineEdit()
+    win.adv_sponsorblock_api_input.setPlaceholderText(
+        "Default API, or a custom HTTPS base URL"
+    )
+    adv_lay.addWidget(win.adv_sponsorblock_api_input, 14, 1)
+    _refresh_adv_sponsorblock_controls(win)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 12, 1)
+    adv_lay.addWidget(adv_reset_btn, 15, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -744,6 +823,17 @@ def build_download_tab(win):
         lambda _: _update_adv_badge()
     )
     win.adv_subtitle_delivery_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_sponsorblock_mode_combo.currentIndexChanged.connect(
+        lambda _: _refresh_adv_sponsorblock_controls(win)
+    )
+    win.adv_sponsorblock_mode_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    for combo in win.adv_sponsorblock_action_combos.values():
+        combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
+    win.adv_sponsorblock_api_input.textChanged.connect(
         lambda _: _update_adv_badge()
     )
 
@@ -1762,6 +1852,9 @@ class DownloadTabMixin:
         worker.subtitle_convert = YtDlpExtractor.subtitle_convert
         worker.subtitle_embed = YtDlpExtractor.subtitle_embed
         worker.sponsorblock = YtDlpExtractor.sponsorblock
+        worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
+        worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
+        worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
         worker.parallel_connections = self._parallel_connections
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
@@ -2088,6 +2181,7 @@ class DownloadTabMixin:
         ytdlp_override_keys = {
             "format_spec", "format_sort_preset", "container",
             "audio_format", "audio_quality", "subtitle_mode",
+            "sponsorblock_mode",
         }
         active_ytdlp_overrides = ytdlp_override_keys.intersection(_dl_overrides)
         if active_ytdlp_overrides and fmt_type != "ytdlp_direct":
@@ -2108,7 +2202,8 @@ class DownloadTabMixin:
             return False
         try:
             from ...download_options import (
-                validate_download_options, validate_subtitle_options,
+                validate_download_options, validate_sponsorblock_options,
+                validate_subtitle_options,
             )
             ytdlp_options = validate_download_options(
                 format_spec=_dl_overrides.get("format_spec", ""),
@@ -2135,6 +2230,25 @@ class DownloadTabMixin:
                     automatic=YtDlpExtractor.subtitle_auto,
                     convert=YtDlpExtractor.subtitle_convert,
                     embed=YtDlpExtractor.subtitle_embed,
+                )
+            sponsorblock_mode = _dl_overrides.get("sponsorblock_mode", "")
+            if sponsorblock_mode == "disabled":
+                sponsorblock_options = validate_sponsorblock_options(
+                    enabled=False
+                )
+            elif sponsorblock_mode == "custom":
+                sponsorblock_options = validate_sponsorblock_options(
+                    enabled=True,
+                    mark=_dl_overrides.get("sponsorblock_mark", ""),
+                    remove=_dl_overrides.get("sponsorblock_remove", ""),
+                    api_url=_dl_overrides.get("sponsorblock_api", ""),
+                )
+            else:
+                sponsorblock_options = validate_sponsorblock_options(
+                    enabled=YtDlpExtractor.sponsorblock,
+                    mark=YtDlpExtractor.sponsorblock_mark,
+                    remove=YtDlpExtractor.sponsorblock_remove,
+                    api_url=YtDlpExtractor.sponsorblock_api,
                 )
         except ValueError as error:
             self._log(f"[OUTPUT] Invalid per-download settings: {error}")
@@ -2271,7 +2385,10 @@ class DownloadTabMixin:
         self.download_worker.subtitle_auto = subtitle_options["automatic"]
         self.download_worker.subtitle_convert = subtitle_options["convert"]
         self.download_worker.subtitle_embed = subtitle_options["embed"]
-        self.download_worker.sponsorblock = YtDlpExtractor.sponsorblock
+        self.download_worker.sponsorblock = sponsorblock_options["enabled"]
+        self.download_worker.sponsorblock_mark = sponsorblock_options["mark"]
+        self.download_worker.sponsorblock_remove = sponsorblock_options["remove"]
+        self.download_worker.sponsorblock_api = sponsorblock_options["api_url"]
         self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
         if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
@@ -2300,6 +2417,12 @@ class DownloadTabMixin:
                 self._log(
                     f"[SUBS] {subtitle_options['languages']} | {auto} | "
                     f"{conversion} | {delivery}"
+                )
+            if sponsorblock_options["enabled"]:
+                self._log(
+                    "[SPONSORBLOCK] Mark: "
+                    f"{sponsorblock_options['mark'] or 'none'} | Remove: "
+                    f"{sponsorblock_options['remove'] or 'none'}"
                 )
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
@@ -3212,6 +3335,9 @@ class DownloadTabMixin:
         worker.subtitle_convert = YtDlpExtractor.subtitle_convert
         worker.subtitle_embed = YtDlpExtractor.subtitle_embed
         worker.sponsorblock = YtDlpExtractor.sponsorblock
+        worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
+        worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
+        worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
         worker.parallel_connections = self._parallel_connections
         worker.log.connect(self._log)
         worker.all_done.connect(lambda it=item, inf=info: self._on_queue_item_done(it, inf, out_dir))
@@ -3585,6 +3711,10 @@ class DownloadTabMixin:
                 state.subtitle_auto = bool(worker.subtitle_auto)
                 state.subtitle_convert = worker.subtitle_convert or ""
                 state.subtitle_embed = bool(worker.subtitle_embed)
+                state.sponsorblock = bool(worker.sponsorblock)
+                state.sponsorblock_mark = worker.sponsorblock_mark or ""
+                state.sponsorblock_remove = worker.sponsorblock_remove or ""
+                state.sponsorblock_api = worker.sponsorblock_api or ""
                 state.output_dir = worker.output_dir
                 state.segments = [list(s) for s in worker.segments]
             else:

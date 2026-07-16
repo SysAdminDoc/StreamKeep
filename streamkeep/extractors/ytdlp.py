@@ -187,6 +187,9 @@ class YtDlpExtractor(Extractor):
     subtitle_convert = ""
     subtitle_embed = True
     sponsorblock = False
+    sponsorblock_mark = ""
+    sponsorblock_remove = "sponsor,selfpromo,interaction"
+    sponsorblock_api = ""
 
     def _has_ytdlp(self):
         from ..capabilities import CapabilityUnavailableError, require_capability

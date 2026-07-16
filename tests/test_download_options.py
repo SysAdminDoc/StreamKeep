@@ -1,7 +1,8 @@
 import pytest
 
 from streamkeep.download_options import (
-    validate_download_options, validate_subtitle_options,
+    validate_download_options, validate_sponsorblock_options,
+    validate_subtitle_options,
 )
 
 
@@ -58,3 +59,39 @@ def test_enabled_subtitles_require_languages_and_known_conversion():
         validate_subtitle_options(
             enabled=True, languages="en", convert="ttml"
         )
+
+
+def test_sponsorblock_categories_are_validated_and_deduplicated():
+    options = validate_sponsorblock_options(
+        enabled=True,
+        mark="intro,chapter,intro",
+        remove="sponsor,selfpromo",
+        api_url="https://sponsor.example/api/",
+    )
+    assert options == {
+        "enabled": True,
+        "mark": "intro,chapter",
+        "remove": "sponsor,selfpromo",
+        "api_url": "https://sponsor.example/api",
+    }
+
+
+@pytest.mark.parametrize("category", ["chapter", "poi_highlight"])
+def test_sponsorblock_mark_only_categories_cannot_be_removed(category):
+    with pytest.raises(ValueError, match="can only be marked"):
+        validate_sponsorblock_options(enabled=True, remove=category)
+
+
+def test_sponsorblock_api_requires_https_except_on_loopback():
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        validate_sponsorblock_options(
+            enabled=True, mark="sponsor", api_url="http://example.com"
+        )
+    assert validate_sponsorblock_options(
+        enabled=True, mark="sponsor", api_url="http://127.0.0.1:8080"
+    )["api_url"] == "http://127.0.0.1:8080"
+
+
+def test_enabled_sponsorblock_requires_at_least_one_action():
+    with pytest.raises(ValueError, match="at least one"):
+        validate_sponsorblock_options(enabled=True)

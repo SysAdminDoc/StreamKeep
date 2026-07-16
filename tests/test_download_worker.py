@@ -184,6 +184,31 @@ def test_ytdlp_audio_extract_forces_selected_subtitles_to_sidecars(
     assert "--embed-subs" not in cmd
 
 
+def test_ytdlp_sponsorblock_cmd_keeps_mark_remove_and_api_distinct(
+    tmp_path, monkeypatch
+):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.sponsorblock = True
+    worker.sponsorblock_mark = "intro,chapter"
+    worker.sponsorblock_remove = "sponsor,selfpromo"
+    worker.sponsorblock_api = "https://sponsor.example/api"
+    monkeypatch.setattr(
+        "streamkeep.extractors.ytdlp.ytdlp_command", lambda: ["yt-dlp"]
+    )
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("--sponsorblock-mark") + 1] == "intro,chapter"
+    assert cmd[cmd.index("--sponsorblock-remove") + 1] == "sponsor,selfpromo"
+    assert cmd[cmd.index("--sponsorblock-api") + 1] == (
+        "https://sponsor.example/api"
+    )
+
+
 def test_ytdlp_original_container_does_not_force_merge_or_remux(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"

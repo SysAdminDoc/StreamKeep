@@ -126,13 +126,19 @@ def _run_download(args):
         sys.exit(1)
 
     from .download_options import (
-        validate_download_options, validate_subtitle_options,
+        validate_download_options, validate_sponsorblock_options,
+        validate_subtitle_options,
     )
     subtitle_requested = any((
         getattr(args, "sub_langs", ""),
         getattr(args, "auto_subs", False),
         getattr(args, "convert_subs", ""),
         getattr(args, "sub_delivery", ""),
+    ))
+    sponsorblock_requested = any((
+        getattr(args, "sponsorblock_mark", ""),
+        getattr(args, "sponsorblock_remove", ""),
+        getattr(args, "sponsorblock_api", ""),
     ))
     requested_ytdlp_output = any((
         getattr(args, "format_spec", ""),
@@ -142,6 +148,7 @@ def _run_download(args):
         getattr(args, "audio_format", ""),
         getattr(args, "audio_quality", ""),
         subtitle_requested,
+        sponsorblock_requested,
     ))
     if getattr(args, "audio_format", "") and getattr(args, "container", ""):
         _print_line("Error: Choose either --container or --audio-format, not both.")
@@ -161,6 +168,12 @@ def _run_download(args):
             automatic=getattr(args, "auto_subs", False),
             convert=getattr(args, "convert_subs", ""),
             embed=(getattr(args, "sub_delivery", "") or "embed") == "embed",
+        )
+        sponsorblock_options = validate_sponsorblock_options(
+            enabled=sponsorblock_requested,
+            mark=getattr(args, "sponsorblock_mark", ""),
+            remove=getattr(args, "sponsorblock_remove", ""),
+            api_url=getattr(args, "sponsorblock_api", ""),
         )
         if (output_options["audio_format"] and subtitle_options["enabled"]
                 and subtitle_options["embed"]):
@@ -271,6 +284,10 @@ def _run_download(args):
         dw.subtitle_auto = subtitle_options["automatic"]
         dw.subtitle_convert = subtitle_options["convert"]
         dw.subtitle_embed = subtitle_options["embed"]
+        dw.sponsorblock = sponsorblock_options["enabled"]
+        dw.sponsorblock_mark = sponsorblock_options["mark"]
+        dw.sponsorblock_remove = sponsorblock_options["remove"]
+        dw.sponsorblock_api = sponsorblock_options["api_url"]
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
         state["dw"] = dw  # prevent GC while event loop runs
@@ -646,6 +663,18 @@ def build_parser():
     dl.add_argument(
         "--sub-delivery", default="", choices=["embed", "sidecar"],
         help="Embed subtitles or keep sidecar files (default: embed)",
+    )
+    dl.add_argument(
+        "--sponsorblock-mark", default="",
+        help="Comma-separated SponsorBlock categories to mark as chapters",
+    )
+    dl.add_argument(
+        "--sponsorblock-remove", default="",
+        help="Comma-separated SponsorBlock categories to remove",
+    )
+    dl.add_argument(
+        "--sponsorblock-api", default="",
+        help="Custom SponsorBlock API base URL (HTTPS, or loopback HTTP)",
     )
     dl.add_argument("--config-dir", default=argparse.SUPPRESS,
                     help="Override the config/database directory")

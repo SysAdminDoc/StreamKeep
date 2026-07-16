@@ -129,3 +129,13 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     assert subtitle_args.auto_subs is True
     assert subtitle_args.convert_subs == "srt"
     assert subtitle_args.sub_delivery == "sidecar"
+
+    sponsor_args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--sponsorblock-mark", "intro,chapter",
+        "--sponsorblock-remove", "sponsor",
+        "--sponsorblock-api", "https://sponsor.example/api",
+    ])
+    assert sponsor_args.sponsorblock_mark == "intro,chapter"
+    assert sponsor_args.sponsorblock_remove == "sponsor"
+    assert sponsor_args.sponsorblock_api == "https://sponsor.example/api"

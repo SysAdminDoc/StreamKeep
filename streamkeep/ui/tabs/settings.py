@@ -16,7 +16,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHeaderView, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -870,8 +870,33 @@ class SettingsTabMixin:
         self._config["subtitle_auto"] = subtitle_options["automatic"]
         self._config["subtitle_convert"] = subtitle_options["convert"]
         self._config["subtitle_embed"] = subtitle_options["embed"]
-        YtDlpExtractor.sponsorblock = self.sponsorblock_check.isChecked()
-        self._config["sponsorblock"] = YtDlpExtractor.sponsorblock
+        from ...download_options import validate_sponsorblock_options
+        sponsorblock_mark = ",".join(
+            category for category, combo in self.sponsorblock_action_combos.items()
+            if combo.currentData() == "mark"
+        )
+        sponsorblock_remove = ",".join(
+            category for category, combo in self.sponsorblock_action_combos.items()
+            if combo.currentData() == "remove"
+        )
+        try:
+            sponsorblock_options = validate_sponsorblock_options(
+                enabled=self.sponsorblock_check.isChecked(),
+                mark=sponsorblock_mark,
+                remove=sponsorblock_remove,
+                api_url=self.sponsorblock_api_input.text(),
+            )
+        except ValueError as error:
+            self._set_status(f"SponsorBlock settings: {error}", "warning")
+            return
+        YtDlpExtractor.sponsorblock = sponsorblock_options["enabled"]
+        YtDlpExtractor.sponsorblock_mark = sponsorblock_options["mark"]
+        YtDlpExtractor.sponsorblock_remove = sponsorblock_options["remove"]
+        YtDlpExtractor.sponsorblock_api = sponsorblock_options["api_url"]
+        self._config["sponsorblock"] = sponsorblock_options["enabled"]
+        self._config["sponsorblock_mark"] = sponsorblock_options["mark"]
+        self._config["sponsorblock_remove"] = sponsorblock_options["remove"]
+        self._config["sponsorblock_api"] = sponsorblock_options["api_url"]
         # Apply filename templates
         self._folder_template = self.folder_template_input.text().strip() or DEFAULT_FOLDER_TEMPLATE
         self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE
@@ -2520,13 +2545,69 @@ def build_settings_tab(win):
     if not bool(win._config.get("subtitle_embed", True)):
         win.subs_delivery_combo.setCurrentIndex(1)
     subs_output_row.addWidget(win.subs_delivery_combo, 1)
-    win.sponsorblock_check = QCheckBox(
-        "Skip SponsorBlock segments (sponsor / self-promo / interaction)"
-    )
+    win.sponsorblock_check = QCheckBox("Enable SponsorBlock by default")
     yt_lay.addWidget(win.subs_check)
     yt_lay.addLayout(subs_languages_row)
     yt_lay.addLayout(subs_output_row)
     yt_lay.addWidget(win.sponsorblock_check)
+
+    from ...download_options import (
+        SPONSORBLOCK_CATEGORIES, SPONSORBLOCK_LEGACY_REMOVE,
+        SPONSORBLOCK_NON_REMOVABLE,
+    )
+    win.sponsorblock_table = QTableWidget()
+    win.sponsorblock_table.setColumnCount(2)
+    win.sponsorblock_table.setHorizontalHeaderLabels(["Category", "Action"])
+    win.sponsorblock_table.setRowCount(len(SPONSORBLOCK_CATEGORIES))
+    win.sponsorblock_table.verticalHeader().setVisible(False)
+    win.sponsorblock_table.horizontalHeader().setSectionResizeMode(
+        0, QHeaderView.ResizeMode.Stretch
+    )
+    win.sponsorblock_table.horizontalHeader().setSectionResizeMode(
+        1, QHeaderView.ResizeMode.Fixed
+    )
+    win.sponsorblock_table.setColumnWidth(1, 170)
+    win.sponsorblock_table.setFixedHeight(310)
+    win.sponsorblock_action_combos = {}
+    saved_sponsor_enabled = bool(win._config.get("sponsorblock", False))
+    saved_sponsor_mark = str(win._config.get("sponsorblock_mark", "") or "")
+    saved_sponsor_remove = str(
+        win._config.get("sponsorblock_remove", "") or ""
+    ) if "sponsorblock_remove" in win._config else (
+        SPONSORBLOCK_LEGACY_REMOVE if saved_sponsor_enabled else ""
+    )
+    marked = set(saved_sponsor_mark.split(","))
+    removed = set(saved_sponsor_remove.split(","))
+    for row, (category, label) in enumerate(SPONSORBLOCK_CATEGORIES.items()):
+        item = QTableWidgetItem(label)
+        item.setToolTip(category)
+        win.sponsorblock_table.setItem(row, 0, item)
+        combo = QComboBox()
+        combo.addItem("Ignore", userData="")
+        combo.addItem("Mark chapter", userData="mark")
+        if category not in SPONSORBLOCK_NON_REMOVABLE:
+            combo.addItem("Remove segment", userData="remove")
+        if category in removed and category not in SPONSORBLOCK_NON_REMOVABLE:
+            combo.setCurrentIndex(2)
+        elif category in marked:
+            combo.setCurrentIndex(1)
+        win.sponsorblock_table.setCellWidget(row, 1, combo)
+        win.sponsorblock_action_combos[category] = combo
+    yt_lay.addWidget(win.sponsorblock_table)
+
+    sponsor_api_row = QHBoxLayout()
+    sponsor_api_row.setSpacing(8)
+    sponsor_api_label = QLabel("API URL:")
+    sponsor_api_label.setFixedWidth(100)
+    sponsor_api_row.addWidget(sponsor_api_label)
+    win.sponsorblock_api_input = QLineEdit(
+        str(win._config.get("sponsorblock_api", "") or "")
+    )
+    win.sponsorblock_api_input.setPlaceholderText(
+        "https://sponsor.ajay.app (blank = yt-dlp default)"
+    )
+    sponsor_api_row.addWidget(win.sponsorblock_api_input, 1)
+    yt_lay.addLayout(sponsor_api_row)
 
     win.subs_check.setChecked(bool(win._config.get("download_subs", False)))
     YtDlpExtractor.download_subs = win.subs_check.isChecked()
@@ -2543,9 +2624,17 @@ def build_settings_tab(win):
         win.subs_delivery_combo.setEnabled(enabled)
     win.subs_check.toggled.connect(_toggle_subtitle_defaults)
     _toggle_subtitle_defaults(win.subs_check.isChecked())
-    if win._config.get("sponsorblock"):
-        win.sponsorblock_check.setChecked(True)
-        YtDlpExtractor.sponsorblock = True
+    win.sponsorblock_check.setChecked(saved_sponsor_enabled)
+    YtDlpExtractor.sponsorblock = saved_sponsor_enabled
+    YtDlpExtractor.sponsorblock_mark = saved_sponsor_mark
+    YtDlpExtractor.sponsorblock_remove = saved_sponsor_remove
+    YtDlpExtractor.sponsorblock_api = win.sponsorblock_api_input.text()
+
+    def _toggle_sponsorblock_defaults(enabled):
+        win.sponsorblock_table.setEnabled(enabled)
+        win.sponsorblock_api_input.setEnabled(enabled)
+    win.sponsorblock_check.toggled.connect(_toggle_sponsorblock_defaults)
+    _toggle_sponsorblock_defaults(saved_sponsor_enabled)
 
     card_lay.addWidget(yt_block)
 
