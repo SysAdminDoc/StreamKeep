@@ -27,6 +27,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.33.0" date="2026-07-16">
+      <description><p>Adds a non-DRM HLS clear-key override and hardens backup restore, event hooks, remote image handling, plugin isolation, and credential storage.</p></description>
+    </release>
     <release version="4.32.0" date="2026-07-16">
       <description><p>Adds full yt-dlp output, subtitle, SponsorBlock, and incremental playlist sync controls.</p></description>
     </release>
