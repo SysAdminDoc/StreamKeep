@@ -31,7 +31,9 @@ class FTPDestination(UploadDestination):
             ftp.login(settings["username"], settings["password"])
             self._ensure_ftp_dir(ftp, settings["remote_dir"])
 
-            filename = os.path.basename(file_path)
+            filename, name_err = self._safe_remote_filename(file_path)
+            if name_err:
+                return False, f"FTP upload failed: {name_err}"
             file_size = os.path.getsize(file_path)
             sent = [0]
 
@@ -74,7 +76,9 @@ class FTPDestination(UploadDestination):
 
             self._ensure_sftp_dir(sftp, settings["remote_dir"])
 
-            filename = os.path.basename(file_path)
+            filename, name_err = self._safe_remote_filename(file_path)
+            if name_err:
+                return False, f"SFTP upload failed: {name_err}"
             remote_path = self._remote_path(settings["remote_dir"], filename)
 
             def _cb(sent, total):
@@ -176,6 +180,22 @@ class FTPDestination(UploadDestination):
             return "/"
         normalized = "/".join(parts)
         return f"/{normalized}" if is_absolute else normalized
+
+    @staticmethod
+    def _safe_remote_filename(file_path):
+        """Return ``(filename, error)`` for a STOR/put-safe leaf name.
+
+        Control characters — especially CR/LF — could inject commands into the
+        FTP control channel; NUL, path separators, and dot names are never
+        valid leaf names.
+        """
+        name = os.path.basename(str(file_path or ""))
+        if any(ord(ch) < 0x20 or ch == "\x7f" for ch in name):
+            return "", "filename contains control characters"
+        name = name.replace("\\", "").replace("/", "").strip()
+        if not name or name in (".", ".."):
+            return "", "filename is invalid"
+        return name, ""
 
     @staticmethod
     def _remote_path(remote_dir, filename):

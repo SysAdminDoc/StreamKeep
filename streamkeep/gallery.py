@@ -11,7 +11,7 @@ Share IDs are UUID-based for unguessable URLs.
 
 import mimetypes
 import os
-import uuid
+import secrets
 
 from .theme import CAT
 
@@ -50,7 +50,9 @@ def unregister_shared(share_id):
 
 
 def generate_share_id():
-    return uuid.uuid4().hex[:12]
+    # 128 bits of entropy (32 hex chars) so a LAN-bound share URL cannot be
+    # brute-forced, unlike the previous 48-bit truncated UUID.
+    return secrets.token_hex(16)
 
 
 def get_shared(share_id):

@@ -21,6 +21,13 @@ class GalleryTests(unittest.TestCase):
             self.assertEqual(headers["Content-Range"], "bytes 2-5/10")
             self.assertEqual(headers["Content-Length"], "4")
 
+    def test_share_id_has_128_bits_of_entropy(self):
+        ids = {gallery.generate_share_id() for _ in range(200)}
+        self.assertEqual(len(ids), 200)  # no collisions
+        for share_id in ids:
+            self.assertEqual(len(share_id), 32)  # 128 bits as hex
+            self.assertTrue(all(c in "0123456789abcdef" for c in share_id))
+
     def test_serve_media_range_rejects_invalid_ranges(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "clip.mp4"

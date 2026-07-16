@@ -90,18 +90,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Why: `load_plugin` appends plugin parent to `sys.path`, allowing a malicious plugin to shadow stdlib modules.
   Where: `streamkeep/plugins.py`
 
-- [ ] P3 — Increase gallery share ID entropy from 48 to 128 bits
-  Why: `uuid4().hex[:12]` (48 bits) is brute-forceable when bound to LAN (`bind_lan=True`).
-  Where: `streamkeep/gallery.py`
-
-- [ ] P3 — Strip trailing punctuation from clipboard URL captures
-  Why: regex captures trailing `)`, `,`, `.` from natural text around URLs.
-  Where: `streamkeep/clipboard.py`
-
-- [ ] P3 — Validate FTP STOR filenames for special characters
-  Why: `os.path.basename` strips paths but filenames with spaces or FTP-meaningful chars could fail.
-  Where: `streamkeep/upload/ftp.py`
-
 ## Definition of Done
 
 - Active planning remains in this file.

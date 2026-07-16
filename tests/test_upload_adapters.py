@@ -89,6 +89,37 @@ class UploadAdapterTests(unittest.TestCase):
             self.assertEqual(progress[-1], (file_path.stat().st_size, file_path.stat().st_size))
             self.assertTrue(fake_ftp.closed)
 
+    def test_ftp_upload_rejects_control_char_filename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # A filename with an embedded CRLF could inject a second FTP
+            # control-channel command after STOR.
+            file_path = Path(tmpdir) / "clip.bin"
+            file_path.write_bytes(b"streamkeep")
+            fake_ftp = _FakeFTP()
+            dest = FTPDestination({
+                "host": "ftp.example.com", "port": "21",
+                "username": "a", "password": "b", "remote_dir": "/",
+            })
+            with mock.patch(
+                "streamkeep.upload.ftp.ftplib.FTP", return_value=fake_ftp
+            ), mock.patch(
+                "streamkeep.upload.ftp.os.path.basename",
+                return_value="clip.bin\r\nDELE important",
+            ):
+                ok, msg = dest.upload(str(file_path))
+            self.assertFalse(ok)
+            self.assertIn("control characters", msg)
+            self.assertFalse(hasattr(fake_ftp, "command"))
+
+    def test_safe_remote_filename_rules(self):
+        assert FTPDestination._safe_remote_filename("/a/b/clip.mp4") == (
+            "clip.mp4", ""
+        )
+        name, err = FTPDestination._safe_remote_filename("bad\r\nname")
+        assert name == "" and "control" in err
+        name, err = FTPDestination._safe_remote_filename("..")
+        assert name == "" and err
+
     def test_ftp_connection_reports_invalid_port_cleanly(self):
         dest = FTPDestination({"host": "ftp.example.com", "port": "not-a-port"})
 
