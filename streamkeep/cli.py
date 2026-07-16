@@ -20,10 +20,8 @@ import sys
 from PyQt6.QtCore import QCoreApplication
 
 from . import VERSION
-from .config import load_config, write_log_line
 from .extractors.base import Extractor as _ExtBase
 from .paths import _CREATE_NO_WINDOW
-from . import db as _db
 
 
 def _get_output_stream():
@@ -103,7 +101,8 @@ def _check_ffmpeg():
 
 def _record_cli_failure(url, stage, error, output_dir="", info=None):
     try:
-        _db.save_failed_job(
+        from . import db
+        db.save_failed_job(
             url=url,
             platform=(info.platform if info else ""),
             title=(info.title if info else url),
@@ -127,9 +126,11 @@ def _run_download(args):
         print("Error: ffmpeg not found in PATH.")
         sys.exit(1)
 
+    from . import db
+    from .config import install_file_logging, load_config, write_log_line
+
     app = QCoreApplication(sys.argv)
-    _db.init_db()
-    from .config import install_file_logging
+    db.init_db()
     install_file_logging()
 
     from .workers import FetchWorker, DownloadWorker
@@ -267,7 +268,8 @@ def _run_download(args):
 def _on_download_done(state, app, output_dir):
     _print_progress("")
     _print_line(f"\nDownload complete -> {output_dir}")
-    _db.mark_failed_jobs_resolved_for_url(state.get("source_url", ""))
+    from . import db
+    db.mark_failed_jobs_resolved_for_url(state.get("source_url", ""))
     try:
         from .verify import create_archive_manifest
         manifest = create_archive_manifest(output_dir, write_sidecar=True)
@@ -303,20 +305,19 @@ def _run_server(args):
     """Start the REST API / web remote server headlessly."""
     config_dir = getattr(args, "config_dir", "") or ""
     if config_dir:
-        from . import paths
-        from pathlib import Path
-        paths.CONFIG_DIR = Path(config_dir)
-        paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        from .paths import CONFIG_DIR
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     output_dir = getattr(args, "output_dir", "") or ""
     if output_dir:
+        from .config import load_config, save_config
         cfg = load_config()
         cfg["output_dir"] = output_dir
-        from .config import save_config
         save_config(cfg)
 
+    from . import db
     app = QCoreApplication(sys.argv)
-    _db.init_db()
+    db.init_db()
     from .config import install_file_logging
     install_file_logging()
 
@@ -382,27 +383,28 @@ def _run_snapshot(args):
 def _run_db_maintenance(args):
     """Run a database maintenance action."""
     import json as _json
-    _db.init_db()
+    from . import db
+    db.init_db()
     action = getattr(args, "action", "info")
     if action == "info":
-        diag = _db.db_diagnostics()
+        diag = db.db_diagnostics()
         _print_line(_json.dumps(diag, indent=2))
     elif action == "check":
-        ok, detail = _db.check_integrity()
+        ok, detail = db.check_integrity()
         _print_line(f"Integrity: {'PASS' if ok else 'FAIL'}")
         _print_line(detail)
         if not ok:
             sys.exit(1)
     elif action == "optimize":
-        result = _db.run_optimize()
+        result = db.run_optimize()
         _print_line(f"Optimize: {result}")
     elif action == "checkpoint":
-        ok, detail = _db.checkpoint_wal()
+        ok, detail = db.checkpoint_wal()
         _print_line(f"WAL checkpoint: {'OK' if ok else 'FAILED'} — {detail}")
         if not ok:
             sys.exit(1)
     elif action == "vacuum":
-        ok, detail = _db.vacuum_after_backup()
+        ok, detail = db.vacuum_after_backup()
         _print_line(f"Vacuum: {'OK' if ok else 'FAILED'} — {detail}")
         if not ok:
             sys.exit(1)
@@ -416,6 +418,8 @@ def build_parser():
         description=f"StreamKeep v{VERSION} — multi-platform stream/VOD downloader",
     )
     p.add_argument("--version", action="version", version=f"StreamKeep v{VERSION}")
+    p.add_argument("--config-dir", default="",
+                   help="Override the config/database directory")
 
     sub = p.add_subparsers(dest="command")
 
@@ -428,6 +432,8 @@ def build_parser():
                     help="Output directory (default: config or ~/Videos/StreamKeep)")
     dl.add_argument("--rate-limit", default="",
                     help="Bandwidth limit (e.g. 5M, 500K)")
+    dl.add_argument("--config-dir", default=argparse.SUPPRESS,
+                    help="Override the config/database directory")
 
     # -- server --
     srv = sub.add_parser("server", help="Start REST API / web remote UI")
@@ -437,24 +443,30 @@ def build_parser():
                      help="Bind address (127.0.0.1 or 0.0.0.0)")
     srv.add_argument("--token", default="",
                      help="Fixed bearer token (default: random per launch)")
-    srv.add_argument("--config-dir", default="",
-                     help="Override config directory path")
+    srv.add_argument("--config-dir", default=argparse.SUPPRESS,
+                     help="Override the config/database directory")
     srv.add_argument("--output-dir", default="",
                      help="Default output directory for queued downloads")
 
     # -- list-extractors --
-    sub.add_parser("extractors", help="List supported platforms")
+    ext_p = sub.add_parser("extractors", help="List supported platforms")
+    ext_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
 
     # -- db maintenance --
     db_p = sub.add_parser("db", help="Database maintenance and diagnostics")
     db_p.add_argument("action", nargs="?", default="info",
                       choices=["info", "check", "optimize", "checkpoint", "vacuum"],
                       help="Action: info (default), check, optimize, checkpoint, vacuum")
+    db_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                      help="Override the config/database directory")
 
     # -- diagnostic snapshot --
     diag_p = sub.add_parser("snapshot", help="Export a privacy-redacted diagnostic ZIP")
     diag_p.add_argument("-o", "--output", default="",
                         help="Output path (default: streamkeep_diag_<timestamp>.zip)")
+    diag_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                        help="Override the config/database directory")
 
     # Legacy flat args for backward compat
     p.add_argument("--url", dest="legacy_url", default="",
@@ -471,6 +483,16 @@ def run_cli(argv=None):
     """Parse args and dispatch to the appropriate handler."""
     p = build_parser()
     args = p.parse_args(argv)
+
+    config_dir = getattr(args, "config_dir", "") or ""
+    if config_dir:
+        from .paths import bind_config_dir
+        bind_config_dir(config_dir)
+
+    # Import only after the optional root override is bound so crash/config/
+    # database modules all capture the same filesystem boundary.
+    from .crash_log import setup_crash_logging
+    setup_crash_logging()
 
     # Handle legacy flat args
     if args.legacy_list:
@@ -512,7 +534,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors",
+        "download", "dl", "server", "extractors", "db", "snapshot",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
     return any(arg in cli_triggers for arg in sys.argv[1:])

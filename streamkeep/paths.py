@@ -62,3 +62,22 @@ LOG_FILE = CONFIG_DIR / "streamkeep.log"
 LOG_FILE_BACKUP = CONFIG_DIR / "streamkeep.log.1"
 LOG_FILE_MAX_BYTES = 2_000_000  # rotate at ~2 MB
 CRASH_LOG = CONFIG_DIR / "crash.log"
+
+
+def bind_config_dir(path):
+    """Bind every config-derived path before stateful modules are imported.
+
+    CLI entry points call this immediately after argument parsing.  Modules
+    such as :mod:`streamkeep.config` and :mod:`streamkeep.db` intentionally
+    capture these values at import time, so rebinding must happen before those
+    imports rather than mutating only ``CONFIG_DIR`` later.
+    """
+    global CONFIG_DIR, CONFIG_FILE, LOG_FILE, LOG_FILE_BACKUP, CRASH_LOG
+
+    config_dir = Path(path).expanduser().resolve()
+    CONFIG_DIR = config_dir
+    CONFIG_FILE = config_dir / "config.json"
+    LOG_FILE = config_dir / "streamkeep.log"
+    LOG_FILE_BACKUP = config_dir / "streamkeep.log.1"
+    CRASH_LOG = config_dir / "crash.log"
+    return config_dir

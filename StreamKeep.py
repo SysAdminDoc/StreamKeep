@@ -38,7 +38,7 @@ def _launcher_has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors",
+        "download", "dl", "server", "extractors", "db", "snapshot",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
         "--internal-ytdlp",
     }
@@ -66,7 +66,6 @@ def _branding_icon_path() -> Path:
 
 from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
 from streamkeep.paths import _CREATE_NO_WINDOW
-from streamkeep.crash_log import setup_crash_logging
 
 
 def _restore_internal_cli_streams():
@@ -128,13 +127,14 @@ def main():
     if _run_internal_ytdlp():
         return
 
-    setup_crash_logging()
-
     # CLI / headless mode (F42): detect subcommands before creating the GUI
     from streamkeep.cli import has_cli_args, run_cli
     if has_cli_args():
         run_cli()
         return
+
+    from streamkeep.crash_log import setup_crash_logging
+    setup_crash_logging()
 
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import QApplication, QMessageBox
