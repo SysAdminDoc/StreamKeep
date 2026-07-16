@@ -5,6 +5,7 @@ The index lives in ``%APPDATA%/StreamKeep/search.db``.  Each row stores
 a recording path, text segment, and start/end timestamps in seconds.
 """
 
+import html
 import json
 import os
 import re
@@ -13,6 +14,28 @@ import threading
 
 from .paths import CONFIG_DIR
 from .sqlite_runtime import connect as sqlite_connect
+
+# WebVTT timestamp: hours are optional (MM:SS.mmm and HH:MM:SS.mmm are both
+# valid per the W3C WebVTT spec); minutes/seconds are two digits, millis three.
+_VTT_TS = r"(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})"
+_VTT_CUE_RE = re.compile(_VTT_TS + r"\s*-->\s*" + _VTT_TS)
+_VTT_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _vtt_ts_to_secs(hours, minutes, seconds, millis):
+    return (
+        (int(hours) if hours else 0) * 3600
+        + int(minutes) * 60
+        + int(seconds)
+        + int(millis) / 1000
+    )
+
+
+def _strip_vtt_markup(text):
+    """Drop WebVTT cue tags (voice/class/italic/timestamp spans) and unescape
+    entities so indexed text is plain and searchable."""
+    text = _VTT_TAG_RE.sub("", text)
+    return html.unescape(text).strip()
 
 DB_PATH = CONFIG_DIR / "search.db"
 SCHEMA_VERSION = 2
@@ -109,7 +132,13 @@ def _parse_srt(path):
 
 
 def _parse_vtt(path):
-    """Parse a .vtt file into segments."""
+    """Parse a .vtt file into segments.
+
+    WebVTT-spec-correct: accepts both ``MM:SS.mmm`` and ``HH:MM:SS.mmm`` cue
+    timestamps, ignores cue identifiers and trailing cue settings, strips
+    inline markup, and isolates malformed cues (a bad block is skipped rather
+    than aborting the file).
+    """
     segments = []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -117,23 +146,31 @@ def _parse_vtt(path):
     except OSError:
         return segments
 
+    content = content.replace("﻿", "")
     blocks = re.split(r"\n\s*\n", content.strip())
     for block in blocks:
         lines = block.strip().split("\n")
+        if not lines:
+            continue
+        header = lines[0].strip().upper()
+        # Skip the file signature and non-cue blocks.
+        if header.startswith(("WEBVTT", "NOTE", "STYLE", "REGION")):
+            continue
+        cue_idx = None
+        cue_match = None
         for i, line in enumerate(lines):
-            m = re.match(
-                r"(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*"
-                r"(\d{2}):(\d{2}):(\d{2})\.(\d{3})",
-                line,
-            )
-            if m:
-                g = [int(x) for x in m.groups()]
-                start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
-                end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
-                text = " ".join(lines[i + 1:]).strip()
-                if text:
-                    segments.append((start, end, text))
+            match = _VTT_CUE_RE.match(line.strip())
+            if match:
+                cue_idx, cue_match = i, match
                 break
+        if cue_match is None:
+            continue  # malformed / setting-only block — isolate and skip
+        g = cue_match.groups()
+        start = _vtt_ts_to_secs(g[0], g[1], g[2], g[3])
+        end = _vtt_ts_to_secs(g[4], g[5], g[6], g[7])
+        text = _strip_vtt_markup(" ".join(lines[cue_idx + 1:]))
+        if text:
+            segments.append((start, end, text))
     return segments
 
 
@@ -152,10 +189,17 @@ def _parse_transcript_json(path):
     for item in items:
         if not isinstance(item, dict):
             continue
-        text = item.get("text", "").strip()
+        # Accept both the internal shape ({text, start, end}) and the Podcast
+        # Namespace JSON transcript shape ({body, startTime, endTime, speaker}).
+        text = str(item.get("text") or item.get("body") or "").strip()
+        speaker = str(item.get("speaker") or "").strip()
+        if speaker and text:
+            text = f"{speaker}: {text}"
+        raw_start = item.get("start", item.get("startTime", 0))
+        raw_end = item.get("end", item.get("endTime"))
         try:
-            start = float(item.get("start", 0) or 0)
-            end = float(item.get("end", start + 1) or (start + 1))
+            start = float(raw_start or 0)
+            end = float(raw_end if raw_end is not None else start + 1)
         except (TypeError, ValueError):
             continue
         if text:

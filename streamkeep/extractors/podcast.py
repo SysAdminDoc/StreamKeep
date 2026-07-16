@@ -1,6 +1,7 @@
 """Podcast RSS — parses RSS/XML feeds for episode listing."""
 
 import html
+import json
 import re
 import urllib.parse
 
@@ -8,6 +9,55 @@ from .. import CURL_UA
 from ..http import curl
 from ..models import QualityInfo, StreamInfo, VODInfo
 from .base import Extractor
+
+
+def parse_podcast_chapters_json(text):
+    """Parse a Podcast Namespace ``application/json+chapters`` document.
+
+    Returns a list of ``{title, start, end, img, url}`` dicts ordered by start
+    time, matching the player's chapter model. Each chapter ends where the next
+    begins (per the spec, ``endTime`` is optional); a chapter flagged
+    ``toc: false`` is excluded from the table of contents. Malformed entries are
+    skipped rather than aborting the whole file.
+    """
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    raw = data.get("chapters") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    parsed = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("toc") is False:
+            continue
+        try:
+            start = float(entry.get("startTime"))
+        except (TypeError, ValueError):
+            continue
+        end = None
+        if entry.get("endTime") is not None:
+            try:
+                end = float(entry.get("endTime"))
+            except (TypeError, ValueError):
+                end = None
+        parsed.append({
+            "title": str(entry.get("title") or "").strip(),
+            "start": start,
+            "end": end,
+            "img": str(entry.get("img") or "").strip(),
+            "url": str(entry.get("url") or "").strip(),
+        })
+    parsed.sort(key=lambda c: c["start"])
+    # Fill missing end times from the next chapter's start.
+    for index, chapter in enumerate(parsed):
+        if chapter["end"] is None:
+            chapter["end"] = (
+                parsed[index + 1]["start"] if index + 1 < len(parsed) else 0.0
+            )
+    return parsed
 
 
 class PodcastRSSExtractor(Extractor):

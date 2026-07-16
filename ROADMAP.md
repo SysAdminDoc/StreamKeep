@@ -174,11 +174,11 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Each adapter type has a versioned interface, declared permissions/dependencies, timeouts/cancellation, typed outcomes, compatibility diagnostics, and a minimal sample test; unsupported manifest versions fail closed; no plugin directory is appended globally to `sys.path`.
   Complexity: L
 
-- [ ] P2 — Parse WebVTT and Podcast Namespace transcript/chapter metadata correctly
-  Why: Regex-only WebVTT indexing rejects valid minute-only timestamps and loses cue structure, while standardized podcast transcripts/chapters are not imported into the existing search/player model.
-  Evidence: `streamkeep/search.py:111-137`, podcast extractor/feed code; W3C WebVTT (https://www.w3.org/TR/webvtt1/) and Podcast Namespace 1.0 (https://github.com/Podcastindex-org/podcast-namespace/blob/main/docs/1.0.md).
-  Touches: transcript parser/indexer, podcast extraction, sidecar downloader, search, player chapters, fixtures.
-  Acceptance: Valid `MM:SS.mmm` and `HH:MM:SS.mmm` cues, identifiers/settings/markup, malformed-cue isolation, transcript/chapter URLs, hashes, language, and refresh behavior are covered by fixtures; indexed hits jump to the correct timestamp offline.
+- [ ] P2 — Download podcast transcript/chapter sidecars from feed metadata with hashes and refresh
+  Why: The WebVTT and Podcast Namespace JSON parsers are now correct and import into the search/player model, but `<podcast:transcript>` / `<podcast:chapters>` URLs are not yet discovered from feeds, fetched into per-recording sidecars, hashed for change detection, or refreshed.
+  Evidence: `streamkeep/extractors/podcast.py` (feed item parsing), `parse_podcast_chapters_json`, `streamkeep/search.py` transcript indexing, `streamkeep/workers/finalize.py`.
+  Touches: podcast feed parsing (transcript/chapter URL + type + language), sidecar downloader (bounded, hashed), finalize/refresh wiring, tests.
+  Acceptance: Eligible episodes discover transcript/chapter URLs with type and language, download them into hashed sidecars next to the recording, skip re-download when the hash is unchanged, and feed the existing (now-correct) parsers; malformed/absent metadata is non-fatal.
   Complexity: M
 
 ### P3 — Under Consideration
