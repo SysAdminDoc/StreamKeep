@@ -28,6 +28,7 @@ Mission: any video or audio, from any website, in any format, at any quality the
 - [ ] V1 — Per-download Format & Output control
   What: raw yt-dlp format-spec override field; format-sort presets (prefer-AV1/cap-res/smallest via -S); container choice mp4/mkv/webm/original (--merge-output-format); first-class audio-extract mode (-x --audio-format best/mp3/m4a/opus/flac/wav + --audio-quality) at download time, GUI + CLI.
   Verify: real yt-dlp download lands in chosen container; audio mode produces the chosen codec (ffprobe-checked); raw spec passes through verbatim; tests cover cmd construction.
+  Implementation notes (verified 2026-07-16): wire per-download controls into the existing Advanced-overrides panel (`streamkeep/ui/tabs/download.py:452-519`, `get_adv_overrides`/`_reset_adv_overrides` pattern; worker config at ~line 1955). Worker `workers/download.py` `run()` hardcodes outfile `{label}.mp4` (line 319) — container/audio modes must change the expected extension; `_reconcile_output` already adopts sibling containers; "best" audio format has no predictable ext, so use `-o base.%(ext)s` + post-run file discovery. Scope to `ytdlp_direct` format type (HLS/ffmpeg path stays mp4). Extend audio extensions into `verify.py` MEDIA_EXTS, `storage.py`, `gallery.py:118`, `intelligence/thumbnail.py`, `integrations/media_server.py` sets or audio outputs are invisible to verify/storage scans. CLI wiring point: `cli.py:194` (DownloadWorker construction).
   Effort: M
 
 - [ ] V2 — Subtitle suite
