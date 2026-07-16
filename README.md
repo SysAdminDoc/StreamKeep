@@ -98,6 +98,8 @@ python StreamKeep.py download "https://example.com/video" --sponsorblock-mark in
 python StreamKeep.py download "https://example.com/video" --sub-langs en,es --auto-subs --convert-subs srt --sub-delivery sidecar
 python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite --fragment-retries 20 --retry-sleep "fragment:exp=1:20" --live-from-start
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
+python StreamKeep.py import-har capture.har --headers
+python StreamKeep.py import-har capture.har --json
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
 python StreamKeep.py server --trusted-proxy-origin https://streamkeep.example.lan --port 8765
 python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup

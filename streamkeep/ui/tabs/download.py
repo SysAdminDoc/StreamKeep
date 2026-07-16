@@ -3422,7 +3422,8 @@ class DownloadTabMixin:
         layout = QVBoxLayout(dlg)
 
         hint = QLabel(
-            "Paste URLs below (one per line) or load from a text file.\n"
+            "Paste URLs below (one per line) or load from a text or .har file.\n"
+            "A HAR capture is scanned for media/manifest URLs.\n"
             "Lines starting with # are comments and will be skipped."
         )
         layout.addWidget(hint)
@@ -3437,15 +3438,39 @@ class DownloadTabMixin:
 
         def _on_load_file():
             path, _ = QFileDialog.getOpenFileName(
-                dlg, "Open URL list", "",
-                "Text files (*.txt);;All files (*)",
+                dlg, "Open URL list or HAR capture", "",
+                "URL lists and HAR (*.txt *.har);;Text files (*.txt);;"
+                "HAR captures (*.har);;All files (*)",
             )
-            if path:
+            if not path:
+                return
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+            except Exception as e:
+                self._set_status(f"Failed to read file: {e}", "error")
+                return
+            if path.lower().endswith(".har") or raw.lstrip().startswith("{"):
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        text_edit.setPlainText(f.read())
-                except Exception as e:
-                    self._set_status(f"Failed to read file: {e}", "error")
+                    from ...har import parse_har
+                    links = parse_har(raw)
+                except ValueError:
+                    links = []
+                if links:
+                    text_edit.setPlainText(
+                        "\n".join(link["url"] for link in links)
+                    )
+                    status_label.setText(
+                        f"Extracted {len(links)} media/manifest URL(s) from HAR"
+                    )
+                    return
+                if path.lower().endswith(".har"):
+                    self._set_status(
+                        "No media/manifest URLs found in the HAR capture.",
+                        "warning",
+                    )
+                    return
+            text_edit.setPlainText(raw)
 
         load_btn.clicked.connect(_on_load_file)
         btn_row.addWidget(load_btn)

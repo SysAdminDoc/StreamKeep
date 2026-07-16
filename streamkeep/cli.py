@@ -680,6 +680,42 @@ def _run_backup(args):
         sys.exit(1)
 
 
+def _run_har_import(args):
+    """Extract media/manifest URLs (and replay headers) from a HAR capture."""
+    from .har import har_entry_ytdlp_headers, parse_har
+
+    path = str(getattr(args, "path", "") or "")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            raw = handle.read()
+    except OSError as error:
+        _print_line(f"Error: cannot read HAR file: {error}")
+        sys.exit(2)
+    try:
+        links = parse_har(
+            raw, include_segments=bool(getattr(args, "include_segments", False))
+        )
+    except ValueError as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+    if not links:
+        _print_line("No media or streaming-manifest requests found in the HAR capture.")
+        return
+
+    if getattr(args, "json", False):
+        import json as _json
+        _print_line(_json.dumps(links, indent=2, ensure_ascii=False))
+        return
+
+    for link in links:
+        _print_line(link["url"])
+        if getattr(args, "headers", False):
+            header_argv = har_entry_ytdlp_headers(link)
+            for i in range(0, len(header_argv), 2):
+                _print_line(f"    {header_argv[i]} {header_argv[i + 1]!r}")
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 def build_parser():
@@ -878,6 +914,27 @@ def build_parser():
     backup_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                           help="Override the config/database directory")
 
+    # -- HAR import: extract media/manifest links from a browser capture --
+    har_p = sub.add_parser(
+        "import-har",
+        help="Extract media/manifest URLs and replay headers from a HAR capture",
+    )
+    har_p.add_argument("path", help="HAR file exported from a browser network panel")
+    har_p.add_argument(
+        "--json", action="store_true",
+        help="Emit the full link table as JSON (URLs, type, and replay headers)",
+    )
+    har_p.add_argument(
+        "--headers", action="store_true",
+        help="Also print yt-dlp --add-header arguments beneath each URL",
+    )
+    har_p.add_argument(
+        "--include-segments", action="store_true",
+        help="Keep individual HLS/DASH segment URLs instead of collapsing to manifests",
+    )
+    har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
+
     # -- packaged startup contract --
     startup_p = sub.add_parser(
         "startup-check",
@@ -976,6 +1033,8 @@ def run_cli(argv=None):
         _run_snapshot(args)
     elif args.command == "backup":
         _run_backup(args)
+    elif args.command == "import-har":
+        _run_har_import(args)
     elif args.command == "startup-check":
         _run_startup_check(args)
     else:
