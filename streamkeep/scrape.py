@@ -9,6 +9,7 @@ platform-specific parsers.
 import os
 import re
 import sys
+import time
 import urllib.parse
 
 from . import CURL_UA
@@ -22,6 +23,42 @@ from .models import QualityInfo, StreamInfo
 _PLAYWRIGHT_READY = None
 _PLAYWRIGHT_LAST_CHECK = 0.0
 _PLAYWRIGHT_RETRY_AFTER = 300  # 5 minutes
+
+_HEADLESS_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_HEADLESS_MAX_WAIT_SECONDS = 15.0
+_HEADLESS_MAX_LINKS = 100
+_HEADLESS_MAX_REQUESTS = 512
+
+
+def _safe_headless_url(url):
+    """Return a normalized HTTP(S) URL suitable for browser navigation.
+
+    Browser scraping is deliberately narrower than generic URL parsing: local
+    browser/file schemes and credential-bearing authority strings are never
+    handed to Chromium.
+    """
+    text = str(url or "").strip()
+    if not text or len(text) > 8192:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme.lower() not in _HEADLESS_ALLOWED_SCHEMES:
+            return ""
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            return ""
+        # Accessing ``port`` validates malformed values such as ``:99999``.
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return ""
+    return text
+
+
+def _launch_scrape_browser(playwright):
+    """Launch Chromium with its platform sandbox left enabled."""
+    return playwright.chromium.launch(
+        headless=True,
+        args=["--mute-audio"],
+    )
 
 
 def _cancelled(checker=None):
@@ -129,6 +166,20 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
     """Load a page in a headless Chromium browser and capture any network
     requests that look like media streams. Catches lazy-loaded players
     that the regex scraper can't see."""
+    page_url = _safe_headless_url(page_url)
+    if not page_url:
+        if log_fn:
+            log_fn("[HEADLESS] Refused non-HTTP(S) or credential-bearing URL.")
+        return []
+
+    try:
+        max_links = max(0, min(_HEADLESS_MAX_LINKS, int(max_links)))
+        wait_seconds = max(0.0, min(_HEADLESS_MAX_WAIT_SECONDS, float(wait_seconds)))
+    except (TypeError, ValueError, OverflowError):
+        return []
+    if max_links == 0:
+        return []
+
     if not ensure_playwright_browser(log_fn, should_cancel=should_cancel):
         return []
     if _cancelled(should_cancel):
@@ -146,6 +197,8 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
 
     captured = []
     seen = set()
+    request_count = 0
+    deadline = time.monotonic() + wait_seconds + 10.0
 
     def add(u, hint):
         if _cancelled(should_cancel):
@@ -168,18 +221,49 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
         with sync_playwright() as p:
             if _cancelled(should_cancel):
                 return []
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--mute-audio", "--no-sandbox"],
-            )
+            browser = _launch_scrape_browser(p)
             context = None
             page = None
             try:
                 context = browser.new_context(
                     user_agent=CURL_UA,
                     viewport={"width": 1280, "height": 800},
+                    accept_downloads=False,
+                    service_workers="block",
+                    ignore_https_errors=False,
                 )
                 page = context.new_page()
+                page.set_default_timeout(750)
+                page.set_default_navigation_timeout(8000)
+
+                def route_request(route, req):
+                    nonlocal request_count
+                    if _cancelled(should_cancel) or time.monotonic() >= deadline:
+                        route.abort("blockedbyclient")
+                        return
+                    if not _safe_headless_url(req.url):
+                        route.abort("blockedbyclient")
+                        return
+                    request_count += 1
+                    if request_count > _HEADLESS_MAX_REQUESTS:
+                        route.abort("blockedbyclient")
+                        return
+                    resource_type = req.resource_type
+                    if resource_type == "media":
+                        add(req.url, "headless media")
+                        # Capturing the media URL is sufficient. Do not let the
+                        # browser stream an unbounded response into memory/disk.
+                        route.abort("blockedbyclient")
+                        return
+                    if resource_type in ("image", "font"):
+                        route.abort("blockedbyclient")
+                        return
+                    route.continue_()
+
+                context.route("**/*", route_request)
+                page.on("dialog", lambda dialog: dialog.dismiss())
+                page.on("download", lambda download: download.cancel())
+                page.on("popup", lambda popup: popup.close())
 
                 def on_request(req):
                     if _cancelled(should_cancel):
@@ -209,7 +293,7 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                 if log_fn:
                     log_fn(f"[HEADLESS] Loading {page_url[:80]} (up to {wait_seconds}s)")
                 try:
-                    nav_timeout = max(4000, min(12000, int((wait_seconds + 2) * 1000)))
+                    nav_timeout = max(2000, min(8000, int((wait_seconds + 1) * 1000)))
                     page.goto(page_url, wait_until="domcontentloaded", timeout=nav_timeout)
                 except Exception as nav_err:
                     if log_fn:
@@ -245,7 +329,7 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
 
                 try:
                     remaining_ms = max(0, int(wait_seconds * 1000))
-                    while remaining_ms > 0:
+                    while remaining_ms > 0 and time.monotonic() < deadline:
                         if _cancelled(should_cancel):
                             return captured
                         step = min(250, remaining_ms)
