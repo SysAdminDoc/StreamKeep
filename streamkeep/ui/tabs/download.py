@@ -1745,7 +1745,14 @@ class DownloadTabMixin:
         for q in qualities:
             bw_mbps = q.bandwidth / 1_000_000 if q.bandwidth else 0
             ft_tag = f" [{q.format_type.upper()}]" if q.format_type != "hls" else ""
-            label = f"{q.name} ({q.resolution}, {bw_mbps:.1f} Mbps){ft_tag}"
+            fps = getattr(q, "frame_rate", 0.0) or 0.0
+            fps_tag = f" {fps:.0f}fps" if fps else ""
+            vr = str(getattr(q, "video_range", "") or "").upper()
+            hdr_tag = " HDR" if vr in ("PQ", "HLG") else ""
+            label = (
+                f"{q.name} ({q.resolution}{fps_tag}{hdr_tag}, "
+                f"{bw_mbps:.1f} Mbps){ft_tag}"
+            )
             self.quality_combo.addItem(label, q)
         if qualities:
             selected_idx = self._choose_default_quality_index(

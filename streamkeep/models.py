@@ -15,8 +15,11 @@ class MediaTrackInfo:
     url: str = ""
     group_id: str = ""
     codec: str = ""
-    bandwidth: int = 0
+    bandwidth: int = 0              # peak BANDWIDTH (bits/s)
+    average_bandwidth: int = 0      # AVERAGE-BANDWIDTH when advertised
     resolution: str = ""
+    frame_rate: float = 0.0         # FRAME-RATE (HLS) / @frameRate (DASH)
+    video_range: str = ""           # SDR / PQ / HLG (VIDEO-RANGE)
     stream_index: int = 0
     default: bool = False
     autoselect: bool = False
@@ -30,12 +33,44 @@ class QualityInfo:
     url: str = ""
     resolution: str = ""
     bandwidth: int = 0
+    average_bandwidth: int = 0
+    frame_rate: float = 0.0
+    video_range: str = ""           # SDR / PQ / HLG for HDR-aware selection
     format_type: str = "hls"       # hls, mp4, dash, ytdlp_direct
     audio_url: str = ""             # If set, video is video-only and needs audio merge
     ytdlp_source: str = ""          # Original page URL for ytdlp_direct downloads
     ytdlp_format: str = ""          # Format spec (e.g. "137+140")
     tracks: list[MediaTrackInfo] = field(default_factory=list)
     primary_track_id: str = ""
+
+
+@dataclass
+class HLSSegment:
+    """One media segment from an HLS media playlist."""
+    uri: str = ""
+    duration: float = 0.0
+    media_sequence: int = 0         # absolute EXT-X-MEDIA-SEQUENCE index
+    discontinuity_sequence: int = 0
+    program_date_time: str = ""
+    byterange: str = ""
+    gap: bool = False               # EXT-X-GAP — segment is a placeholder
+
+
+@dataclass
+class HLSMediaPlaylist:
+    """A parsed HLS media (segment) playlist with sequence identity."""
+    target_duration: float = 0.0
+    media_sequence: int = 0
+    discontinuity_sequence: int = 0
+    is_endlist: bool = False        # VOD (EXT-X-ENDLIST) vs live
+    total_duration: float = 0.0
+    start_time: str = ""
+    validator: str = ""             # strong HTTP validator (ETag/Last-Modified)
+    segments: list[HLSSegment] = field(default_factory=list)
+
+    @property
+    def is_live(self) -> bool:
+        return not self.is_endlist
 
 
 def default_media_tracks(quality):
@@ -206,6 +241,13 @@ class ResumeState:
     playlist_url: str = ""
     format_type: str = "hls"
     audio_url: str = ""
+    # HLS resume identity — a live playlist that has rolled past our window,
+    # changed its strong validator, or crossed a discontinuity is no longer
+    # safe to resume against and must fall back to a full restart.
+    playlist_validator: str = ""          # ETag or Last-Modified of the media playlist
+    media_sequence: int = 0               # EXT-X-MEDIA-SEQUENCE at download start
+    discontinuity_sequence: int = 0       # EXT-X-DISCONTINUITY-SEQUENCE at start
+    playlist_segment_count: int = 0       # segments present when resume was written
     selected_tracks: list[dict[str, object]] = field(default_factory=list)
     ytdlp_source: str = ""
     ytdlp_format: str = ""

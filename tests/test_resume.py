@@ -133,6 +133,42 @@ class ResumeTests(unittest.TestCase):
             self.assertTrue(state.ytdlp_embed_thumbnail)
             self.assertEqual(state.ytdlp_template_name, "Authenticated archive")
 
+    def test_hls_resume_identity_round_trips_and_sanitizes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sidecar = root / resume.SIDECAR_NAME
+            sidecar.write_text(
+                json.dumps({
+                    "playlist_validator": '"etag-abc123"',
+                    "media_sequence": 947210,
+                    "discontinuity_sequence": 31,
+                    "playlist_segment_count": 12,
+                }),
+                encoding="utf-8",
+            )
+            state = resume.load_resume_state(str(root))
+            self.assertIsNotNone(state)
+            self.assertEqual(state.playlist_validator, '"etag-abc123"')
+            self.assertEqual(state.media_sequence, 947210)
+            self.assertEqual(state.discontinuity_sequence, 31)
+            self.assertEqual(state.playlist_segment_count, 12)
+
+    def test_hls_identity_negative_values_clamp(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / resume.SIDECAR_NAME).write_text(
+                json.dumps({
+                    "media_sequence": -5,
+                    "discontinuity_sequence": "bad",
+                    "playlist_segment_count": 10**20,
+                }),
+                encoding="utf-8",
+            )
+            state = resume.load_resume_state(str(root))
+            self.assertEqual(state.media_sequence, 0)
+            self.assertEqual(state.discontinuity_sequence, 0)
+            self.assertEqual(state.playlist_segment_count, resume.MAX_SEGMENTS)
+
 
 if __name__ == "__main__":
     unittest.main()

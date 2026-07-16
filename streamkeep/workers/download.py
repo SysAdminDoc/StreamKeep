@@ -81,6 +81,14 @@ class DownloadWorker(QThread):
         # wrong key URI/value. Never copied into resume/config persistence.
         self.hls_key_override = ""
         self.hls_key_iv = ""
+        # HLS resume identity captured from the media playlist at start (via
+        # set_hls_playlist_identity). Persisted so a resumed live download can
+        # detect a rolled-past window / crossed discontinuity / changed
+        # validator and fall back to a full restart.
+        self.hls_playlist_validator = ""
+        self.hls_media_sequence = 0
+        self.hls_discontinuity_sequence = 0
+        self.hls_playlist_segment_count = 0
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -160,6 +168,14 @@ class DownloadWorker(QThread):
             state.ytdlp_embed_metadata = self.ytdlp_embed_metadata
             state.ytdlp_embed_thumbnail = self.ytdlp_embed_thumbnail
             state.ytdlp_template_name = self.ytdlp_template_name or ""
+            state.playlist_validator = self.hls_playlist_validator or ""
+            state.media_sequence = int(self.hls_media_sequence or 0)
+            state.discontinuity_sequence = int(
+                self.hls_discontinuity_sequence or 0
+            )
+            state.playlist_segment_count = int(
+                self.hls_playlist_segment_count or 0
+            )
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -169,6 +185,32 @@ class DownloadWorker(QThread):
                     self.output_dir, f"{label}.%(ext)s"
                 )
             save_resume_state(state)
+
+    def set_hls_playlist_identity(self, playlist):
+        """Capture resume identity from a parsed HLS media playlist.
+
+        Accepts an ``HLSMediaPlaylist`` (or any object exposing
+        ``media_sequence``/``discontinuity_sequence``/``segments``/
+        ``validator``). Values are copied into the resume sidecar on the next
+        ``attach_resume_state``/refresh so a later resume can call
+        ``resume_identity_matches`` against a freshly fetched playlist.
+        """
+        if playlist is None:
+            return
+        self.hls_playlist_validator = str(getattr(playlist, "validator", "") or "")
+        try:
+            self.hls_media_sequence = int(getattr(playlist, "media_sequence", 0) or 0)
+        except (TypeError, ValueError):
+            self.hls_media_sequence = 0
+        try:
+            self.hls_discontinuity_sequence = int(
+                getattr(playlist, "discontinuity_sequence", 0) or 0
+            )
+        except (TypeError, ValueError):
+            self.hls_discontinuity_sequence = 0
+        self.hls_playlist_segment_count = len(
+            getattr(playlist, "segments", []) or []
+        )
 
     def cancel(self):
         self._cancel = True

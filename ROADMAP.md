@@ -137,13 +137,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: One token/component stylesheet owns type, spacing, borders, density, focus, and states; System/Dark/Light/High Contrast plus density/accent settings are reachable and persistent; no fixed dimensions clip at the supported minimum or 200% scale; screenshot matrices detect theme/layout regressions.
   Complexity: M
 
-- [ ] P1 — Make HLS variant and resume semantics standards-complete
-  Why: The parser ignores rendition groups, codecs, frame rate, HDR, and average bandwidth, while resume identity is not tied to manifest validators and discontinuity/media sequence.
-  Evidence: `streamkeep/hls.py`, `streamkeep/resume.py`; RFC 8216 (https://www.rfc-editor.org/info/rfc8216/); refines existing extractor/protocol resilience work.
-  Touches: typed HLS models/parser, quality UI, resume state, protocol fixtures.
-  Acceptance: `EXT-X-STREAM-INF` and `EXT-X-MEDIA` associate audio/subtitle/language variants; codec/FPS/HDR/average bandwidth reach format selection; resumed segments key on manifest validator plus media/discontinuity sequence; fixture tests cover live rollover, gaps, discontinuities, alternate renditions, and malformed playlists.
-  Complexity: M
-
 ### P2 — Later
 
 - [ ] P2 — Expose archive maintenance as one dry-run-first workflow

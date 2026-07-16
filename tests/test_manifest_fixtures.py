@@ -9,8 +9,13 @@ import unittest
 from pathlib import Path
 
 from streamkeep.dash import parse_mpd_xml
-from streamkeep.hls import parse_hls_master, parse_hls_duration
-from streamkeep.models import default_media_tracks
+from streamkeep.hls import (
+    parse_hls_duration,
+    parse_hls_master,
+    parse_hls_media_playlist,
+    resume_identity_matches,
+)
+from streamkeep.models import ResumeState, default_media_tracks
 
 FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
 
@@ -147,12 +152,118 @@ class HLSMasterPlaylistTests(unittest.TestCase):
         )
 
 
+    def test_frame_rate_hdr_and_average_bandwidth_reach_selection(self):
+        qualities = parse_hls_master(
+            _read("master_hdr_fps.m3u8"),
+            "https://cdn.example.com/live/master.m3u8",
+        )
+        self.assertEqual(len(qualities), 2)
+        uhd = next(q for q in qualities if q.resolution == "3840x2160")
+        self.assertAlmostEqual(uhd.frame_rate, 59.94, places=2)
+        self.assertEqual(uhd.video_range, "PQ")
+        self.assertEqual(uhd.bandwidth, 16000000)
+        self.assertEqual(uhd.average_bandwidth, 12000000)
+        video = next(t for t in uhd.tracks if t.kind == "video")
+        self.assertAlmostEqual(video.frame_rate, 59.94, places=2)
+        self.assertEqual(video.video_range, "PQ")
+        sdr = next(q for q in qualities if q.resolution == "1920x1080")
+        self.assertEqual(sdr.video_range, "SDR")
+        self.assertAlmostEqual(sdr.frame_rate, 29.97, places=2)
+
+
 class HLSMediaPlaylistTests(unittest.TestCase):
     def test_media_playlist_duration_and_segments(self):
         total, start_time, seg_count = parse_hls_duration(_read("media.m3u8"))
         self.assertEqual(seg_count, 4)
         self.assertIn("2026-07-01", start_time)
         self.assertAlmostEqual(total, 38.5, places=1)
+
+    def test_typed_media_playlist_is_vod_with_sequence(self):
+        playlist = parse_hls_media_playlist(
+            _read("media.m3u8"), "https://cdn.example.com/",
+        )
+        self.assertTrue(playlist.is_endlist)
+        self.assertFalse(playlist.is_live)
+        self.assertEqual(playlist.media_sequence, 0)
+        self.assertEqual(len(playlist.segments), 4)
+        self.assertEqual(playlist.target_duration, 10.0)
+        self.assertEqual(
+            [s.media_sequence for s in playlist.segments], [0, 1, 2, 3]
+        )
+        self.assertEqual(
+            playlist.segments[0].uri, "https://cdn.example.com/seg0.ts"
+        )
+        self.assertAlmostEqual(playlist.total_duration, 38.5, places=1)
+
+    def test_live_rollover_tracks_sequence_and_discontinuity(self):
+        playlist = parse_hls_media_playlist(_read("live_rollover.m3u8"))
+        self.assertTrue(playlist.is_live)
+        self.assertEqual(playlist.media_sequence, 947210)
+        self.assertEqual(playlist.discontinuity_sequence, 31)
+        self.assertEqual(
+            [s.media_sequence for s in playlist.segments],
+            [947210, 947211, 947212],
+        )
+        # The discontinuity between segment 0 and 1 advances the per-segment
+        # discontinuity sequence.
+        self.assertEqual(
+            [s.discontinuity_sequence for s in playlist.segments],
+            [31, 32, 32],
+        )
+        self.assertAlmostEqual(playlist.total_duration, 17.5, places=1)
+
+    def test_gaps_and_byterange_are_captured(self):
+        playlist = parse_hls_media_playlist(_read("media_gap.m3u8"))
+        self.assertEqual([s.gap for s in playlist.segments], [False, True, False])
+        self.assertEqual(playlist.segments[2].byterange, "75232@0")
+        self.assertTrue(playlist.is_endlist)
+        self.assertEqual(playlist.discontinuity_sequence, 2)
+
+    def test_malformed_extinf_isolates_bad_segment(self):
+        playlist = parse_hls_media_playlist(_read("media_malformed.m3u8"))
+        # seg6 has a non-numeric EXTINF and is skipped, but sequence numbering
+        # stays aligned so seg7 keeps its true media-sequence position.
+        self.assertEqual(
+            [s.uri for s in playlist.segments], ["seg5.ts", "seg7.ts"]
+        )
+        self.assertEqual(
+            [s.media_sequence for s in playlist.segments], [5, 7]
+        )
+        self.assertAlmostEqual(playlist.total_duration, 19.0, places=1)
+
+
+class HLSResumeIdentityTests(unittest.TestCase):
+    def _state(self, **kw):
+        base = dict(
+            playlist_validator="etag-1",
+            media_sequence=100,
+            discontinuity_sequence=2,
+            playlist_segment_count=3,
+        )
+        base.update(kw)
+        return ResumeState(**base)
+
+    def test_identical_identity_can_resume(self):
+        playlist = parse_hls_media_playlist(_read("media_gap.m3u8"))
+        playlist.validator = "etag-1"
+        self.assertTrue(resume_identity_matches(self._state(), playlist))
+
+    def test_changed_validator_forces_restart(self):
+        playlist = parse_hls_media_playlist(_read("media_gap.m3u8"))
+        playlist.validator = "etag-2"
+        self.assertFalse(resume_identity_matches(self._state(), playlist))
+
+    def test_window_rolled_past_forces_restart(self):
+        playlist = parse_hls_media_playlist(_read("media_gap.m3u8"))
+        playlist.validator = "etag-1"
+        playlist.media_sequence = 200  # far beyond stored 100 + 3 segments
+        self.assertFalse(resume_identity_matches(self._state(), playlist))
+
+    def test_crossed_discontinuity_forces_restart(self):
+        playlist = parse_hls_media_playlist(_read("media_gap.m3u8"))
+        playlist.validator = "etag-1"
+        playlist.discontinuity_sequence = 5  # advanced past stored 2
+        self.assertFalse(resume_identity_matches(self._state(), playlist))
 
     def test_ll_hls_media_segment_count(self):
         total, _, seg_count = parse_hls_duration(_read("ll_hls.m3u8"))

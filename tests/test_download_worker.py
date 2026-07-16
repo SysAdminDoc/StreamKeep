@@ -626,3 +626,28 @@ def test_ffmpeg_path_blocks_before_process_start(tmp_path):
     popen.assert_not_called()
     assert errors and errors[0][0] == 0
     assert any("Install FFmpeg 8.1.2" in line for line in logs)
+
+
+def test_hls_playlist_identity_persists_into_resume_sidecar(tmp_path):
+    from streamkeep.hls import parse_hls_media_playlist
+    from streamkeep import resume as resume_mod
+
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 0, 6)], str(tmp_path), "hls",
+    )
+    playlist = parse_hls_media_playlist(
+        "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:947210\n"
+        "#EXT-X-DISCONTINUITY-SEQUENCE:31\n"
+        "#EXTINF:6.0,\nseg947210.ts\n#EXTINF:6.0,\nseg947211.ts\n"
+    )
+    playlist.validator = '"etag-xyz"'
+    worker.set_hls_playlist_identity(playlist)
+    worker.attach_resume_state(ResumeState(output_dir=str(tmp_path)))
+
+    state = resume_mod.load_resume_state(str(tmp_path))
+    assert state is not None
+    assert state.playlist_validator == '"etag-xyz"'
+    assert state.media_sequence == 947210
+    assert state.discontinuity_sequence == 31
+    assert state.playlist_segment_count == 2

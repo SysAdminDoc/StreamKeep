@@ -154,6 +154,18 @@ def _sanitize_resume_payload(data, output_dir):
         "playlist_url": _sanitize_text(data.get("playlist_url", "")),
         "format_type": _sanitize_text(data.get("format_type", "hls"), max_len=32) or "hls",
         "audio_url": _sanitize_text(data.get("audio_url", "")),
+        "playlist_validator": _sanitize_text(
+            data.get("playlist_validator", ""), max_len=512
+        ),
+        "media_sequence": _sanitize_int_range(
+            data.get("media_sequence", 0), 0, 10**15
+        ),
+        "discontinuity_sequence": _sanitize_int_range(
+            data.get("discontinuity_sequence", 0), 0, 10**15
+        ),
+        "playlist_segment_count": _sanitize_int_range(
+            data.get("playlist_segment_count", 0), 0, MAX_SEGMENTS
+        ),
         "selected_tracks": _sanitize_selected_tracks(
             data.get("selected_tracks", [])
         ),
