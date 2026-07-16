@@ -27,6 +27,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.35.0" date="2026-07-16">
+      <description><p>Adds aria2c external-downloader routing with URL sanitization, HAR-capture media/manifest import, an optional queue-complete power action, and a streamkeep:// protocol handler with browser bookmarklet.</p></description>
+    </release>
     <release version="4.34.0" date="2026-07-16">
       <description><p>Makes HLS parsing and resume standards-complete, corrects WebVTT/podcast transcript parsing, and adds bilingual subtitle merge, LRC export, and YouTube live-chat replay normalization.</p></description>
     </release>
