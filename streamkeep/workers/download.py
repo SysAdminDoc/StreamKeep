@@ -96,6 +96,15 @@ class DownloadWorker(QThread):
 
         cmd = ytdlp_command() + [
             "-f", self.ytdlp_format,
+            # Force the merged container to mp4. Without this, a video+audio
+            # spec that pairs an mp4 video track with a webm/opus audio track
+            # (common on YouTube, where opus is often the highest-bitrate
+            # audio) makes yt-dlp auto-switch the merge container to .mkv. It
+            # then writes "<outfile>.mkv" instead of the "<label>.mp4" this
+            # worker expects, so the file-exists check below fails and the
+            # download is falsely reported as "yt-dlp download failed" even
+            # though yt-dlp exited 0. mp4 muxes avc1/vp9/av1 + aac/opus fine.
+            "--merge-output-format", "mp4",
             "--no-part",
             "--newline",
             "--progress",
@@ -181,6 +190,14 @@ class DownloadWorker(QThread):
                         pass
                 return False
 
+            # Safety net: yt-dlp exited 0 but the exact .mp4 is missing.
+            # A merge that could not honour --merge-output-format (rare exotic
+            # codec combo) falls back to another container and writes
+            # "<label>.<ext>" or "<label>.mp4.<ext>". Reconcile that produced
+            # file to the expected path so the download is not falsely failed.
+            if (self._proc.returncode == 0 and not os.path.exists(outfile)):
+                self._reconcile_output(outfile)
+
             if (self._proc.returncode == 0 and os.path.exists(outfile)
                     and os.path.getsize(outfile) > 0):
                 size = os.path.getsize(outfile)
@@ -205,6 +222,41 @@ class DownloadWorker(QThread):
         except Exception as e:
             self.log.emit(f"[ERROR] {label}: {e}")
             return False
+
+    def _reconcile_output(self, outfile):
+        """Rename a merged file yt-dlp wrote under a different container.
+
+        yt-dlp's Merger names the output after the real container when it
+        cannot honour the requested extension (e.g. ``<label>.mkv`` or
+        ``<label>.mp4.mkv``). When the expected ``outfile`` is absent, adopt
+        the largest sibling that shares the base name so the rest of the
+        pipeline (resume sidecar, integrity manifest) sees the ``.mp4`` path
+        it expects.
+        """
+        import glob
+
+        base, _ext = os.path.splitext(outfile)
+        candidates = []
+        for pattern in (base + ".*", outfile + ".*"):
+            for path in glob.glob(pattern):
+                if os.path.abspath(path) == os.path.abspath(outfile):
+                    continue
+                try:
+                    if os.path.isfile(path) and os.path.getsize(path) > 0:
+                        candidates.append(path)
+                except OSError:
+                    continue
+        if not candidates:
+            return
+        produced = max(candidates, key=lambda p: os.path.getsize(p))
+        try:
+            os.replace(produced, outfile)
+            self.log.emit(
+                f"[INFO] Adopted merged output {os.path.basename(produced)} "
+                f"-> {os.path.basename(outfile)}"
+            )
+        except OSError as e:
+            self.log.emit(f"[WARN] Could not reconcile merged output: {e}")
 
     def _mark_segment_done(self, seg_idx):
         """Merge the segment into the resume sidecar and persist it."""
