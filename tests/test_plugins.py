@@ -24,7 +24,7 @@ class PluginTests(unittest.TestCase):
         self.assertFalse(found[0]["enabled"])
         self.assertIn("Invalid plugin.json", found[0]["error"])
 
-    def test_load_plugin_appends_parent_path_without_prepending(self):
+    def test_load_plugin_does_not_mutate_global_sys_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             plugin_dir = base / "example_plugin"
@@ -33,7 +33,13 @@ class PluginTests(unittest.TestCase):
                 json.dumps({"id": "example", "enabled": True}),
                 encoding="utf-8",
             )
-            (plugin_dir / "__init__.py").write_text("LOADED = True\n", encoding="utf-8")
+            # Record sys.path from inside the plugin so we can prove the plugin
+            # runs with its own directory importable but the global path is
+            # restored afterward.
+            (plugin_dir / "__init__.py").write_text(
+                "import sys\nPATH_DURING = list(sys.path)\nLOADED = True\n",
+                encoding="utf-8",
+            )
             info = {
                 "id": "example",
                 "enabled": True,
@@ -45,10 +51,20 @@ class PluginTests(unittest.TestCase):
             try:
                 loaded = plugins.load_plugin(info)
                 self.assertTrue(loaded)
-                self.assertEqual(sys.path[0], original_sys_path[0])
-                self.assertEqual(sys.path[-1], str(base))
+                # No plugin directory (or its parent) persists globally.
+                self.assertEqual(sys.path, original_sys_path)
+                self.assertNotIn(str(base), sys.path)
+                self.assertNotIn(str(plugin_dir), sys.path)
+                # The plugin's own directory was importable during execution,
+                # appended at the end so it cannot shadow stdlib/app modules.
+                mod = sys.modules["sk_plugin_example_plugin"]
+                self.assertEqual(mod.PATH_DURING[-1], str(plugin_dir))
+                self.assertEqual(
+                    mod.PATH_DURING[:len(original_sys_path)], original_sys_path
+                )
             finally:
                 sys.path[:] = original_sys_path
+                sys.modules.pop("sk_plugin_example_plugin", None)
 
     def test_load_all_plugins_skips_enabled_but_untrusted_plugins(self):
         log_events = []

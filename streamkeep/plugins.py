@@ -27,6 +27,7 @@ Plugin types (detected by what the module imports/subclasses):
 Plugins run in the same process — no sandbox. Trust-based, like yt-dlp.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -133,6 +134,28 @@ def discover_plugins():
     return plugins
 
 
+@contextlib.contextmanager
+def _scoped_plugin_path(plugin_path):
+    """Expose a plugin's own directory for imports only while it executes.
+
+    The directory is appended to the end of ``sys.path`` (so it can never
+    shadow stdlib or app modules) and is always removed afterward, so no
+    plugin directory — and never a parent that could expose sibling plugins —
+    persists on the global import path.
+    """
+    added = plugin_path not in sys.path
+    if added:
+        sys.path.append(plugin_path)
+    try:
+        yield
+    finally:
+        if added:
+            try:
+                sys.path.remove(plugin_path)
+            except ValueError:
+                pass
+
+
 def load_plugin(plugin_info, log_fn=None):
     """Load a single plugin by importing its Python module.
 
@@ -146,43 +169,38 @@ def load_plugin(plugin_info, log_fn=None):
     if not plugin_path or not os.path.isdir(plugin_path):
         return False
 
-    # Add the plugin's parent to sys.path at the end so we don't let
-    # community plugins shadow app or stdlib modules process-wide.
-    parent = os.path.dirname(plugin_path)
-    if parent not in sys.path:
-        sys.path.append(parent)
-
     module_name = os.path.basename(plugin_path)
     try:
-        # Try loading as a package (has __init__.py)
-        init_py = os.path.join(plugin_path, "__init__.py")
-        if os.path.isfile(init_py):
-            spec = importlib.util.spec_from_file_location(
-                f"sk_plugin_{module_name}", init_py,
-                submodule_search_locations=[plugin_path],
-            )
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[spec.name] = mod
-                spec.loader.exec_module(mod)
-                if log_fn:
-                    log_fn(f"[PLUGIN] Loaded: {plugin_id} v{plugin_info.get('version', '?')}")
-                return True
-
-        # Try loading a single .py file
-        for fname in os.listdir(plugin_path):
-            if fname.endswith(".py") and fname != "__init__.py":
-                fpath = os.path.join(plugin_path, fname)
+        with _scoped_plugin_path(plugin_path):
+            # Try loading as a package (has __init__.py)
+            init_py = os.path.join(plugin_path, "__init__.py")
+            if os.path.isfile(init_py):
                 spec = importlib.util.spec_from_file_location(
-                    f"sk_plugin_{module_name}_{fname[:-3]}", fpath,
+                    f"sk_plugin_{module_name}", init_py,
+                    submodule_search_locations=[plugin_path],
                 )
                 if spec and spec.loader:
                     mod = importlib.util.module_from_spec(spec)
                     sys.modules[spec.name] = mod
                     spec.loader.exec_module(mod)
                     if log_fn:
-                        log_fn(f"[PLUGIN] Loaded: {plugin_id} ({fname})")
+                        log_fn(f"[PLUGIN] Loaded: {plugin_id} v{plugin_info.get('version', '?')}")
                     return True
+
+            # Try loading a single .py file
+            for fname in os.listdir(plugin_path):
+                if fname.endswith(".py") and fname != "__init__.py":
+                    fpath = os.path.join(plugin_path, fname)
+                    spec = importlib.util.spec_from_file_location(
+                        f"sk_plugin_{module_name}_{fname[:-3]}", fpath,
+                    )
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        sys.modules[spec.name] = mod
+                        spec.loader.exec_module(mod)
+                        if log_fn:
+                            log_fn(f"[PLUGIN] Loaded: {plugin_id} ({fname})")
+                        return True
 
     except Exception as e:
         plugin_info["error"] = str(e)

@@ -38,17 +38,18 @@ class SecretsTests(unittest.TestCase):
             with self.assertRaises(secrets.SecretStorageError):
                 secrets.protect("secret", field_name="token")
 
-    def test_insecure_fallback_must_be_explicit(self):
+    def test_protect_never_writes_insecure_b64(self):
+        # There is no longer any way to make protect() write a reversible
+        # value; it always fails closed when no secure backend exists.
         with mock.patch("streamkeep.secrets.sys.platform", "linux"), \
              mock.patch("streamkeep.secrets._keyring_set", return_value=False):
-            stored = secrets.protect(
-                "secret",
-                field_name="token",
-                allow_insecure_fallback=True,
-            )
+            with self.assertRaises(secrets.SecretStorageError):
+                secrets.protect("secret", field_name="token")
 
-        self.assertTrue(stored.startswith("b64:"))
-        self.assertEqual(secrets.unprotect(stored), "secret")
+    def test_unprotect_still_reads_legacy_b64_for_migration(self):
+        import base64
+        legacy = "b64:" + base64.b64encode(b"secret").decode("ascii")
+        self.assertEqual(secrets.unprotect(legacy), "secret")
 
     def test_nested_config_secrets_are_references_and_exports_are_empty(self):
         cfg = {

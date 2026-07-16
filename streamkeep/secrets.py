@@ -333,13 +333,15 @@ def _sanitize_export_strings(value: Any) -> Any:
     return value
 
 
-def protect(plaintext, field_name="", *, allow_insecure_fallback=False):
+def protect(plaintext, field_name=""):
     """Encrypt *plaintext* using OS-level encryption.
 
     Returns a prefixed string: ``"dpapi:..."`` on Windows,
-    ``"kr:<field_name>"`` via keyring on macOS/Linux. Empty input
-    returns empty string. New ``"b64:..."`` values are only written when
-    ``allow_insecure_fallback`` is explicitly set.
+    ``"kr:<field_name>"`` via keyring on macOS/Linux. Empty input returns
+    empty string. This function always fails closed: if no secure backend is
+    available it raises rather than writing a reversible value. The insecure
+    ``"b64:..."`` encoding is never produced here — it is only recognized on
+    read (``unprotect``) so pre-existing legacy configs can be migrated.
     """
     if not plaintext:
         return ""
@@ -351,9 +353,6 @@ def protect(plaintext, field_name="", *, allow_insecure_fallback=False):
 
     if field_name and _keyring_set(field_name, plaintext):
         return f"kr:{field_name}"
-
-    if allow_insecure_fallback:
-        return "b64:" + base64.b64encode(plaintext.encode("utf-8")).decode("ascii")
 
     raise SecretStorageError(
         "Secure credential storage is unavailable. Install/configure keyring "
