@@ -92,6 +92,7 @@ python StreamKeep.py --version
 python StreamKeep.py extractors
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
+python StreamKeep.py server --trusted-proxy-origin https://streamkeep.example.lan --port 8765
 python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup
 python StreamKeep.py backup restore C:\Backups\StreamKeep.skbackup
 python StreamKeep.py backup secrets-export C:\Backups\StreamKeep-secrets.sksbackup
@@ -108,8 +109,8 @@ python StreamKeep.py --url "https://example.com/video" --output C:\Videos
 python StreamKeep.py --server --port 8765
 ```
 
-The local server binds to localhost by default, validates bearer tokens in constant time, checks Host headers to resist DNS rebinding, and restricts browser companion access to local/chrome-extension origins.
-When LAN access is enabled in Settings or with `server --bind 0.0.0.0`, StreamKeep only accepts Host and Origin values that match this machine's local interface names or IP addresses, and the token is still required for API calls.
+The local server always binds to `127.0.0.1`, validates bearer tokens in constant time, rejects duplicate or unconfigured Host headers, and binds paired client tokens to their browser origin and scopes. Every mutating request requires JSON plus a fresh 128-bit nonce and timestamp; replays, stale requests, cross-site fetches, and unapproved origins are rejected.
+LAN access is opt-in and only operates through an explicitly configured HTTPS reverse proxy. The proxy must run on the StreamKeep PC, be the only process exposed to the network, forward to the displayed loopback port, and set exact `X-Forwarded-Proto: https` and `X-Forwarded-Host` values matching the configured HTTPS origin. Direct `0.0.0.0` HTTP control is refused. Headless setup can explicitly request one five-minute code with `server --pairing-code-stdout`; bearer tokens are never accepted in argv, printed, placed in URLs, or written to logs.
 In server mode, `POST /api/queue` writes a durable SQLite job before returning `202` with a `job_id`. Use `GET /api/jobs/{job_id}` or `/api/status` to observe fetch, download, finalization, and terminal state; `POST /api/jobs/cancel` persists cancellation. Eligible interrupted jobs resume on restart, completed jobs appear in `/api/library`, and `/api/failures/retry` creates an observable retry job with its own durable acknowledgement.
 
 ## Browser Companion
@@ -117,11 +118,11 @@ In server mode, `POST /api/queue` writes a durable SQLite job before returning `
 The Chrome/Edge/Firefox companion extension lives in `browser-extension/`.
 
 1. Load the extension unpacked from `browser-extension/`.
-2. Open StreamKeep, go to Settings, enable Browser companion, and copy the pairing token and port.
-3. Paste them into the extension popup.
+2. Open StreamKeep, go to Settings, enable Browser companion, and select **New code**.
+3. Enter the displayed loopback port and one-time code in the extension popup, then select **Pair**.
 4. Use **Send to Fetch** or **Send to Queue** from the browser toolbar.
 
-Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are generated per app launch and are never written to disk.
+Extension icons are shipped under `browser-extension/icons/`. The 256-bit master token is stored through the operating-system credential backend and never shared with clients. One-time pairing codes expire after five minutes; successful pairing returns a scoped, origin-bound client token. **Revoke all** invalidates every client and rotates the stored master token.
 
 ## Requirements
 

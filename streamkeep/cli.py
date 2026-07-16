@@ -7,7 +7,7 @@ workers and pyqtSignal infrastructure work without modification.
 Usage::
 
     python StreamKeep.py --url URL [--quality best|1080p|720p|...] [--output DIR]
-    python StreamKeep.py --server [--port PORT] [--bind 0.0.0.0]
+    python StreamKeep.py --server [--port PORT] [--trusted-proxy-origin HTTPS_ORIGIN]
     python StreamKeep.py --list-extractors
 """
 
@@ -330,8 +330,34 @@ def _run_server(args):
             value = default
         return max(1, min(maximum, value))
 
-    bind_lan = args.bind == "0.0.0.0"
-    server = LocalCompanionServer(bind_lan=bind_lan, port=args.port or 0)
+    proxy_origin = str(getattr(args, "trusted_proxy_origin", "") or "").strip()
+    bind_lan = bool(proxy_origin)
+    if args.bind != "127.0.0.1" and not bind_lan:
+        _print_line(
+            "ERROR: Direct LAN HTTP binding is disabled. Configure an HTTPS "
+            "reverse proxy and pass --trusted-proxy-origin instead."
+        )
+        raise SystemExit(2)
+
+    from .local_server import generate_bearer_token, valid_bearer_token
+    master_token = str(cfg.get("companion_token", "") or "")
+    if not valid_bearer_token(master_token):
+        master_token = generate_bearer_token()
+    cfg["companion_token"] = master_token
+    if not save_config(cfg):
+        _print_line("ERROR: Secure credential storage is unavailable; server stayed off.")
+        raise SystemExit(2)
+
+    try:
+        server = LocalCompanionServer(
+            bind_lan=bind_lan,
+            external_origin=proxy_origin,
+            master_token=master_token,
+            port=args.port or 0,
+        )
+    except ValueError as error:
+        _print_line(f"ERROR: {error}")
+        raise SystemExit(2) from None
     service = HeadlessJobService(
         output_dir=output_dir,
         max_concurrent=_bounded_config_int("max_concurrent_downloads", 3, 8),
@@ -344,13 +370,6 @@ def _run_server(args):
     server.failure_retrier = service.retry_failure
     server.failure_discarder = service.discard_failure
 
-    fixed_token = getattr(args, "token", "") or ""
-    if fixed_token:
-        from .local_server import ALL_SCOPES
-        server._token_store.remove(server.token)
-        server.token = fixed_token
-        server._token_store.add(fixed_token, ALL_SCOPES)
-
     server.url_received.connect(
         lambda url, action: _print_line(f"[{action}] {url}")
     )
@@ -358,9 +377,14 @@ def _run_server(args):
     server.start()
 
     _print_line(f"StreamKeep v{VERSION} — server mode")
-    _print_line(f"Listening on {'0.0.0.0' if bind_lan else '127.0.0.1'}:{server.port}")
-    _print_line(f"Token: {server.token}")
+    _print_line(f"Listening on 127.0.0.1:{server.port}")
+    if bind_lan:
+        _print_line(f"HTTPS reverse-proxy origin: {server.url}")
     _print_line(f"Web UI: {server.url}")
+    if bool(getattr(args, "pairing_code_stdout", False)):
+        _print_line(f"One-time pairing code (5 minutes): {server.create_pairing_code()}")
+    else:
+        _print_line("Pair clients from the GUI, or restart with --pairing-code-stdout.")
     if config_dir:
         _print_line(f"Config: {config_dir}")
     if output_dir:
@@ -512,9 +536,11 @@ def build_parser():
     srv.add_argument("--port", type=int, default=0,
                      help="Port to bind (default: random)")
     srv.add_argument("--bind", default="127.0.0.1",
-                     help="Bind address (127.0.0.1 or 0.0.0.0)")
-    srv.add_argument("--token", default="",
-                     help="Fixed bearer token (default: random per launch)")
+                     help="Deprecated compatibility option; only 127.0.0.1 is served")
+    srv.add_argument("--trusted-proxy-origin", default="",
+                     help="Exact HTTPS origin for a local reverse proxy")
+    srv.add_argument("--pairing-code-stdout", action="store_true",
+                     help="Print one short-lived pairing code for headless setup")
     srv.add_argument("--config-dir", default=argparse.SUPPRESS,
                      help="Override the config/database directory")
     srv.add_argument("--output-dir", default="",

@@ -78,6 +78,7 @@ _STRING_CONFIG_KEYS = frozenset({
     "output_dir", "folder_template", "file_template", "webhook_url",
     "rate_limit", "proxy", "cookies_browser", "cookies_file", "theme",
     "language", "whisper_model", "hf_token", "dismissed_update_tag",
+    "companion_proxy_origin",
     "pp_convert_video_format", "pp_convert_video_codec",
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",
@@ -523,7 +524,9 @@ def _quarantine_import_capabilities(config):
         result.setdefault("media_server", {})["enabled"] = False
 
     companion_paths = [
-        (key,) for key in ("companion_server_enabled", "companion_bind_lan")
+        (key,) for key in (
+            "companion_server_enabled", "companion_bind_lan", "companion_proxy_origin"
+        )
         if key in config
     ]
     companion_active = bool(

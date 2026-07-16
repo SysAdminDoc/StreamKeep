@@ -16,8 +16,8 @@ One-click "send current tab URL to StreamKeep desktop app."
 ## Pair with StreamKeep
 
 1. Open StreamKeep → **Settings** tab → **Browser companion**. Tick **Enable**.
-2. The tab shows a **Pairing token** (32-char hex, regenerated every launch) and a port.
-3. Click the StreamKeep browser icon, paste the token, enter the port, click **Save**.
+2. Select **New code** and note the loopback port. The one-use code expires after five minutes.
+3. Click the StreamKeep browser icon, enter the port and code, then select **Pair**.
 4. Click **Test pairing** — should show `Paired with StreamKeep.`
 
 ## Send a URL
@@ -29,15 +29,15 @@ Open any supported page (Kick, Twitch, YouTube, Rumble, etc.), click the icon, t
 
 ## Security
 
-- Server binds **strictly to 127.0.0.1** — never reachable over the network.
-- Every request requires a bearer token compared in constant time.
-- Tokens are **never stored on disk** — they regenerate each time you launch StreamKeep.
-- Re-pairing is a paste-and-save; no re-install needed.
+- The application server binds **strictly to 127.0.0.1**. Optional LAN access requires an explicitly configured HTTPS reverse proxy on the StreamKeep PC.
+- Pairing codes are short-lived and one-use. The issued client token is origin-bound, scoped, and held only in browser session storage.
+- Every mutating request includes a fresh timestamp and cryptographic nonce; Host, Origin, and cross-site metadata are validated by the server.
+- Re-pairing uses a new code; no extension re-install is needed.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `Test failed: HTTP 401` | Token mismatch — re-copy from StreamKeep Settings. |
+| `Test failed: HTTP 401` | Access expired or was revoked — generate and enter a new pairing code. |
 | `Test failed: Failed to fetch` | StreamKeep isn't running, or the companion server is off in Settings. |
 | `Send failed: Current tab has no http(s) URL` | Extension pages (chrome://, about:…) can't be captured. |

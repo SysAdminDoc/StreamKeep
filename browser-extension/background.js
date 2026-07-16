@@ -1,21 +1,26 @@
 // Service worker — registers right-click context menu and handles sends.
 
 async function companionPost(path, body) {
-  const { host, port, token } = await chrome.storage.local.get([
-    "host", "port", "token",
+  const [{ port }, { token }] = await Promise.all([
+    chrome.storage.local.get(["port"]),
+    chrome.storage.session.get(["token"]),
   ]);
-  if (!host || !port || !token) return;
-  const url = `http://${host}:${port}${path}`;
+  if (!port || !token) return;
+  const url = `http://127.0.0.1:${port}${path}`;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      "X-StreamKeep-Timestamp": String(Math.floor(Date.now() / 1000)),
+      "X-StreamKeep-Nonce": Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
     },
     body: JSON.stringify(body),
   });
   if (resp.status === 401) {
-    console.warn("[StreamKeep] Token expired or rotated. Re-pair from StreamKeep Settings.");
+    console.warn("[StreamKeep] Access expired or rotated. Generate a new pairing code in Settings.");
   }
 }
 

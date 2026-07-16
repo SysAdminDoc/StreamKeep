@@ -1,12 +1,13 @@
 """Local HTTP server — browser-companion extension + REST API + Web Remote UI.
 
-Binds to 127.0.0.1 (or 0.0.0.0 if LAN access is enabled in Settings)
-on a random port. Every request requires a bearer token — 32-byte hex,
-regenerated every app launch, displayed in the Settings tab.
+The application listener always binds to loopback. Optional LAN access is
+terminated by an explicitly configured local HTTPS reverse proxy. Clients
+exchange a short-lived, one-use pairing code for an origin-bound bearer token;
+the persistent master token is never displayed or exposed to clients.
 
 Tokens carry scopes: ``status`` (read-only state), ``queue`` (send URLs),
-``recovery`` (retry/discard failed jobs).  The master token created at
-launch has all scopes.  ``rotate_token()`` replaces it atomically;
+``recovery`` (retry/discard failed jobs). The secure master token has all
+scopes. ``rotate_token()`` replaces it atomically;
 ``create_scoped_token()`` mints a restricted token.
 
 REST API endpoints (F37):
@@ -24,11 +25,14 @@ The server runs on its own thread (stdlib http.server is threaded), and
 hands received URLs to the main-thread Qt via a pyqtSignal.
 """
 
+import hashlib
 import ipaddress
 import json
+import re
 import secrets
-import socket
 import threading
+import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from urllib.parse import urlsplit
@@ -39,6 +43,27 @@ SCOPE_STATUS = "status"
 SCOPE_QUEUE = "queue"
 SCOPE_RECOVERY = "recovery"
 ALL_SCOPES = frozenset({SCOPE_STATUS, SCOPE_QUEUE, SCOPE_RECOVERY})
+PAIRED_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+
+
+def generate_bearer_token():
+    """Generate a 256-bit URL-safe bearer token."""
+    return secrets.token_urlsafe(32)
+
+
+def valid_bearer_token(token):
+    token = str(token or "")
+    # Legacy 128-bit hex tokens remain valid for one-way migration.
+    return bool(_TOKEN_RE.fullmatch(token))
+
+
+@dataclass(frozen=True)
+class TokenGrant:
+    scopes: frozenset
+    origin: str = ""
+    expires_at: float = 0.0
 
 
 class TokenStore:
@@ -48,9 +73,13 @@ class TokenStore:
         self._lock = threading.Lock()
         self._tokens = {}  # token_str -> frozenset of scopes
 
-    def add(self, token, scopes):
+    def add(self, token, scopes, *, origin="", expires_at=0.0):
+        if not valid_bearer_token(token):
+            raise ValueError("Bearer tokens must contain at least 128 bits.")
         with self._lock:
-            self._tokens[token] = frozenset(scopes)
+            self._tokens[token] = TokenGrant(
+                frozenset(scopes), str(origin or ""), float(expires_at or 0.0)
+            )
 
     def remove(self, token):
         with self._lock:
@@ -61,12 +90,110 @@ class TokenStore:
             self._tokens.clear()
 
     def check(self, token):
+        candidate = str(token or "")
+        if not candidate:
+            return None
         with self._lock:
-            return self._tokens.get(token)
+            rows = tuple(self._tokens.items())
+        matched = None
+        # Do not expose token-prefix timing through the loopback/LAN boundary.
+        for stored, grant in rows:
+            if secrets.compare_digest(stored, candidate):
+                matched = grant
+        if matched and matched.expires_at and matched.expires_at <= time.time():
+            self.remove(candidate)
+            return None
+        return matched
 
     def __len__(self):
         with self._lock:
             return len(self._tokens)
+
+
+class PairingStore:
+    """One-time, short-lived pairing code registry."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._digest = b""
+        self._expires_at = 0.0
+        self._scopes = frozenset()
+        self._attempts = 0
+
+    def issue(self, scopes, ttl_seconds=300):
+        code = secrets.token_urlsafe(18)
+        with self._lock:
+            self._digest = hashlib.sha256(code.encode("ascii")).digest()
+            self._expires_at = time.time() + max(30, min(600, int(ttl_seconds)))
+            self._scopes = frozenset(scopes) & ALL_SCOPES
+            self._attempts = 0
+        return code
+
+    def consume(self, code):
+        digest = hashlib.sha256(str(code or "").encode("utf-8")).digest()
+        with self._lock:
+            valid = bool(
+                self._digest
+                and self._expires_at > time.time()
+                and self._attempts < 5
+                and secrets.compare_digest(self._digest, digest)
+            )
+            if valid:
+                scopes = self._scopes
+                self._digest = b""
+                self._expires_at = 0.0
+                self._scopes = frozenset()
+                return scopes
+            self._attempts += 1
+            if self._attempts >= 5 or self._expires_at <= time.time():
+                self._digest = b""
+                self._scopes = frozenset()
+            return None
+
+
+class ReplayStore:
+    """Bounded per-token nonce cache for mutating requests."""
+
+    def __init__(self, *, max_age_seconds=120, max_entries=20_000):
+        self._lock = threading.Lock()
+        self._seen = {}
+        self._max_age = max(30, min(300, int(max_age_seconds)))
+        self._max_entries = max(100, min(100_000, int(max_entries)))
+
+    def validate_freshness(self, timestamp, nonce):
+        try:
+            request_time = int(str(timestamp or ""))
+        except (TypeError, ValueError):
+            return False, "request_timestamp_invalid"
+        now = int(time.time())
+        if abs(now - request_time) > self._max_age:
+            return False, "request_timestamp_expired"
+        nonce = str(nonce or "")
+        if not _NONCE_RE.fullmatch(nonce):
+            return False, "request_nonce_invalid"
+        return True, ""
+
+    def accept(self, token, timestamp, nonce):
+        fresh, error = self.validate_freshness(timestamp, nonce)
+        if not fresh:
+            return False, error
+        now = int(time.time())
+        nonce = str(nonce or "")
+        key = hashlib.sha256(
+            str(token).encode("utf-8") + b"\0" + nonce.encode("ascii")
+        ).digest()
+        with self._lock:
+            cutoff = now - self._max_age
+            self._seen = {
+                seen_key: seen_at for seen_key, seen_at in self._seen.items()
+                if seen_at >= cutoff
+            }
+            if key in self._seen:
+                return False, "request_replayed"
+            if len(self._seen) >= self._max_entries:
+                return False, "request_replay_window_full"
+            self._seen[key] = now
+        return True, ""
 
 
 class _ServerSignals(QObject):
@@ -79,6 +206,7 @@ class _ServerSignals(QObject):
 class _CompanionHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 64
 
 
 _LOCAL_HOSTS = frozenset(("", "127.0.0.1", "::1", "localhost"))
@@ -94,84 +222,63 @@ def _canonical_host(host):
     try:
         return str(ipaddress.ip_address(host))
     except ValueError:
-        return host
+        try:
+            return host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return ""
 
 
 def _normalize_host_header(value):
-    raw = str(value or "").strip()
-    if not raw:
+    raw = str(value or "")
+    if not raw or raw != raw.strip() or re.search(r"[\s/@?#,\\]", raw):
         return ""
     if raw.startswith("["):
-        end = raw.find("]")
-        return _canonical_host(raw[1:end] if end > 0 else raw)
-    if raw.count(":") == 1:
-        raw = raw.rsplit(":", 1)[0]
-    return _canonical_host(raw)
-
-
-def _usable_interface_addr(addr):
+        match = re.fullmatch(r"\[([^]]+)](?::([0-9]{1,5}))?", raw)
+        if not match:
+            return ""
+        host, port_text = match.groups()
+        try:
+            if ipaddress.ip_address(host.split("%", 1)[0]).version != 6:
+                return ""
+        except ValueError:
+            return ""
+    else:
+        if raw.count(":") > 1:
+            return ""
+        host, separator, port_text = raw.partition(":")
+        if not separator:
+            port_text = ""
+    if port_text:
+        if not re.fullmatch(r"[0-9]{1,5}", port_text):
+            return ""
+        if not (1 <= int(port_text) <= 65_535):
+            return ""
+    host = _canonical_host(host)
+    if not host:
+        return ""
     try:
-        ip = ipaddress.ip_address(str(addr).split("%", 1)[0])
+        ipaddress.ip_address(host)
+        return host
     except ValueError:
-        return False
-    return not (ip.is_unspecified or ip.is_multicast)
+        labels = host.rstrip(".").split(".")
+        if len(host) > 253 or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in labels
+        ):
+            return ""
+        return host.rstrip(".")
 
 
-def _discover_lan_hosts():
-    hosts = set()
-    names = {socket.gethostname(), socket.getfqdn()}
-    for name in names:
-        norm_name = _canonical_host(name)
-        if norm_name and norm_name not in _LOCAL_HOSTS:
-            hosts.add(norm_name)
-        try:
-            for info in socket.getaddrinfo(name, None):
-                addr = info[4][0]
-                if _usable_interface_addr(addr):
-                    hosts.add(_canonical_host(addr))
-        except OSError:
-            pass
-
-    probes = (
-        (socket.AF_INET, ("8.8.8.8", 80)),
-        (socket.AF_INET6, ("2001:4860:4860::8888", 80)),
-    )
-    for family, target in probes:
-        try:
-            with socket.socket(family, socket.SOCK_DGRAM) as sock:
-                sock.connect(target)
-                addr = sock.getsockname()[0]
-            if _usable_interface_addr(addr):
-                hosts.add(_canonical_host(addr))
-        except OSError:
-            pass
-
-    return hosts
-
-
-def _build_allowed_hosts(bind_lan=False, extra_hosts=None):
-    hosts = {_canonical_host(host) for host in _LOCAL_HOSTS}
-    if bind_lan:
-        hosts.update(_discover_lan_hosts())
+def _build_allowed_hosts(extra_hosts=None):
+    hosts = {
+        normalized for host in _LOCAL_HOSTS
+        if (normalized := _canonical_host(host))
+    }
     for host in extra_hosts or ():
         norm = _normalize_host_header(host)
         if norm:
             hosts.add(norm)
     return frozenset(hosts)
-
-
-def _preferred_display_host(allowed_hosts):
-    for host in sorted(allowed_hosts):
-        try:
-            ip = ipaddress.ip_address(host)
-        except ValueError:
-            continue
-        if ip.version == 4 and not ip.is_loopback:
-            return host
-    for host in sorted(allowed_hosts):
-        if host and host not in _LOCAL_HOSTS:
-            return host
-    return "127.0.0.1"
 
 
 def _format_url_host(host):
@@ -181,9 +288,44 @@ def _format_url_host(host):
     return host
 
 
+def _normalize_origin(value, *, allow_extensions=True):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return ""
+    if parsed.path not in ("", "/"):
+        return ""
+    scheme = parsed.scheme.lower()
+    host = _canonical_host(parsed.hostname)
+    if allow_extensions and scheme in ("chrome-extension", "moz-extension"):
+        if not host or port is not None:
+            return ""
+        if scheme == "chrome-extension" and not re.fullmatch(r"[a-p]{32}", host):
+            return ""
+        return f"{scheme}://{host}"
+    if scheme not in ("http", "https") or not host:
+        return ""
+    authority = _format_url_host(host)
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return f"{scheme}://{authority}"
+
+
+def _validate_external_origin(value):
+    origin = _normalize_origin(value, allow_extensions=False)
+    if not origin or not origin.startswith("https://"):
+        raise ValueError("LAN remote access requires an explicit HTTPS reverse-proxy origin.")
+    return origin
+
+
 class LocalCompanionServer:
-    """Wraps a ThreadingHTTPServer bound to 127.0.0.1 (or 0.0.0.0) on a
-    random port.
+    """Wrap a loopback-only ``ThreadingHTTPServer`` on a random port.
 
     Usage:
         server = LocalCompanionServer()
@@ -194,9 +336,21 @@ class LocalCompanionServer:
     Token / port are accessible via `server.token` / `server.port`.
     """
 
-    def __init__(self, *, bind_lan=False, allowed_hosts=None, port=0):
+    def __init__(
+        self,
+        *,
+        bind_lan=False,
+        allowed_hosts=None,
+        port=0,
+        master_token=None,
+        external_origin="",
+    ):
         self._token_store = TokenStore()
-        self.token = secrets.token_hex(16)
+        self._pairing_store = PairingStore()
+        self._replay_store = ReplayStore()
+        self.token = str(master_token or generate_bearer_token())
+        if not valid_bearer_token(self.token):
+            raise ValueError("Stored companion token is invalid or too short.")
         self._token_store.add(self.token, ALL_SCOPES)
         self.port = int(port or 0)
         self._httpd = None
@@ -212,30 +366,43 @@ class LocalCompanionServer:
         self.failure_retrier = None  # callable(failure_id) -> durable job dict
         self.failure_discarder = None  # callable(failure_id) -> bool
         self._bind_lan = bool(bind_lan)
-        self._bind_addr = "0.0.0.0" if self._bind_lan else "127.0.0.1"
-        self._allowed_hosts = _build_allowed_hosts(self._bind_lan, allowed_hosts)
+        self.external_origin = (
+            _validate_external_origin(external_origin) if self._bind_lan else ""
+        )
+        # Even LAN access stays loopback-only. A locally managed reverse proxy
+        # owns TLS and forwards to this listener.
+        self._bind_addr = "127.0.0.1"
+        extra_hosts = set(allowed_hosts or ())
+        if self.external_origin:
+            extra_hosts.add(urlsplit(self.external_origin).hostname)
+        self._allowed_hosts = _build_allowed_hosts(extra_hosts)
         self.allowed_hosts = tuple(sorted(host for host in self._allowed_hosts if host))
         self.display_host = (
-            _preferred_display_host(self._allowed_hosts)
-            if self._bind_lan else "127.0.0.1"
+            _canonical_host(urlsplit(self.external_origin).hostname)
+            if self.external_origin else "127.0.0.1"
         )
 
     def rotate_token(self):
-        """Replace the master token. Old tokens stop working immediately."""
-        old = self.token
-        self._token_store.remove(old)
-        self.token = secrets.token_hex(16)
+        """Replace master access and revoke every paired client immediately."""
+        self._token_store.revoke_all()
+        self.token = generate_bearer_token()
         self._token_store.add(self.token, ALL_SCOPES)
         return self.token
 
-    def create_scoped_token(self, scopes):
+    def create_scoped_token(self, scopes, *, origin="", expires_at=0.0):
         """Mint a token restricted to the given scopes."""
         valid = frozenset(scopes) & ALL_SCOPES
         if not valid:
             raise ValueError(f"No valid scopes in {scopes!r}")
-        tok = secrets.token_hex(16)
-        self._token_store.add(tok, valid)
+        tok = generate_bearer_token()
+        self._token_store.add(
+            tok, valid, origin=str(origin or ""), expires_at=expires_at
+        )
         return tok
+
+    def create_pairing_code(self, scopes=ALL_SCOPES, *, ttl_seconds=300):
+        """Create a one-use code that never appears in a URL or request log."""
+        return self._pairing_store.issue(scopes, ttl_seconds=ttl_seconds)
 
     def revoke_token(self, token):
         """Revoke a specific token (scoped or master)."""
@@ -253,6 +420,9 @@ class LocalCompanionServer:
             failure_retrier=self.failure_retrier,
             failure_discarder=self.failure_discarder,
             allowed_hosts=self._allowed_hosts,
+            pairing_store=self._pairing_store,
+            replay_store=self._replay_store,
+            external_origin=self.external_origin,
         )
         self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
         self.port = self._httpd.server_address[1]
@@ -283,6 +453,8 @@ class LocalCompanionServer:
     def url(self):
         if int(self.port or 0) <= 0:
             return ""
+        if self.external_origin:
+            return f"{self.external_origin}/"
         return f"http://{_format_url_host(self.display_host)}:{self.port}/"
 
 
@@ -320,73 +492,178 @@ def _build_handler(
     failure_retrier=None,
     failure_discarder=None,
     allowed_hosts=None,
+    pairing_store=None,
+    replay_store=None,
+    external_origin="",
 ):
-    allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts(False))
+    allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts())
+    pairing_store = pairing_store or PairingStore()
+    replay_store = replay_store or ReplayStore()
+    external_origin = str(external_origin or "")
+    external_host = (
+        _canonical_host(urlsplit(external_origin).hostname)
+        if external_origin else ""
+    )
+    external_authority = (
+        urlsplit(external_origin).netloc.lower() if external_origin else ""
+    )
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args, **_kwargs):
             return
 
         def _host_ok(self):
-            return _normalize_host_header(self.headers.get("Host")) in allowed_hosts
+            host_values = self.headers.get_all("Host", failobj=[])
+            return (
+                len(host_values) == 1
+                and _normalize_host_header(host_values[0]) in allowed_hosts
+            )
 
         def _origin_ok(self, origin):
-            if not origin:
+            normalized = _normalize_origin(origin)
+            if not normalized:
                 return False
-            if origin.startswith("chrome-extension://"):
+            if normalized.startswith(("chrome-extension://", "moz-extension://")):
                 return True
-            try:
-                parsed = urlsplit(origin)
-            except ValueError:
-                return False
-            if parsed.scheme not in ("http", "https"):
-                return False
-            return _normalize_host_header(parsed.netloc) in allowed_hosts
+            if external_origin and secrets.compare_digest(normalized, external_origin):
+                return True
+            parsed = urlsplit(normalized)
+            local_port = int(self.server.server_address[1])
+            return (
+                parsed.scheme == "http"
+                and _canonical_host(parsed.hostname) in _LOCAL_HOSTS
+                and parsed.port == local_port
+            )
+
+        def _external_boundary_ok(self):
+            forwarded_proto = str(self.headers.get("X-Forwarded-Proto", "") or "").lower()
+            forwarded_host = str(self.headers.get("X-Forwarded-Host", "") or "").lower()
+            origin = _normalize_origin(self.headers.get("Origin", ""))
+            host = _normalize_host_header(self.headers.get("Host", ""))
+            uses_external = bool(
+                external_origin
+                and (
+                    origin == external_origin
+                    or host == external_host
+                    or forwarded_proto
+                    or forwarded_host
+                )
+            )
+            if not uses_external:
+                return not (forwarded_proto or forwarded_host)
+            peer = _canonical_host(self.client_address[0] if self.client_address else "")
+            return bool(
+                peer in ("127.0.0.1", "::1")
+                and forwarded_proto == "https"
+                and secrets.compare_digest(forwarded_host, external_authority)
+            )
 
         def _reject_bad_host(self):
             if not self._host_ok():
-                self.send_response(403)
-                self.end_headers()
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "host_denied",
+                    "message": "Request Host is not configured for this listener.",
+                })
+                return True
+            if not self._external_boundary_ok():
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "transport_denied",
+                    "message": "LAN control requires the configured HTTPS reverse proxy.",
+                })
                 return True
             return False
 
-        def _token_scopes(self):
-            """Return the scopes for the bearer token, or None."""
+        def _token_grant(self):
+            """Return ``(grant, token)`` for a valid origin-bound bearer."""
             hdr = self.headers.get("Authorization", "") or ""
-            if not hdr.startswith("Bearer "):
+            scheme, separator, candidate = hdr.partition(" ")
+            if not separator or scheme.lower() != "bearer":
                 return None
-            candidate = hdr[7:].strip()
+            candidate = candidate.strip()
             if not candidate:
                 return None
-            return token_store.check(candidate)
+            grant = token_store.check(candidate)
+            if grant is None:
+                return None
+            if grant.origin:
+                origin = _normalize_origin(self.headers.get("Origin", ""))
+                if not origin or not secrets.compare_digest(origin, grant.origin):
+                    return None
+            return grant, candidate
 
-        def _require_auth(self, scope=None):
+        def _require_auth(self, scope=None, *, mutating=False):
             """Check auth + optional scope. Returns True if authorized."""
-            scopes = self._token_scopes()
-            if scopes is None:
+            auth = self._token_grant()
+            if auth is None:
                 self._json_response(401, {
                     "ok": False,
                     "err": "token_invalid",
-                    "message": "Missing or expired bearer token. Re-pair with the current token from Settings.",
+                    "message": "Missing, expired, or origin-mismatched token. Re-pair from Settings.",
                 })
                 return False
-            if scope and scope not in scopes:
+            grant, token = auth
+            if scope and scope not in grant.scopes:
                 self._json_response(403, {
                     "ok": False,
                     "err": "scope_denied",
                     "message": f"This token does not have the '{scope}' scope.",
                 })
                 return False
+            if mutating and not self._require_mutation_proof(token):
+                return False
+            return True
+
+        def _require_mutation_proof(self, token):
+            origin = self.headers.get("Origin", "")
+            if origin and not self._origin_ok(origin):
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "origin_denied",
+                    "message": "Mutating requests require an approved origin.",
+                })
+                return False
+            fetch_site = str(self.headers.get("Sec-Fetch-Site", "") or "").lower()
+            if fetch_site == "cross-site":
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "cross_site_denied",
+                    "message": "Cross-site mutation was rejected.",
+                })
+                return False
+            content_type = str(self.headers.get("Content-Type", "") or "")
+            if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                self._json_response(415, {
+                    "ok": False,
+                    "err": "content_type_denied",
+                    "message": "Mutating requests require application/json.",
+                })
+                return False
+            accepted, error = replay_store.accept(
+                token,
+                self.headers.get("X-StreamKeep-Timestamp", ""),
+                self.headers.get("X-StreamKeep-Nonce", ""),
+            )
+            if not accepted:
+                code = 409 if error == "request_replayed" else 400
+                self._json_response(code, {
+                    "ok": False,
+                    "err": error,
+                    "message": "Request freshness proof was missing, stale, or already used.",
+                })
+                return False
             return True
 
         def _cors(self):
             origin = self.headers.get("Origin", "")
-            allowed = origin if self._origin_ok(origin) else "http://localhost"
-            self.send_header("Access-Control-Allow-Origin", allowed)
-            self.send_header("Vary", "Origin")
+            if origin and self._origin_ok(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin, X-Forwarded-Proto, X-Forwarded-Host")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.send_header(
-                "Access-Control-Allow-Headers", "Content-Type, Authorization"
+                "Access-Control-Allow-Headers",
+                "Content-Type, Authorization, X-StreamKeep-Timestamp, X-StreamKeep-Nonce",
             )
 
         def _security_headers(self):
@@ -400,6 +677,10 @@ def _build_handler(
             )
 
         def _json_response(self, code, obj):
+            # Early auth/origin/Host rejections happen before endpoint handlers
+            # read the JSON body. Draining a bounded body avoids a Windows TCP
+            # reset that can otherwise hide the response from the client.
+            self._discard_unread_body()
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self._cors()
@@ -409,10 +690,34 @@ def _build_handler(
             self.end_headers()
             self.wfile.write(body)
 
+        def _discard_unread_body(self, max_bytes=1_048_576):
+            if getattr(self, "_request_body_consumed", False):
+                return
+            self._request_body_consumed = True
+            if self.command not in ("POST", "PUT", "PATCH", "DELETE"):
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+            except (TypeError, ValueError):
+                self.close_connection = True
+                return
+            if length <= 0:
+                return
+            if length > max_bytes:
+                self.close_connection = True
+                return
+            try:
+                self.rfile.read(length)
+            except OSError:
+                self.close_connection = True
+
         def _read_body(self, max_bytes=1_048_576):
+            self._request_body_consumed = True
             try:
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 if length <= 0 or length > max_bytes:
+                    if length > max_bytes:
+                        self.close_connection = True
                     return {}
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
                 return json.loads(raw) if raw else {}
@@ -421,6 +726,14 @@ def _build_handler(
 
         def do_OPTIONS(self):
             if self._reject_bad_host():
+                return
+            origin = self.headers.get("Origin", "")
+            if not origin or not self._origin_ok(origin):
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "origin_denied",
+                    "message": "CORS preflight origin is not approved.",
+                })
                 return
             self.send_response(204)
             self._cors()
@@ -460,25 +773,88 @@ def _build_handler(
                 return
             path = self.path.split("?")[0]
 
-            if path == "/send_url":
-                if self._require_auth(SCOPE_QUEUE):
+            if path == "/pair":
+                self._handle_pair()
+            elif path == "/send_url":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_send_url()
             elif path == "/api/queue":
-                if self._require_auth(SCOPE_QUEUE):
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_queue()
             elif path == "/api/jobs/cancel":
-                if self._require_auth(SCOPE_QUEUE):
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_job_cancel()
             elif path == "/api/failures/retry":
-                if self._require_auth(SCOPE_RECOVERY):
+                if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_failure_retry()
             elif path == "/api/failures/discard":
-                if self._require_auth(SCOPE_RECOVERY):
+                if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_failure_discard()
             else:
-                self.send_response(404)
-                self._cors()
-                self.end_headers()
+                self._json_response(404, {"ok": False, "err": "not_found"})
+
+        def _handle_pair(self):
+            origin_header = self.headers.get("Origin", "")
+            if origin_header and not self._origin_ok(origin_header):
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "origin_denied",
+                    "message": "Pairing origin is not approved.",
+                })
+                return
+            fetch_site = str(self.headers.get("Sec-Fetch-Site", "") or "").lower()
+            if fetch_site == "cross-site":
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "cross_site_denied",
+                    "message": "Cross-site pairing was rejected.",
+                })
+                return
+            fresh, error = replay_store.validate_freshness(
+                self.headers.get("X-StreamKeep-Timestamp", ""),
+                self.headers.get("X-StreamKeep-Nonce", ""),
+            )
+            if not fresh:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": error,
+                    "message": "Pairing requires a fresh timestamp and nonce.",
+                })
+                return
+            content_type = str(self.headers.get("Content-Type", "") or "")
+            if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                self._json_response(415, {"ok": False, "err": "content_type_denied"})
+                return
+            data = self._read_body(max_bytes=4096)
+            scopes = pairing_store.consume(data.get("code"))
+            if not scopes:
+                self._json_response(401, {
+                    "ok": False,
+                    "err": "pairing_invalid",
+                    "message": "Pairing code is invalid, expired, used, or locked.",
+                })
+                return
+            requested_scopes = data.get("scopes")
+            if isinstance(requested_scopes, list):
+                scopes &= frozenset(str(scope) for scope in requested_scopes)
+                if not scopes:
+                    self._json_response(400, {
+                        "ok": False,
+                        "err": "pairing_scope_invalid",
+                        "message": "The client did not request an approved scope.",
+                    })
+                    return
+            origin = _normalize_origin(origin_header) if origin_header else ""
+            token = generate_bearer_token()
+            expires_at = time.time() + PAIRED_TOKEN_TTL_SECONDS
+            token_store.add(token, scopes, origin=origin, expires_at=expires_at)
+            self._json_response(201, {
+                "ok": True,
+                "token": token,
+                "scopes": sorted(scopes),
+                "origin": origin,
+                "expires_at": int(expires_at),
+            })
 
         def _handle_send_url(self):
             data = self._read_body()
@@ -735,9 +1111,9 @@ button:hover{background:#74c7ec}
 <div id="auth">
 <h1>StreamKeep Remote</h1>
 <div class="card">
-<p style="color:#a6adc8;margin-bottom:12px">Enter the bearer token from Settings to connect.</p>
-<div class="row"><input id="token-input" type="password" placeholder="Bearer token"></div>
-<button onclick="doAuth()" style="width:100%;margin-top:8px">Connect</button>
+<p style="color:#a6adc8;margin-bottom:12px">Generate a one-time pairing code in StreamKeep Settings, then enter it here.</p>
+<div class="row"><input id="token-input" type="password" placeholder="One-time pairing code"></div>
+<button onclick="doAuth()" style="width:100%;margin-top:8px">Pair and connect</button>
 <p id="auth-err" style="color:#f38ba8;margin-top:8px;display:none"></p>
 </div>
 </div>
@@ -774,30 +1150,42 @@ button:hover{background:#74c7ec}
 <script>
 let TOKEN='';
 const BASE=location.origin;
+function freshHeaders(){
+  const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+  return {'X-StreamKeep-Timestamp':String(Math.floor(Date.now()/1000)),
+    'X-StreamKeep-Nonce':Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')};
+}
 function api(path,opts){
   opts=opts||{};opts.headers=opts.headers||{};
   opts.headers['Authorization']='Bearer '+TOKEN;
+  if((opts.method||'GET').toUpperCase()!=='GET'){
+    Object.assign(opts.headers,freshHeaders());
+    opts.headers['Content-Type']=opts.headers['Content-Type']||'application/json';}
   return fetch(BASE+path,opts).then(r=>{
     if(r.status===401){clearInterval(_refreshId);
       document.getElementById('app').style.display='none';
       document.getElementById('auth').style.display='block';
       document.getElementById('auth-err').style.display='block';
       document.getElementById('auth-err').textContent=
-        'Token expired or rotated. Re-enter the current token from Settings.';
+        'Access expired or was rotated. Generate a new pairing code in Settings.';
       return {ok:false};}
     return r.json();});
 }
 function doAuth(){
-  TOKEN=document.getElementById('token-input').value.trim();
-  api('/ping').then(d=>{
+  const code=document.getElementById('token-input').value.trim();
+  fetch(BASE+'/pair',{method:'POST',headers:Object.assign(
+    {'Content-Type':'application/json'},freshHeaders()),
+    body:JSON.stringify({code,scopes:['status','queue','recovery']})}).then(async r=>{
+      const d=await r.json();if(!r.ok)throw new Error(d.message||d.err||'Pairing failed');
+      TOKEN=d.token||'';return api('/ping');}).then(d=>{
     if(d.ok){document.getElementById('auth').style.display='none';
       document.getElementById('app').style.display='block';refresh();
       _refreshId=setInterval(refresh,5000);}
     else throw new Error(d.message||'');
   }).catch(e=>{
     document.getElementById('auth-err').style.display='block';
-    var msg=e&&e.message&&e.message.includes('expired')?e.message:
-      'Invalid token or server unreachable. Check the token in StreamKeep Settings.';
+    var msg=e&&e.message?e.message:
+      'Pairing failed. Generate a fresh code in StreamKeep Settings.';
     document.getElementById('auth-err').textContent=msg;
   });
 }

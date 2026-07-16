@@ -1,8 +1,25 @@
-// StreamKeep Companion popup. Stores host/port/token in chrome.storage.local,
-// fires authenticated POST /send_url to the app's local server.
+// StreamKeep Companion popup. Exchanges a one-time code for an origin-bound
+// token, then sends replay-protected requests to the loopback listener.
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
+
+function freshHeaders() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return {
+    "X-StreamKeep-Timestamp": String(Math.floor(Date.now() / 1000)),
+    "X-StreamKeep-Nonce": Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
+  };
+}
+
+async function storedPairing() {
+  const [{ port }, { token }] = await Promise.all([
+    chrome.storage.local.get(["port"]),
+    chrome.storage.session.get(["token"]),
+  ]);
+  return { port, token };
+}
 
 function setStatus(msg, cls) {
   statusEl.className = "status " + (cls || "");
@@ -10,18 +27,26 @@ function setStatus(msg, cls) {
 }
 
 async function load() {
-  const cfg = await chrome.storage.local.get(["host", "port", "token"]);
-  if (cfg.host) $("host").value = cfg.host;
+  const cfg = await storedPairing();
   if (cfg.port) $("port").value = cfg.port;
-  if (cfg.token) $("token").value = cfg.token;
+  if (cfg.token) setStatus("Paired. Test the connection or send a URL.", "ok");
 }
 
-async function save() {
-  const host = $("host").value.trim() || "127.0.0.1";
+async function pair() {
   const port = parseInt($("port").value, 10) || 0;
-  const token = $("token").value.trim();
-  await chrome.storage.local.set({ host, port, token });
-  setStatus("Saved.", "ok");
+  const code = $("pairing-code").value.trim();
+  if (!port || !code) throw new Error("Enter the loopback port and one-time pairing code.");
+  const resp = await fetch(`http://127.0.0.1:${port}/pair`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...freshHeaders() },
+    body: JSON.stringify({ code, scopes: ["status", "queue"] }),
+  });
+  const result = await resp.json();
+  if (!resp.ok || !result.token) throw new Error(result.message || "Pairing failed.");
+  await chrome.storage.local.set({ port });
+  await chrome.storage.session.set({ token: result.token });
+  $("pairing-code").value = "";
+  setStatus("Paired with StreamKeep.", "ok");
 }
 
 async function currentTabUrl() {
@@ -30,18 +55,17 @@ async function currentTabUrl() {
 }
 
 async function companionCall(path, method, body) {
-  const { host, port, token } = await chrome.storage.local.get([
-    "host", "port", "token",
-  ]);
-  if (!host || !port || !token) {
-    throw new Error("Set host, port, and token first.");
+  const { port, token } = await storedPairing();
+  if (!port || !token) {
+    throw new Error("Pair this extension with StreamKeep first.");
   }
-  const url = `http://${host}:${port}${path}`;
+  const url = `http://127.0.0.1:${port}${path}`;
   const resp = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      ...freshHeaders(),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -50,14 +74,14 @@ async function companionCall(path, method, body) {
     try {
       const err = await resp.json();
       if (err.err === "token_invalid") {
-        throw new Error("Token expired or rotated. Re-pair with the current token from StreamKeep Settings.");
+        throw new Error("Access expired or was rotated. Generate a new pairing code in StreamKeep Settings.");
       }
       if (err.err === "scope_denied") {
         throw new Error(err.message || "Token lacks the required scope.");
       }
       if (err.message) detail = err.message;
     } catch (e) {
-      if (e.message.startsWith("Token expired") || e.message.startsWith("Token lacks"))
+      if (e.message.startsWith("Access expired") || e.message.startsWith("Token lacks"))
         throw e;
     }
     throw new Error(detail);
@@ -124,7 +148,10 @@ async function sendAllTabs() {
 
 document.addEventListener("DOMContentLoaded", () => {
   load();
-  $("save").addEventListener("click", save);
+  $("pair").addEventListener("click", async () => {
+    setStatus("Pairing…");
+    try { await pair(); } catch (e) { setStatus(`Pairing failed: ${e.message}`, "err"); }
+  });
   $("test").addEventListener("click", testPairing);
   $("send-fetch").addEventListener("click", () => sendUrl("fetch"));
   $("send-queue").addEventListener("click", () => sendUrl("queue"));

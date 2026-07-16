@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from streamkeep import config, secrets
@@ -54,6 +55,7 @@ class SecretsTests(unittest.TestCase):
             "theme": "dark",
             "webhook_url": "https://hooks.example/secret",
             "hf_token": "hf_private",
+            "companion_token": "companion-master-token-must-stay-private",
             "proxy_pool": [{"url": "socks5://user:pass@proxy"}],
             "media_server": {
                 "url": "https://media.internal",
@@ -72,11 +74,14 @@ class SecretsTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertNotIn("hf_private", serialized)
         self.assertNotIn("media-token", serialized)
+        self.assertNotIn("companion-master-token", serialized)
         self.assertTrue(stored["hf_token"].startswith("secretref:"))
+        self.assertTrue(stored["companion_token"].startswith("secretref:"))
         self.assertEqual(resolved, cfg)
         self.assertEqual(exported["hf_token"], "")
         self.assertEqual(exported["proxy_pool"], [])
         self.assertEqual(exported["media_server"]["token"], "")
+        self.assertEqual(exported["companion_token"], "")
         self.assertNotIn("signed-value", exported["recent_urls"][0])
         self.assertGreaterEqual(len(store), 5)
 
@@ -127,6 +132,19 @@ class SecretsTests(unittest.TestCase):
                 {"theme": "dark"},
             )
             self.assertNotIn("must-not-leak", config_file.read_text(encoding="utf-8"))
+
+    def test_companion_refuses_even_existing_master_when_secure_save_fails(self):
+        from streamkeep.ui.tabs.settings import SettingsTabMixin
+
+        window = SimpleNamespace(
+            _config={"companion_token": "a" * 32},
+            _persist_config=mock.Mock(return_value=False),
+        )
+        with self.assertRaisesRegex(ValueError, "Secure credential storage"):
+            SettingsTabMixin._ensure_companion_master_token(window)
+
+        self.assertNotIn("companion_token", window._config)
+        window._persist_config.assert_called_once_with()
 
     def test_config_backup_rotation_never_copies_legacy_plaintext(self):
         with tempfile.TemporaryDirectory() as tmpdir:

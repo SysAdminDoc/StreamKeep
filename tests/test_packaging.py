@@ -80,6 +80,23 @@ def test_browser_extension_validates_mv3_manifest():
     assert ok, f"Extension validation failed: {errors}"
 
 
+def test_browser_extension_keeps_access_session_only_and_replay_protected():
+    extension = ROOT / "browser-extension"
+    manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
+    popup = (extension / "popup.js").read_text(encoding="utf-8")
+    background = (extension / "background.js").read_text(encoding="utf-8")
+
+    assert manifest["host_permissions"] == ["http://127.0.0.1/*"]
+    assert 'chrome.storage.local.set({ port })' in popup
+    assert 'chrome.storage.session.set({ token: result.token })' in popup
+    assert 'chrome.storage.local.set({ port, token' not in popup
+    assert 'scopes: ["status", "queue"]' in popup
+    for source in (popup, background):
+        assert "chrome.storage.session.get" in source
+        assert "X-StreamKeep-Timestamp" in source
+        assert "X-StreamKeep-Nonce" in source
+
+
 def test_browser_extension_packages_deterministic_zip():
     from browser_extension import package_extension
     with tempfile.TemporaryDirectory() as tmpdir:

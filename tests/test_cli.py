@@ -86,3 +86,17 @@ def test_backup_command_is_headless_and_secret_free(tmp_path):
     assert b"must-not-export" not in output.read_bytes()
     assert "Backup created" in result.stdout
     assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()
+
+
+def test_server_cli_never_accepts_or_prints_bearer_tokens_in_argv():
+    source = (ROOT / "streamkeep" / "cli.py").read_text(encoding="utf-8")
+    assert 'add_argument("--token"' not in source
+    assert '_print_line(f"Token:' not in source
+    assert 'add_argument("--token-stdin"' not in source
+    assert 'add_argument("--pairing-code-stdout"' in source
+    assert "--trusted-proxy-origin" in source
+    server_source = source[
+        source.index("def _run_server("):source.index("# ── --list-extractors")
+    ]
+    assert "_print_line(server.token)" not in server_source
+    assert 'f"{server.token}' not in server_source

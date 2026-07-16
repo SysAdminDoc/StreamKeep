@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
@@ -37,7 +37,11 @@ from ...postprocess import (
     available_video_codec_keys,
 )
 from ...theme import CAT
-from ...local_server import LocalCompanionServer
+from ...local_server import (
+    LocalCompanionServer,
+    generate_bearer_token,
+    valid_bearer_token,
+)
 from ...updater import (
     DownloadUpdateWorker, UpdateCheckWorker, arm_self_replace,
 )
@@ -790,13 +794,22 @@ class SettingsTabMixin:
         if hasattr(self, "companion_check"):
             prev_enabled = bool(self._config.get("companion_server_enabled", False))
             prev_bind_lan = bool(self._config.get("companion_bind_lan", False))
+            prev_proxy_origin = str(
+                self._config.get("companion_proxy_origin", "") or ""
+            )
             new_enabled = bool(self.companion_check.isChecked())
             new_bind_lan = bool(self.companion_lan_check.isChecked())
+            new_proxy_origin = self.companion_proxy_origin_input.text().strip()
             self._config["companion_server_enabled"] = new_enabled
             self._config["companion_bind_lan"] = new_bind_lan
-            if new_enabled != prev_enabled or new_bind_lan != prev_bind_lan:
+            self._config["companion_proxy_origin"] = new_proxy_origin
+            if (
+                new_enabled != prev_enabled
+                or new_bind_lan != prev_bind_lan
+                or new_proxy_origin != prev_proxy_origin
+            ):
                 self._maybe_start_companion_server(
-                    force_restart=prev_enabled and new_enabled and new_bind_lan != prev_bind_lan
+                    force_restart=prev_enabled and new_enabled
                 )
             else:
                 self._refresh_companion_ui()
@@ -974,18 +987,59 @@ class SettingsTabMixin:
             self._set_status("Browser companion disabled.", "idle")
 
     def _on_companion_scope_toggled(self, checked):
-        """Persist LAN scope changes and restart the server if needed."""
+        """Persist reverse-proxy scope changes and restart if needed."""
         self._config["companion_bind_lan"] = bool(checked)
+        if hasattr(self, "companion_proxy_origin_input"):
+            self._config["companion_proxy_origin"] = (
+                self.companion_proxy_origin_input.text().strip()
+            )
         self._persist_config()
         if bool(self._config.get("companion_server_enabled", False)):
             self._maybe_start_companion_server(force_restart=self._companion_server is not None)
-            if checked:
-                self._set_status("Browser companion restarted with LAN access enabled.", "warning")
+            if self._companion_server is None:
+                self._set_status(
+                    "Browser companion could not start. Review the HTTPS origin and secure storage status.",
+                    "warning",
+                )
+            elif checked:
+                self._set_status(
+                    "Browser companion restarted behind the trusted HTTPS proxy.",
+                    "warning",
+                )
             else:
                 self._set_status("Browser companion returned to local-only access.", "success")
         else:
             self._refresh_companion_ui()
             self._set_status("Browser companion access scope saved.", "success")
+
+    def _on_companion_proxy_origin_changed(self):
+        origin = self.companion_proxy_origin_input.text().strip()
+        changed = origin != str(self._config.get("companion_proxy_origin", "") or "")
+        self._config["companion_proxy_origin"] = origin
+        self._persist_config()
+        if changed and bool(self._config.get("companion_bind_lan", False)):
+            self._maybe_start_companion_server(
+                force_restart=self._companion_server is not None
+            )
+            if self._companion_server is None:
+                self._set_status(
+                    "HTTPS remote origin is invalid or the companion could not restart.",
+                    "warning",
+                )
+            else:
+                self._set_status("HTTPS remote origin applied.", "success")
+
+    def _ensure_companion_master_token(self):
+        token = str(self._config.get("companion_token", "") or "")
+        if not valid_bearer_token(token):
+            token = generate_bearer_token()
+        self._config["companion_token"] = token
+        if not self._persist_config():
+            self._config.pop("companion_token", None)
+            raise ValueError(
+                "Secure credential storage is unavailable; companion access stayed off."
+            )
+        return token
 
     def _copy_text_to_clipboard(self, text, label):
         value = str(text or "").strip()
@@ -1017,7 +1071,7 @@ class SettingsTabMixin:
         srv = getattr(self, "_companion_server", None)
         running = srv is not None and int(getattr(srv, "port", 0) or 0) > 0
         local_url = self._companion_local_url()
-        token = str(getattr(srv, "token", "") or "") if running else ""
+        pairing_code = str(getattr(self, "_companion_pairing_code", "") or "")
         error_text = str(getattr(self, "_companion_last_error", "") or "")
 
         if hasattr(self, "companion_check"):
@@ -1032,7 +1086,7 @@ class SettingsTabMixin:
         if running and bind_lan:
             banner_title = "LAN access is enabled"
             banner_body = (
-                "The companion is live on this PC and other devices on your network can connect if they know the token."
+                "The listener remains local. Other devices can connect only through the configured HTTPS reverse proxy and a one-time pairing code."
             )
             banner_tone = "warning"
         elif running:
@@ -1085,18 +1139,20 @@ class SettingsTabMixin:
                 self.companion_remote_value.setText("Off")
                 self.companion_remote_sub.setText("Enable the companion to expose a local URL")
         if hasattr(self, "companion_token_value"):
-            if token:
+            if pairing_code:
                 self.companion_token_value.setText("Ready")
-                self.companion_token_sub.setText("Rotate on demand or on next launch")
-            elif enabled:
-                self.companion_token_value.setText("Pending")
-                self.companion_token_sub.setText("Generated after the server starts")
+                self.companion_token_sub.setText("One use, expires within 5 minutes")
+            elif running:
+                self.companion_token_value.setText("Generate")
+                self.companion_token_sub.setText(f"Extension port: {srv.port}")
             else:
                 self.companion_token_value.setText("Waiting")
-                self.companion_token_sub.setText("Generated only while the companion is on")
+                self.companion_token_sub.setText("Codes are available only while running")
 
         if hasattr(self, "companion_rotate_token_btn"):
-            self.companion_rotate_token_btn.setEnabled(bool(token))
+            self.companion_rotate_token_btn.setEnabled(running)
+        if hasattr(self, "companion_revoke_tokens_btn"):
+            self.companion_revoke_tokens_btn.setEnabled(running)
 
         if hasattr(self, "companion_url_display"):
             self.companion_url_display.setText(local_url)
@@ -1105,26 +1161,58 @@ class SettingsTabMixin:
         if hasattr(self, "companion_copy_url_btn"):
             self.companion_copy_url_btn.setEnabled(bool(local_url))
         if hasattr(self, "companion_token_display"):
-            self.companion_token_display.setText(token)
+            self.companion_token_display.setText(pairing_code)
         if hasattr(self, "companion_copy_token_btn"):
-            self.companion_copy_token_btn.setEnabled(bool(token))
+            self.companion_copy_token_btn.setEnabled(bool(pairing_code))
 
     def _on_copy_companion_url(self):
         self._copy_text_to_clipboard(self._companion_local_url(), "Browser companion URL")
 
     def _on_copy_companion_token(self):
         text = self.companion_token_display.text() if hasattr(self, "companion_token_display") else ""
-        self._copy_text_to_clipboard(text, "Pairing token")
+        self._copy_text_to_clipboard(text, "One-time pairing code")
 
     def _on_rotate_companion_token(self):
         srv = getattr(self, "_companion_server", None)
         if srv is None or int(getattr(srv, "port", 0) or 0) <= 0:
             self._set_status("Companion server is not running.", "warning")
             return
-        srv.rotate_token()
+        self._config["companion_token"] = srv.rotate_token()
+        if not self._persist_config():
+            srv.stop()
+            self._companion_server = None
+            self._companion_pairing_code = ""
+            self._config.pop("companion_token", None)
+            self._set_status(
+                "Access was revoked, but secure storage failed; companion stopped.",
+                "error",
+            )
+            self._refresh_companion_ui()
+            return
+        self._publish_companion_pairing_code(srv.create_pairing_code())
+        self._log("[COMPANION] All client access revoked and master token rotated.")
+        self._set_status("All clients revoked. A fresh one-time pairing code is ready.", "success")
+
+    def _on_generate_companion_pairing_code(self):
+        srv = getattr(self, "_companion_server", None)
+        if srv is None or int(getattr(srv, "port", 0) or 0) <= 0:
+            self._set_status("Companion server is not running.", "warning")
+            return
+        self._publish_companion_pairing_code(srv.create_pairing_code())
+        self._set_status("One-time pairing code generated for five minutes.", "success")
+
+    def _publish_companion_pairing_code(self, code):
+        self._companion_pairing_code = code
         self._refresh_companion_ui()
-        self._log("[COMPANION] Token rotated — old tokens are now invalid.")
-        self._set_status("Pairing token rotated. Re-pair the browser extension.", "success")
+        QTimer.singleShot(
+            300_000,
+            lambda issued=code: self._expire_companion_pairing_code(issued),
+        )
+
+    def _expire_companion_pairing_code(self, issued):
+        if getattr(self, "_companion_pairing_code", "") == issued:
+            self._companion_pairing_code = ""
+            self._refresh_companion_ui()
 
     def _on_open_companion_remote(self):
         url = self._companion_local_url()
@@ -1230,9 +1318,14 @@ class SettingsTabMixin:
         changes the setting."""
         enabled = bool(self._config.get("companion_server_enabled", False))
         bind_lan = bool(self._config.get("companion_bind_lan", False))
-        desired_bind = "0.0.0.0" if bind_lan else "127.0.0.1"
+        proxy_origin = str(self._config.get("companion_proxy_origin", "") or "").strip()
+        desired_bind = "127.0.0.1"
         running = self._companion_server is not None
-        if running and getattr(self._companion_server, "_bind_addr", "") != desired_bind:
+        if running and (
+            getattr(self._companion_server, "_bind_addr", "") != desired_bind
+            or getattr(self._companion_server, "external_origin", "")
+            != (proxy_origin if bind_lan else "")
+        ):
             force_restart = True
         if force_restart and running:
             try:
@@ -1240,10 +1333,16 @@ class SettingsTabMixin:
             except Exception:
                 pass
             self._companion_server = None
+            self._companion_pairing_code = ""
             running = False
         if enabled and not running:
             try:
-                srv = LocalCompanionServer(bind_lan=bind_lan)
+                master_token = self._ensure_companion_master_token()
+                srv = LocalCompanionServer(
+                    bind_lan=bind_lan,
+                    external_origin=proxy_origin,
+                    master_token=master_token,
+                )
                 srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)
                 srv.failed_job_retry_requested.connect(self._retry_failed_job)
@@ -1251,12 +1350,12 @@ class SettingsTabMixin:
                 srv.start()
                 self._companion_server = srv
                 self._companion_last_error = ""
-                host = getattr(srv, "display_host", "127.0.0.1")
                 self._log(
-                    f"[COMPANION] Listening on {host}:{srv.port} "
-                    f"— token in Settings tab."
+                    f"[COMPANION] Loopback listener ready on port {srv.port} "
+                    "— pairing is explicit and nonce-protected."
                 )
-            except OSError as e:
+            except (OSError, ValueError) as e:
+                self._companion_pairing_code = ""
                 self._companion_last_error = str(e)
                 self._log(f"[COMPANION] Could not start server: {e}")
         elif enabled and running:
@@ -1267,6 +1366,7 @@ class SettingsTabMixin:
             except Exception:
                 pass
             self._companion_server = None
+            self._companion_pairing_code = ""
             self._companion_last_error = ""
             self._log("[COMPANION] Server stopped.")
         elif not enabled:
@@ -2183,23 +2283,40 @@ def build_settings_tab(win):
     win.companion_check = QCheckBox("Enable browser-extension companion (local server)")
     win.companion_check.setChecked(bool(win._config.get("companion_server_enabled", False)))
     win.companion_check.setToolTip(
-        "Starts a 127.0.0.1-only HTTP server on a random port so the "
-        "StreamKeep browser extension can send URLs with one click. The "
-        "server requires a bearer token shown below, regenerated each "
-        "app launch."
+        "Starts a 127.0.0.1-only HTTP server on a random port. Clients must "
+        "exchange a short-lived pairing code for an origin-bound token."
     )
     win.companion_check.toggled.connect(win._on_companion_toggled)
     comp_row.addWidget(win.companion_check)
-    win.companion_lan_check = QCheckBox("Allow LAN access")
+    win.companion_lan_check = QCheckBox("Enable LAN through HTTPS reverse proxy")
     win.companion_lan_check.setChecked(bool(win._config.get("companion_bind_lan", False)))
     win.companion_lan_check.setToolTip(
-        "Bind to 0.0.0.0 instead of 127.0.0.1 — allows access from other "
-        "devices on your network. The Web Remote UI is available at / in a browser."
+        "The app remains loopback-only. A locally managed reverse proxy must "
+        "terminate trusted HTTPS and forward to the displayed listener port."
     )
     win.companion_lan_check.toggled.connect(win._on_companion_scope_toggled)
     comp_row.addWidget(win.companion_lan_check)
     comp_row.addStretch(1)
     companion_panel_lay.addLayout(comp_row)
+
+    proxy_origin_row = QHBoxLayout()
+    proxy_origin_row.setSpacing(8)
+    proxy_origin_row.addWidget(QLabel("HTTPS remote origin:"))
+    win.companion_proxy_origin_input = QLineEdit(
+        str(win._config.get("companion_proxy_origin", "") or "")
+    )
+    win.companion_proxy_origin_input.setPlaceholderText(
+        "https://streamkeep.example.lan"
+    )
+    win.companion_proxy_origin_input.setToolTip(
+        "Exact public origin served by your trusted local reverse proxy. "
+        "HTTP origins, paths, query strings, and broad host patterns are rejected."
+    )
+    win.companion_proxy_origin_input.editingFinished.connect(
+        win._on_companion_proxy_origin_changed
+    )
+    proxy_origin_row.addWidget(win.companion_proxy_origin_input, 1)
+    companion_panel_lay.addLayout(proxy_origin_row)
 
     win.companion_status_banner, win.companion_status_title, win.companion_status_body = (
         make_status_banner()
@@ -2219,9 +2336,9 @@ def build_settings_tab(win):
         "Enable the companion to expose a local control page",
     )
     token_card, win.companion_token_value, win.companion_token_sub = make_metric_card(
-        "Pairing token",
+        "Pairing code",
         "Waiting",
-        "Generated fresh on each launch",
+        "Generate only when a client is ready",
     )
     companion_metrics.addWidget(scope_card)
     companion_metrics.addWidget(remote_card)
@@ -2235,7 +2352,7 @@ def build_settings_tab(win):
     win.companion_url_display.setReadOnly(True)
     win.companion_url_display.setPlaceholderText("Enable the companion server to expose a local URL")
     win.companion_url_display.setToolTip(
-        "Open this on the same PC for a lightweight queue and status view."
+        "Open the loopback URL on this PC, or the configured HTTPS origin from a paired LAN client."
     )
     endpoint_row.addWidget(win.companion_url_display, 1)
     win.companion_copy_url_btn = QPushButton("Copy")
@@ -2252,33 +2369,42 @@ def build_settings_tab(win):
 
     comp_token_row = QHBoxLayout()
     comp_token_row.setSpacing(8)
-    comp_token_row.addWidget(QLabel("Pairing token:"))
+    comp_token_row.addWidget(QLabel("One-time pairing code:"))
     win.companion_token_display = QLineEdit("")
     win.companion_token_display.setReadOnly(True)
-    win.companion_token_display.setPlaceholderText("Enable server to generate a token")
+    win.companion_token_display.setPlaceholderText("Select New code after the server starts")
     win.companion_token_display.setToolTip(
-        "Paste this into the StreamKeep browser extension's popup. "
-        "Regenerated on each launch — never stored on disk."
+        "Use this once in the extension or web remote. It expires after five "
+        "minutes and is never placed in a URL or log."
     )
     comp_token_row.addWidget(win.companion_token_display, 1)
-    win.companion_copy_token_btn = QPushButton("Copy token")
+    win.companion_copy_token_btn = QPushButton("Copy code")
     win.companion_copy_token_btn.setObjectName("secondary")
     win.companion_copy_token_btn.setFixedWidth(108)
     win.companion_copy_token_btn.clicked.connect(win._on_copy_companion_token)
     comp_token_row.addWidget(win.companion_copy_token_btn)
-    win.companion_rotate_token_btn = QPushButton("Rotate")
+    win.companion_rotate_token_btn = QPushButton("New code")
     win.companion_rotate_token_btn.setObjectName("secondary")
     win.companion_rotate_token_btn.setFixedWidth(82)
     win.companion_rotate_token_btn.setToolTip(
-        "Generate a new token immediately. The old token stops working — "
-        "re-pair the browser extension with the new one."
+        "Generate a one-use pairing code valid for five minutes."
     )
-    win.companion_rotate_token_btn.clicked.connect(win._on_rotate_companion_token)
+    win.companion_rotate_token_btn.clicked.connect(
+        win._on_generate_companion_pairing_code
+    )
     comp_token_row.addWidget(win.companion_rotate_token_btn)
+    win.companion_revoke_tokens_btn = QPushButton("Revoke all")
+    win.companion_revoke_tokens_btn.setObjectName("secondary")
+    win.companion_revoke_tokens_btn.setFixedWidth(92)
+    win.companion_revoke_tokens_btn.setToolTip(
+        "Invalidate every paired client and rotate the secure master token."
+    )
+    win.companion_revoke_tokens_btn.clicked.connect(win._on_rotate_companion_token)
+    comp_token_row.addWidget(win.companion_revoke_tokens_btn)
     companion_panel_lay.addLayout(comp_token_row)
 
     companion_hint = QLabel(
-        "The token rotates every launch and can be rotated on demand. It is never stored on disk. If LAN access is on, share it only with devices you trust."
+        "The master token is generated with 256 bits and kept in the operating-system secure store. Clients receive scoped, origin-bound tokens only after explicit one-time pairing. Mutating calls are nonce-protected."
     )
     companion_hint.setObjectName("subtleText")
     companion_hint.setWordWrap(True)
