@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import VERSION
+from .capabilities import get_runtime_capabilities
 from .paths import CONFIG_DIR, LOG_FILE, CRASH_LOG, PORTABLE
 
 _REDACT_PATTERNS = [
@@ -107,22 +108,7 @@ def _runtime_info():
         "portable": PORTABLE,
         "config_dir": str(CONFIG_DIR),
     }
-    try:
-        import subprocess
-        from .paths import _CREATE_NO_WINDOW
-        r = subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        first_line = r.stdout.decode("utf-8", errors="replace").split("\n")[0]
-        info["ffmpeg"] = first_line.strip() if r.returncode == 0 else "not found"
-    except Exception:
-        info["ffmpeg"] = "not available"
-    try:
-        import yt_dlp.version
-        info["yt_dlp_version"] = getattr(yt_dlp.version, "__version__", "unknown")
-    except (ImportError, AttributeError):
-        info["yt_dlp_version"] = "not installed"
+    info["runtime_capabilities"] = get_runtime_capabilities(refresh=True)
     return info
 
 

@@ -7,6 +7,7 @@ time presence isn't enough — the GPU/driver must also be present).
 
 import subprocess
 
+from ..capabilities import resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW
 
 
@@ -59,7 +60,7 @@ def detect_ffmpeg_encoders():
         return _FFMPEG_ENCODERS_CACHE
     try:
         r = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
+            [resolve_tool_command("ffmpeg"), "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=15,
             creationflags=_CREATE_NO_WINDOW,
         )
@@ -85,7 +86,7 @@ def _probe_hw_encoder(encoder_name):
     try:
         r = subprocess.run(
             [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                resolve_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error",
                 "-f", "lavfi", "-i", "color=c=black:s=64x64:r=1:d=0.04",
                 "-c:v", encoder_name, "-f", "null", "-",
             ],

@@ -992,7 +992,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         elif "ntfy.sh" in url or "/ntfy/" in url:
             body = f"{title}\n{details}".strip() if details else title
             try:
-                cmd = ["curl", "-s", "-X", "POST",
+                from ..capabilities import resolve_tool_command
+                cmd = [resolve_tool_command("curl"), "-s", "-X", "POST",
                        "-H", f"Title: StreamKeep: {event}",
                        "-H", "Priority: default",
                        "-H", f"Tags: {platform}",
@@ -1028,7 +1029,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
     def _fire_webhook_json(self, url, payload):
         """Fire-and-forget JSON POST via curl."""
         try:
-            cmd = ["curl", "-s", "-X", "POST",
+            from ..capabilities import resolve_tool_command
+            cmd = [resolve_tool_command("curl"), "-s", "-X", "POST",
                    "-H", "Content-Type: application/json",
                    "-d", json.dumps(payload),
                    "--max-time", "10", url]

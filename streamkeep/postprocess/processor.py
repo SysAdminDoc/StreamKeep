@@ -8,6 +8,7 @@ import os
 import subprocess
 import threading
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 from ..utils import safe_filename
 from .codecs import (
@@ -109,6 +110,8 @@ class PostProcessor:
     @staticmethod
     def _ffmpeg_run(cmd, log_fn, label):
         try:
+            cmd = list(cmd)
+            cmd[0] = resolve_tool_command("ffmpeg")
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=3600,
                 creationflags=_CREATE_NO_WINDOW,
@@ -342,7 +345,8 @@ class PostProcessor:
         try:
             r = subprocess.run(
                 [
-                    "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                    resolve_tool_command("ffprobe"), "-v", "error",
+                    "-show_entries", "format=duration",
                     "-of", "default=noprint_wrappers=1:nokey=1", src,
                 ],
                 capture_output=True, text=True, timeout=15,
@@ -421,11 +425,15 @@ class PostProcessor:
             "-f", "null", "-",
         ]
         try:
+            detect_cmd[0] = resolve_tool_command("ffmpeg")
             r = subprocess.run(
                 detect_cmd, capture_output=True, text=True, timeout=600,
                 creationflags=_CREATE_NO_WINDOW,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        except (
+            CapabilityUnavailableError, FileNotFoundError,
+            subprocess.TimeoutExpired, OSError,
+        ) as e:
             if log_fn:
                 log_fn(f"[POST] Silence detection failed: {e}")
             return
@@ -450,7 +458,8 @@ class PostProcessor:
         # Probe duration to add trailing segment
         try:
             dur_r = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                [resolve_tool_command("ffprobe"), "-v", "error",
+                 "-show_entries", "format=duration",
                  "-of", "default=noprint_wrappers=1:nokey=1", src],
                 capture_output=True, text=True, timeout=15,
                 creationflags=_CREATE_NO_WINDOW,

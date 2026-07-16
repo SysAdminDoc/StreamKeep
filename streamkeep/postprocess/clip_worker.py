@@ -16,6 +16,7 @@ import tempfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
@@ -66,9 +67,10 @@ class ClipWorker(QThread):
         dur = max(0.0, self.end_secs - self.start_secs)
         if dur <= 0:
             return None
+        ffmpeg_path = resolve_tool_command("ffmpeg")
         if not self.reencode:
             return [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                 "-ss", f"{self.start_secs:.3f}",
                 "-i", self.source_path,
                 "-t", f"{dur:.3f}",
@@ -77,7 +79,7 @@ class ClipWorker(QThread):
                 "-y", self.output_path,
             ]
         cmd = [
-            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+            ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
             "-i", self.source_path,
             "-ss", f"{self.start_secs:.3f}",
             "-t", f"{dur:.3f}",
@@ -92,7 +94,12 @@ class ClipWorker(QThread):
         return cmd
 
     def run(self):
-        cmd = self._build_cmd()
+        try:
+            cmd = self._build_cmd()
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[CLIP] Blocked: {error}")
+            self.done.emit(False, "")
+            return
         if cmd is None:
             self.log.emit("[CLIP] Invalid range — end must be greater than start.")
             self.done.emit(False, "")
@@ -216,6 +223,13 @@ class HighlightWorker(QThread):
             self.done.emit(False, "")
             return
 
+        try:
+            ffmpeg_path = resolve_tool_command("ffmpeg")
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[HIGHLIGHT] Blocked: {error}")
+            self.done.emit(False, "")
+            return
+
         tmp_dir = tempfile.mkdtemp(prefix="streamkeep_hl_")
         parts = []
         n = len(self.ranges)
@@ -232,7 +246,7 @@ class HighlightWorker(QThread):
                 part_path = os.path.join(tmp_dir, f"part_{i:03d}.mp4")
                 if not self.reencode:
                     cmd = [
-                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
+                        ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                         "-ss", f"{start:.3f}", "-i", self.source_path,
                         "-t", f"{dur:.3f}", "-c", "copy",
                         "-avoid_negative_ts", "make_zero",
@@ -240,7 +254,7 @@ class HighlightWorker(QThread):
                     ]
                 else:
                     cmd = [
-                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
+                        ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                         "-i", self.source_path,
                         "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
                         "-c:v", self.video_codec, "-c:a", self.audio_codec,
@@ -287,7 +301,7 @@ class HighlightWorker(QThread):
                 os.makedirs(out_dir, exist_ok=True)
 
             cmd = [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
+                ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-f", "concat", "-safe", "0", "-i", list_path,
                 "-c", "copy", "-y", self.output_path,
             ]

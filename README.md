@@ -126,10 +126,11 @@ Extension icons are shipped under `browser-extension/icons/`. Pairing tokens are
 ## Requirements
 
 - Python 3.10 or newer.
-- `ffmpeg` and `ffprobe` in `PATH`.
-- `curl` in `PATH`.
+- FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
+- curl 8.21.0 or newer in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
-- For full YouTube fallback support through yt-dlp: install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`. Settings and onboarding report when yt-dlp, `yt-dlp-ejs`, or a JavaScript runtime is missing.
+- The pinned Python security floors are yt-dlp 2026.06.09 and Pillow 12.3.0. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; the installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement.
+- StreamKeep records the exact path, version, provenance, and enabled capabilities for each runtime dependency. Settings, onboarding, and diagnostic snapshots expose that registry; missing or below-floor tools block only the dependent operation and include repair guidance. Startup never installs packages implicitly.
 - Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
 
 Install Python dependencies:
@@ -213,6 +214,7 @@ The artifact suite exercises empty, legacy-migrated, and populated libraries off
 - Keep local HTTP APIs bound to loopback and token-gated.
 - Use `QThread`/signals for background work; do not block the GUI thread.
 - Keep subprocess arguments explicit, use `--` separators for user URLs, restrict curl/ffmpeg protocols, and pass `-nostdin` to ffmpeg jobs.
+- Resolve external media/network tools through the shared runtime capability registry so below-floor executables cannot enter download, inspection, post-processing, or webhook paths.
 - Preserve accessibility fundamentals in every UI change: named controls, keyboard-navigable dialogs, readable contrast, status text for long-running work, and log/toast feedback for failures.
 - Do not add GitHub Actions workflows; builds, tests, audits, and release artifacts are produced locally for this repo.
 

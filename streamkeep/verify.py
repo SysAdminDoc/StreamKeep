@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from .capabilities import CapabilityUnavailableError, resolve_tool_command
 from .paths import _CREATE_NO_WINDOW
 
 # Status constants
@@ -62,18 +63,17 @@ def verify_media(media_path, expected_duration=0):
     if file_size == 0:
         return STATUS_FAIL, "File is empty (0 bytes)"
 
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-show_entries", "format=duration,size,nb_streams",
-        "-of", "json",
-        media_path,
-    ]
     try:
+        cmd = [
+            resolve_tool_command("ffprobe"), "-v", "error",
+            "-show_entries", "format=duration,size,nb_streams",
+            "-of", "json", media_path,
+        ]
         r = subprocess.run(
             cmd, capture_output=True, timeout=30,
             creationflags=_CREATE_NO_WINDOW,
         )
-    except (subprocess.TimeoutExpired, OSError) as e:
+    except (CapabilityUnavailableError, subprocess.TimeoutExpired, OSError) as e:
         return STATUS_FAIL, f"ffprobe error: {e}"
 
     if r.returncode != 0:

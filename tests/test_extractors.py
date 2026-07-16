@@ -1330,94 +1330,101 @@ class TestYtDlpExtractorURL(unittest.TestCase):
 class TestYtDlpRuntimeReadiness(unittest.TestCase):
     """yt-dlp version, EJS, and JavaScript runtime readiness helpers."""
 
-    def test_command_uses_internal_runner_in_frozen_build(self):
-        with patch.object(ytdlp_mod.sys, "frozen", True, create=True), \
-                patch.object(ytdlp_mod.sys, "executable", r"C:\\Apps\\StreamKeep.exe"):
-            self.assertEqual(
-                ytdlp_mod.ytdlp_command(),
-                [r"C:\\Apps\\StreamKeep.exe", "--internal-ytdlp"],
-            )
+    @staticmethod
+    def _registry(*, yt=True, ejs=True, javascript=True, runtime="deno"):
+        def record(name, supported, *, version="", path="", display=""):
+            return {
+                "name": name,
+                "display_name": display or name,
+                "path": path,
+                "version": version,
+                "minimum": "",
+                "provenance": "test-fixture" if supported else "missing",
+                "available": supported,
+                "supported": supported,
+                "capabilities": [],
+                "command": [path] if path else [],
+                "repair": f"Repair {display or name}.",
+                "detail": "",
+                "state": "ready" if supported else "missing",
+            }
 
-    @patch(f"{_YTDLP}._has_python_module", return_value=True)
-    def test_command_uses_python_module_in_source_build(self, _mock_module):
-        with patch.object(ytdlp_mod.sys, "frozen", False, create=True):
-            self.assertEqual(
-                ytdlp_mod.ytdlp_command(),
-                [ytdlp_mod.sys.executable, "-m", "yt_dlp"],
-            )
-
-    @patch(f"{_YTDLP}._probe_js_runtime")
-    @patch(f"{_YTDLP}._has_python_module", return_value=True)
-    @patch(f"{_YTDLP}._bundled_ytdlp_version", return_value="2026.07.04")
-    @patch(f"{_YTDLP}.run_capture_interruptible")
-    def test_frozen_status_reads_bundled_version_without_spawning_app(
-            self, mock_run, _mock_version, _mock_module, mock_runtime):
-        mock_runtime.return_value = {
-            "name": "deno", "supported": True, "available": True,
-            "version": "2.7.11", "message": "",
+        yt_record = record(
+            "yt_dlp", yt, version="2026.07.04" if yt else "",
+            path=r"C:\Python\yt_dlp\__init__.py", display="yt-dlp",
+        )
+        ejs_record = record(
+            "yt_dlp_ejs", ejs, version="0.8.0" if ejs else "",
+            path=r"C:\Python\yt_dlp_ejs\__init__.py", display="yt-dlp-ejs",
+        )
+        ejs_record["required_by_ytdlp"] = "==0.8.0"
+        js_record = record(
+            "javascript", javascript, version="22.3.0" if runtime == "node" else "2.7.11",
+            path=rf"C:\Tools\{runtime}.exe", display=runtime,
+        )
+        js_record["runtime"] = runtime if javascript else ""
+        youtube_ready = yt and ejs and javascript
+        youtube = record("youtube", youtube_ready, display="YouTube support")
+        youtube["available"] = yt
+        youtube["detail"] = (
+            "Full YouTube support is ready."
+            if youtube_ready else "YouTube components need repair."
+        )
+        return {
+            "yt_dlp": yt_record,
+            "yt_dlp_ejs": ejs_record,
+            "javascript": js_record,
+            "youtube": youtube,
         }
-        with patch.object(ytdlp_mod.sys, "frozen", True, create=True):
-            status = ytdlp_mod.ytdlp_runtime_status()
+
+    @patch("streamkeep.capabilities.resolve_command_prefix")
+    def test_command_uses_registry_command(self, mock_resolve):
+        mock_resolve.return_value = [r"C:\Apps\StreamKeep.exe", "--internal-ytdlp"]
+        self.assertEqual(ytdlp_mod.ytdlp_command(), mock_resolve.return_value)
+        mock_resolve.assert_called_once_with("yt_dlp")
+
+    @patch("streamkeep.capabilities.get_runtime_capabilities")
+    def test_status_reads_registry_without_spawning_app(self, mock_registry):
+        mock_registry.return_value = self._registry()
+        status = ytdlp_mod.ytdlp_runtime_status()
 
         self.assertEqual(status["state"], "ready")
         self.assertEqual(status["yt_dlp_version"], "2026.07.04")
-        mock_run.assert_not_called()
+        self.assertEqual(status["yt_dlp_path"], r"C:\Python\yt_dlp\__init__.py")
 
     def test_parse_version_parts_handles_cli_formats(self):
         self.assertEqual(ytdlp_mod._parse_version_parts("2026.06.09")[0], (2026, 6, 9))
         self.assertEqual(ytdlp_mod._parse_version_parts("v22.3.0")[0], (22, 3, 0))
         self.assertEqual(ytdlp_mod._parse_version_parts("deno 2.3.1 (stable)")[0], (2, 3, 1))
 
-    @patch(f"{_YTDLP}.run_capture_interruptible")
-    def test_status_reports_missing_ytdlp_with_actionable_hint(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=127, stderr="not found"),
-            CommandResult(returncode=127, stderr="deno missing"),
-            CommandResult(returncode=127, stderr="node missing"),
-            CommandResult(returncode=127, stderr="nodejs missing"),
-            CommandResult(returncode=127, stderr="qjs missing"),
-            CommandResult(returncode=127, stderr="bun missing"),
-        ]
-
+    @patch("streamkeep.capabilities.get_runtime_capabilities")
+    def test_status_reports_missing_ytdlp_with_actionable_hint(self, mock_registry):
+        mock_registry.return_value = self._registry(yt=False, ejs=False, javascript=False)
         status = ytdlp_mod.ytdlp_runtime_status()
 
         self.assertEqual(status["state"], "missing")
-        self.assertIn("pip install -U", status["detail"])
+        self.assertIn("repair", status["detail"].lower())
 
-    @patch(f"{_YTDLP}._has_python_module")
-    @patch(f"{_YTDLP}.run_capture_interruptible")
-    def test_status_reports_missing_ejs_and_js_runtime(self, mock_run, mock_has_module):
-        mock_has_module.side_effect = lambda name: name == "yt_dlp"
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2026.06.09"),
-            CommandResult(returncode=127, stderr="deno missing"),
-            CommandResult(returncode=127, stderr="node missing"),
-            CommandResult(returncode=127, stderr="nodejs missing"),
-            CommandResult(returncode=127, stderr="qjs missing"),
-            CommandResult(returncode=127, stderr="bun missing"),
-        ]
-
+    @patch("streamkeep.capabilities.get_runtime_capabilities")
+    def test_status_reports_missing_ejs_and_js_runtime(self, mock_registry):
+        mock_registry.return_value = self._registry(ejs=False, javascript=False)
         status = ytdlp_mod.ytdlp_runtime_status()
 
         self.assertEqual(status["state"], "limited")
-        self.assertIn("yt-dlp-ejs", status["detail"])
-        self.assertIn("Deno 2.3+", status["detail"])
+        self.assertIn("yt-dlp-ejs", " ".join(status["problems"]))
+        self.assertIn("deno", " ".join(status["problems"]).lower())
 
-    @patch(f"{_YTDLP}._has_python_module")
-    @patch(f"{_YTDLP}.run_capture_interruptible")
-    def test_status_accepts_node_runtime_and_builds_runtime_args(self, mock_run, mock_has_module):
-        mock_has_module.return_value = True
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2026.06.09"),
-            CommandResult(returncode=127, stderr="deno missing"),
-            CommandResult(returncode=0, stdout="v22.3.0"),
-        ]
-
+    @patch("streamkeep.capabilities.get_runtime_capabilities")
+    def test_status_accepts_node_runtime_and_builds_runtime_args(self, mock_registry):
+        mock_registry.return_value = self._registry(runtime="node")
         status = ytdlp_mod.ytdlp_runtime_status()
 
         self.assertEqual(status["state"], "ready")
         self.assertEqual(status["js_runtime"]["name"], "node")
-        self.assertEqual(ytdlp_mod.ytdlp_runtime_args(status), ["--js-runtimes", "node"])
+        self.assertEqual(
+            ytdlp_mod.ytdlp_runtime_args(status),
+            ["--no-js-runtimes", "--js-runtimes", r"node:C:\Tools\node.exe"],
+        )
 
     @patch(f"{_YTDLP}.ytdlp_runtime_status")
     @patch(f"{_YTDLP}.run_capture_interruptible")
@@ -1430,16 +1437,15 @@ class TestYtDlpRuntimeReadiness(unittest.TestCase):
             "js_runtime": {"supported": False, "name": ""},
             "problems": ["Install Deno 2.3+."],
         }
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2026.06.09"),
-            CommandResult(returncode=1, stderr="ERROR: Video unavailable"),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=1, stderr="ERROR: Video unavailable"
+        )
         logs = []
 
         info = ext.resolve("https://www.youtube.com/watch?v=abc", log_fn=logs.append)
 
         self.assertIsNone(info)
-        self.assertTrue(any("yt-dlp runtime support is limited" in line for line in logs))
+        self.assertTrue(any("yt-dlp runtime support is not ready" in line for line in logs))
 
 
 class TestYtDlpExtractorResolve(unittest.TestCase):
@@ -1480,10 +1486,9 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
                 },
             ],
         }
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=0, stdout=json.dumps(yt_json)),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=0, stdout=json.dumps(yt_json)
+        )
         info = self.ext.resolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertIsNotNone(info)
         self.assertEqual(info.platform, "yt-dlp")
@@ -1497,42 +1502,34 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_no_ytdlp_installed(self, mock_run):
         mock_run.return_value = CommandResult(returncode=127, stderr="not found")
-        info = self.ext.resolve("https://youtube.com/watch?v=abc")
+        with patch.object(self.ext, "_has_ytdlp", return_value=False):
+            info = self.ext.resolve("https://youtube.com/watch?v=abc")
         self.assertIsNone(info)
+        mock_run.assert_not_called()
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_ytdlp_error(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=1, stderr="ERROR: Video unavailable"),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=1, stderr="ERROR: Video unavailable"
+        )
         info = self.ext.resolve("https://youtube.com/watch?v=deleted")
         self.assertIsNone(info)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_bad_json(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=0, stdout="not json at all"),
-        ]
+        mock_run.return_value = CommandResult(returncode=0, stdout="not json at all")
         info = self.ext.resolve("https://youtube.com/watch?v=badjson")
         self.assertIsNone(info)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_interrupted(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(interrupted=True),
-        ]
+        mock_run.return_value = CommandResult(interrupted=True)
         info = self.ext.resolve("https://youtube.com/watch?v=int")
         self.assertIsNone(info)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_timed_out(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(timed_out=True),
-        ]
+        mock_run.return_value = CommandResult(timed_out=True)
         info = self.ext.resolve("https://youtube.com/watch?v=slow")
         self.assertIsNone(info)
 
@@ -1564,10 +1561,9 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
                 },
             ],
         }
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=0, stdout=json.dumps(yt_json)),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=0, stdout=json.dumps(yt_json)
+        )
         info = self.ext.resolve("https://youtube.com/watch?v=filter")
         self.assertIsNotNone(info)
         resolutions = [q.resolution for q in info.qualities]
@@ -1595,10 +1591,9 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
                 {"title": "Main", "start_time": 60, "end_time": 500},
             ],
         }
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=0, stdout=json.dumps(yt_json)),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=0, stdout=json.dumps(yt_json)
+        )
         info = self.ext.resolve("https://youtube.com/watch?v=chapters")
         self.assertIsNotNone(info)
         self.assertEqual(len(info.chapters), 2)
@@ -1611,20 +1606,18 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
             "is_live": True,
             "formats": [],
         }
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=0, stdout=json.dumps(yt_json)),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=0, stdout=json.dumps(yt_json)
+        )
         info = self.ext.resolve("https://youtube.com/watch?v=live")
         self.assertIsNotNone(info)
         self.assertTrue(info.is_live)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_auth_error_triggers_browser_scan(self, mock_run):
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout="2024.01.01"),
-            CommandResult(returncode=1, stderr="ERROR: Sign in to confirm your age"),
-        ]
+        mock_run.return_value = CommandResult(
+            returncode=1, stderr="ERROR: Sign in to confirm your age"
+        )
         with patch(f"{_YTDLP}.scan_browser_cookies", return_value=[]):
             info = self.ext.resolve("https://youtube.com/watch?v=agelock")
         self.assertIsNone(info)

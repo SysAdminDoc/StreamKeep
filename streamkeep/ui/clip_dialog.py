@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 from ..theme import CAT
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
@@ -308,20 +309,21 @@ class _WaveformWorker(QThread):
                     return
 
             # Extract raw 16-bit signed PCM mono at 8 kHz
-            cmd = [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
-                "-i", self.src_path,
-                "-ac", "1", "-ar", str(WAVE_SAMPLE_RATE),
-                "-f", "s16le", "pipe:1",
-            ]
             try:
+                cmd = [
+                    resolve_tool_command("ffmpeg"), *FFMPEG_SAFETY,
+                    "-hide_banner", "-loglevel", "error",
+                    "-i", self.src_path, "-ac", "1",
+                    "-ar", str(WAVE_SAMPLE_RATE), "-f", "s16le", "pipe:1",
+                ]
                 proc = subprocess.run(
                     cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     creationflags=_CREATE_NO_WINDOW,
                     timeout=120,
                 )
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            except (CapabilityUnavailableError, FileNotFoundError,
+                    subprocess.TimeoutExpired, OSError):
                 self.ready.emit([])
                 return
 
@@ -1364,23 +1366,22 @@ class _PreviewWorker(QThread):
                 self.ready.emit("")
                 return
             dst = os.path.join(cache_dir, f"_preview_{int(self.at_secs * 1000):010d}.jpg")
-            cmd = [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
-                "-ss", f"{max(0.0, self.at_secs):.3f}",
-                "-i", self.src_path,
-                "-frames:v", "1",
-                "-vf", "scale=260:-2",
-                "-q:v", "4",
-                "-y", dst,
-            ]
             try:
+                cmd = [
+                    resolve_tool_command("ffmpeg"), *FFMPEG_SAFETY,
+                    "-hide_banner", "-loglevel", "error",
+                    "-ss", f"{max(0.0, self.at_secs):.3f}",
+                    "-i", self.src_path, "-frames:v", "1",
+                    "-vf", "scale=260:-2", "-q:v", "4", "-y", dst,
+                ]
                 proc = subprocess.run(
                     cmd,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     creationflags=_CREATE_NO_WINDOW,
                     timeout=15,
                 )
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            except (CapabilityUnavailableError, FileNotFoundError,
+                    subprocess.TimeoutExpired, OSError):
                 self.ready.emit("")
                 return
             if self._cancel:

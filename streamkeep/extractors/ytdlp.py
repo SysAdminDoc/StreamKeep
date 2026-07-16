@@ -12,7 +12,6 @@ import importlib.util
 import logging
 import os
 import re
-import sys
 import time
 import urllib.parse
 from pathlib import Path
@@ -24,9 +23,6 @@ from .base import Extractor
 
 logger = logging.getLogger(__name__)
 
-
-_YTDLP_INSTALL_HINT = 'Install or update with: pip install -U "yt-dlp[default]"'
-_JS_RUNTIME_HINT = "Install Deno 2.3+ or Node.js 22+ for full YouTube support."
 
 # Signatures of a Cloudflare / anti-bot interstitial. An increasing number of
 # video hosts (Rumble, Bitchute, many PeerTube mirrors) gate their pages this
@@ -100,173 +96,60 @@ def _has_python_module(module_name):
 
 
 def ytdlp_command():
-    """Return the bundled yt-dlp command prefix for this runtime.
-
-    A windowed one-file PyInstaller executable cannot use ``python -m``
-    because ``sys.executable`` points back to StreamKeep itself.  Its hidden
-    internal mode re-enters the executable and dispatches directly to the
-    bundled ``yt_dlp`` module.  Source installs use the same module through
-    the active Python interpreter and retain the external CLI as a fallback.
-    """
-    if getattr(sys, "frozen", False):
-        return [sys.executable, "--internal-ytdlp"]
-    if _has_python_module("yt_dlp"):
-        return [sys.executable, "-m", "yt_dlp"]
-    return ["yt-dlp"]
-
-
-def _bundled_ytdlp_version():
-    """Return the bundled module version without spawning a second app."""
-    try:
-        from yt_dlp.version import __version__
-        return str(__version__ or "").strip()
-    except (ImportError, AttributeError):
-        return ""
-
-
-def _probe_command_version(command, args=None):
-    result = run_capture_interruptible([command] + list(args or ["--version"]), timeout=5)
-    if result.interrupted:
-        return {
-            "name": command,
-            "available": False,
-            "supported": False,
-            "version": "",
-            "message": "Runtime probe was interrupted.",
-        }
-    if result.returncode != 0 or result.timed_out:
-        return {
-            "name": command,
-            "available": False,
-            "supported": False,
-            "version": "",
-            "message": (result.stderr or result.error or "not found").strip(),
-        }
-    text = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
-    parts, version = _parse_version_parts(text)
-    return {
-        "name": command,
-        "available": True,
-        "supported": True,
-        "version": version,
-        "parts": parts,
-        "raw": text,
-        "message": "",
-    }
-
-
-def _probe_js_runtime():
-    candidates = [
-        ("deno", ("deno",), (2, 3, 0), None),
-        ("node", ("node", "nodejs"), (22, 0, 0), None),
-        ("quickjs", ("qjs",), (2023, 12, 9), None),
-        ("bun", ("bun",), (1, 2, 11), (1, 3, 14)),
-    ]
-    unsupported = []
-    for name, commands, minimum, maximum in candidates:
-        for command in commands:
-            probed = _probe_command_version(command)
-            if not probed.get("available"):
-                continue
-            parts = tuple(probed.get("parts") or ())
-            if name == "quickjs" and "quickjs-ng" in probed.get("raw", "").lower():
-                supported = True
-            else:
-                supported = _version_at_least(parts, minimum)
-            if maximum and parts and parts > maximum:
-                supported = False
-            probed.update({
-                "name": name,
-                "command": command,
-                "supported": supported,
-                "minimum": ".".join(str(x) for x in minimum),
-            })
-            if supported:
-                if name == "bun":
-                    probed["message"] = "Bun is deprecated by yt-dlp; prefer Deno or Node.js."
-                return probed
-            unsupported.append(probed)
-    if unsupported:
-        first = unsupported[0]
-        return {
-            "name": first.get("name", ""),
-            "command": first.get("command", ""),
-            "available": True,
-            "supported": False,
-            "version": first.get("version", ""),
-            "message": (
-                f"{first.get('name', 'JavaScript runtime')} {first.get('version', '')} "
-                f"is below the supported minimum {first.get('minimum', '')}."
-            ).strip(),
-        }
-    return {
-        "name": "",
-        "command": "",
-        "available": False,
-        "supported": False,
-        "version": "",
-        "message": _JS_RUNTIME_HINT,
-    }
+    """Return the exact security-approved yt-dlp command prefix."""
+    from ..capabilities import resolve_command_prefix
+    return resolve_command_prefix("yt_dlp")
 
 
 def ytdlp_runtime_status():
-    """Return yt-dlp CLI, external-component, and JS-runtime readiness."""
-    version = _bundled_ytdlp_version() if getattr(sys, "frozen", False) else ""
-    if not version:
-        result = run_capture_interruptible(ytdlp_command() + ["--version"], timeout=5)
-        if result.interrupted:
-            return {
-                "state": "missing",
-                "summary": "Interrupted",
-                "detail": "yt-dlp readiness probe was interrupted.",
-                "yt_dlp_version": "",
-                "ejs_available": False,
-                "js_runtime": _probe_js_runtime(),
-                "problems": ["yt-dlp readiness probe was interrupted."],
-            }
-        if result.returncode != 0 or result.timed_out:
-            return {
-                "state": "missing",
-                "summary": "Missing",
-                "detail": f"yt-dlp was not found. {_YTDLP_INSTALL_HINT}.",
-                "yt_dlp_version": "",
-                "ejs_available": False,
-                "js_runtime": _probe_js_runtime(),
-                "problems": ["yt-dlp was not found."],
-            }
-
-        _parts, version = _parse_version_parts(result.stdout)
-        version = version or result.stdout.strip().splitlines()[0][:32]
-    yt_dlp_module = _has_python_module("yt_dlp")
-    ejs_available = _has_python_module("yt_dlp_ejs") or not yt_dlp_module
-    runtime = _probe_js_runtime()
-    problems = []
-    if not ejs_available:
-        problems.append('yt-dlp-ejs is missing; install with pip install -U "yt-dlp[default]".')
-    if not runtime.get("supported"):
-        problems.append(runtime.get("message") or _JS_RUNTIME_HINT)
-
-    if problems:
-        return {
-            "state": "limited",
-            "summary": "Limited",
-            "detail": f"yt-dlp {version} found. " + " ".join(problems),
-            "yt_dlp_version": version,
-            "ejs_available": ejs_available,
-            "js_runtime": runtime,
-            "problems": problems,
-        }
-
-    runtime_label = runtime.get("name") or "JavaScript runtime"
-    runtime_version = runtime.get("version") or "available"
+    """Return yt-dlp/EJS/JavaScript readiness from the shared registry."""
+    from ..capabilities import format_capability_problem, get_runtime_capabilities
+    registry = get_runtime_capabilities()
+    yt_dlp = registry["yt_dlp"]
+    ejs = registry["yt_dlp_ejs"]
+    runtime_record = registry["javascript"]
+    youtube = registry["youtube"]
+    runtime = {
+        "name": runtime_record.get("runtime", ""),
+        "command": (runtime_record.get("command") or [""])[0],
+        "path": runtime_record.get("path", ""),
+        "available": runtime_record.get("available", False),
+        "supported": runtime_record.get("supported", False),
+        "version": runtime_record.get("version", ""),
+        "minimum": runtime_record.get("minimum", ""),
+        "message": "" if runtime_record.get("supported") else format_capability_problem(runtime_record),
+        "provenance": runtime_record.get("provenance", ""),
+    }
+    components = (yt_dlp, ejs, runtime_record)
+    problems = [
+        format_capability_problem(record)
+        for record in components if not record.get("supported")
+    ]
+    if youtube.get("supported"):
+        state, summary = "ready", "Ready"
+    elif not yt_dlp.get("available"):
+        state, summary = "missing", "Missing"
+    elif not yt_dlp.get("supported"):
+        state, summary = "blocked", "Blocked"
+    else:
+        state, summary = "limited", "Limited"
+    detail = youtube.get("detail", "")
+    if yt_dlp.get("available"):
+        detail += (
+            f" yt-dlp path: {yt_dlp.get('path')} "
+            f"({yt_dlp.get('provenance')})."
+        )
     return {
-        "state": "ready",
-        "summary": "Ready",
-        "detail": f"yt-dlp {version} with yt-dlp-ejs and {runtime_label} {runtime_version}.",
-        "yt_dlp_version": version,
-        "ejs_available": ejs_available,
+        "state": state,
+        "summary": summary,
+        "detail": detail.strip(),
+        "yt_dlp_version": yt_dlp.get("version", ""),
+        "yt_dlp_path": yt_dlp.get("path", ""),
+        "ejs_available": ejs.get("supported", False),
+        "ejs_version": ejs.get("version", ""),
+        "ejs_requirement": ejs.get("required_by_ytdlp", ""),
         "js_runtime": runtime,
-        "problems": [],
+        "problems": problems,
     }
 
 
@@ -274,15 +157,16 @@ def ytdlp_runtime_args(status=None):
     status = status or ytdlp_runtime_status()
     runtime = status.get("js_runtime") or {}
     name = runtime.get("name", "")
-    if not runtime.get("supported") or not name or name == "deno":
+    path = runtime.get("path") or runtime.get("command") or ""
+    if not runtime.get("supported") or not name or not path:
         return []
-    return ["--js-runtimes", name]
+    return ["--no-js-runtimes", "--js-runtimes", f"{name}:{path}"]
 
 
 def format_ytdlp_runtime_warning(status):
     if status.get("state") == "ready":
         return ""
-    return "yt-dlp runtime support is limited: " + status.get("detail", "")
+    return "yt-dlp runtime support is not ready: " + status.get("detail", "")
 
 
 class YtDlpExtractor(Extractor):
@@ -301,10 +185,12 @@ class YtDlpExtractor(Extractor):
     sponsorblock = False
 
     def _has_ytdlp(self):
-        if getattr(sys, "frozen", False):
-            return bool(_bundled_ytdlp_version())
-        result = run_capture_interruptible(ytdlp_command() + ["--version"], timeout=5)
-        return result.returncode == 0
+        from ..capabilities import CapabilityUnavailableError, require_capability
+        try:
+            require_capability("yt_dlp")
+            return True
+        except CapabilityUnavailableError:
+            return False
 
     def extract_channel_id(self, url):
         try:

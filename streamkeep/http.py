@@ -23,6 +23,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from .capabilities import CapabilityUnavailableError, resolve_tool_command
 from .paths import _CREATE_NO_WINDOW
 from .utils import fmt_size
 
@@ -188,7 +189,7 @@ def _build_curl_cmd(url: str, headers: dict[str, str] | None = None, method: str
     max_time = max(1, int(timeout or 30))
     connect_timeout = max(1, min(10, max_time))
     cmd = [
-        "curl", "-s", "-L",
+        resolve_tool_command("curl"), "-s", "-L",
         "--proto", "=http,https",
         "--max-redirs", "5",
         "--connect-timeout", str(connect_timeout),
@@ -233,7 +234,11 @@ def _append_cookie_args(cmd):
 
 def curl(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -> str | None:
     """Run curl and return stdout or None."""
-    cmd = _build_curl_cmd(url, headers, timeout=timeout)
+    try:
+        cmd = _build_curl_cmd(url, headers, timeout=timeout)
+    except CapabilityUnavailableError as error:
+        logger.warning("Blocked curl request: %s", error)
+        return None
     result = run_capture_interruptible(cmd, timeout=timeout + 2)
     return result.stdout if result.returncode == 0 else None
 
@@ -251,14 +256,14 @@ def curl_json(url: str, headers: dict[str, str] | None = None, timeout: float = 
 
 def curl_post_json(url: str, data: Any, headers: dict[str, str] | None = None, timeout: float = 30) -> Any:
     """POST JSON and parse response."""
-    cmd = _build_curl_cmd(
-        url,
-        headers,
-        method="POST",
-        body=json.dumps(data),
-        timeout=timeout,
-    )
     try:
+        cmd = _build_curl_cmd(
+            url,
+            headers,
+            method="POST",
+            body=json.dumps(data),
+            timeout=timeout,
+        )
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
         if result.returncode == 0:
             return json.loads(result.stdout)
@@ -293,19 +298,19 @@ def _parse_final_response_headers(raw_headers):
 def http_head_details(url, timeout=20):
     """HEAD request returning range, validator, and digest metadata."""
     connect_timeout = max(1, min(10, int(timeout or 20)))
-    cmd = [
-        "curl", "-sI", "-L",
-        "--proto", "=http,https",
-        "--max-redirs", "5",
-        "--connect-timeout", str(connect_timeout),
-        "--max-time", str(max(1, int(timeout or 20))),
-    ]
-    _proxy = _resolve_proxy(url)
-    if _proxy:
-        cmd.extend(["-x", _proxy])
-    _append_cookie_args(cmd)
-    cmd.append(url)
     try:
+        cmd = [
+            resolve_tool_command("curl"), "-sI", "-L",
+            "--proto", "=http,https",
+            "--max-redirs", "5",
+            "--connect-timeout", str(connect_timeout),
+            "--max-time", str(max(1, int(timeout or 20))),
+        ]
+        _proxy = _resolve_proxy(url)
+        if _proxy:
+            cmd.extend(["-x", _proxy])
+        _append_cookie_args(cmd)
+        cmd.append(url)
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
         if result.returncode != 0:
             return {}
@@ -500,6 +505,12 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
     support, the file is too small to benefit from splitting, or any
     chunk fails — caller is expected to fall back to ffmpeg.
     """
+    try:
+        curl_path = resolve_tool_command("curl")
+    except CapabilityUnavailableError as error:
+        if log_fn:
+            log_fn(f"[PARALLEL] blocked: {error}")
+        return False
     head = http_head_details(url)
     status = int(head.get("status", 0) or 0)
     total = int(head.get("content_length", 0) or 0)
@@ -572,7 +583,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         except OSError:
             pass
         cmd = [
-            "curl", "-sS", "-L", "--fail",
+            curl_path, "-sS", "-L", "--fail",
             "--proto", "=http,https",
             "--max-redirs", "5",
             "--retry", "2", "--retry-delay", "1",

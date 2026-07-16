@@ -12,6 +12,7 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 SCENE_THUMB_W = 120
@@ -100,12 +101,18 @@ class SceneWorker(QThread):
             return
 
         results = []
+        try:
+            ffmpeg_path = resolve_tool_command("ffmpeg")
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[SCENE] Blocked: {error}")
+            self.scenes_ready.emit([])
+            return
         for i, ts in enumerate(timestamps):
             if self._cancel:
                 break
             thumb_path = os.path.join(cache_dir, f"scene_{i:03d}.jpg")
             cmd = [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
+                ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
                 "-ss", f"{ts:.3f}", "-i", self.source_path,
                 "-frames:v", "1",
                 "-vf", f"scale={SCENE_THUMB_W}:-2",

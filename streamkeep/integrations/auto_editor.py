@@ -26,6 +26,7 @@ import os
 import subprocess
 import tempfile
 
+from ..capabilities import resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
@@ -164,11 +165,12 @@ def remove_silence(src, dst, method="audio", threshold="4%", margin="0.2s",
     ext = os.path.splitext(src)[1] or ".mp4"
     tmpdir = tempfile.mkdtemp(prefix="sk_ae_mux_")
     try:
+        ffmpeg_path = resolve_tool_command("ffmpeg")
         seg_files = []
         for idx, (seg_start, seg_end) in enumerate(segments):
             seg_dst = os.path.join(tmpdir, f"seg_{idx:04d}{ext}")
             seg_cmd = [
-                "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
+                ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
                 "-ss", f"{seg_start:.3f}", "-to", f"{seg_end:.3f}",
                 "-i", src, "-c", "copy", seg_dst,
             ]
@@ -191,7 +193,7 @@ def remove_silence(src, dst, method="audio", threshold="4%", margin="0.2s",
                 f.write(f"file '{escaped}'\n")
 
         concat_cmd = [
-            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
+            ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "concat", "-safe", "0", "-i", concat_path,
             "-c", "copy", dst,
         ]

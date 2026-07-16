@@ -1,13 +1,11 @@
 """First-run onboarding wizard — polished multi-step setup for new users."""
 
-import subprocess
-
 from PyQt6.QtWidgets import (
     QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton,
     QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from ..paths import _CREATE_NO_WINDOW
+from ..capabilities import format_capability_problem, get_runtime_capabilities
 from ..extractors.ytdlp import ytdlp_runtime_status
 from ..utils import default_output_dir
 from .widgets import (
@@ -218,27 +216,19 @@ class OnboardingWizard(QDialog):
         return page
 
     def _check_ffmpeg(self):
-        message = (
-            "ffmpeg was found. Downloads, trimming, and verification are ready to use."
-        )
-        tone = "success"
-        title = "System tools look good"
-        try:
-            r = subprocess.run(
-                ["ffmpeg", "-version"],
-                capture_output=True,
-                timeout=5,
-                creationflags=_CREATE_NO_WINDOW,
-            )
-            if r.returncode != 0:
-                raise OSError("ffmpeg returned a non-zero exit code")
-        except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
-            tone = "warning"
-            title = "ffmpeg is still missing"
+        registry = get_runtime_capabilities(refresh=True)
+        ffmpeg = registry["ffmpeg"]
+        if ffmpeg.get("supported"):
+            tone = "success"
+            title = "FFmpeg is security-ready"
             message = (
-                "Install ffmpeg and add it to PATH before starting downloads. "
-                "You can finish setup now and fix this later from Settings."
+                f"FFmpeg {ffmpeg['version']} from {ffmpeg['provenance']}: "
+                f"{ffmpeg['path']}"
             )
+        else:
+            tone = "warning"
+            title = "FFmpeg needs repair"
+            message = format_capability_problem(ffmpeg)
         update_status_banner(
             self._ffmpeg_banner,
             self._ffmpeg_title,
@@ -249,6 +239,7 @@ class OnboardingWizard(QDialog):
         )
 
     def _check_ytdlp_runtime(self):
+        get_runtime_capabilities(refresh=True)
         status = ytdlp_runtime_status()
         state = status.get("state", "missing")
         if state == "ready":

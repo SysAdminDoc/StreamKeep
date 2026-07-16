@@ -26,7 +26,10 @@ class VerifyTests(unittest.TestCase):
             ).encode("utf-8")
             completed = mock.Mock(returncode=0, stdout=probe_stdout, stderr=b"")
 
-            with mock.patch("streamkeep.verify.subprocess.run", return_value=completed):
+            with mock.patch(
+                    "streamkeep.verify.resolve_tool_command",
+                    return_value=r"C:\Tools\ffprobe.exe",
+            ), mock.patch("streamkeep.verify.subprocess.run", return_value=completed):
                 status, details = verify_media(str(media_path), expected_duration=60)
 
             self.assertEqual(status, STATUS_FAIL)

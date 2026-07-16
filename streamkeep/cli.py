@@ -20,8 +20,8 @@ import sys
 from PyQt6.QtCore import QCoreApplication
 
 from . import VERSION
+from .capabilities import CapabilityUnavailableError, require_capability
 from .extractors.base import Extractor as _ExtBase
-from .paths import _CREATE_NO_WINDOW
 
 
 def _get_output_stream():
@@ -88,14 +88,10 @@ def _print_line(text):
 
 
 def _check_ffmpeg():
-    import subprocess
     try:
-        r = subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        return r.returncode == 0
-    except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+        require_capability("ffmpeg", refresh=True)
+        return True
+    except CapabilityUnavailableError:
         return False
 
 
@@ -123,7 +119,10 @@ def _record_cli_failure(url, stage, error, output_dir="", info=None):
 def _run_download(args):
     """Resolve *args.url* and download it."""
     if not _check_ffmpeg():
-        print("Error: ffmpeg not found in PATH.")
+        try:
+            require_capability("ffmpeg")
+        except CapabilityUnavailableError as error:
+            print(f"Error: {error}")
         sys.exit(1)
 
     from . import db

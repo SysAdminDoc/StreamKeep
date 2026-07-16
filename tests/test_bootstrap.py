@@ -5,18 +5,27 @@ from streamkeep import bootstrap
 
 
 class BootstrapTests(unittest.TestCase):
-    def test_cli_bootstrap_skips_optional_dependency_installs(self):
+    def test_bootstrap_reports_missing_modules_without_installing(self):
         def fake_import(name):
             if name == "PyQt6":
                 return object()
             raise ImportError(name)
 
-        with mock.patch.object(bootstrap, "_is_frozen", return_value=False), \
-                mock.patch.object(bootstrap.subprocess, "check_call") as check_call:
-            with mock.patch("importlib.import_module", side_effect=fake_import):
-                bootstrap.bootstrap(include_optional=False)
+        with mock.patch.object(
+            bootstrap.importlib, "import_module", side_effect=fake_import
+        ):
+            status = bootstrap.bootstrap(include_optional=True)
 
-        check_call.assert_not_called()
+        self.assertTrue(status["PyQt6"]["available"])
+        self.assertFalse(status["yt_dlp"]["available"])
+        self.assertNotIn("subprocess", bootstrap.__dict__)
+
+    def test_cli_bootstrap_skips_optional_probes(self):
+        with mock.patch.object(bootstrap.importlib, "import_module") as import_module:
+            status = bootstrap.bootstrap(include_optional=False)
+
+        self.assertEqual(set(status), {"PyQt6"})
+        import_module.assert_called_once_with("PyQt6")
 
 
 if __name__ == "__main__":

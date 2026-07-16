@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest import mock
 
 from PyQt6.QtCore import Qt
@@ -11,11 +10,38 @@ def _ready_ytdlp_status():
     return {
         "state": "ready",
         "summary": "Ready",
-        "detail": "yt-dlp 2026.01.01 with yt-dlp-ejs and deno 2.3.0.",
-        "yt_dlp_version": "2026.01.01",
+        "detail": "yt-dlp 2026.07.04 with yt-dlp-ejs and deno 2.3.0.",
+        "yt_dlp_version": "2026.07.04",
         "ejs_available": True,
         "js_runtime": {"name": "deno", "version": "2.3.0", "supported": True},
         "problems": [],
+    }
+
+
+def _ready_runtime_registry(*, refresh=False):
+    del refresh
+
+    def record(name, version, path):
+        return {
+            "name": name,
+            "display_name": name,
+            "path": path,
+            "version": version,
+            "minimum": version,
+            "provenance": "test-fixture",
+            "available": True,
+            "supported": True,
+            "capabilities": [],
+            "command": [path],
+            "repair": "",
+            "detail": f"{name} {version} at {path}",
+            "state": "ready",
+        }
+
+    return {
+        "ffmpeg": record("FFmpeg", "8.1.2", r"C:\Tools\ffmpeg.exe"),
+        "curl": record("curl", "8.21.0", r"C:\Tools\curl.exe"),
+        "pillow": record("Pillow", "12.3.0", r"C:\Python\PIL\__init__.py"),
     }
 
 
@@ -54,12 +80,12 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             mock.patch("streamkeep.ui.thumb_loader.ThumbLoader.request") as thumb_request, \
             mock.patch("streamkeep.search.index_all_async", lambda *args, **kwargs: None), \
             mock.patch(
-                "streamkeep.ui.onboarding.subprocess.run",
-                return_value=SimpleNamespace(returncode=0, stdout="ffmpeg version test\n"),
+                "streamkeep.ui.onboarding.get_runtime_capabilities",
+                side_effect=_ready_runtime_registry,
             ), \
             mock.patch(
-                "streamkeep.ui.tabs.settings.subprocess.run",
-                return_value=SimpleNamespace(returncode=0, stdout="2026.01.01\n"),
+                "streamkeep.ui.tabs.settings.get_runtime_capabilities",
+                side_effect=_ready_runtime_registry,
             ), \
             mock.patch("streamkeep.ui.tabs.settings.ytdlp_runtime_status", _ready_ytdlp_status), \
             mock.patch("streamkeep.ui.onboarding.ytdlp_runtime_status", _ready_ytdlp_status):

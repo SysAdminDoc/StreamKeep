@@ -75,6 +75,19 @@ class SnapshotTests(unittest.TestCase):
                 self.assertIn("_snapshot_meta.json", names)
                 runtime = json.loads(zf.read("runtime.json"))
                 self.assertIn("streamkeep_version", runtime)
+                capabilities = runtime["runtime_capabilities"]
+                self.assertEqual(
+                    set(capabilities),
+                    {
+                        "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
+                        "pillow", "curl", "ffmpeg", "ffprobe",
+                    },
+                )
+                for record in capabilities.values():
+                    self.assertIn("path", record)
+                    self.assertIn("version", record)
+                    self.assertIn("provenance", record)
+                    self.assertIn("capabilities", record)
 
     def test_config_in_snapshot_is_redacted(self):
         with tempfile.TemporaryDirectory() as tmpdir:

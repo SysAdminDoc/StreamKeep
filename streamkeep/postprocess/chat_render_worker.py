@@ -18,12 +18,6 @@ import logging
 import os
 import subprocess
 
-try:
-    from PIL import Image
-    Image.MAX_IMAGE_PIXELS = 89_478_485
-except ImportError:
-    pass
-
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..paths import _CREATE_NO_WINDOW, CONFIG_DIR, FFMPEG_SAFETY
@@ -162,10 +156,16 @@ class ChatRenderWorker(QThread):
         self._cancel = True
 
     def run(self):
+        from ..capabilities import (
+            CapabilityUnavailableError, require_capability, resolve_tool_command,
+        )
         try:
+            require_capability("pillow")
+            ffmpeg_path = resolve_tool_command("ffmpeg")
             from PIL import Image, ImageDraw, ImageFont
-        except ImportError:
-            self.done.emit(False, "Pillow not installed. Run: pip install Pillow")
+            Image.MAX_IMAGE_PIXELS = 89_478_485
+        except (CapabilityUnavailableError, ImportError) as error:
+            self.done.emit(False, f"Toolchain blocked: {error}")
             return
 
         messages = _load_chat_jsonl(self.chat_jsonl_path)
@@ -226,7 +226,7 @@ class ChatRenderWorker(QThread):
 
         # Start ffmpeg pipe
         cmd = [
-            "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
+            ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
             "-y",
             "-f", "rawvideo",
             "-pix_fmt", "rgba",

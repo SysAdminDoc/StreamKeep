@@ -6,11 +6,17 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..capabilities import (
+    CapabilityUnavailableError,
+    require_capability,
+    resolve_tool_command,
+)
 from ..http import parallel_http_download
 from ..paths import FFMPEG_SAFETY, _CREATE_NO_WINDOW
 from ..resume import (
@@ -52,6 +58,7 @@ class DownloadWorker(QThread):
         self.chunk_length_secs = 0
         self._cancel = False
         self._proc = None
+        self._ffmpeg_path = ""
         self._proc_lock = __import__("threading").Lock()
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
@@ -93,6 +100,7 @@ class DownloadWorker(QThread):
         """Assemble the yt-dlp download command for a single segment."""
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
+        ffmpeg_path = self._ffmpeg_path or resolve_tool_command("ffmpeg")
         cmd = ytdlp_command() + [
             "-f", self.ytdlp_format,
             # Force the merged container to mp4. Without this, a video+audio
@@ -109,6 +117,7 @@ class DownloadWorker(QThread):
             "--progress",
             "-o", outfile,
             "--no-playlist",
+            "--ffmpeg-location", str(Path(ffmpeg_path).parent),
         ]
         if self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
@@ -308,6 +317,24 @@ class DownloadWorker(QThread):
         merge_completed(self._resume_state, seg_idx)
         save_resume_state(self._resume_state)
 
+    def _ensure_supported_ffmpeg(self):
+        if self._ffmpeg_path:
+            return True
+        try:
+            self._ffmpeg_path = resolve_tool_command("ffmpeg")
+            return True
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[BLOCKED] {error}")
+            return False
+
+    def _ensure_supported_ytdlp(self):
+        try:
+            require_capability("yt_dlp")
+            return True
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[BLOCKED] {error}")
+            return False
+
     def run(self):
         logger.info("Download started: %d segment(s) to %s", len(self.segments), self.output_dir)
         for seg_idx, label, start, duration in self.segments:
@@ -334,6 +361,18 @@ class DownloadWorker(QThread):
 
             # yt-dlp direct download mode
             if self.format_type == "ytdlp_direct" and self.ytdlp_source and self.ytdlp_format:
+                if not self._ensure_supported_ffmpeg():
+                    self.error.emit(
+                        seg_idx,
+                        "Unsafe or missing FFmpeg; see log for repair guidance",
+                    )
+                    return
+                if not self._ensure_supported_ytdlp():
+                    self.error.emit(
+                        seg_idx,
+                        "Unsafe or missing yt-dlp; see log for repair guidance",
+                    )
+                    return
                 success = self._download_with_ytdlp(seg_idx, label, outfile)
                 if self._cancel:
                     return
@@ -395,6 +434,13 @@ class DownloadWorker(QThread):
                 else:
                     self.log.emit(f"[INFO] {label}: falling back to ffmpeg")
 
+            if not self._ensure_supported_ffmpeg():
+                self.error.emit(
+                    seg_idx,
+                    "Unsafe or missing FFmpeg; see log for repair guidance",
+                )
+                return
+
             # Live-only: split long captures into chunks via ffmpeg segment
             # muxer. The outfile pattern `<base>_part%03d.mp4` gives us
             # `live_recording_part000.mp4`, `_part001.mp4`, ... aligned
@@ -410,7 +456,7 @@ class DownloadWorker(QThread):
             if chunk_mode:
                 base = os.path.join(self.output_dir, f"{label}_part%03d.mp4")
                 cmd = [
-                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-i", self.playlist_url,
                     "-c", "copy",
                     "-f", "segment",
@@ -491,14 +537,14 @@ class DownloadWorker(QThread):
             if self.audio_url:
                 if self.format_type == "mp4":
                     cmd = [
-                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                        self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                         "-i", self.playlist_url, "-i", self.audio_url,
                         "-map", "0:v:0", "-map", "1:a:0",
                         "-c", "copy", "-y", outfile,
                     ]
                 else:
                     cmd = [
-                        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                        self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                         "-ss", str(start), "-i", self.playlist_url,
                         "-ss", str(start), "-i", self.audio_url,
                         "-map", "0:v:0", "-map", "1:a:0",
@@ -509,12 +555,12 @@ class DownloadWorker(QThread):
                     cmd.extend(["-y", outfile])
             elif self.format_type == "mp4":
                 cmd = [
-                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-i", self.playlist_url, "-c", "copy", "-y", outfile,
                 ]
             else:
                 cmd = [
-                    "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+                    self._ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
                     "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
                 ]
                 if not is_live_capture:

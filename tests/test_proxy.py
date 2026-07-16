@@ -26,7 +26,10 @@ class ProxyTests(unittest.TestCase):
 
     def test_health_check_uses_platform_null_device(self):
         completed = SimpleNamespace(returncode=0, stdout=b"0.125", stderr=b"")
-        with mock.patch("streamkeep.proxy.subprocess.run", return_value=completed) as run:
+        with mock.patch(
+                "streamkeep.proxy.resolve_tool_command",
+                return_value=r"C:\Tools\curl.exe",
+        ), mock.patch("streamkeep.proxy.subprocess.run", return_value=completed) as run:
             ok, latency = proxy.health_check("http://proxy.local:8080")
 
         self.assertTrue(ok)

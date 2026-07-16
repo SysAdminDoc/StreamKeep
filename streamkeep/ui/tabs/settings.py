@@ -9,7 +9,6 @@ converter buttons, import/export/save row.
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,12 +23,13 @@ from PyQt6.QtWidgets import (
 
 from ... import VERSION
 from ... import db as _db
+from ...capabilities import get_runtime_capabilities
 from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
 from ...http import set_native_proxy
 from ...i18n import available_languages, install_translator
-from ...paths import _CREATE_NO_WINDOW, CONFIG_FILE
+from ...paths import CONFIG_FILE
 from ...config import save_config as _save_config
 from ...postprocess import (
     AUDIO_CODECS, AUDIO_CONTAINERS, ConvertWorker, PostProcessor,
@@ -1647,29 +1647,43 @@ def build_settings_tab(win):
         "Local Toolchain",
         "StreamKeep relies on these binaries for robust downloads.",
     )
-    try:
-        r = subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        ff_ver = r.stdout.split("\n")[0] if r.returncode == 0 else "Not found"
-    except Exception:
-        ff_ver = "Not found"
+    registry = get_runtime_capabilities(refresh=True)
+    ffmpeg = registry["ffmpeg"]
+    curl = registry["curl"]
+    pillow = registry["pillow"]
     yt_status = ytdlp_runtime_status()
     ff_card, _, _ = make_metric_card(
-        "ffmpeg",
-        "Ready" if ff_ver != "Not found" else "Missing",
-        ff_ver[:48],
+        "FFmpeg",
+        ffmpeg["state"].title(),
+        f"{ffmpeg.get('version') or 'not found'} · {ffmpeg['provenance']}"[:96],
     )
     yt_card, _, _ = make_metric_card(
         "yt-dlp",
         yt_status.get("summary", "Missing"),
         yt_status.get("detail", "")[:96],
     )
-    tools_metrics = QHBoxLayout()
+    curl_card, _, _ = make_metric_card(
+        "curl",
+        curl["state"].title(),
+        f"{curl.get('version') or 'not found'} · {curl['provenance']}"[:96],
+    )
+    pillow_card, _, _ = make_metric_card(
+        "Pillow",
+        pillow["state"].title(),
+        f"{pillow.get('version') or 'not found'} · {pillow['provenance']}"[:96],
+    )
+    tools_metrics = QVBoxLayout()
     tools_metrics.setSpacing(10)
-    tools_metrics.addWidget(ff_card)
-    tools_metrics.addWidget(yt_card)
+    tools_row_primary = QHBoxLayout()
+    tools_row_primary.setSpacing(10)
+    tools_row_primary.addWidget(ff_card)
+    tools_row_primary.addWidget(yt_card)
+    tools_row_secondary = QHBoxLayout()
+    tools_row_secondary.setSpacing(10)
+    tools_row_secondary.addWidget(curl_card)
+    tools_row_secondary.addWidget(pillow_card)
+    tools_metrics.addLayout(tools_row_primary)
+    tools_metrics.addLayout(tools_row_secondary)
     tools_lay.addLayout(tools_metrics)
     sections_top.addWidget(tools_block, 1)
     card_lay.addLayout(sections_top)

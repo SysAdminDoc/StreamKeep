@@ -10,7 +10,9 @@ exiting 0.
 
 import os
 import subprocess
+from unittest import mock
 
+from streamkeep.capabilities import CapabilityUnavailableError
 from streamkeep.workers.download import DownloadWorker
 
 
@@ -32,6 +34,7 @@ def test_ytdlp_cmd_forces_mp4_merge(tmp_path, monkeypatch):
     # Non-YouTube source keeps the test hermetic (skips the JS-runtime probe);
     # the merge flag is added unconditionally regardless of host.
     worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
     outfile = os.path.join(str(tmp_path), "video.mp4")
     captured = {}
 
@@ -122,3 +125,62 @@ def test_reconcile_output_noop_when_nothing_produced(tmp_path):
 
     worker._reconcile_output(outfile)
     assert not os.path.exists(outfile)
+
+
+def test_parallel_direct_download_does_not_require_ffmpeg(tmp_path):
+    worker = DownloadWorker(
+        playlist_url="https://example.com/video.mp4",
+        segments=[(0, "video", 0, 10)],
+        output_dir=str(tmp_path),
+        format_type="mp4",
+    )
+    worker.parallel_connections = 2
+
+    def parallel(_url, outfile, **_kwargs):
+        with open(outfile, "wb") as fh:
+            fh.write(b"parallel payload")
+        return True
+
+    with mock.patch(
+            "streamkeep.workers.download.parallel_http_download",
+            side_effect=parallel,
+    ), mock.patch(
+            "streamkeep.workers.download.resolve_tool_command",
+            side_effect=AssertionError("FFmpeg should not be resolved"),
+    ):
+        worker.run()
+
+    assert (tmp_path / "video.mp4").read_bytes() == b"parallel payload"
+
+
+def test_ffmpeg_path_blocks_before_process_start(tmp_path):
+    worker = DownloadWorker(
+        playlist_url="https://example.com/live.m3u8",
+        segments=[(0, "video", 0, 10)],
+        output_dir=str(tmp_path),
+        format_type="hls",
+    )
+    record = {
+        "name": "ffmpeg",
+        "display_name": "FFmpeg",
+        "path": r"C:\Tools\ffmpeg.exe",
+        "version": "8.1.1",
+        "minimum": "8.1.2",
+        "available": True,
+        "supported": False,
+        "repair": "Install FFmpeg 8.1.2 or newer.",
+    }
+    logs = []
+    errors = []
+    worker.log.connect(logs.append)
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+
+    with mock.patch(
+            "streamkeep.workers.download.resolve_tool_command",
+            side_effect=CapabilityUnavailableError(record),
+    ), mock.patch("streamkeep.workers.download.subprocess.Popen") as popen:
+        worker.run()
+
+    popen.assert_not_called()
+    assert errors and errors[0][0] == 0
+    assert any("Install FFmpeg 8.1.2" in line for line in logs)

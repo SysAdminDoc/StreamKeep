@@ -10,6 +10,15 @@ from streamkeep import http
 
 
 class HttpCommandTests(unittest.TestCase):
+    def setUp(self):
+        self._curl = mock.patch.object(
+            http, "resolve_tool_command", return_value=r"C:\Tools\curl.exe"
+        )
+        self._curl.start()
+
+    def tearDown(self):
+        self._curl.stop()
+
     def test_build_curl_cmd_restricts_protocols_and_redirects(self):
         with mock.patch.object(http, "_resolve_proxy", return_value=""), \
                 mock.patch.object(http, "_append_cookie_args"):
@@ -78,6 +87,15 @@ class HttpCommandTests(unittest.TestCase):
 
 class ParallelDownloadTests(unittest.TestCase):
     payload = b"abcdefgh"
+
+    def setUp(self):
+        self._curl = mock.patch.object(
+            http, "resolve_tool_command", return_value=r"C:\Tools\curl.exe"
+        )
+        self._curl.start()
+
+    def tearDown(self):
+        self._curl.stop()
 
     def _head(self, **overrides):
         details = {
@@ -247,8 +265,13 @@ class ParallelDownloadTests(unittest.TestCase):
 class HostProfileTests(unittest.TestCase):
     def setUp(self):
         http.set_host_profiles({})
+        self._curl = mock.patch.object(
+            http, "resolve_tool_command", return_value=r"C:\Tools\curl.exe"
+        )
+        self._curl.start()
 
     def tearDown(self):
+        self._curl.stop()
         http.set_host_profiles({})
 
     def test_host_profile_headers_applied_to_matching_url(self):

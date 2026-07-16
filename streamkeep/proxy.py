@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 
+from .capabilities import CapabilityUnavailableError, resolve_tool_command
 from .paths import _CREATE_NO_WINDOW
 
 _pool = []   # list of dicts: url, platforms, enabled, label, last_health_ms
@@ -113,14 +114,15 @@ def health_check(proxy_url, test_url="https://httpbin.org/ip", timeout=10):
     """
     if not proxy_url:
         return False, -1
-    cmd = [
-        "curl", "-s", "-o", os.devnull, "-w", "%{time_total}",
-        "-x", proxy_url,
-        "--connect-timeout", str(min(timeout, 10)),
-        "--max-time", str(timeout),
-        test_url,
-    ]
     try:
+        cmd = [
+            resolve_tool_command("curl"),
+            "-s", "-o", os.devnull, "-w", "%{time_total}",
+            "-x", proxy_url,
+            "--connect-timeout", str(min(timeout, 10)),
+            "--max-time", str(timeout),
+            test_url,
+        ]
         r = subprocess.run(
             cmd, capture_output=True, timeout=timeout + 2,
             creationflags=_CREATE_NO_WINDOW,
@@ -128,7 +130,7 @@ def health_check(proxy_url, test_url="https://httpbin.org/ip", timeout=10):
         if r.returncode == 0:
             secs = float(r.stdout.decode("utf-8", errors="replace").strip())
             return True, int(secs * 1000)
-    except (subprocess.TimeoutExpired, ValueError, OSError):
+    except (CapabilityUnavailableError, subprocess.TimeoutExpired, ValueError, OSError):
         pass
     return False, -1
 

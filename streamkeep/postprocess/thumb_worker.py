@@ -21,6 +21,7 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 SINGLE_CACHE_NAME = ".streamkeep_thumb.jpg"
@@ -67,7 +68,7 @@ def probe_duration(path):
     try:
         out = subprocess.check_output(
             [
-                "ffprobe", "-v", "error",
+                resolve_tool_command("ffprobe"), "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 path,
@@ -77,7 +78,7 @@ def probe_duration(path):
             timeout=10,
         )
         return float(out.strip() or 0.0)
-    except (subprocess.CalledProcessError, FileNotFoundError,
+    except (CapabilityUnavailableError, subprocess.CalledProcessError, FileNotFoundError,
             subprocess.TimeoutExpired, ValueError, OSError):
         return 0.0
 
@@ -89,23 +90,21 @@ def _run_ffmpeg_thumb(src, at_secs, dst, width=240):
     except OSError:
         return False
     # -ss before -i for a fast keyframe seek — good enough for thumbs.
-    cmd = [
-        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error",
-        "-ss", f"{max(0.0, at_secs):.3f}",
-        "-i", src,
-        "-frames:v", "1",
-        "-vf", f"scale={width}:-2",
-        "-q:v", "5",
-        "-y", dst,
-    ]
     try:
+        cmd = [
+            resolve_tool_command("ffmpeg"), *FFMPEG_SAFETY,
+            "-hide_banner", "-loglevel", "error",
+            "-ss", f"{max(0.0, at_secs):.3f}", "-i", src,
+            "-frames:v", "1", "-vf", f"scale={width}:-2",
+            "-q:v", "5", "-y", dst,
+        ]
         proc = subprocess.run(
             cmd,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=_CREATE_NO_WINDOW,
             timeout=20,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (CapabilityUnavailableError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
     return (proc.returncode == 0
             and os.path.exists(dst)

@@ -13,33 +13,31 @@ import subprocess
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..capabilities import (
+    CapabilityUnavailableError,
+    require_capability,
+    resolve_tool_command,
+)
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
-
-try:
-    from PIL import Image
-    Image.MAX_IMAGE_PIXELS = 89_478_485
-except ImportError:
-    pass
 
 
 def _extract_frame(media_path, at_secs, out_path, width=1280, height=720):
     """Extract a single frame from *media_path* at *at_secs* using ffmpeg."""
-    cmd = [
-        "ffmpeg", *FFMPEG_SAFETY, "-y", "-ss", str(at_secs),
-        "-i", media_path,
-        "-frames:v", "1",
-        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-        "-q:v", "2",
-        out_path,
-    ]
     try:
+        cmd = [
+            resolve_tool_command("ffmpeg"), *FFMPEG_SAFETY,
+            "-y", "-ss", str(at_secs), "-i", media_path,
+            "-frames:v", "1",
+            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+            "-q:v", "2", out_path,
+        ]
         subprocess.run(
             cmd, capture_output=True, timeout=15,
             creationflags=_CREATE_NO_WINDOW,
         )
         return os.path.isfile(out_path) and os.path.getsize(out_path) > 0
-    except (subprocess.TimeoutExpired, OSError):
+    except (CapabilityUnavailableError, subprocess.TimeoutExpired, OSError):
         return False
 
 
@@ -52,9 +50,13 @@ def _score_frame(image_path):
     - Optional face detection bonus
     """
     score = 0.0
+    pillow_ready = False
 
     try:
+        require_capability("pillow")
         from PIL import Image, ImageFilter, ImageStat
+        Image.MAX_IMAGE_PIXELS = 89_478_485
+        pillow_ready = True
         img = Image.open(image_path).convert("L")  # grayscale
 
         # Luminance variance (contrast)
@@ -68,7 +70,7 @@ def _score_frame(image_path):
         edge_mean = edge_stat.mean[0] if edge_stat.mean else 0
         score += min(edge_mean / 30.0, 1.0)
 
-    except ImportError:
+    except (CapabilityUnavailableError, ImportError):
         # No Pillow — basic file-size heuristic (larger JPEG = more detail)
         try:
             size_kb = os.path.getsize(image_path) / 1024
@@ -78,6 +80,8 @@ def _score_frame(image_path):
 
     # Face detection bonus (optional)
     try:
+        if not pillow_ready:
+            return score
         import mediapipe as mp
         face_det = mp.solutions.face_detection.FaceDetection(
             model_selection=0, min_detection_confidence=0.5
@@ -100,7 +104,9 @@ def _apply_text_overlay(image_path, title="", channel="", date=""):
     if not title and not channel:
         return
     try:
+        require_capability("pillow")
         from PIL import Image, ImageDraw, ImageFont
+        Image.MAX_IMAGE_PIXELS = 89_478_485
 
         img = Image.open(image_path)
         draw = ImageDraw.Draw(img)
@@ -133,7 +139,7 @@ def _apply_text_overlay(image_path, title="", channel="", date=""):
             draw.text((x, y), sub, fill=(200, 200, 200), font=font_small)
 
         img.save(image_path, "JPEG", quality=92)
-    except ImportError:
+    except (CapabilityUnavailableError, ImportError):
         pass
 
 
@@ -205,20 +211,20 @@ def generate_thumbnail(recording_dir, *, num_candidates=10, width=1280,
 
 def _probe_duration(media_path):
     """Get media duration in seconds via ffprobe."""
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        media_path,
-    ]
     try:
+        cmd = [
+            resolve_tool_command("ffprobe"), "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            media_path,
+        ]
         r = subprocess.run(
             cmd, capture_output=True, timeout=10,
             creationflags=_CREATE_NO_WINDOW,
         )
         if r.returncode == 0:
             return float(r.stdout.decode("utf-8", errors="replace").strip())
-    except (subprocess.TimeoutExpired, ValueError, OSError):
+    except (CapabilityUnavailableError, subprocess.TimeoutExpired, ValueError, OSError):
         pass
     return 0
 

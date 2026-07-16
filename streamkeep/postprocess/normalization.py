@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 
+from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 BUILTIN_PROFILES = {
@@ -38,12 +39,18 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
     """
     if os.path.exists(dst) and os.path.getsize(dst) > 0:
         return True
+    try:
+        ffmpeg_path = resolve_tool_command("ffmpeg")
+    except CapabilityUnavailableError as error:
+        if log_fn:
+            log_fn(f"[NORM] Blocked: {error}")
+        return False
 
     # Pass 1: measure
     if log_fn:
         log_fn(f"[NORM] Pass 1/2: measuring loudness of {os.path.basename(src)}")
     cmd1 = [
-        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-y",
+        ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-y",
         "-i", src,
         "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json",
         "-f", "null", "-",
@@ -53,7 +60,9 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
         # Fallback to single-pass
         if log_fn:
             log_fn("[NORM] Measurement failed, falling back to single-pass")
-        return _single_pass(src, dst, target_i, target_tp, target_lra, log_fn)
+        return _single_pass(
+            src, dst, target_i, target_tp, target_lra, log_fn, ffmpeg_path
+        )
 
     # Pass 2: apply with measured values
     if log_fn:
@@ -68,7 +77,7 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
         f":linear=true"
     )
     cmd2 = [
-        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
+        ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
         "-i", src,
         "-af", af,
         "-c:v", "copy",
@@ -115,10 +124,10 @@ def _run_measure(cmd):
     return None
 
 
-def _single_pass(src, dst, target_i, target_tp, target_lra, log_fn):
+def _single_pass(src, dst, target_i, target_tp, target_lra, log_fn, ffmpeg_path):
     """Fallback single-pass normalization."""
     cmd = [
-        "ffmpeg", *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
+        ffmpeg_path, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "error", "-y",
         "-i", src,
         "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}",
         "-c:v", "copy",

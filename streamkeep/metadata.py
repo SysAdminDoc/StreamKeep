@@ -5,6 +5,7 @@ import os
 import subprocess
 from datetime import datetime
 
+from .capabilities import resolve_tool_command
 from .paths import _CREATE_NO_WINDOW
 
 
@@ -51,7 +52,7 @@ class MetadataSaver:
                 thumb_path = os.path.join(output_dir, "thumbnail.jpg")
                 subprocess.run(
                     [
-                        "curl", "-s", "-L",
+                        resolve_tool_command("curl"), "-s", "-L",
                         "--proto", "=http,https",
                         "--max-redirs", "5",
                         "-o", thumb_path, stream_info.thumbnail_url,
