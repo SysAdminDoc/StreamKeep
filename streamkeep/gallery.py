@@ -19,6 +19,21 @@ from .theme import CAT
 # Populated from HistoryEntry objects that have shared=True + share_id.
 _shared = {}   # share_id -> {"path": str, "title": str, "channel": str, "media": str}
 
+_VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".ts", ".mov", ".avi", ".flv", ".m4v")
+_AUDIO_EXTS = (".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac")
+_MIME_OVERRIDES = {
+    ".mp3": "audio/mpeg",
+    ".opus": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+}
+
+
+def _media_type(path, fallback="video/mp4"):
+    ext = os.path.splitext(str(path or ""))[1].lower()
+    return _MIME_OVERRIDES.get(ext) or mimetypes.guess_type(path or "")[0] or fallback
+
 
 def register_shared(share_id, path, title="", channel="", media=""):
     """Register a recording for sharing."""
@@ -90,7 +105,8 @@ def render_share_html(share_id, base_url=""):
         return "<h1>Not Found</h1>"
     title = info.get("title", "Untitled")
     channel = info.get("channel", "")
-    media_type = mimetypes.guess_type(info.get("media", ""))[0] or "video/mp4"
+    media_type = _media_type(info.get("media", ""))
+    player_tag = "audio" if media_type.startswith("audio/") else "video"
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{_esc(title)} - StreamKeep</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -98,15 +114,15 @@ def render_share_html(share_id, base_url=""):
 body {{ background: {CAT['base']}; color: {CAT['text']}; font-family: system-ui; margin: 0; padding: 20px; }}
 h1 {{ color: {CAT['blue']}; font-size: 1.4em; }}
 h2 {{ color: {CAT['subtext0']}; font-size: 1em; font-weight: normal; }}
-video {{ width: 100%; max-width: 1200px; border-radius: 8px; background: #000; }}
+video, audio {{ width: 100%; max-width: 1200px; border-radius: 8px; background: #000; }}
 a {{ color: {CAT['blue']}; }}
 </style></head><body>
 <a href="{base_url}/gallery">&larr; Gallery</a>
 <h1>{_esc(title)}</h1>
 <h2>{_esc(channel)}</h2>
-<video controls preload="metadata">
+<{player_tag} controls preload="metadata">
 <source src="{base_url}/media/{share_id}" type="{_esc(media_type)}">
-</video>
+</{player_tag}>
 </body></html>"""
 
 
@@ -115,7 +131,7 @@ def find_media_file(recording_dir):
     if not recording_dir or not os.path.isdir(recording_dir):
         return ""
     for fn in sorted(os.listdir(recording_dir)):
-        if fn.lower().endswith((".mp4", ".mkv", ".webm", ".ts")) and not fn.startswith("."):
+        if fn.lower().endswith(_VIDEO_EXTS + _AUDIO_EXTS) and not fn.startswith("."):
             return os.path.join(recording_dir, fn)
     return ""
 
@@ -136,7 +152,7 @@ def serve_media_range(media_path, range_header=None):
         return None, 403, {}
 
     file_size = os.path.getsize(media_path)
-    content_type = mimetypes.guess_type(media_path)[0] or "video/mp4"
+    content_type = _media_type(media_path)
 
     if range_header and range_header.startswith("bytes="):
         try:

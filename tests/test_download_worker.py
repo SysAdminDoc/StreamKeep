@@ -35,6 +35,9 @@ def test_ytdlp_cmd_forces_mp4_merge(tmp_path, monkeypatch):
     # the merge flag is added unconditionally regardless of host.
     worker.ytdlp_source = "https://example.com/video"
     worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    monkeypatch.setattr(
+        "streamkeep.extractors.ytdlp.ytdlp_command", lambda: ["yt-dlp"]
+    )
     outfile = os.path.join(str(tmp_path), "video.mp4")
     captured = {}
 
@@ -66,6 +69,124 @@ def test_ytdlp_cmd_forces_mp4_merge(tmp_path, monkeypatch):
     cmd = captured["cmd"]
     assert "--merge-output-format" in cmd
     assert cmd[cmd.index("--merge-output-format") + 1] == "mp4"
+    assert cmd[cmd.index("--remux-video") + 1] == "mp4"
+
+
+def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    raw_format = " bv*[height<=720]+ba / b "
+    raw_sort = "vcodec:av01,res:720,+size"
+    worker.ytdlp_format = raw_format
+    worker.ytdlp_format_sort = raw_sort
+    worker.ytdlp_container = "webm"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("-f") + 1] == raw_format
+    assert cmd[cmd.index("-S") + 1] == raw_sort
+    assert cmd[cmd.index("--merge-output-format") + 1] == "webm"
+    assert cmd[cmd.index("--remux-video") + 1] == "webm"
+
+
+def test_ytdlp_audio_cmd_extracts_requested_codec_and_quality(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.ytdlp_format = "bestaudio/best"
+    worker.ytdlp_audio_format = "flac"
+    worker.ytdlp_audio_quality = "0"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "audio.%(ext)s")
+    )
+
+    assert "-x" in cmd
+    assert cmd[cmd.index("--audio-format") + 1] == "flac"
+    assert cmd[cmd.index("--audio-quality") + 1] == "0"
+    assert "--merge-output-format" not in cmd
+    assert "--remux-video" not in cmd
+
+
+def test_ytdlp_original_container_does_not_force_merge_or_remux(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.ytdlp_container = "original"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert "--merge-output-format" not in cmd
+    assert "--remux-video" not in cmd
+
+
+def test_ytdlp_dynamic_output_discovers_actual_media_extension(tmp_path):
+    worker = _make_worker(tmp_path)
+    template = os.path.join(str(tmp_path), "audio.%(ext)s")
+    produced = tmp_path / "audio.opus"
+    produced.write_bytes(b"audio payload")
+    (tmp_path / "audio.info.json").write_text("{}", encoding="utf-8")
+
+    assert worker._find_ytdlp_output(template) == str(produced)
+
+
+def test_ytdlp_output_paths_cover_fixed_and_unknown_extensions(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_container = "mkv"
+    template, expected = worker._ytdlp_output_paths("video")
+    assert template.endswith("video.%(ext)s")
+    assert expected.endswith("video.mkv")
+
+    worker.ytdlp_audio_format = "best"
+    _template, expected = worker._ytdlp_output_paths("audio")
+    assert expected == ""
+
+    worker.ytdlp_audio_format = "mp3"
+    _template, expected = worker._ytdlp_output_paths("audio")
+    assert expected.endswith("audio.mp3")
+
+
+def test_ytdlp_known_container_does_not_skip_mismatched_sibling(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker.ytdlp_container = "mkv"
+    (tmp_path / "video.webm").write_bytes(b"x" * 70000)
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True
+    ), mock.patch.object(
+        worker, "_ensure_supported_ytdlp", return_value=True
+    ), mock.patch.object(
+        worker, "_download_with_ytdlp", return_value=True
+    ) as download:
+        worker.run()
+
+    download.assert_called_once()
+    assert download.call_args.args[2].endswith("video.%(ext)s")
+    assert download.call_args.args[3].endswith("video.mkv")
+
+
+def test_failed_ytdlp_job_does_not_emit_all_done_without_resume_state(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    completions = []
+    worker.all_done.connect(lambda: completions.append(True))
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True
+    ), mock.patch.object(
+        worker, "_ensure_supported_ytdlp", return_value=True
+    ), mock.patch.object(
+        worker, "_download_with_ytdlp", return_value=False
+    ):
+        worker.run()
+
+    assert completions == []
 
 
 def test_reconcile_output_adopts_sibling_container(tmp_path):

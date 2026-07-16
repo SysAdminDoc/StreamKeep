@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+from glob import glob
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ from ..capabilities import (
 )
 from ..http import parallel_http_download
 from ..paths import FFMPEG_SAFETY, _CREATE_NO_WINDOW
+from ..postprocess.codecs import AUDIO_EXTS, VIDEO_EXTS
 from ..resume import (
     clear_resume_state, merge_completed, save_resume_state,
 )
@@ -43,6 +45,10 @@ class DownloadWorker(QThread):
         self.audio_url = ""
         self.ytdlp_source = ""
         self.ytdlp_format = ""
+        self.ytdlp_format_sort = ""
+        self.ytdlp_container = "mp4"
+        self.ytdlp_audio_format = ""
+        self.ytdlp_audio_quality = ""
         self.cookies_browser = ""
         self.rate_limit = ""
         self.proxy = ""
@@ -83,8 +89,18 @@ class DownloadWorker(QThread):
             state.audio_url = self.audio_url or ""
             state.ytdlp_source = self.ytdlp_source or ""
             state.ytdlp_format = self.ytdlp_format or ""
+            state.ytdlp_format_sort = self.ytdlp_format_sort or ""
+            state.ytdlp_container = self.ytdlp_container or "mp4"
+            state.ytdlp_audio_format = self.ytdlp_audio_format or ""
+            state.ytdlp_audio_quality = self.ytdlp_audio_quality or ""
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
+            if self.format_type == "ytdlp_direct" and self.segments:
+                label = self.segments[0][1]
+                _template, expected = self._ytdlp_output_paths(label)
+                state.expected_outfile = expected or os.path.join(
+                    self.output_dir, f"{label}.%(ext)s"
+                )
             save_resume_state(state)
 
     def cancel(self):
@@ -98,20 +114,25 @@ class DownloadWorker(QThread):
 
     def _build_ytdlp_download_cmd(self, outfile, impersonate=False):
         """Assemble the yt-dlp download command for a single segment."""
+        from ..download_options import validate_download_options
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
+
+        options = validate_download_options(
+            format_spec=self.ytdlp_format,
+            format_sort=self.ytdlp_format_sort,
+            container=self.ytdlp_container,
+            audio_format=self.ytdlp_audio_format,
+            audio_quality=self.ytdlp_audio_quality,
+        )
+        format_spec = options["format_spec"]
+        if options["audio_format"] and not self.ytdlp_format:
+            format_spec = "bestaudio/best"
+        if not format_spec:
+            raise ValueError("yt-dlp format specification is empty")
 
         ffmpeg_path = self._ffmpeg_path or resolve_tool_command("ffmpeg")
         cmd = ytdlp_command() + [
-            "-f", self.ytdlp_format,
-            # Force the merged container to mp4. Without this, a video+audio
-            # spec that pairs an mp4 video track with a webm/opus audio track
-            # (common on YouTube, where opus is often the highest-bitrate
-            # audio) makes yt-dlp auto-switch the merge container to .mkv. It
-            # then writes "<outfile>.mkv" instead of the "<label>.mp4" this
-            # worker expects, so the file-exists check below fails and the
-            # download is falsely reported as "yt-dlp download failed" even
-            # though yt-dlp exited 0. mp4 muxes avc1/vp9/av1 + aac/opus fine.
-            "--merge-output-format", "mp4",
+            "-f", format_spec,
             "--no-part",
             "--newline",
             "--progress",
@@ -119,6 +140,20 @@ class DownloadWorker(QThread):
             "--no-playlist",
             "--ffmpeg-location", str(Path(ffmpeg_path).parent),
         ]
+        if options["format_sort"]:
+            cmd.extend(["-S", options["format_sort"]])
+        if options["audio_format"]:
+            cmd.extend(["-x", "--audio-format", options["audio_format"]])
+            if options["audio_quality"]:
+                cmd.extend(["--audio-quality", options["audio_quality"]])
+        elif options["container"] != "original":
+            # --merge-output-format controls separate video/audio merges;
+            # --remux-video also gives single-file formats the requested
+            # container without re-encoding.
+            cmd.extend([
+                "--merge-output-format", options["container"],
+                "--remux-video", options["container"],
+            ])
         if self.cookies_browser:
             cmd.extend(["--cookies-from-browser", self.cookies_browser])
         # Inject cookies.txt for authenticated downloads (F47)
@@ -160,7 +195,9 @@ class DownloadWorker(QThread):
         cmd.append(self.ytdlp_source)
         return cmd
 
-    def _download_with_ytdlp(self, seg_idx, label, outfile):
+    def _download_with_ytdlp(
+        self, seg_idx, label, outfile, expected_outfile=None
+    ):
         """Download via yt-dlp directly. Handles DASH merge, format
         selection, and a one-shot Cloudflare-impersonation retry. Returns
         True on success."""
@@ -171,11 +208,15 @@ class DownloadWorker(QThread):
 
         attempted_impersonate = False
         while True:
-            cmd = self._build_ytdlp_download_cmd(
-                outfile, impersonate=attempted_impersonate
-            )
+            try:
+                cmd = self._build_ytdlp_download_cmd(
+                    outfile, impersonate=attempted_impersonate
+                )
+            except (TypeError, ValueError) as error:
+                self.log.emit(f"[ERROR] Invalid yt-dlp output options: {error}")
+                return False
             outcome, output_lines = self._stream_ytdlp_download(
-                cmd, seg_idx, label, outfile
+                cmd, seg_idx, label, outfile, expected_outfile
             )
             if outcome == "ok":
                 return True
@@ -195,7 +236,9 @@ class DownloadWorker(QThread):
             self.log.emit(f"[FAIL] {label}\n{err_tail}")
             return False
 
-    def _stream_ytdlp_download(self, cmd, seg_idx, label, outfile):
+    def _stream_ytdlp_download(
+        self, cmd, seg_idx, label, outfile, expected_outfile=None
+    ):
         """Run one yt-dlp download attempt, streaming progress.
 
         Returns ``(outcome, output_lines)`` where *outcome* is ``"ok"`` on a
@@ -237,35 +280,43 @@ class DownloadWorker(QThread):
 
             self._proc.wait()
             if self._cancel:
-                if os.path.exists(outfile):
-                    try:
-                        os.remove(outfile)
-                    except OSError:
-                        pass
+                self._remove_ytdlp_outputs(outfile, expected_outfile)
                 return "cancel", output_lines
 
-            # Safety net: yt-dlp exited 0 but the exact .mp4 is missing.
-            # A merge that could not honour --merge-output-format (rare exotic
-            # codec combo) falls back to another container and writes
-            # "<label>.<ext>" or "<label>.mp4.<ext>". Reconcile that produced
-            # file to the expected path so the download is not falsely failed.
-            if (self._proc.returncode == 0 and not os.path.exists(outfile)):
-                self._reconcile_output(outfile)
+            # Legacy callers pass an exact output path. New downloads use an
+            # extension template and discover the container yt-dlp produced.
+            legacy_exact_output = (
+                expected_outfile is None and "%(ext)s" not in outfile
+            )
+            if legacy_exact_output:
+                expected_outfile = outfile
+            if (self._proc.returncode == 0 and legacy_exact_output
+                    and expected_outfile
+                    and not os.path.exists(expected_outfile)):
+                self._reconcile_output(expected_outfile)
+            if (self._proc.returncode == 0 and expected_outfile
+                    and not legacy_exact_output
+                    and not os.path.exists(expected_outfile)):
+                self.log.emit(
+                    f"[ERROR] yt-dlp did not produce the requested "
+                    f".{Path(expected_outfile).suffix.lstrip('.')} output"
+                )
+                self._remove_empty_ytdlp_outputs(outfile, expected_outfile)
+                return "fail", output_lines
+            produced = self._find_ytdlp_output(outfile, expected_outfile)
 
-            if (self._proc.returncode == 0 and os.path.exists(outfile)
-                    and os.path.getsize(outfile) > 0):
-                size = os.path.getsize(outfile)
+            if self._proc.returncode == 0 and produced:
+                size = os.path.getsize(produced)
                 self.progress.emit(seg_idx, 100, "Complete")
                 self.segment_done.emit(seg_idx, fmt_size(size))
                 self._mark_segment_done(seg_idx)
-                self.log.emit(f"[DONE] {label} - {fmt_size(size)}")
+                self.log.emit(
+                    f"[DONE] {label} - {fmt_size(size)} "
+                    f"({Path(produced).suffix.lower().lstrip('.')})"
+                )
                 return "ok", output_lines
 
-            if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
-                try:
-                    os.remove(outfile)
-                except OSError:
-                    pass
+            self._remove_empty_ytdlp_outputs(outfile, expected_outfile)
             return "fail", output_lines
 
         except FileNotFoundError:
@@ -285,16 +336,15 @@ class DownloadWorker(QThread):
         pipeline (resume sidecar, integrity manifest) sees the ``.mp4`` path
         it expects.
         """
-        import glob
-
         base, _ext = os.path.splitext(outfile)
         candidates = []
         for pattern in (base + ".*", outfile + ".*"):
-            for path in glob.glob(pattern):
+            for path in glob(pattern):
                 if os.path.abspath(path) == os.path.abspath(outfile):
                     continue
                 try:
-                    if os.path.isfile(path) and os.path.getsize(path) > 0:
+                    if (os.path.isfile(path) and os.path.getsize(path) > 0
+                            and Path(path).suffix.lower() in (VIDEO_EXTS | AUDIO_EXTS)):
                         candidates.append(path)
                 except OSError:
                     continue
@@ -309,6 +359,78 @@ class DownloadWorker(QThread):
             )
         except OSError as e:
             self.log.emit(f"[WARN] Could not reconcile merged output: {e}")
+
+    @staticmethod
+    def _ytdlp_template_base(outfile):
+        marker = ".%(ext)s"
+        if outfile.endswith(marker):
+            return outfile[:-len(marker)]
+        return os.path.splitext(outfile)[0]
+
+    def _find_ytdlp_output(self, outfile, expected_outfile=None):
+        """Return the largest non-empty media file produced for a template."""
+        if expected_outfile:
+            try:
+                if (os.path.isfile(expected_outfile)
+                        and os.path.getsize(expected_outfile) > 0):
+                    return expected_outfile
+            except OSError:
+                pass
+        if "%(ext)s" not in outfile:
+            try:
+                if os.path.isfile(outfile) and os.path.getsize(outfile) > 0:
+                    return outfile
+            except OSError:
+                pass
+        base = self._ytdlp_template_base(outfile)
+        candidates = []
+        for path in glob(base + ".*"):
+            try:
+                if (os.path.isfile(path) and os.path.getsize(path) > 0
+                        and Path(path).suffix.lower() in (VIDEO_EXTS | AUDIO_EXTS)):
+                    candidates.append(path)
+            except OSError:
+                continue
+        return max(candidates, key=os.path.getsize) if candidates else ""
+
+    def _remove_empty_ytdlp_outputs(self, outfile, expected_outfile=None):
+        base = self._ytdlp_template_base(outfile)
+        paths = set(glob(base + ".*"))
+        if expected_outfile:
+            paths.add(expected_outfile)
+        for path in paths:
+            try:
+                if os.path.isfile(path) and os.path.getsize(path) == 0:
+                    os.remove(path)
+            except OSError:
+                pass
+
+    def _remove_ytdlp_outputs(self, outfile, expected_outfile=None):
+        base = self._ytdlp_template_base(outfile)
+        paths = set(glob(base + ".*"))
+        if expected_outfile:
+            paths.add(expected_outfile)
+        for path in paths:
+            try:
+                suffix = Path(path).suffix.lower()
+                if os.path.isfile(path) and (
+                    suffix in (VIDEO_EXTS | AUDIO_EXTS) or suffix == ".part"
+                ):
+                    os.remove(path)
+            except OSError:
+                pass
+
+    def _ytdlp_output_paths(self, label):
+        """Return ``(template, deterministic output path or '')``."""
+        base = os.path.join(self.output_dir, label)
+        template = base + ".%(ext)s"
+        audio_format = str(self.ytdlp_audio_format or "").lower()
+        if audio_format and audio_format != "best":
+            return template, base + "." + audio_format
+        container = str(self.ytdlp_container or "mp4").lower()
+        if not audio_format and container != "original":
+            return template, base + "." + container
+        return template, ""
 
     def _mark_segment_done(self, seg_idx):
         """Merge the segment into the resume sidecar and persist it."""
@@ -337,16 +459,34 @@ class DownloadWorker(QThread):
 
     def run(self):
         logger.info("Download started: %d segment(s) to %s", len(self.segments), self.output_dir)
+        all_succeeded = True
         for seg_idx, label, start, duration in self.segments:
             if self._cancel:
                 self.log.emit("Download cancelled.")
                 # Leave the sidecar in place — the user may resume.
                 return
 
-            outfile = os.path.join(self.output_dir, f"{label}.mp4")
+            is_ytdlp = (
+                self.format_type == "ytdlp_direct"
+                and self.ytdlp_source
+                and (self.ytdlp_format or self.ytdlp_audio_format)
+            )
+            expected_ytdlp_outfile = ""
+            if is_ytdlp:
+                outfile, expected_ytdlp_outfile = self._ytdlp_output_paths(label)
+                if expected_ytdlp_outfile:
+                    existing_output = (
+                        expected_ytdlp_outfile
+                        if os.path.exists(expected_ytdlp_outfile) else ""
+                    )
+                else:
+                    existing_output = self._find_ytdlp_output(outfile)
+            else:
+                outfile = os.path.join(self.output_dir, f"{label}.mp4")
+                existing_output = outfile if os.path.exists(outfile) else ""
             is_live_capture = duration <= 0
-            if os.path.exists(outfile):
-                size = os.path.getsize(outfile)
+            if existing_output:
+                size = os.path.getsize(existing_output)
                 # Use 64 KB minimum threshold — 1 KB was too small and would
                 # treat corrupt/truncated files as complete.
                 if size > 65536:
@@ -354,13 +494,17 @@ class DownloadWorker(QThread):
                     self.segment_done.emit(seg_idx, fmt_size(size))
                     self._mark_segment_done(seg_idx)
                     continue
+                try:
+                    os.remove(existing_output)
+                except OSError:
+                    pass
 
             duration_label = "live" if is_live_capture else f"{duration}s"
             self.log.emit(f"[DL] {label} - start: {start}s, duration: {duration_label}")
             self.progress.emit(seg_idx, 0, "Starting...")
 
             # yt-dlp direct download mode
-            if self.format_type == "ytdlp_direct" and self.ytdlp_source and self.ytdlp_format:
+            if is_ytdlp:
                 if not self._ensure_supported_ffmpeg():
                     self.error.emit(
                         seg_idx,
@@ -373,10 +517,13 @@ class DownloadWorker(QThread):
                         "Unsafe or missing yt-dlp; see log for repair guidance",
                     )
                     return
-                success = self._download_with_ytdlp(seg_idx, label, outfile)
+                success = self._download_with_ytdlp(
+                    seg_idx, label, outfile, expected_ytdlp_outfile
+                )
                 if self._cancel:
                     return
                 if not success:
+                    all_succeeded = False
                     logger.error("yt-dlp download failed for segment %d (%s)", seg_idx, label)
                     self.error.emit(seg_idx, "yt-dlp download failed")
                 continue
@@ -521,6 +668,7 @@ class DownloadWorker(QThread):
                     elif self._cancel:
                         pass
                     else:
+                        all_succeeded = False
                         logger.error("Chunked capture produced no files for segment %d (%s)", seg_idx, label)
                         self.error.emit(seg_idx, "Chunked capture produced no files")
                 except FileNotFoundError:
@@ -688,19 +836,20 @@ class DownloadWorker(QThread):
                     last_error = str(e)
                     self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
 
-            if not segment_done_flag and not self._cancel and not is_live_capture:
-                logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
-                self.error.emit(
-                    seg_idx,
-                    f"Failed after {attempts} attempt(s): {last_error[:120]}",
-                )
-                self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
+            if not segment_done_flag and not self._cancel:
+                all_succeeded = False
+                if not is_live_capture:
+                    logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
+                    self.error.emit(
+                        seg_idx,
+                        f"Failed after {attempts} attempt(s): {last_error[:120]}",
+                    )
+                    self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
 
         if not self._cancel:
             # Only clear the resume sidecar and signal completion if every
             # segment actually succeeded.  When some segments failed, leave
             # the sidecar in place so the user can resume later.
-            all_succeeded = True
             if self._resume_state is not None:
                 expected = {s[0] for s in self.segments}
                 completed = set(self._resume_state.completed)

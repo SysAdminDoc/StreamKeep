@@ -27,7 +27,10 @@ MANIFEST_FILENAME = ".streamkeep_manifest.json"
 MANIFEST_VERSION = 1
 HASH_CHUNK_SIZE = 1024 * 1024
 
-MEDIA_EXTS = {".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi"}
+MEDIA_EXTS = {
+    ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
+    ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+}
 MANIFEST_SKIP_NAMES = {
     MANIFEST_FILENAME,
     ".streamkeep_resume.json",

@@ -156,7 +156,10 @@ def generate_thumbnail(recording_dir, *, num_candidates=10, width=1280,
     # Find media file
     media = ""
     for fn in sorted(os.listdir(recording_dir)):
-        if fn.lower().endswith((".mp4", ".mkv", ".ts", ".webm")) and not fn.startswith("."):
+        if fn.lower().endswith((
+            ".mp4", ".mkv", ".ts", ".webm", ".mov", ".avi", ".flv", ".m4v",
+            ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+        )) and not fn.startswith("."):
             media = os.path.join(recording_dir, fn)
             break
     if not media:

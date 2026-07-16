@@ -40,6 +40,11 @@ def _reset_adv_overrides(win):
     win.adv_parallel_spin.setValue(0)
     win.adv_folder_tpl_input.clear()
     win.adv_file_tpl_input.clear()
+    win.adv_format_input.clear()
+    win.adv_format_sort_combo.setCurrentIndex(0)
+    win.adv_container_combo.setCurrentIndex(0)
+    win.adv_audio_combo.setCurrentIndex(0)
+    win.adv_audio_quality_input.clear()
     win.adv_override_badge.setVisible(False)
 
 
@@ -64,6 +69,21 @@ def get_adv_overrides(win):
     fitpl = win.adv_file_tpl_input.text().strip()
     if fitpl:
         overrides["file_template"] = fitpl
+    format_spec = win.adv_format_input.text()
+    if format_spec.strip():
+        overrides["format_spec"] = format_spec
+    format_sort_preset = win.adv_format_sort_combo.currentData() or ""
+    if format_sort_preset:
+        overrides["format_sort_preset"] = format_sort_preset
+    container = win.adv_container_combo.currentData() or ""
+    if container:
+        overrides["container"] = container
+    audio_format = win.adv_audio_combo.currentData() or ""
+    if audio_format:
+        overrides["audio_format"] = audio_format
+    audio_quality = win.adv_audio_quality_input.text().strip()
+    if audio_quality:
+        overrides["audio_quality"] = audio_quality
     return overrides
 
 
@@ -490,12 +510,61 @@ def build_download_tab(win):
     win.adv_file_tpl_input.setPlaceholderText("(blank = global template)")
     adv_lay.addWidget(win.adv_file_tpl_input, 4, 1)
 
+    # yt-dlp direct output controls
+    adv_lay.addWidget(QLabel("Raw format spec:"), 5, 0)
+    win.adv_format_input = QLineEdit()
+    win.adv_format_input.setPlaceholderText("e.g. 137+251 or bv*+ba/b")
+    win.adv_format_input.setToolTip(
+        "Passed verbatim to yt-dlp -f for yt-dlp direct sources"
+    )
+    adv_lay.addWidget(win.adv_format_input, 5, 1)
+
+    adv_lay.addWidget(QLabel("Format sort:"), 6, 0)
+    win.adv_format_sort_combo = QComboBox()
+    win.adv_format_sort_combo.addItem("(source default)", userData="")
+    win.adv_format_sort_combo.addItem("Prefer AV1", userData="prefer-av1")
+    win.adv_format_sort_combo.addItem("Cap at 2160p", userData="cap-2160p")
+    win.adv_format_sort_combo.addItem("Cap at 1080p", userData="cap-1080p")
+    win.adv_format_sort_combo.addItem("Cap at 720p", userData="cap-720p")
+    win.adv_format_sort_combo.addItem("Smallest file", userData="smallest")
+    win.adv_format_sort_combo.setToolTip(
+        "Safe yt-dlp -S presets; a resolution cap prefers the best format at or below it"
+    )
+    adv_lay.addWidget(win.adv_format_sort_combo, 6, 1)
+
+    adv_lay.addWidget(QLabel("Video container:"), 7, 0)
+    win.adv_container_combo = QComboBox()
+    win.adv_container_combo.addItem("MP4 (default)", userData="")
+    win.adv_container_combo.addItem("MKV", userData="mkv")
+    win.adv_container_combo.addItem("WebM", userData="webm")
+    win.adv_container_combo.addItem("Original", userData="original")
+    win.adv_container_combo.setToolTip(
+        "Merge/remux video without re-encoding; Original keeps the source container"
+    )
+    adv_lay.addWidget(win.adv_container_combo, 7, 1)
+
+    adv_lay.addWidget(QLabel("Audio extraction:"), 8, 0)
+    audio_row = QHBoxLayout()
+    win.adv_audio_combo = QComboBox()
+    win.adv_audio_combo.addItem("Video download", userData="")
+    for audio_format in ("best", "mp3", "m4a", "opus", "flac", "wav"):
+        win.adv_audio_combo.addItem(audio_format.upper(), userData=audio_format)
+    audio_row.addWidget(win.adv_audio_combo, 1)
+    win.adv_audio_quality_input = QLineEdit()
+    win.adv_audio_quality_input.setPlaceholderText("quality: 0-10 or 128K")
+    win.adv_audio_quality_input.setToolTip(
+        "Optional encoder quality; 0 is best, 10 is worst, or use a bitrate such as 128K"
+    )
+    win.adv_audio_quality_input.setEnabled(False)
+    audio_row.addWidget(win.adv_audio_quality_input, 1)
+    adv_lay.addLayout(audio_row, 8, 1)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 5, 1)
+    adv_lay.addWidget(adv_reset_btn, 9, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -517,6 +586,22 @@ def build_download_tab(win):
     win.adv_parallel_spin.valueChanged.connect(lambda _: _update_adv_badge())
     win.adv_folder_tpl_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_file_tpl_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_format_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_format_sort_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_container_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_audio_combo.currentIndexChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_audio_combo.currentIndexChanged.connect(
+        lambda _: win.adv_audio_quality_input.setEnabled(
+            bool(win.adv_audio_combo.currentData())
+        )
+    )
+    win.adv_audio_quality_input.textChanged.connect(lambda _: _update_adv_badge())
 
     # Splitter: segments table + runtime log
     splitter = QSplitter(Qt.Orientation.Vertical)
@@ -1850,6 +1935,45 @@ class DownloadTabMixin:
 
         # Per-download overrides (F18)
         _dl_overrides = get_adv_overrides(self)
+        ytdlp_override_keys = {
+            "format_spec", "format_sort_preset", "container",
+            "audio_format", "audio_quality",
+        }
+        active_ytdlp_overrides = ytdlp_override_keys.intersection(_dl_overrides)
+        if active_ytdlp_overrides and fmt_type != "ytdlp_direct":
+            self._log(
+                "[OUTPUT] Format/container/audio controls require a yt-dlp direct quality."
+            )
+            self._set_status(
+                "These output controls apply only to yt-dlp direct sources; "
+                "choose a yt-dlp quality or reset them.",
+                "warning",
+            )
+            return False
+        if _dl_overrides.get("audio_format") and _dl_overrides.get("container"):
+            self._set_status(
+                "Choose either a video container or audio extraction, not both.",
+                "warning",
+            )
+            return False
+        try:
+            from ...download_options import validate_download_options
+            ytdlp_options = validate_download_options(
+                format_spec=_dl_overrides.get("format_spec", ""),
+                format_sort_preset=_dl_overrides.get("format_sort_preset", ""),
+                container=_dl_overrides.get("container", ""),
+                audio_format=_dl_overrides.get("audio_format", ""),
+                audio_quality=_dl_overrides.get("audio_quality", ""),
+            )
+        except ValueError as error:
+            self._log(f"[OUTPUT] Invalid per-download settings: {error}")
+            self._set_status(str(error), "warning")
+            return False
+
+        if ytdlp_options["format_spec"]:
+            ytdlp_format = ytdlp_options["format_spec"]
+        elif ytdlp_options["audio_format"]:
+            ytdlp_format = "bestaudio/best"
 
         # Render filename + folder from templates (templates can produce
         # nested paths like "{channel}/{date} - {title}")
@@ -1956,6 +2080,10 @@ class DownloadTabMixin:
         self.download_worker.audio_url = audio_url
         self.download_worker.ytdlp_source = ytdlp_source
         self.download_worker.ytdlp_format = ytdlp_format
+        self.download_worker.ytdlp_format_sort = ytdlp_options["format_sort"]
+        self.download_worker.ytdlp_container = ytdlp_options["container"]
+        self.download_worker.ytdlp_audio_format = ytdlp_options["audio_format"]
+        self.download_worker.ytdlp_audio_quality = ytdlp_options["audio_quality"]
         self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
         self.download_worker.rate_limit = _dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit
         self.download_worker.proxy = YtDlpExtractor.proxy
@@ -1971,6 +2099,17 @@ class DownloadTabMixin:
             self._log("Audio merge: enabled (video-only format detected)")
         if fmt_type == "ytdlp_direct":
             self._log("Download mode: yt-dlp direct (handles URL refresh + format merge)")
+            if ytdlp_options["audio_format"]:
+                detail = ytdlp_options["audio_format"]
+                if ytdlp_options["audio_quality"]:
+                    detail += f" @ {ytdlp_options['audio_quality']}"
+                self._log(f"[OUTPUT] Audio extraction: {detail}")
+            else:
+                self._log(
+                    f"[OUTPUT] Video container: {ytdlp_options['container']}"
+                )
+            if ytdlp_options["format_sort"]:
+                self._log(f"[OUTPUT] Format sort: {ytdlp_options['format_sort']}")
         self.download_worker.progress.connect(self._on_dl_progress)
         self.download_worker.segment_done.connect(self._on_segment_done)
         self.download_worker.error.connect(self._on_dl_error)
@@ -3242,6 +3381,10 @@ class DownloadTabMixin:
                 state.audio_url = worker.audio_url or ""
                 state.ytdlp_source = worker.ytdlp_source or ""
                 state.ytdlp_format = worker.ytdlp_format or ""
+                state.ytdlp_format_sort = worker.ytdlp_format_sort or ""
+                state.ytdlp_container = worker.ytdlp_container or "mp4"
+                state.ytdlp_audio_format = worker.ytdlp_audio_format or ""
+                state.ytdlp_audio_quality = worker.ytdlp_audio_quality or ""
                 state.output_dir = worker.output_dir
                 state.segments = [list(s) for s in worker.segments]
             else:

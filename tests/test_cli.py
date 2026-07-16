@@ -100,3 +100,22 @@ def test_server_cli_never_accepts_or_prints_bearer_tokens_in_argv():
     ]
     assert "_print_line(server.token)" not in server_source
     assert 'f"{server.token}' not in server_source
+
+
+def test_download_parser_exposes_format_container_and_audio_controls():
+    args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--format", "137+251",
+        "--format-sort-preset", "prefer-av1",
+        "--container", "mkv",
+    ])
+    assert args.format_spec == "137+251"
+    assert args.format_sort_preset == "prefer-av1"
+    assert args.container == "mkv"
+
+    audio_args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--audio-format", "opus", "--audio-quality", "128K",
+    ])
+    assert audio_args.audio_format == "opus"
+    assert audio_args.audio_quality == "128K"

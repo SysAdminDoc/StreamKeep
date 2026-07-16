@@ -17,6 +17,10 @@ from ..metadata import MetadataSaver
 
 # Supported server types
 SERVER_TYPES = ["plex", "jellyfin", "emby"]
+_MEDIA_EXTS = (
+    ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
+    ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+)
 
 
 def _safe_name(s, max_len=80):
@@ -44,18 +48,23 @@ def _next_episode(season_dir):
     return max(existing, default=0) + 1
 
 
-def _find_video(out_dir):
-    """Return the path to the largest video file in *out_dir*."""
+def _find_media(out_dir):
+    """Return the path to the largest audio or video file in *out_dir*."""
     best, best_size = None, 0
     if not os.path.isdir(out_dir):
         return None
     for f in os.listdir(out_dir):
-        if f.lower().endswith((".mp4", ".mkv", ".ts", ".webm", ".flv")):
+        if f.lower().endswith(_MEDIA_EXTS):
             fp = os.path.join(out_dir, f)
             sz = os.path.getsize(fp)
             if sz > best_size:
                 best, best_size = fp, sz
     return best
+
+
+def _find_video(out_dir):
+    """Backward-compatible alias for older integrations/tests."""
+    return _find_media(out_dir)
 
 
 def import_to_media_server(config, out_dir, info=None, log_fn=None):
@@ -83,10 +92,10 @@ def import_to_media_server(config, out_dir, info=None, log_fn=None):
 
 
 def _do_import(config, out_dir, info, log_fn):
-    video = _find_video(out_dir)
-    if not video:
+    media = _find_media(out_dir)
+    if not media:
         if log_fn:
-            log_fn("[MEDIA-SERVER] No video file found in output directory.")
+            log_fn("[MEDIA-SERVER] No media file found in output directory.")
         return
 
     library_path = config["library_path"].strip()
@@ -106,17 +115,17 @@ def _do_import(config, out_dir, info, log_fn):
     os.makedirs(season_dir, exist_ok=True)
 
     ep_num = _next_episode(season_dir)
-    ext = os.path.splitext(video)[1]
+    ext = os.path.splitext(media)[1]
     dest_name = f"{channel} - S{year}E{ep_num:02d} - {title}{ext}"
     dest_path = os.path.join(season_dir, dest_name)
 
     # Try hardlink first, fall back to copy
     try:
-        os.link(video, dest_path)
+        os.link(media, dest_path)
         if log_fn:
             log_fn(f"[MEDIA-SERVER] Hardlinked → {dest_path}")
     except OSError:
-        shutil.copy2(video, dest_path)
+        shutil.copy2(media, dest_path)
         if log_fn:
             log_fn(f"[MEDIA-SERVER] Copied → {dest_path}")
 

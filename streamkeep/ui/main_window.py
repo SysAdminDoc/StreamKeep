@@ -1702,6 +1702,10 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.audio_url = refreshed_audio or ""
             worker.ytdlp_source = state.ytdlp_source or ""
             worker.ytdlp_format = state.ytdlp_format or ""
+            worker.ytdlp_format_sort = state.ytdlp_format_sort or ""
+            worker.ytdlp_container = state.ytdlp_container or "mp4"
+            worker.ytdlp_audio_format = state.ytdlp_audio_format or ""
+            worker.ytdlp_audio_quality = state.ytdlp_audio_quality or ""
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy

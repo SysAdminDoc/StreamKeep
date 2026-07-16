@@ -37,6 +37,11 @@ class ResumeTests(unittest.TestCase):
                         ],
                         "completed": ["1", "bad", -1, "1"],
                         "title": "Recovered",
+                        "ytdlp_format": "bv*[height<=720]+ba/b",
+                        "ytdlp_format_sort": "res:720",
+                        "ytdlp_container": "webm",
+                        "ytdlp_audio_format": "opus",
+                        "ytdlp_audio_quality": "128K",
                     }
                 ),
                 encoding="utf-8",
@@ -48,6 +53,11 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(state.output_dir, str(root.resolve()))
             self.assertEqual(state.segments, [[0, "Segment 0", 0.0, 10.0]])
             self.assertEqual(state.completed, [1])
+            self.assertEqual(state.ytdlp_format, "bv*[height<=720]+ba/b")
+            self.assertEqual(state.ytdlp_format_sort, "res:720")
+            self.assertEqual(state.ytdlp_container, "webm")
+            self.assertEqual(state.ytdlp_audio_format, "opus")
+            self.assertEqual(state.ytdlp_audio_quality, "128K")
 
 
 if __name__ == "__main__":

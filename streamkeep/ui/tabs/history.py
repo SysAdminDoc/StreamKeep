@@ -1043,7 +1043,10 @@ class HistoryTabMixin:
 
     def _find_media_in_dir(self, dir_path):
         """Return the first media file path in *dir_path*, or ''."""
-        _MEDIA_EXTS = (".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi")
+        _MEDIA_EXTS = (
+            ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
+            ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+        )
         try:
             for fn in sorted(os.listdir(dir_path)):
                 if fn.lower().endswith(_MEDIA_EXTS) and not fn.startswith("."):

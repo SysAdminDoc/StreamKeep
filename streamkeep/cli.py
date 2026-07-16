@@ -125,6 +125,31 @@ def _run_download(args):
             print(f"Error: {error}")
         sys.exit(1)
 
+    from .download_options import validate_download_options
+    requested_ytdlp_output = any((
+        getattr(args, "format_spec", ""),
+        getattr(args, "format_sort", ""),
+        getattr(args, "format_sort_preset", ""),
+        getattr(args, "container", ""),
+        getattr(args, "audio_format", ""),
+        getattr(args, "audio_quality", ""),
+    ))
+    if getattr(args, "audio_format", "") and getattr(args, "container", ""):
+        _print_line("Error: Choose either --container or --audio-format, not both.")
+        sys.exit(2)
+    try:
+        output_options = validate_download_options(
+            format_spec=getattr(args, "format_spec", ""),
+            format_sort=getattr(args, "format_sort", ""),
+            format_sort_preset=getattr(args, "format_sort_preset", ""),
+            container=getattr(args, "container", ""),
+            audio_format=getattr(args, "audio_format", ""),
+            audio_quality=getattr(args, "audio_quality", ""),
+        )
+    except ValueError as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
     from . import db
     from .config import install_file_logging, load_config, write_log_line
 
@@ -182,6 +207,18 @@ def _run_download(args):
         qi = _pick_quality(info.qualities, quality_pref)
         _print_line(f"Selected: {qi.name} ({qi.resolution or qi.format_type})")
         _print_line("")
+        if requested_ytdlp_output and qi.format_type != "ytdlp_direct":
+            message = (
+                "Format/container/audio controls require a yt-dlp direct "
+                "source; the selected quality uses " + qi.format_type + "."
+            )
+            _print_line(f"Error: {message}")
+            _record_cli_failure(
+                args.url, "download", message, output_dir, info
+            )
+            state["exit_code"] = 2
+            app.quit()
+            return
 
         # Build a single whole-stream segment. The DownloadWorker downloads
         # each (seg_idx, label, start, duration) tuple with ffmpeg, so one
@@ -194,7 +231,14 @@ def _run_download(args):
         dw = DownloadWorker(qi.url, segments, output_dir, qi.format_type)
         dw.audio_url = qi.audio_url
         dw.ytdlp_source = qi.ytdlp_source
-        dw.ytdlp_format = qi.ytdlp_format
+        dw.ytdlp_format = (
+            output_options["format_spec"]
+            or ("bestaudio/best" if output_options["audio_format"] else qi.ytdlp_format)
+        )
+        dw.ytdlp_format_sort = output_options["format_sort"]
+        dw.ytdlp_container = output_options["container"]
+        dw.ytdlp_audio_format = output_options["audio_format"]
+        dw.ytdlp_audio_quality = output_options["audio_quality"]
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
         state["dw"] = dw  # prevent GC while event loop runs
@@ -528,6 +572,33 @@ def build_parser():
                     help="Output directory (default: config or ~/Videos/StreamKeep)")
     dl.add_argument("--rate-limit", default="",
                     help="Bandwidth limit (e.g. 5M, 500K)")
+    dl.add_argument(
+        "-f", "--format", "--format-spec", dest="format_spec", default="",
+        help="Raw yt-dlp format specification (passed verbatim to -f)",
+    )
+    sort_group = dl.add_mutually_exclusive_group()
+    sort_group.add_argument(
+        "--format-sort", default="",
+        help="Custom yt-dlp format-sort expression (passed verbatim to -S)",
+    )
+    sort_group.add_argument(
+        "--format-sort-preset", default="",
+        choices=["prefer-av1", "cap-2160p", "cap-1080p", "cap-720p", "smallest"],
+        help="Named yt-dlp format-sort preset",
+    )
+    dl.add_argument(
+        "--container", default="", choices=["mp4", "mkv", "webm", "original"],
+        help="Video merge/remux container (default: mp4)",
+    )
+    dl.add_argument(
+        "--audio-format", default="",
+        choices=["best", "mp3", "m4a", "opus", "flac", "wav"],
+        help="Extract audio in the selected format instead of keeping video",
+    )
+    dl.add_argument(
+        "--audio-quality", default="",
+        help="Audio encoder quality (0-10 or bitrate such as 128K)",
+    )
     dl.add_argument("--config-dir", default=argparse.SUPPRESS,
                     help="Override the config/database directory")
 
@@ -645,6 +716,12 @@ def run_cli(argv=None):
             args.output = ""
         if not hasattr(args, "rate_limit"):
             args.rate_limit = ""
+        for name in (
+            "format_spec", "format_sort", "format_sort_preset", "container",
+            "audio_format", "audio_quality",
+        ):
+            if not hasattr(args, name):
+                setattr(args, name, "")
 
     if args.command in ("download", "dl"):
         _run_download(args)

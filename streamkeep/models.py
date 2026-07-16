@@ -148,6 +148,10 @@ class ResumeState:
     audio_url: str = ""
     ytdlp_source: str = ""
     ytdlp_format: str = ""
+    ytdlp_format_sort: str = ""
+    ytdlp_container: str = "mp4"
+    ytdlp_audio_format: str = ""
+    ytdlp_audio_quality: str = ""
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

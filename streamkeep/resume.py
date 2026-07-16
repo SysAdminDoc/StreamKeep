@@ -103,7 +103,19 @@ def _sanitize_resume_payload(data, output_dir):
         "format_type": _sanitize_text(data.get("format_type", "hls"), max_len=32) or "hls",
         "audio_url": _sanitize_text(data.get("audio_url", "")),
         "ytdlp_source": _sanitize_text(data.get("ytdlp_source", "")),
-        "ytdlp_format": _sanitize_text(data.get("ytdlp_format", ""), max_len=128),
+        "ytdlp_format": _sanitize_text(data.get("ytdlp_format", ""), max_len=1024),
+        "ytdlp_format_sort": _sanitize_text(
+            data.get("ytdlp_format_sort", ""), max_len=1024
+        ),
+        "ytdlp_container": _sanitize_text(
+            data.get("ytdlp_container", "mp4"), max_len=16
+        ) or "mp4",
+        "ytdlp_audio_format": _sanitize_text(
+            data.get("ytdlp_audio_format", ""), max_len=16
+        ),
+        "ytdlp_audio_quality": _sanitize_text(
+            data.get("ytdlp_audio_quality", ""), max_len=32
+        ),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),
         "completed": _sanitize_completed(data.get("completed", [])),
