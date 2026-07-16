@@ -231,12 +231,12 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
   Complexity: L
 
-- [ ] P2 — Normalize YouTube live-chat replay into the existing chat pipeline
-  Why: StreamKeep captures Twitch/Kick chat and Twitch VOD replay, but YouTube replay cannot feed its chat highlights, overlay renderer, or archive exports.
-  Evidence: `streamkeep/chat/`, `streamkeep/extractors/twitch.py`, `workers/finalize.py`; imsyy/yt-dlp-gui YouTube live-chat replay export.
-  Touches: yt-dlp subtitle/chat extraction, normalized chat model, finalize/resume, JSONL/CSV export, filters and fixtures.
-  Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; timestamps, author/channel-owner/member flags, message text, and supported emotes normalize to `chat.jsonl`; regex/user filters and CSV export work; partial/unavailable replay is non-fatal; existing spike/highlight/render tools consume the result unchanged.
-  Complexity: M
+- [ ] P3 — Add an opt-in YouTube live-chat replay download trigger
+  Why: The replay normalizer and finalize ingest are implemented and tested (any `*.live_chat.json` yt-dlp produces is flattened into the shared chat model), but there is no explicit GUI/CLI toggle to make yt-dlp fetch the replay for eligible YouTube VODs.
+  Evidence: `streamkeep/chat/youtube_replay.py`, `workers/finalize.py::ingest_replay_dir`, `streamkeep/subtitles.py::ytdlp_sub_args`.
+  Touches: a per-job "capture YouTube chat replay" option, yt-dlp `--sub-langs live_chat`/`--write-subs` wiring, Settings/CLI, bounded/cancellable behavior.
+  Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; the downloaded replay is normalized by the existing pipeline; unavailable replay is non-fatal.
+  Complexity: S
 
 - [ ] P3 — Surface bilingual-subtitle and LRC options in the Settings post-processing UI
   Why: The bilingual-merge and LRC-export transforms, config keys, and PostProcessor step are implemented and persist via `pp_bilingual_*`/`pp_lrc_*`, but there are no Settings checkboxes/inputs to toggle them from the GUI yet.

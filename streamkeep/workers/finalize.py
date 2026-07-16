@@ -156,6 +156,14 @@ class FinalizeWorker(QThread):
                             self.log.emit(f"[CHAT] Failed: {err}")
                         else:
                             self.log.emit(f"[CHAT] Saved {count} comments to {file_base or 'chat'}.chat.json/.txt")
+                if not self._interrupted():
+                    # Flatten any yt-dlp YouTube live-chat replay that was
+                    # downloaded alongside the media into the shared chat model.
+                    try:
+                        from ..chat.youtube_replay import ingest_replay_dir
+                        ingest_replay_dir(out_dir, log_fn=self.log.emit)
+                    except Exception as e:
+                        self.log.emit(f"[CHAT] Replay normalization skipped: {e}")
                 if self._has_postprocess_work(snapshot) and not self._interrupted():
                     step_no += 1
                     self._emit_progress("Running post-processing", step_no, total_steps)
