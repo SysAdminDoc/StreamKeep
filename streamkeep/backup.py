@@ -103,43 +103,86 @@ def create_backup(output_path, *, include_logs=False):
                 pass
 
 
+class _RestoreError(Exception):
+    """Backup content failed a pre-activation trust or integrity check."""
+
+
 def restore_backup(backup_path):
     """Restore from a .skbackup file.
 
-    **Destructive** — replaces current config files with backup contents.
+    **Destructive on success only.** Backup contents are extracted to a private
+    staging directory, scrubbed of authentication state, and validated
+    (metadata/schema versions, ``trusted_schema=OFF`` ``quick_check`` and
+    ``foreign_key_check``, and FTS rebuild) before any current file is touched.
+    If any staged file fails validation the current config directory is left
+    byte-for-byte intact and a redacted report is returned. Only after every
+    staged file validates are the files swapped into place atomically.
+
     Returns ``(ok, message)``.
     """
     if not backup_path or not os.path.isfile(backup_path):
         return False, "Backup file not found"
 
+    from .diagnostics import redact_text
+
+    staging_dir = None
     try:
         with zipfile.ZipFile(backup_path, "r") as zf:
             names = zf.namelist()
 
-            # Validate it's a StreamKeep backup
+            # Validate it's a StreamKeep backup with parseable metadata.
             if "_backup_meta.json" not in names:
                 return False, "Invalid backup file (missing metadata)"
+            _validate_backup_meta(zf)
 
-            # Extract only known files to CONFIG_DIR
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            restored = 0
+            # Stage every known file into a private directory, transforming and
+            # validating it there. Nothing under CONFIG_DIR is touched yet.
+            staging_dir = Path(tempfile.mkdtemp(prefix="streamkeep_restore_"))
+            staged = {}
             for fname in BACKUP_FILES:
-                if fname in names:
-                    current = CONFIG_DIR / fname
-                    _backup_existing_file(current)
-                    if fname in SQLITE_BACKUP_FILES:
-                        _remove_sqlite_sidecars(current)
-                    data = zf.read(fname)
-                    if fname == "config.json":
-                        data = _secret_free_config_bytes(data)
-                    elif fname == "library.db":
-                        data = _secret_free_sqlite_bytes(data)
-                    _write_atomic(current, data)
-                    restored += 1
+                if fname not in names:
+                    continue
+                dest = staging_dir / fname
+                data = zf.read(fname)
+                if fname == "config.json":
+                    dest.write_bytes(_secret_free_config_bytes(data))
+                elif fname in SQLITE_BACKUP_FILES:
+                    dest.write_bytes(data)
+                    _prepare_and_validate_sqlite(dest, fname)
+                else:
+                    dest.write_bytes(data)
+                staged[fname] = dest
+    except _RestoreError as e:
+        _cleanup_staging(staging_dir)
+        return False, f"Restore aborted: {redact_text(str(e))}"
+    except (OSError, ValueError, zipfile.BadZipFile, sqlite3.Error) as e:
+        _cleanup_staging(staging_dir)
+        return False, f"Restore failed: {redact_text(str(e))}"
 
-        return True, f"Restored {restored} files from backup"
-    except (OSError, zipfile.BadZipFile) as e:
-        return False, f"Restore failed: {e}"
+    # Every staged file validated — activate them atomically.
+    prepared = []
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        for fname, src in staged.items():
+            current = CONFIG_DIR / fname
+            tmp = current.with_suffix(current.suffix + ".restore-tmp")
+            _write_atomic_tmp(tmp, src.read_bytes())
+            prepared.append((current, tmp, fname))
+        for current, tmp, fname in prepared:
+            _backup_existing_file(current)
+            if fname in SQLITE_BACKUP_FILES:
+                _remove_sqlite_sidecars(current)
+            os.replace(tmp, current)
+        return True, f"Restored {len(prepared)} files from backup"
+    except OSError as e:
+        for _current, tmp, _fname in prepared:
+            try:
+                Path(tmp).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return False, f"Restore failed during activation: {redact_text(str(e))}"
+    finally:
+        _cleanup_staging(staging_dir)
 
 
 def list_backup_contents(backup_path):
@@ -259,19 +302,6 @@ def _remove_sqlite_sidecars(path):
             pass
 
 
-def _write_atomic(path, data):
-    """Write *data* to *path* atomically."""
-    tmp = path.with_suffix(path.suffix + ".restore-tmp")
-    with open(tmp, "wb") as f:
-        f.write(data)
-        try:
-            f.flush()
-            os.fsync(f.fileno())
-        except (OSError, AttributeError):
-            pass
-    os.replace(tmp, path)
-
-
 def _scrub_database_auth_state(connection):
     from .diagnostics import redact_text
     connection.execute("PRAGMA journal_mode=DELETE")
@@ -320,25 +350,123 @@ def _secret_free_config_bytes(data):
     ).encode("utf-8")
 
 
-def _secret_free_sqlite_bytes(data):
-    tmp = tempfile.NamedTemporaryFile(
-        prefix="streamkeep_restore_scrub_", suffix=".db", delete=False,
-    )
-    path = Path(tmp.name)
+def _validate_backup_meta(zf):
+    """Reject a backup whose metadata is missing or unparseable."""
     try:
-        tmp.write(data)
-        tmp.close()
-        connection = sqlite_connect(str(path), configure_journal=False)
-        try:
-            _scrub_database_auth_state(connection)
-        finally:
-            connection.close()
-        return path.read_bytes()
+        meta = json.loads(zf.read("_backup_meta.json").decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        raise _RestoreError("backup metadata is unreadable") from e
+    if not isinstance(meta, dict) or not str(meta.get("version") or "").strip():
+        raise _RestoreError("backup metadata is missing a version")
+
+
+def _prepare_and_validate_sqlite(path, fname):
+    """Scrub then validate a staged SQLite file before it can be activated.
+
+    Raises ``_RestoreError`` if the database is corrupt, has a newer schema than
+    this build supports, or fails referential-integrity checks. On success the
+    staged file is safe to swap into the live config directory.
+    """
+    # Scrub credential/auth state first (existing restore behavior).
+    connection = sqlite_connect(str(path), configure_journal=False)
+    try:
+        _scrub_database_auth_state(connection)
     finally:
+        connection.close()
+    _remove_sqlite_sidecars(path)
+
+    # Validate integrity under an untrusted-schema connection so a malicious
+    # backup cannot execute embedded schema logic during the checks.
+    connection = sqlite_connect(str(path), configure_journal=False)
+    try:
+        connection.execute("PRAGMA trusted_schema=OFF")
+        _check_backup_schema_version(connection, fname)
+        integrity = connection.execute("PRAGMA quick_check").fetchall()
+        result = [str(r[0]) for r in integrity]
+        if not (len(result) == 1 and result[0] == "ok"):
+            raise _RestoreError(f"{fname} failed the integrity quick_check")
+        fk_rows = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_rows:
+            raise _RestoreError(
+                f"{fname} failed foreign_key_check "
+                f"({len(fk_rows)} orphaned references)"
+            )
+    except sqlite3.DatabaseError as e:
+        raise _RestoreError(f"{fname} is not a readable SQLite database") from e
+    finally:
+        connection.close()
+    _remove_sqlite_sidecars(path)
+
+    if fname == "search.db":
+        _rebuild_search_fts(path)
+
+
+def _check_backup_schema_version(connection, fname):
+    """Reject databases whose schema is newer than this build understands."""
+    if fname == "library.db":
+        from .db import SCHEMA_VERSION
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise _RestoreError(
+                f"library.db schema v{version} is newer than the supported "
+                f"v{SCHEMA_VERSION}"
+            )
+    elif fname == "search.db":
+        from .search import SCHEMA_VERSION as SEARCH_SCHEMA_VERSION
+        has_meta = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_meta'"
+        ).fetchone()
+        version = 0
+        if has_meta:
+            row = connection.execute(
+                "SELECT value FROM search_meta WHERE key='schema_version'"
+            ).fetchone()
+            try:
+                version = int(row[0]) if row else 0
+            except (TypeError, ValueError):
+                version = 0
+        if version > SEARCH_SCHEMA_VERSION:
+            raise _RestoreError(
+                f"search.db schema v{version} is newer than the supported "
+                f"v{SEARCH_SCHEMA_VERSION}"
+            )
+
+
+def _rebuild_search_fts(path):
+    """Rebuild the transcript FTS index so restored search state is consistent."""
+    connection = sqlite_connect(str(path), configure_journal=False)
+    try:
+        has_fts = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='transcript_fts'"
+        ).fetchone()
+        if has_fts:
+            connection.execute(
+                "INSERT INTO transcript_fts(transcript_fts) VALUES('rebuild')"
+            )
+            connection.commit()
+    except sqlite3.DatabaseError as e:
+        raise _RestoreError("search.db FTS index could not be rebuilt") from e
+    finally:
+        connection.close()
+    _remove_sqlite_sidecars(path)
+
+
+def _write_atomic_tmp(tmp_path, data):
+    """Write *data* to *tmp_path* durably (no rename); caller does os.replace."""
+    with open(tmp_path, "wb") as f:
+        f.write(data)
         try:
-            tmp.close()
-        except OSError:
+            f.flush()
+            os.fsync(f.fileno())
+        except (OSError, AttributeError):
             pass
-        path.unlink(missing_ok=True)
-        Path(f"{path}-wal").unlink(missing_ok=True)
-        Path(f"{path}-shm").unlink(missing_ok=True)
+
+
+def _cleanup_staging(staging_dir):
+    if not staging_dir:
+        return
+    try:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    except OSError:
+        pass

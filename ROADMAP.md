@@ -164,13 +164,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: A paired browser action can send URL-only or URL plus validated start/end; the desktop opens the correct prefilled workflow once; unsupported/expired pairing is actionable; host permissions exactly match supported origins and never request broad browsing access.
   Complexity: S
 
-- [ ] P1 — Validate backup databases before atomic activation
-  Why: Restoring malformed or incompatible SQLite/FTS state can replace a working library before integrity is known.
-  Evidence: `streamkeep/backup.py::restore_backup`, `streamkeep/db.py::quick_check`, `streamkeep/search.py`; SQLite security guidance (https://sqlite.org/security.html) and PRAGMA reference (https://www.sqlite.org/pragma.html).
-  Touches: backup staging, database connection policy, FTS rebuild, restore UI/tests.
-  Acceptance: Restore extracts to a private staging directory, validates metadata/schema versions, enables `trusted_schema=OFF`, runs `quick_check` and `foreign_key_check`, opens/rebuilds FTS, and swaps all files atomically only on success; failure leaves pre-restore state byte-for-byte intact with a redacted report.
-  Complexity: M
-
 - [ ] P1 — Make HLS variant and resume semantics standards-complete
   Why: The parser ignores rendition groups, codecs, frame rate, HDR, and average bandwidth, while resume identity is not tied to manifest validators and discontinuity/media sequence.
   Evidence: `streamkeep/hls.py`, `streamkeep/resume.py`; RFC 8216 (https://www.rfc-editor.org/info/rfc8216/); refines existing extractor/protocol resilience work.

@@ -240,5 +240,143 @@ class BackupTests(unittest.TestCase):
             self.assertIn("clip.mp4", row[0])
 
 
+    def _make_valid_db(self, path):
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE items (name TEXT)")
+        conn.execute("INSERT INTO items (name) VALUES ('restored-row')")
+        conn.commit()
+        conn.close()
+
+    def test_restore_rejects_corrupt_database_and_preserves_current_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            current_db = config_dir / "library.db"
+            self._make_valid_db(current_db)
+            original_bytes = current_db.read_bytes()
+
+            # A backup whose library.db is not a valid SQLite database.
+            backup_path = config_dir / "corrupt.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("library.db", b"SQLite format 3\x00 but not really")
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.restore_backup(backup_path)
+
+            self.assertFalse(ok)
+            self.assertIn("Restore", message)
+            # Current database is untouched, byte-for-byte.
+            self.assertEqual(current_db.read_bytes(), original_bytes)
+            self.assertFalse((config_dir / "library.db.pre-restore").exists())
+
+    def test_restore_rejects_newer_schema_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            current_db = config_dir / "library.db"
+            self._make_valid_db(current_db)
+            original_bytes = current_db.read_bytes()
+
+            future_db = config_dir / "future.db"
+            self._make_valid_db(future_db)
+            conn = sqlite3.connect(future_db)
+            conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 5}")
+            conn.commit()
+            conn.close()
+
+            backup_path = config_dir / "future.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("library.db", future_db.read_bytes())
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.restore_backup(backup_path)
+
+            self.assertFalse(ok)
+            self.assertIn("newer", message)
+            self.assertEqual(current_db.read_bytes(), original_bytes)
+
+    def test_restore_rejects_backup_with_unparseable_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            current_db = config_dir / "library.db"
+            self._make_valid_db(current_db)
+            original_bytes = current_db.read_bytes()
+
+            replacement_db = config_dir / "replacement.db"
+            self._make_valid_db(replacement_db)
+
+            backup_path = config_dir / "bad_meta.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", "{ not valid json")
+                zf.writestr("library.db", replacement_db.read_bytes())
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.restore_backup(backup_path)
+
+            self.assertFalse(ok)
+            self.assertEqual(current_db.read_bytes(), original_bytes)
+
+    def test_restore_activates_only_after_all_files_validate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            current_db = config_dir / "library.db"
+            self._make_valid_db(current_db)
+            conn = sqlite3.connect(current_db)
+            conn.execute("DELETE FROM items")
+            conn.execute("INSERT INTO items (name) VALUES ('original-row')")
+            conn.commit()
+            conn.close()
+            original_bytes = current_db.read_bytes()
+
+            good_db = config_dir / "good.db"
+            self._make_valid_db(good_db)
+
+            # library.db is valid but search.db is corrupt; the whole restore
+            # must abort without swapping the valid library.db in.
+            backup_path = config_dir / "mixed.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("library.db", good_db.read_bytes())
+                zf.writestr("search.db", b"this is not a database")
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, _message = backup.restore_backup(backup_path)
+
+            self.assertFalse(ok)
+            self.assertEqual(current_db.read_bytes(), original_bytes)
+            self.assertFalse((config_dir / "search.db").exists())
+
+    def test_restore_rebuilds_search_fts_index(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            from streamkeep import search
+            search_src = config_dir / "search_src.db"
+            with mock.patch.object(search, "DB_PATH", search_src):
+                conn = search._connect()
+                conn.execute(
+                    "INSERT INTO transcript_segments "
+                    "(recording_path, text, start_sec, end_sec) "
+                    "VALUES ('clip.mp4', 'hello searchable world', 0, 5)"
+                )
+                conn.commit()
+                conn.close()
+
+            backup_path = config_dir / "search.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("search.db", search_src.read_bytes())
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.restore_backup(backup_path)
+
+            self.assertTrue(ok, message)
+            restored = config_dir / "search.db"
+            self.assertTrue(restored.is_file())
+            with mock.patch.object(search, "DB_PATH", restored):
+                hits = search.search_transcripts("searchable")
+            self.assertTrue(any("clip.mp4" in str(h) for h in hits))
+
+
 if __name__ == "__main__":
     unittest.main()
