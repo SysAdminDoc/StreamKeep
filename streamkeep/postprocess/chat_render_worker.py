@@ -188,7 +188,11 @@ class ChatRenderWorker(QThread):
                     path = get_emote_image(provider, eid)
                     if path:
                         try:
-                            eimg = Image.open(path).convert("RGBA")
+                            from ..image_fetch import decode_image
+                            eimg = decode_image(
+                                path,
+                                allowed_formats=("png", "gif", "webp", "jpeg"),
+                            ).convert("RGBA")
                             eimg = eimg.resize(
                                 (emote_size, emote_size),
                                 Image.LANCZOS,

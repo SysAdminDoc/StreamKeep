@@ -2,11 +2,7 @@
 
 import json
 import os
-import subprocess
 from datetime import datetime
-
-from .capabilities import resolve_tool_command
-from .paths import _CREATE_NO_WINDOW
 
 
 class MetadataSaver:
@@ -50,15 +46,8 @@ class MetadataSaver:
         if stream_info.thumbnail_url:
             try:
                 thumb_path = os.path.join(output_dir, "thumbnail.jpg")
-                subprocess.run(
-                    [
-                        resolve_tool_command("curl"), "-s", "-L",
-                        "--proto", "=http,https",
-                        "--max-redirs", "5",
-                        "-o", thumb_path, stream_info.thumbnail_url,
-                    ],
-                    timeout=15, creationflags=_CREATE_NO_WINDOW,
-                )
+                from .image_fetch import download_image
+                download_image(stream_info.thumbnail_url, thumb_path)
             except Exception:
                 pass
 

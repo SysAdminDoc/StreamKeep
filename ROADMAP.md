@@ -235,13 +235,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: An immutable schema-versioned job spec is built and validated once, serializes without secrets, rejects unsupported future versions, migrates existing queue/resume payloads, and produces equivalent sanitized command plans from GUI, CLI, REST/headless, and monitor fixtures; workers receive the spec instead of field-by-field mutation.
   Complexity: L
 
-- [ ] P1 — Centralize bounded remote-image acquisition and decoding
-  Why: Metadata thumbnails and chat emotes can follow redirects or decode attacker-controlled images without one effective byte/type/pixel/frame/allocation policy.
-  Evidence: `streamkeep/metadata.py`, `postprocess/emote_cache.py`, `postprocess/chat_render_worker.py`, `intelligence/thumbnail.py`; https://pillow.readthedocs.io/en/stable/handbook/security.html.
-  Touches: shared HTTP/image helper, metadata and emote caches, chat/smart-thumbnail rendering, Qt thumbnail loaders, tests.
-  Acceptance: All remote images use HTTP(S)-only redirects, strict byte/time limits, partial-file cleanup, content magic and allowlisted formats, Pillow decompression warnings as errors, dimension/frame/allocation caps, bounded cache quotas, and redacted diagnostics; oversized, truncated, animated-bomb, spoofed-type, redirect, and cancellation fixtures fail without a published file.
-  Complexity: M
-
 - [ ] P1 — Split portable and MSIX build/update contracts
   Why: The tracked spec produces one-file output, the MSIX builder requires a directory, and the updater self-replaces `sys.executable` even though MSIX content is package-managed.
   Evidence: `StreamKeep.spec`, `packaging/msix/build_msix.py`, `streamkeep/updater.py`; https://learn.microsoft.com/en-us/windows/msix/app-installer/auto-update-and-repair--overview.

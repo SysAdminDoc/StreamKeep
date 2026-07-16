@@ -32,10 +32,38 @@ _CDN = {
 
 _UA = "StreamKeep/1.0 (emote-cache)"
 _TIMEOUT = 10
+# Hard ceiling for the on-disk emote cache; oldest files are evicted first.
+_MAX_CACHE_BYTES = 256 * 1024 * 1024
 
 
 def _ensure_dir():
     EMOTE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _enforce_cache_quota(max_bytes=_MAX_CACHE_BYTES):
+    """Evict the oldest cached emotes until the cache fits within *max_bytes*."""
+    try:
+        entries = []
+        total = 0
+        for path in EMOTE_CACHE_DIR.glob("*.png"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append((stat.st_mtime, stat.st_size, path))
+            total += stat.st_size
+        if total <= max_bytes:
+            return
+        for _mtime, size, path in sorted(entries):
+            try:
+                path.unlink()
+                total -= size
+            except OSError:
+                continue
+            if total <= max_bytes:
+                break
+    except OSError:
+        pass
 
 
 def _cached_path(provider, emote_id):
@@ -43,16 +71,18 @@ def _cached_path(provider, emote_id):
 
 
 def _download(url, dest):
-    """Download a URL to dest. Returns True on success."""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = resp.read(2 * 1024 * 1024)
-        with open(dest, "wb") as f:
-            f.write(data)
-        return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+    """Download an emote image to dest through the bounded image policy.
+
+    Returns True on success. SSRF-safe, byte-bounded, and magic-validated —
+    the CDN response is only kept if it is a real raster image.
+    """
+    from ..image_fetch import download_image
+    return download_image(
+        url, dest,
+        max_bytes=2 * 1024 * 1024,
+        timeout=_TIMEOUT,
+        allowed_formats=("png", "gif", "webp", "jpeg"),
+    )
 
 
 def _fetch_json(url):
@@ -172,5 +202,6 @@ def get_emote_image(provider, emote_id):
         return None
     url = cdn_template.replace("{id}", str(emote_id))
     if _download(url, str(path)):
+        _enforce_cache_quota()
         return str(path)
     return None
