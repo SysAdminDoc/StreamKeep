@@ -96,8 +96,9 @@ from .tabs.storage import (
 
 
 class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTabMixin, StorageTabMixin, QMainWindow):
-    def __init__(self):
+    def __init__(self, *, startup_check=False):
         super().__init__()
+        self._startup_check = bool(startup_check)
         self.setWindowTitle(f"StreamKeep v{VERSION}")
         self.setMinimumSize(1020, 800)
         self.resize(1120, 900)
@@ -183,6 +184,10 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             "end_hour": 17,
             "limit": "500K",
         }
+        # The monitor repository is read before _apply_config() performs its
+        # broader migration pass.  Initialize the schema first so a genuinely
+        # empty or legacy-only config root can start safely.
+        _db.init_db()
         self.monitor = ChannelMonitor()
         self.monitor.status_changed.connect(self._refresh_monitor_table)
         self.monitor.channel_went_live.connect(self._on_channel_live)
@@ -216,8 +221,9 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
-        self._scheduler_timer.start(30_000)
-        self._scheduler_tick()  # Apply bandwidth rule immediately on startup
+        if not self._startup_check:
+            self._scheduler_timer.start(30_000)
+            self._scheduler_tick()  # Apply bandwidth rule immediately on startup
         # Hook history-table context menu (right-click → Trim / Open / Remove).
         try:
             self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -253,16 +259,19 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self._resume_candidates = []
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
-        QTimer.singleShot(800, self._scan_for_resumable_downloads)
+        if not self._startup_check:
+            QTimer.singleShot(800, self._scan_for_resumable_downloads)
         # Auto-update check — opt-in, deferred so the UI paints first and
         # so the release-API call doesn't block startup.
         self._update_check_worker = None
         self._update_download_worker = None
         self._latest_update_payload = None
-        QTimer.singleShot(2500, self._maybe_check_for_updates)
+        if not self._startup_check:
+            QTimer.singleShot(2500, self._maybe_check_for_updates)
         # Start the browser-companion local server if the user opted in.
         # Deferred so the UI paints before we open a socket.
-        QTimer.singleShot(1000, self._maybe_start_companion_server)
+        if not self._startup_check:
+            QTimer.singleShot(1000, self._maybe_start_companion_server)
         from streamkeep.config import install_gui_logging
         self._gui_log_handler = install_gui_logging(self._log)
         # Keyboard shortcuts (F11)
@@ -693,8 +702,9 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self._refresh_monitor_summary()
         self._refresh_history_summary()
         # Build transcript search index in background (F27)
-        from ..search import index_all_async
-        index_all_async(self._history, log_fn=self._log)
+        if not self._startup_check:
+            from ..search import index_all_async
+            index_all_async(self._history, log_fn=self._log)
 
     def _persist_config(self):
         cfg = self._config
@@ -750,6 +760,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
     def _init_tray_icon(self):
         """Create a system tray icon with badge overlay and live dropdown (F28).
         Falls back gracefully if tray isn't supported."""
+        if self._startup_check:
+            return
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
         self._tray_base_pix = QPixmap(32, 32)

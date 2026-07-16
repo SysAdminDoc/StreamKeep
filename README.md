@@ -190,7 +190,14 @@ When pyflakes is installed, also run:
 python -m pyflakes StreamKeep.py streamkeep tests
 ```
 
-For UI-facing changes, launch the app and exercise the affected tab. For packaging changes, build the target artifact locally and smoke-launch it before publishing.
+For a Windows one-file release, build and run the hidden artifact-boundary smoke suite:
+
+```powershell
+python -m PyInstaller --clean --noconfirm StreamKeep.spec
+python packaging\artifact_smoke.py --executable .\dist\StreamKeep.exe
+```
+
+The artifact suite exercises empty, legacy-migrated, and populated libraries offscreen, writes machine-readable readiness records, checks embedded yt-dlp and thumbnail initialization, rejects process re-entry fanout, and enforces a bounded clean exit. For UI-facing changes, exercise the affected tab only when a non-disruptive test desktop is available.
 
 ## Development Notes
 

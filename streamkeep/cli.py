@@ -410,6 +410,20 @@ def _run_db_maintenance(args):
             sys.exit(1)
 
 
+def _run_startup_check(args):
+    """Construct the real application offscreen and emit a readiness file."""
+    config_dir = getattr(args, "config_dir", "") or ""
+    if not config_dir:
+        _print_line("Error: startup-check requires --config-dir.")
+        sys.exit(2)
+    from .startup_check import run_startup_check
+    result = run_startup_check(
+        ready_file=args.ready_file,
+        fixture=args.fixture,
+    )
+    sys.exit(0 if result.get("ready") else 1)
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 def build_parser():
@@ -468,6 +482,22 @@ def build_parser():
     diag_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
 
+    # -- packaged startup contract --
+    startup_p = sub.add_parser(
+        "startup-check",
+        help="Run the offscreen packaged-startup readiness contract",
+    )
+    startup_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                           help="Required isolated config/database directory")
+    startup_p.add_argument("--ready-file", required=True,
+                           help="Path for the atomic machine-readable result")
+    startup_p.add_argument(
+        "--fixture",
+        choices=["empty", "migrated", "populated"],
+        default="empty",
+        help="Isolated startup state to prepare",
+    )
+
     # Legacy flat args for backward compat
     p.add_argument("--url", dest="legacy_url", default="",
                    help=argparse.SUPPRESS)
@@ -524,6 +554,8 @@ def run_cli(argv=None):
         _run_db_maintenance(args)
     elif args.command == "snapshot":
         _run_snapshot(args)
+    elif args.command == "startup-check":
+        _run_startup_check(args)
     else:
         p.print_help()
         sys.exit(0)
@@ -535,6 +567,7 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot",
+        "startup-check",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
     return any(arg in cli_triggers for arg in sys.argv[1:])
