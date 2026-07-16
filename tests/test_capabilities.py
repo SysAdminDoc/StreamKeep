@@ -221,6 +221,12 @@ class ReleaseFloorTests(unittest.TestCase):
             flatpak,
         )
 
+    def test_launcher_does_not_bypass_registry_or_block_degraded_startup(self):
+        root = Path(__file__).resolve().parents[1]
+        launcher = (root / "StreamKeep.py").read_text(encoding="utf-8")
+        self.assertNotIn('["ffmpeg", "-version"]', launcher)
+        self.assertNotIn("pip install", launcher)
+
 
 if __name__ == "__main__":
     unittest.main()

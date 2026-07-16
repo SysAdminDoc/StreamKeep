@@ -26,7 +26,6 @@ import multiprocessing
 multiprocessing.freeze_support()
 
 import sys
-import subprocess
 import os
 from pathlib import Path
 
@@ -66,7 +65,6 @@ def _branding_icon_path() -> Path:
 
 
 from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
-from streamkeep.paths import _CREATE_NO_WINDOW
 
 
 def _restore_internal_cli_streams():
@@ -138,12 +136,10 @@ def main():
     setup_crash_logging()
 
     from PyQt6.QtGui import QIcon
-    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from PyQt6.QtWidgets import QApplication
     from streamkeep.theme import apply_theme
     from streamkeep.ui.main_window import StreamKeep
 
-    # QApplication must exist before any QWidget (e.g. a QMessageBox in the
-    # ffmpeg error path). Create it first so every failure branch is safe.
     app = QApplication(sys.argv)
     branding_icon = QIcon(str(_branding_icon_path()))
     app.setWindowIcon(branding_icon)
@@ -161,23 +157,6 @@ def main():
     except Exception:
         saved_theme = "dark"
     apply_theme(saved_theme, app=app)
-
-    ffmpeg_ok = False
-    try:
-        r = subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, timeout=5,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        ffmpeg_ok = r.returncode == 0
-    except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
-        ffmpeg_ok = False
-    if not ffmpeg_ok:
-        QMessageBox.critical(
-            None, "StreamKeep",
-            "ffmpeg not found (or failed to run) in PATH.\n"
-            "Install ffmpeg and try again.",
-        )
-        sys.exit(1)
 
     win = StreamKeep()
     win.show()
