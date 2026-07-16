@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve()
@@ -22,6 +22,8 @@ def collect_tree(relative, dest):
 
 hiddenimports = []
 hiddenimports += collect_submodules('streamkeep')
+hiddenimports += collect_submodules('yt_dlp')
+hiddenimports += collect_submodules('yt_dlp_ejs')
 
 datas = []
 for top_level in ('LICENSE', 'README.md', 'requirements.txt', 'icon.ico', 'icon.png'):
@@ -32,6 +34,7 @@ datas += collect_tree('assets', 'assets')
 datas += collect_tree('browser-extension', 'browser-extension')
 datas += collect_tree('packaging', 'packaging')
 datas += collect_tree('streamkeep/i18n', 'streamkeep/i18n')
+datas += collect_data_files('yt_dlp_ejs')
 
 
 a = Analysis(

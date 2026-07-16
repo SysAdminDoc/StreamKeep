@@ -1330,6 +1330,39 @@ class TestYtDlpExtractorURL(unittest.TestCase):
 class TestYtDlpRuntimeReadiness(unittest.TestCase):
     """yt-dlp version, EJS, and JavaScript runtime readiness helpers."""
 
+    def test_command_uses_internal_runner_in_frozen_build(self):
+        with patch.object(ytdlp_mod.sys, "frozen", True, create=True), \
+                patch.object(ytdlp_mod.sys, "executable", r"C:\\Apps\\StreamKeep.exe"):
+            self.assertEqual(
+                ytdlp_mod.ytdlp_command(),
+                [r"C:\\Apps\\StreamKeep.exe", "--internal-ytdlp"],
+            )
+
+    @patch(f"{_YTDLP}._has_python_module", return_value=True)
+    def test_command_uses_python_module_in_source_build(self, _mock_module):
+        with patch.object(ytdlp_mod.sys, "frozen", False, create=True):
+            self.assertEqual(
+                ytdlp_mod.ytdlp_command(),
+                [ytdlp_mod.sys.executable, "-m", "yt_dlp"],
+            )
+
+    @patch(f"{_YTDLP}._probe_js_runtime")
+    @patch(f"{_YTDLP}._has_python_module", return_value=True)
+    @patch(f"{_YTDLP}._bundled_ytdlp_version", return_value="2026.07.04")
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_frozen_status_reads_bundled_version_without_spawning_app(
+            self, mock_run, _mock_version, _mock_module, mock_runtime):
+        mock_runtime.return_value = {
+            "name": "deno", "supported": True, "available": True,
+            "version": "2.7.11", "message": "",
+        }
+        with patch.object(ytdlp_mod.sys, "frozen", True, create=True):
+            status = ytdlp_mod.ytdlp_runtime_status()
+
+        self.assertEqual(status["state"], "ready")
+        self.assertEqual(status["yt_dlp_version"], "2026.07.04")
+        mock_run.assert_not_called()
+
     def test_parse_version_parts_handles_cli_formats(self):
         self.assertEqual(ytdlp_mod._parse_version_parts("2026.06.09")[0], (2026, 6, 9))
         self.assertEqual(ytdlp_mod._parse_version_parts("v22.3.0")[0], (22, 3, 0))

@@ -92,8 +92,9 @@ class DownloadWorker(QThread):
     def _download_with_ytdlp(self, seg_idx, label, outfile):
         """Download via yt-dlp directly. Handles URL refresh, DASH merge,
         and format selection. Returns True on success."""
-        cmd = [
-            "yt-dlp",
+        from ..extractors.ytdlp import ytdlp_command
+
+        cmd = ytdlp_command() + [
             "-f", self.ytdlp_format,
             "--no-part",
             "--newline",
@@ -199,7 +200,7 @@ class DownloadWorker(QThread):
             return False
 
         except FileNotFoundError:
-            self.log.emit(f"[ERROR] {label}: yt-dlp not in PATH")
+            self.log.emit(f"[ERROR] {label}: bundled yt-dlp could not be started")
             return False
         except Exception as e:
             self.log.emit(f"[ERROR] {label}: {e}")

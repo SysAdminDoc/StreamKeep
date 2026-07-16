@@ -26,6 +26,41 @@ from .paths import _CREATE_NO_WINDOW
 from . import db as _db
 
 
+def _get_output_stream():
+    """Return a writable console stream, or ``None`` for windowed launches.
+
+    PyInstaller's GUI build sets ``sys.stdout`` and ``sys.__stdout__`` to
+    ``None``.  When a frozen CLI invocation has a parent console on Windows,
+    attach to it and open ``CONOUT$``; double-clicked/windowed invocations
+    simply run without console output instead of crashing.
+    """
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "__stdout__", None)):
+        if stream is not None and callable(getattr(stream, "write", None)):
+            return stream
+
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        # ATTACH_PARENT_PROCESS. Failure is expected when there is no parent
+        # console; opening CONOUT$ below is the definitive availability check.
+        kernel32.AttachConsole(ctypes.c_uint(-1).value)
+        stream = open(
+            "CONOUT$",
+            "w",
+            encoding="utf-8",
+            errors="replace",
+            buffering=1,
+        )
+        sys.stdout = stream
+        return stream
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
 def _print_progress(text):
     """Overwrite the current console line with *text*."""
     import shutil
@@ -33,18 +68,24 @@ def _print_progress(text):
     # stdout is redirected (background/headless) — os.get_terminal_size on
     # Windows rejects the keyword and raises when there is no console.
     cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+    stream = _get_output_stream()
+    if stream is None:
+        return
     try:
-        sys.stdout.write("\r" + text[:cols].ljust(cols) + "\r")
-        sys.stdout.flush()
-    except OSError:
+        stream.write("\r" + text[:cols].ljust(cols) + "\r")
+        stream.flush()
+    except (AttributeError, OSError, ValueError):
         pass  # stdout closed/redirected — progress is best-effort
 
 
 def _print_line(text):
+    stream = _get_output_stream()
+    if stream is None:
+        return
     try:
-        sys.stdout.write(text + "\n")
-        sys.stdout.flush()
-    except OSError:
+        stream.write(text + "\n")
+        stream.flush()
+    except (AttributeError, OSError, ValueError):
         pass
 
 

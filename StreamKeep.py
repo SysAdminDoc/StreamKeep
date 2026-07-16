@@ -27,6 +27,7 @@ multiprocessing.freeze_support()
 
 import sys
 import subprocess
+import os
 from pathlib import Path
 
 from streamkeep.bootstrap import bootstrap
@@ -39,6 +40,7 @@ def _launcher_has_cli_args():
     cli_triggers = {
         "download", "dl", "server", "extractors",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
+        "--internal-ytdlp",
     }
     return any(arg in cli_triggers for arg in sys.argv[1:])
 
@@ -67,7 +69,65 @@ from streamkeep.paths import _CREATE_NO_WINDOW
 from streamkeep.crash_log import setup_crash_logging
 
 
+def _restore_internal_cli_streams():
+    """Restore redirected pipes for the windowed frozen yt-dlp helper.
+
+    PyInstaller's ``console=False`` bootloader deliberately sets the Python
+    standard streams to ``None``.  The internal yt-dlp subprocess is launched
+    with stdout/stderr pipes, however, so reconnect those inherited Windows
+    handles before yt-dlp starts writing progress and JSON output.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        import io
+        import msvcrt
+
+        kernel32 = ctypes.windll.kernel32
+        invalid_handle = ctypes.c_void_p(-1).value
+        for stream_name, handle_id in (("stdout", -11), ("stderr", -12)):
+            stream = getattr(sys, stream_name, None)
+            if stream is not None and callable(getattr(stream, "write", None)):
+                continue
+            handle = kernel32.GetStdHandle(ctypes.c_ulong(handle_id).value)
+            if not handle or handle == invalid_handle:
+                continue
+            fd = msvcrt.open_osfhandle(handle, os.O_WRONLY)
+            raw = os.fdopen(fd, "wb", closefd=False)
+            setattr(
+                sys,
+                stream_name,
+                io.TextIOWrapper(
+                    raw,
+                    encoding="utf-8",
+                    errors="replace",
+                    line_buffering=True,
+                    write_through=True,
+                ),
+            )
+    except (AttributeError, OSError, ValueError):
+        # The caller will receive yt-dlp's exit status even if a host blocks
+        # access to the inherited handles.
+        pass
+
+
+def _run_internal_ytdlp():
+    """Run the bundled yt-dlp module when the frozen app re-enters itself."""
+    flag = "--internal-ytdlp"
+    if flag not in sys.argv[1:]:
+        return False
+    flag_index = sys.argv.index(flag)
+    _restore_internal_cli_streams()
+    from yt_dlp import main as ytdlp_main
+    ytdlp_main(sys.argv[flag_index + 1:])
+    return True
+
+
 def main():
+    if _run_internal_ytdlp():
+        return
+
     setup_crash_logging()
 
     # CLI / headless mode (F42): detect subcommands before creating the GUI

@@ -12,6 +12,7 @@ import importlib.util
 import logging
 import os
 import re
+import sys
 import time
 import urllib.parse
 from pathlib import Path
@@ -64,6 +65,31 @@ def _has_python_module(module_name):
         return importlib.util.find_spec(module_name) is not None
     except (ImportError, AttributeError, ValueError):
         return False
+
+
+def ytdlp_command():
+    """Return the bundled yt-dlp command prefix for this runtime.
+
+    A windowed one-file PyInstaller executable cannot use ``python -m``
+    because ``sys.executable`` points back to StreamKeep itself.  Its hidden
+    internal mode re-enters the executable and dispatches directly to the
+    bundled ``yt_dlp`` module.  Source installs use the same module through
+    the active Python interpreter and retain the external CLI as a fallback.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--internal-ytdlp"]
+    if _has_python_module("yt_dlp"):
+        return [sys.executable, "-m", "yt_dlp"]
+    return ["yt-dlp"]
+
+
+def _bundled_ytdlp_version():
+    """Return the bundled module version without spawning a second app."""
+    try:
+        from yt_dlp.version import __version__
+        return str(__version__ or "").strip()
+    except (ImportError, AttributeError):
+        return ""
 
 
 def _probe_command_version(command, args=None):
@@ -153,30 +179,32 @@ def _probe_js_runtime():
 
 def ytdlp_runtime_status():
     """Return yt-dlp CLI, external-component, and JS-runtime readiness."""
-    result = run_capture_interruptible(["yt-dlp", "--version"], timeout=5)
-    if result.interrupted:
-        return {
-            "state": "missing",
-            "summary": "Interrupted",
-            "detail": "yt-dlp readiness probe was interrupted.",
-            "yt_dlp_version": "",
-            "ejs_available": False,
-            "js_runtime": _probe_js_runtime(),
-            "problems": ["yt-dlp readiness probe was interrupted."],
-        }
-    if result.returncode != 0 or result.timed_out:
-        return {
-            "state": "missing",
-            "summary": "Missing",
-            "detail": f"yt-dlp was not found. {_YTDLP_INSTALL_HINT}.",
-            "yt_dlp_version": "",
-            "ejs_available": False,
-            "js_runtime": _probe_js_runtime(),
-            "problems": ["yt-dlp was not found."],
-        }
+    version = _bundled_ytdlp_version() if getattr(sys, "frozen", False) else ""
+    if not version:
+        result = run_capture_interruptible(ytdlp_command() + ["--version"], timeout=5)
+        if result.interrupted:
+            return {
+                "state": "missing",
+                "summary": "Interrupted",
+                "detail": "yt-dlp readiness probe was interrupted.",
+                "yt_dlp_version": "",
+                "ejs_available": False,
+                "js_runtime": _probe_js_runtime(),
+                "problems": ["yt-dlp readiness probe was interrupted."],
+            }
+        if result.returncode != 0 or result.timed_out:
+            return {
+                "state": "missing",
+                "summary": "Missing",
+                "detail": f"yt-dlp was not found. {_YTDLP_INSTALL_HINT}.",
+                "yt_dlp_version": "",
+                "ejs_available": False,
+                "js_runtime": _probe_js_runtime(),
+                "problems": ["yt-dlp was not found."],
+            }
 
-    _parts, version = _parse_version_parts(result.stdout)
-    version = version or result.stdout.strip().splitlines()[0][:32]
+        _parts, version = _parse_version_parts(result.stdout)
+        version = version or result.stdout.strip().splitlines()[0][:32]
     yt_dlp_module = _has_python_module("yt_dlp")
     ejs_available = _has_python_module("yt_dlp_ejs") or not yt_dlp_module
     runtime = _probe_js_runtime()
@@ -241,7 +269,9 @@ class YtDlpExtractor(Extractor):
     sponsorblock = False
 
     def _has_ytdlp(self):
-        result = run_capture_interruptible(["yt-dlp", "--version"], timeout=5)
+        if getattr(sys, "frozen", False):
+            return bool(_bundled_ytdlp_version())
+        result = run_capture_interruptible(ytdlp_command() + ["--version"], timeout=5)
         return result.returncode == 0
 
     def extract_channel_id(self, url):
@@ -256,7 +286,7 @@ class YtDlpExtractor(Extractor):
             return "download"
 
     def _build_cmd(self, url, include_runtime=False, runtime_status=None):
-        cmd = ["yt-dlp", "--dump-json", "--no-download"]
+        cmd = ytdlp_command() + ["--dump-json", "--no-download"]
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         if self.cookies_file and os.path.isfile(self.cookies_file):
@@ -281,7 +311,7 @@ class YtDlpExtractor(Extractor):
     def _try_with_browser(self, url, browser_name, log_fn=None, runtime_status=None):
         """Attempt yt-dlp extraction with a specific browser's cookies.
         Returns (data_dict, None) or (None, error_str)."""
-        cmd = ["yt-dlp", "--dump-json", "--no-download"]
+        cmd = ytdlp_command() + ["--dump-json", "--no-download"]
         if log_fn and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
@@ -515,8 +545,8 @@ class YtDlpExtractor(Extractor):
         if not has_ytdlp:
             return []
         self._log(log_fn, f"Probing for playlist/channel: {url}")
-        cmd = [
-            "yt-dlp", "--flat-playlist", "--dump-single-json",
+        cmd = ytdlp_command() + [
+            "--flat-playlist", "--dump-single-json",
             "--playlist-end", str(limit), "--no-warnings",
         ]
         runtime_status = None
