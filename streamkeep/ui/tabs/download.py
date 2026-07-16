@@ -401,6 +401,13 @@ def build_download_tab(win):
     win.scan_btn.clicked.connect(win._on_scan_page)
     utility_lay.addWidget(win.scan_btn)
 
+    win.scan_lan_check = QCheckBox("Allow LAN for this scan")
+    win.scan_lan_check.setToolTip(
+        "One scan only: allow RFC1918/ULA page targets. Loopback, link-local, "
+        "cloud metadata, and other special addresses remain blocked."
+    )
+    utility_lay.addWidget(win.scan_lan_check)
+
     win.queue_btn = QPushButton("Queue")
     win.queue_btn.setObjectName("secondary")
     win.queue_btn.setToolTip("Add the current URL to the download queue")
@@ -2927,9 +2934,17 @@ class DownloadTabMixin:
             self._set_status("Scan Page expects a full http(s) URL.", "warning")
             return
         self.scan_btn.setEnabled(False)
+        allow_lan = self.scan_lan_check.isChecked()
+        self.scan_lan_check.setChecked(False)
         self._set_status("Scanning page for media links...", "working")
-        self._log(f"[SCRAPE] Scanning {url}")
-        worker = _PageScrapeWorker(url)
+        self._log(
+            f"[SCRAPE] Scanning {url} "
+            f"(LAN override {'enabled for this scan' if allow_lan else 'off'})"
+        )
+        worker = _PageScrapeWorker(
+            url,
+            allow_private_network=allow_lan,
+        )
         worker.finished.connect(self._on_scan_done)
         worker.error.connect(self._on_scan_error)
         worker.log.connect(self._log)

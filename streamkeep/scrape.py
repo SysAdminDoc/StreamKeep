@@ -6,14 +6,18 @@ from the extractors because these are generic URL sniffers, not
 platform-specific parsers.
 """
 
+import http.client
+import ipaddress
 import os
 import re
+import socket
+import ssl
 import sys
 import time
 import urllib.parse
 
 from . import CURL_UA
-from .http import curl, http_interrupted, http_probe, run_capture_interruptible
+from .http import http_interrupted, http_probe, run_capture_interruptible
 from .models import QualityInfo, StreamInfo
 
 
@@ -28,37 +32,280 @@ _HEADLESS_ALLOWED_SCHEMES = frozenset({"http", "https"})
 _HEADLESS_MAX_WAIT_SECONDS = 15.0
 _HEADLESS_MAX_LINKS = 100
 _HEADLESS_MAX_REQUESTS = 512
+_HEADLESS_MAX_REDIRECTS = 10
+_HEADLESS_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_HEADLESS_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+_HEADLESS_HOST_RESOLVER_RULES = "MAP * ~NOTFOUND"
+_LAN_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+))
+_METADATA_ADDRESSES = frozenset({
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("100.100.100.200"),
+    ipaddress.ip_address("fd00:ec2::254"),
+})
 
 
-def _safe_headless_url(url):
+class HeadlessNetworkBlocked(ValueError):
+    """Raised when a page-scan network destination violates policy."""
+
+
+class _HeadlessNetworkPolicy:
+    def __init__(self, *, allow_private_network=False):
+        self.allow_private_network = bool(allow_private_network)
+        self.resolutions = {}
+        self.requests = 0
+        self.blocked = 0
+        self.redirects = 0
+        self.total_bytes = 0
+
+    def resolve(self, url):
+        normalized, host, port = _parse_headless_url(url)
+        try:
+            addresses = _resolve_headless_addresses(host, port)
+        except (OSError, ValueError) as error:
+            self.blocked += 1
+            raise HeadlessNetworkBlocked(
+                f"DNS resolution failed for {host}"
+            ) from error
+        if not addresses:
+            self.blocked += 1
+            raise HeadlessNetworkBlocked(f"DNS returned no addresses for {host}")
+        for address in addresses:
+            if not _address_allowed(address, self.allow_private_network):
+                self.blocked += 1
+                raise HeadlessNetworkBlocked(
+                    f"Address class is not allowed for {host}"
+                )
+        key = (host, port)
+        stable = frozenset(str(address) for address in addresses)
+        previous = self.resolutions.get(key)
+        if previous is not None and stable != previous:
+            self.blocked += 1
+            raise HeadlessNetworkBlocked(
+                f"DNS answer changed during scan for {host}"
+            )
+        self.resolutions[key] = stable
+        return normalized, host, port, tuple(addresses)
+
+
+def _parse_headless_url(url):
+    text = str(url or "").strip()
+    if not text or len(text) > 8192:
+        raise HeadlessNetworkBlocked("URL is empty or exceeds the size limit")
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        scheme = parsed.scheme.lower()
+        if scheme not in _HEADLESS_ALLOWED_SCHEMES:
+            raise HeadlessNetworkBlocked("Only HTTP(S) URLs are allowed")
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            raise HeadlessNetworkBlocked("URL authority is missing or contains credentials")
+        port = parsed.port or (443 if scheme == "https" else 80)
+        host = parsed.hostname.rstrip(".").encode("idna").decode("ascii").lower()
+        if not host:
+            raise HeadlessNetworkBlocked("URL host is empty")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise HeadlessNetworkBlocked("URL authority is malformed") from error
+    display_host = f"[{host}]" if ":" in host else host
+    default_port = 443 if scheme == "https" else 80
+    authority = display_host if port == default_port else f"{display_host}:{port}"
+    normalized = urllib.parse.urlunsplit((
+        scheme,
+        authority,
+        parsed.path or "/",
+        parsed.query,
+        "",
+    ))
+    return normalized, host, port
+
+
+def _resolve_headless_addresses(host, port):
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        rows = socket.getaddrinfo(
+            host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP,
+        )
+        values = {row[4][0].split("%", 1)[0] for row in rows}
+        return tuple(sorted((ipaddress.ip_address(value) for value in values), key=str))
+    return (literal,)
+
+
+def _address_allowed(address, allow_private_network=False):
+    if getattr(address, "ipv4_mapped", None) is not None:
+        return False
+    if address in _METADATA_ADDRESSES:
+        return False
+    if (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    ):
+        return False
+    if address.is_global:
+        return True
+    return bool(
+        allow_private_network
+        and any(address in network for network in _LAN_NETWORKS)
+    )
+
+
+def _safe_headless_url(url, *, policy=None, allow_private_network=False):
     """Return a normalized HTTP(S) URL suitable for browser navigation.
 
     Browser scraping is deliberately narrower than generic URL parsing: local
     browser/file schemes and credential-bearing authority strings are never
     handed to Chromium.
     """
-    text = str(url or "").strip()
-    if not text or len(text) > 8192:
-        return ""
     try:
-        parsed = urllib.parse.urlsplit(text)
-        if parsed.scheme.lower() not in _HEADLESS_ALLOWED_SCHEMES:
-            return ""
-        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
-            return ""
-        # Accessing ``port`` validates malformed values such as ``:99999``.
-        _ = parsed.port
-    except (TypeError, ValueError):
+        active_policy = policy or _HeadlessNetworkPolicy(
+            allow_private_network=allow_private_network,
+        )
+        normalized, _host, _port, _addresses = active_policy.resolve(url)
+        return normalized
+    except HeadlessNetworkBlocked:
         return ""
-    return text
 
 
 def _launch_scrape_browser(playwright):
-    """Launch Chromium with its platform sandbox left enabled."""
+    """Launch a sandboxed Chromium whose network is route-brokered."""
     return playwright.chromium.launch(
         headless=True,
-        args=["--mute-audio"],
+        chromium_sandbox=True,
+        args=[
+            "--mute-audio",
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            f"--host-resolver-rules={_HEADLESS_HOST_RESOLVER_RULES}",
+        ],
     )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPConnection):
+    """HTTPS connection to one validated IP while verifying the URL host."""
+
+    default_port = 443
+
+    def __init__(self, host, port, address, timeout):
+        super().__init__(host, port=port, timeout=timeout)
+        self._address = str(address)
+        self._context = ssl.create_default_context()
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._address, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+def _safe_request_headers(headers, host, port, scheme):
+    allowed = {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "cache-control",
+        "cookie",
+        "if-modified-since",
+        "if-none-match",
+        "origin",
+        "pragma",
+        "range",
+        "referer",
+        "user-agent",
+    }
+    clean = {}
+    total = 0
+    for name, value in dict(headers or {}).items():
+        key = str(name).strip().lower()
+        text = str(value)
+        size = len(key) + len(text)
+        if (
+            key in allowed
+            and len(clean) < 64
+            and len(text) <= 8192
+            and total + size <= 65536
+            and "\r" not in text
+            and "\n" not in text
+        ):
+            clean[key] = text
+            total += size
+    default_port = 443 if scheme == "https" else 80
+    display_host = f"[{host}]" if ":" in host else host
+    clean["host"] = display_host if port == default_port else f"{display_host}:{port}"
+    clean.setdefault("user-agent", CURL_UA)
+    return clean
+
+
+def _pinned_request(url, *, policy, method="GET", headers=None, timeout=8.0):
+    """Perform one non-redirecting request pinned to a validated DNS answer."""
+    normalized, host, port, addresses = policy.resolve(url)
+    method = str(method or "GET").upper()
+    if method not in {"GET", "HEAD"}:
+        policy.blocked += 1
+        raise HeadlessNetworkBlocked(f"HTTP method {method} is not allowed")
+    parsed = urllib.parse.urlsplit(normalized)
+    target = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+    request_headers = _safe_request_headers(headers, host, port, parsed.scheme)
+    last_error = None
+    for address in addresses:
+        connection = None
+        try:
+            if parsed.scheme == "https":
+                connection = _PinnedHTTPSConnection(
+                    host, port, address, timeout,
+                )
+            else:
+                connection = http.client.HTTPConnection(
+                    str(address), port=port, timeout=timeout,
+                )
+            connection.request(method, target, headers=request_headers)
+            response = connection.getresponse()
+            length = response.getheader("content-length")
+            if length and int(length) > _HEADLESS_MAX_RESPONSE_BYTES:
+                raise HeadlessNetworkBlocked("Response exceeds the per-request byte limit")
+            body = response.read(_HEADLESS_MAX_RESPONSE_BYTES + 1)
+            if len(body) > _HEADLESS_MAX_RESPONSE_BYTES:
+                raise HeadlessNetworkBlocked("Response exceeds the per-request byte limit")
+            if policy.total_bytes + len(body) > _HEADLESS_MAX_TOTAL_BYTES:
+                raise HeadlessNetworkBlocked("Scan exceeds the total response byte limit")
+            policy.total_bytes += len(body)
+            response_headers = {}
+            header_bytes = 0
+            for name, value in response.getheaders():
+                key = str(name).lower()
+                if key in {"connection", "content-length", "proxy-authenticate",
+                           "proxy-authorization", "transfer-encoding", "upgrade"}:
+                    continue
+                if "\r" in value or "\n" in value:
+                    continue
+                size = len(key) + len(value)
+                if len(response_headers) >= 64 or header_bytes + size > 65536:
+                    continue
+                response_headers[key] = value
+                header_bytes += size
+            return {
+                "url": normalized,
+                "status": int(response.status),
+                "headers": response_headers,
+                "body": body,
+            }
+        except HeadlessNetworkBlocked:
+            policy.blocked += 1
+            raise
+        except (OSError, ssl.SSLError, http.client.HTTPException, ValueError) as error:
+            last_error = error
+        finally:
+            if connection is not None:
+                connection.close()
+    policy.blocked += 1
+    raise HeadlessNetworkBlocked(f"Connection failed for {host}") from last_error
 
 
 def _cancelled(checker=None):
@@ -99,7 +346,7 @@ def ensure_playwright_browser(log_fn=None, should_cancel=None):
             if _cancelled(should_cancel):
                 _PLAYWRIGHT_READY = False
                 return False
-            browser = p.chromium.launch(headless=True)
+            browser = _launch_scrape_browser(p)
             browser.close()
         _PLAYWRIGHT_READY = True
         return True
@@ -142,7 +389,7 @@ def ensure_playwright_browser(log_fn=None, should_cancel=None):
                     if _cancelled(should_cancel):
                         _PLAYWRIGHT_READY = False
                         return False
-                    browser = p.chromium.launch(headless=True)
+                    browser = _launch_scrape_browser(p)
                     browser.close()
                 _PLAYWRIGHT_READY = True
                 return True
@@ -162,14 +409,18 @@ def ensure_playwright_browser(log_fn=None, should_cancel=None):
 
 
 def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
-                                wait_seconds=8, should_cancel=None):
+                                wait_seconds=8, should_cancel=None,
+                                allow_private_network=False):
     """Load a page in a headless Chromium browser and capture any network
     requests that look like media streams. Catches lazy-loaded players
     that the regex scraper can't see."""
-    page_url = _safe_headless_url(page_url)
+    policy = _HeadlessNetworkPolicy(
+        allow_private_network=allow_private_network,
+    )
+    page_url = _safe_headless_url(page_url, policy=policy)
     if not page_url:
         if log_fn:
-            log_fn("[HEADLESS] Refused non-HTTP(S) or credential-bearing URL.")
+            log_fn("[HEADLESS] Refused URL outside the page-scan network policy.")
         return []
 
     try:
@@ -200,11 +451,15 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
     request_count = 0
     deadline = time.monotonic() + wait_seconds + 10.0
 
-    def add(u, hint):
+    def add(u, hint, *, validated=False):
         if _cancelled(should_cancel):
             return
         if not u or u in seen:
             return
+        if not validated:
+            u = _safe_headless_url(u, policy=policy)
+            if not u:
+                return
         if len(captured) >= max_links:
             return
         lower = u.lower()
@@ -241,16 +496,19 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                     if _cancelled(should_cancel) or time.monotonic() >= deadline:
                         route.abort("blockedbyclient")
                         return
-                    if not _safe_headless_url(req.url):
+                    normalized = _safe_headless_url(req.url, policy=policy)
+                    if not normalized:
                         route.abort("blockedbyclient")
                         return
                     request_count += 1
+                    policy.requests = request_count
                     if request_count > _HEADLESS_MAX_REQUESTS:
+                        policy.blocked += 1
                         route.abort("blockedbyclient")
                         return
                     resource_type = req.resource_type
                     if resource_type == "media":
-                        add(req.url, "headless media")
+                        add(normalized, "headless media", validated=True)
                         # Capturing the media URL is sufficient. Do not let the
                         # browser stream an unbounded response into memory/disk.
                         route.abort("blockedbyclient")
@@ -258,9 +516,36 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                     if resource_type in ("image", "font"):
                         route.abort("blockedbyclient")
                         return
-                    route.continue_()
+                    try:
+                        remaining = max(0.1, min(8.0, deadline - time.monotonic()))
+                        result = _pinned_request(
+                            normalized,
+                            policy=policy,
+                            method=getattr(req, "method", "GET"),
+                            headers=getattr(req, "headers", {}),
+                            timeout=remaining,
+                        )
+                        if 300 <= result["status"] < 400:
+                            policy.redirects += 1
+                            if policy.redirects > _HEADLESS_MAX_REDIRECTS:
+                                policy.blocked += 1
+                                route.abort("blockedbyclient")
+                                return
+                        route.fulfill(
+                            status=result["status"],
+                            headers=result["headers"],
+                            body=result["body"],
+                        )
+                    except HeadlessNetworkBlocked as error:
+                        if log_fn:
+                            log_fn(f"[HEADLESS] Blocked request: {error}")
+                        route.abort("blockedbyclient")
 
                 context.route("**/*", route_request)
+                if hasattr(context, "route_web_socket"):
+                    context.route_web_socket(
+                        "**/*", lambda websocket: websocket.close()
+                    )
                 page.on("dialog", lambda dialog: dialog.dismiss())
                 page.on("download", lambda download: download.cancel())
                 page.on("popup", lambda popup: popup.close())
@@ -337,6 +622,15 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                         remaining_ms -= step
                 except Exception:
                     pass
+
+                try:
+                    html = page.content()
+                    for url, hint in _extract_media_links(
+                        html, max_links=max_links,
+                    ):
+                        add(url, hint)
+                except Exception:
+                    pass
             finally:
                 try:
                     if page is not None:
@@ -359,22 +653,17 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
 
     if log_fn:
         log_fn(f"[HEADLESS] Captured {len(captured)} media request(s)")
+        log_fn(
+            "[HEADLESS] Network policy: "
+            f"requests={policy.requests}, blocked={policy.blocked}, "
+            f"redirects={policy.redirects}, bytes={policy.total_bytes}, "
+            f"lan_override={'on' if policy.allow_private_network else 'off'}"
+        )
     return captured
 
 
-def scrape_media_links(page_url, log_fn=None, max_links=100):
-    """Fetch a webpage and extract URLs that look like media or embeddable
-    streams. Returns a de-duplicated list of (url, hint) tuples.
-
-    Conservative: looks for explicit media files (mp4/mp3/m3u8), common
-    streaming hosts, and iframe embeds. Does NOT execute JavaScript."""
-    headers = {
-        "User-Agent": CURL_UA,
-        "Accept": "text/html,application/xhtml+xml",
-    }
-    body = curl(page_url, headers=headers, timeout=20) or ""
-    if not body:
-        return []
+def _extract_media_links(body, *, max_links=100):
+    """Extract bounded media candidates from already-fetched page HTML."""
     found = []
     seen = set()
 
@@ -429,8 +718,71 @@ def scrape_media_links(page_url, log_fn=None, max_links=100):
         )):
             add(src, "iframe embed")
 
+    return found
+
+
+def scrape_media_links(page_url, log_fn=None, max_links=100,
+                       allow_private_network=False):
+    """Safely fetch a webpage and extract media or embeddable URLs.
+
+    Redirects are followed manually through the same pinned DNS/address
+    policy as the browser route broker. JavaScript is not executed here.
+    """
+    try:
+        max_links = max(0, min(_HEADLESS_MAX_LINKS, int(max_links)))
+    except (TypeError, ValueError, OverflowError):
+        return []
+    if max_links == 0:
+        return []
+    policy = _HeadlessNetworkPolicy(
+        allow_private_network=allow_private_network,
+    )
+    current = _safe_headless_url(page_url, policy=policy)
+    if not current:
+        if log_fn:
+            log_fn("[SCRAPE] Refused URL outside the page-scan network policy.")
+        return []
+    headers = {
+        "User-Agent": CURL_UA,
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    result = None
+    try:
+        for _redirect in range(_HEADLESS_MAX_REDIRECTS + 1):
+            policy.requests += 1
+            result = _pinned_request(
+                current, policy=policy, headers=headers, timeout=8.0,
+            )
+            if result["status"] not in {301, 302, 303, 307, 308}:
+                break
+            location = result["headers"].get("location", "")
+            if not location:
+                return []
+            policy.redirects += 1
+            if policy.redirects > _HEADLESS_MAX_REDIRECTS:
+                raise HeadlessNetworkBlocked("Redirect budget exceeded")
+            current = urllib.parse.urljoin(current, location)
+        if result is None or not 200 <= result["status"] < 300:
+            return []
+        body = result["body"].decode("utf-8", "replace")
+    except HeadlessNetworkBlocked as error:
+        if log_fn:
+            log_fn(f"[SCRAPE] Blocked request: {error}")
+        return []
+
+    found = []
+    for url, hint in _extract_media_links(body, max_links=max_links):
+        safe_url = _safe_headless_url(url, policy=policy)
+        if safe_url:
+            found.append((safe_url, hint))
+
     if log_fn:
-        log_fn(f"[SCRAPE] Found {len(found)} candidate link(s) in {page_url}")
+        log_fn(
+            f"[SCRAPE] Found {len(found)} candidate link(s); "
+            f"requests={policy.requests}, redirects={policy.redirects}, "
+            f"bytes={policy.total_bytes}, "
+            f"lan_override={'on' if policy.allow_private_network else 'off'}"
+        )
     return found
 
 

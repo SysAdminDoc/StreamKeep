@@ -120,6 +120,8 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert work_surface is not None
             assert work_surface.orientation() == Qt.Orientation.Horizontal
             assert window.download_hero_title.text() == "New download"
+            assert window.scan_lan_check.text() == "Allow LAN for this scan"
+            assert not window.scan_lan_check.isChecked()
             assert "border-radius: 999px" not in window.status_pill.styleSheet()
             metric_labels = [
                 getattr(window, f"download_{key}_{suffix}")

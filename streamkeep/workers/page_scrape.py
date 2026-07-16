@@ -15,10 +15,11 @@ class PageScrapeWorker(QThread):
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
-    def __init__(self, url, use_headless=True):
+    def __init__(self, url, use_headless=True, allow_private_network=False):
         super().__init__()
         self.url = url
         self.use_headless = use_headless
+        self.allow_private_network = bool(allow_private_network)
 
     def _interrupted(self):
         return self.isInterruptionRequested()
@@ -45,13 +46,18 @@ class PageScrapeWorker(QThread):
                         self.url,
                         log_fn=self.log.emit,
                         should_cancel=self._interrupted,
+                        allow_private_network=self.allow_private_network,
                     ))
                     if self._interrupted():
                         return
 
                 # Static-HTML pass: cheap regex scan for anything the headless
                 # pass might have missed (e.g. pages with many linked videos).
-                merge(scrape_media_links(self.url, log_fn=self.log.emit))
+                merge(scrape_media_links(
+                    self.url,
+                    log_fn=self.log.emit,
+                    allow_private_network=self.allow_private_network,
+                ))
                 if self._interrupted():
                     return
 
