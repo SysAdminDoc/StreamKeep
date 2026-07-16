@@ -61,6 +61,8 @@ class DownloadWorker(QThread):
         self.sponsorblock_mark = ""
         self.sponsorblock_remove = ""
         self.sponsorblock_api = ""
+        self.download_archive = ""
+        self.break_on_existing = False
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -109,6 +111,8 @@ class DownloadWorker(QThread):
             state.sponsorblock_mark = self.sponsorblock_mark or ""
             state.sponsorblock_remove = self.sponsorblock_remove or ""
             state.sponsorblock_api = self.sponsorblock_api or ""
+            state.download_archive = self.download_archive or ""
+            state.break_on_existing = bool(self.break_on_existing)
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -227,6 +231,10 @@ class DownloadWorker(QThread):
                 cmd.extend([
                     "--sponsorblock-api", sponsorblock_options["api_url"]
                 ])
+        if self.download_archive:
+            cmd.extend(["--download-archive", self.download_archive])
+            if self.break_on_existing:
+                cmd.append("--break-on-existing")
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
         if impersonate:

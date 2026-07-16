@@ -209,6 +209,24 @@ def test_ytdlp_sponsorblock_cmd_keeps_mark_remove_and_api_distinct(
     )
 
 
+def test_ytdlp_cmd_uses_incremental_download_archive(tmp_path, monkeypatch):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.download_archive = str(tmp_path / "source.txt")
+    worker.break_on_existing = True
+    monkeypatch.setattr(
+        "streamkeep.extractors.ytdlp.ytdlp_command", lambda: ["yt-dlp"]
+    )
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("--download-archive") + 1] == worker.download_archive
+    assert "--break-on-existing" in cmd
+
+
 def test_ytdlp_original_container_does_not_force_merge_or_remux(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"

@@ -51,6 +51,8 @@ class ResumeTests(unittest.TestCase):
                         "sponsorblock_mark": "intro,chapter",
                         "sponsorblock_remove": "sponsor",
                         "sponsorblock_api": "https://sponsor.example/api",
+                        "download_archive": "C:/archives/source.txt",
+                        "break_on_existing": True,
                     }
                 ),
                 encoding="utf-8",
@@ -78,6 +80,10 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(
                 state.sponsorblock_api, "https://sponsor.example/api"
             )
+            self.assertEqual(
+                state.download_archive, "C:/archives/source.txt"
+            )
+            self.assertTrue(state.break_on_existing)
 
 
 if __name__ == "__main__":

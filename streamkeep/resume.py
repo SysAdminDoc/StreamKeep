@@ -139,6 +139,12 @@ def _sanitize_resume_payload(data, output_dir):
         "sponsorblock_api": _sanitize_text(
             data.get("sponsorblock_api", ""), max_len=2048
         ),
+        "download_archive": _sanitize_text(
+            data.get("download_archive", ""), max_len=4096
+        ),
+        "break_on_existing": _sanitize_bool(
+            data.get("break_on_existing", False)
+        ),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),
         "completed": _sanitize_completed(data.get("completed", [])),

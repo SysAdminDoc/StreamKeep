@@ -1657,6 +1657,45 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
             info = self.ext.resolve("https://youtube.com/watch?v=agelock")
         self.assertIsNone(info)
 
+    @patch(f"{_YTDLP}.ytdlp_command", return_value=["yt-dlp"])
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_playlist_probe_builds_range_filter_and_archive_flags(
+        self, mock_run, _mock_command
+    ):
+        mock_run.return_value = CommandResult(
+            returncode=0,
+            stdout=json.dumps({
+                "_type": "playlist",
+                "entries": [{
+                    "id": "video-2", "extractor_key": "Youtube",
+                    "url": "video-2", "title": "Second",
+                }],
+            }),
+        )
+        with patch.object(self.ext, "_has_ytdlp", return_value=True):
+            entries = self.ext.list_playlist_entries(
+                "https://example.com/playlist",
+                playlist_items="2:5", date_after="20260101",
+                date_before="20261231", match_filter="duration > 60",
+                max_downloads=3, archive_path="C:/archives/source.txt",
+                break_on_existing=True,
+            )
+
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--playlist-items") + 1], "2:5")
+        self.assertEqual(cmd[cmd.index("--dateafter") + 1], "20260101")
+        self.assertEqual(cmd[cmd.index("--datebefore") + 1], "20261231")
+        self.assertEqual(
+            cmd[cmd.index("--match-filters") + 1], "duration > 60"
+        )
+        self.assertEqual(cmd[cmd.index("--max-downloads") + 1], "3")
+        self.assertEqual(
+            cmd[cmd.index("--download-archive") + 1],
+            "C:/archives/source.txt",
+        )
+        self.assertIn("--break-on-existing", cmd)
+        self.assertEqual(entries[0]["id"], "video-2")
+
 
 # ===================================================================
 # Extractor.detect() Registry

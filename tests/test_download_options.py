@@ -1,7 +1,8 @@
 import pytest
 
 from streamkeep.download_options import (
-    validate_download_options, validate_sponsorblock_options,
+    validate_download_options, validate_playlist_options,
+    validate_sponsorblock_options,
     validate_subtitle_options,
 )
 
@@ -95,3 +96,26 @@ def test_sponsorblock_api_requires_https_except_on_loopback():
 def test_enabled_sponsorblock_requires_at_least_one_action():
     with pytest.raises(ValueError, match="at least one"):
         validate_sponsorblock_options(enabled=True)
+
+
+def test_playlist_options_preserve_ranges_filters_and_archive():
+    options = validate_playlist_options(
+        items="1:5,9", date_after="20260101", date_before="20261231",
+        match_filter="duration > 60 & !is_live", max_downloads=12,
+        archive_path="C:/archives/channel.txt", break_on_existing=True,
+    )
+    assert options["items"] == "1:5,9"
+    assert options["match_filter"] == "duration > 60 & !is_live"
+    assert options["max_downloads"] == 12
+    assert options["break_on_existing"] is True
+
+
+@pytest.mark.parametrize("date", ["2026-01-01", "20260230", "tomorrow"])
+def test_playlist_options_reject_invalid_dates(date):
+    with pytest.raises(ValueError, match="YYYYMMDD"):
+        validate_playlist_options(date_after=date)
+
+
+def test_break_on_existing_requires_archive():
+    with pytest.raises(ValueError, match="requires a download archive"):
+        validate_playlist_options(break_on_existing=True)

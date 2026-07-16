@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from datetime import datetime
 
 
 FORMAT_SORT_PRESETS = {
@@ -202,4 +203,44 @@ def validate_sponsorblock_options(*, enabled=False, mark="", remove="", api_url=
         "mark": mark,
         "remove": remove,
         "api_url": api_url,
+    }
+
+
+def validate_playlist_options(
+    *, items="", date_after="", date_before="", match_filter="",
+    max_downloads=0, archive_path="", break_on_existing=False,
+):
+    """Validate playlist expansion and incremental archive controls."""
+    items = _safe_argument(items, "Playlist item range", max_len=512).strip()
+    date_after = str(date_after or "").strip()
+    date_before = str(date_before or "").strip()
+    for label, value in (("Date after", date_after), ("Date before", date_before)):
+        if not value:
+            continue
+        try:
+            datetime.strptime(value, "%Y%m%d")
+        except ValueError as error:
+            raise ValueError(f"{label} must use YYYYMMDD") from error
+    match_filter = _safe_argument(
+        match_filter, "Playlist match filter", max_len=2048
+    )
+    try:
+        max_downloads = int(max_downloads or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Maximum downloads must be a number") from error
+    if not 0 <= max_downloads <= 10000:
+        raise ValueError("Maximum downloads must be between 1 and 10000")
+    archive_path = _safe_argument(
+        archive_path, "Download archive path", max_len=4096
+    ).strip()
+    if break_on_existing and not archive_path:
+        raise ValueError("Break-on-existing requires a download archive")
+    return {
+        "items": items,
+        "date_after": date_after,
+        "date_before": date_before,
+        "match_filter": match_filter,
+        "max_downloads": max_downloads,
+        "archive_path": archive_path,
+        "break_on_existing": bool(break_on_existing),
     }

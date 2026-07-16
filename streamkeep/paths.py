@@ -11,6 +11,7 @@ the executable instead of ``%APPDATA%\\StreamKeep``.
 import os
 import sys
 import subprocess
+import hashlib
 from pathlib import Path
 
 # Windows-only: hide console windows that subprocess would otherwise spawn
@@ -81,3 +82,12 @@ def bind_config_dir(path):
     LOG_FILE_BACKUP = config_dir / "streamkeep.log.1"
     CRASH_LOG = config_dir / "crash.log"
     return config_dir
+
+
+def source_archive_path(source_url):
+    """Return the private stable yt-dlp archive path for a source URL."""
+    identity = str(source_url or "").strip().encode("utf-8")
+    digest = hashlib.sha256(identity).hexdigest()
+    archive_dir = CONFIG_DIR / "download-archives"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    return str(archive_dir / f"{digest}.txt")

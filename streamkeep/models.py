@@ -171,6 +171,8 @@ class ResumeState:
     sponsorblock_mark: str = ""
     sponsorblock_remove: str = ""
     sponsorblock_api: str = ""
+    download_archive: str = ""
+    break_on_existing: bool = False
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

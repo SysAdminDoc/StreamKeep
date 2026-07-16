@@ -58,6 +58,13 @@ def _window_with_advanced_controls():
             combo.addItem("remove", userData="remove")
         win.adv_sponsorblock_action_combos[category] = combo
     win.adv_sponsorblock_api_input = QLineEdit()
+    win.adv_playlist_items_input = QLineEdit()
+    win.adv_playlist_after_input = QLineEdit()
+    win.adv_playlist_before_input = QLineEdit()
+    win.adv_playlist_filter_input = QLineEdit()
+    win.adv_playlist_max_spin = QSpinBox()
+    win.adv_playlist_max_spin.setRange(0, 10000)
+    win.adv_playlist_archive_check = QCheckBox()
     win.adv_override_badge = QLabel()
     return win
 
@@ -111,3 +118,22 @@ def test_sponsorblock_matrix_builds_custom_override_payload():
     assert overrides["sponsorblock_mark"] == "intro,chapter"
     assert overrides["sponsorblock_remove"] == "sponsor"
     assert overrides["sponsorblock_api"] == "https://sponsor.example/api"
+
+
+def test_playlist_expansion_controls_build_override_payload():
+    win = _window_with_advanced_controls()
+    win.adv_playlist_items_input.setText("2:5")
+    win.adv_playlist_after_input.setText("20260101")
+    win.adv_playlist_before_input.setText("20261231")
+    win.adv_playlist_filter_input.setText("duration > 60")
+    win.adv_playlist_max_spin.setValue(3)
+    win.adv_playlist_archive_check.setChecked(True)
+
+    overrides = get_adv_overrides(win)
+
+    assert overrides["playlist_items"] == "2:5"
+    assert overrides["playlist_date_after"] == "20260101"
+    assert overrides["playlist_date_before"] == "20261231"
+    assert overrides["playlist_match_filter"] == "duration > 60"
+    assert overrides["playlist_max_downloads"] == 3
+    assert overrides["playlist_archive_sync"] is True

@@ -1392,6 +1392,15 @@ class MonitorTabMixin:
         """New VODs from a subscribed channel — queue their source URLs
         so they get downloaded in the background."""
         added = 0
+        source_url = ""
+        for entry in self.monitor.entries:
+            if entry.channel_id == channel_id:
+                source_url = entry.url
+                break
+        archive_path = ""
+        if source_url:
+            from ...paths import source_archive_path
+            archive_path = source_archive_path(source_url)
         for v in vods:
             # Quality auto-upgrade check (F25)
             is_upgrade = self._check_quality_upgrade(channel_id, v)
@@ -1406,6 +1415,8 @@ class MonitorTabMixin:
                 vod_platform=v.platform,
                 vod_title=v.title,
                 vod_channel=v.channel,
+                download_archive=archive_path,
+                break_on_existing=bool(archive_path),
             ):
                 if self._download_queue:
                     self._download_queue[-1]["vod_date"] = v.date

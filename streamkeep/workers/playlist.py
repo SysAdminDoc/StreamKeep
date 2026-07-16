@@ -13,9 +13,10 @@ class PlaylistExpandWorker(QThread):
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
-    def __init__(self, url):
+    def __init__(self, url, **options):
         super().__init__()
         self.url = url
+        self.options = dict(options)
 
     def _interrupted(self):
         return self.isInterruptionRequested()
@@ -27,6 +28,7 @@ class PlaylistExpandWorker(QThread):
                     return
                 entries = YtDlpExtractor().list_playlist_entries(
                     self.url, log_fn=self.log.emit,
+                    **self.options,
                 )
                 if self._interrupted():
                     return

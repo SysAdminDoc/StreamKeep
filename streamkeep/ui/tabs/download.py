@@ -54,6 +54,12 @@ def _reset_adv_overrides(win):
     for combo in win.adv_sponsorblock_action_combos.values():
         combo.setCurrentIndex(0)
     win.adv_sponsorblock_api_input.clear()
+    win.adv_playlist_items_input.clear()
+    win.adv_playlist_after_input.clear()
+    win.adv_playlist_before_input.clear()
+    win.adv_playlist_filter_input.clear()
+    win.adv_playlist_max_spin.setValue(0)
+    win.adv_playlist_archive_check.setChecked(False)
     win.adv_override_badge.setVisible(False)
 
 
@@ -131,6 +137,23 @@ def get_adv_overrides(win):
             overrides["sponsorblock_api"] = (
                 win.adv_sponsorblock_api_input.text().strip()
             )
+    playlist_items = win.adv_playlist_items_input.text().strip()
+    if playlist_items:
+        overrides["playlist_items"] = playlist_items
+    playlist_after = win.adv_playlist_after_input.text().strip()
+    if playlist_after:
+        overrides["playlist_date_after"] = playlist_after
+    playlist_before = win.adv_playlist_before_input.text().strip()
+    if playlist_before:
+        overrides["playlist_date_before"] = playlist_before
+    playlist_filter = win.adv_playlist_filter_input.text()
+    if playlist_filter.strip():
+        overrides["playlist_match_filter"] = playlist_filter
+    playlist_max = win.adv_playlist_max_spin.value()
+    if playlist_max:
+        overrides["playlist_max_downloads"] = playlist_max
+    if win.adv_playlist_archive_check.isChecked():
+        overrides["playlist_archive_sync"] = True
     return overrides
 
 
@@ -765,12 +788,48 @@ def build_download_tab(win):
     adv_lay.addWidget(win.adv_sponsorblock_api_input, 14, 1)
     _refresh_adv_sponsorblock_controls(win)
 
+    adv_lay.addWidget(QLabel("Playlist items:"), 15, 0)
+    win.adv_playlist_items_input = QLineEdit()
+    win.adv_playlist_items_input.setPlaceholderText(
+        "e.g. 1:10,15,20:30:2 (blank = all)"
+    )
+    adv_lay.addWidget(win.adv_playlist_items_input, 15, 1)
+
+    adv_lay.addWidget(QLabel("Playlist dates:"), 16, 0)
+    playlist_date_row = QHBoxLayout()
+    win.adv_playlist_after_input = QLineEdit()
+    win.adv_playlist_after_input.setPlaceholderText("after YYYYMMDD")
+    win.adv_playlist_before_input = QLineEdit()
+    win.adv_playlist_before_input.setPlaceholderText("before YYYYMMDD")
+    playlist_date_row.addWidget(win.adv_playlist_after_input)
+    playlist_date_row.addWidget(win.adv_playlist_before_input)
+    adv_lay.addLayout(playlist_date_row, 16, 1)
+
+    adv_lay.addWidget(QLabel("Playlist filter:"), 17, 0)
+    win.adv_playlist_filter_input = QLineEdit()
+    win.adv_playlist_filter_input.setPlaceholderText(
+        "yt-dlp match filter, e.g. duration > 60 & !is_live"
+    )
+    adv_lay.addWidget(win.adv_playlist_filter_input, 17, 1)
+
+    adv_lay.addWidget(QLabel("Playlist sync:"), 18, 0)
+    playlist_sync_row = QHBoxLayout()
+    win.adv_playlist_max_spin = QSpinBox()
+    win.adv_playlist_max_spin.setRange(0, 10000)
+    win.adv_playlist_max_spin.setSpecialValueText("No maximum")
+    playlist_sync_row.addWidget(win.adv_playlist_max_spin)
+    win.adv_playlist_archive_check = QCheckBox(
+        "Incremental archive (stop at existing)"
+    )
+    playlist_sync_row.addWidget(win.adv_playlist_archive_check)
+    adv_lay.addLayout(playlist_sync_row, 18, 1)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 15, 1)
+    adv_lay.addWidget(adv_reset_btn, 19, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -834,6 +893,17 @@ def build_download_tab(win):
     for combo in win.adv_sponsorblock_action_combos.values():
         combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
     win.adv_sponsorblock_api_input.textChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    for field in (
+        win.adv_playlist_items_input, win.adv_playlist_after_input,
+        win.adv_playlist_before_input, win.adv_playlist_filter_input,
+    ):
+        field.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_playlist_max_spin.valueChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    win.adv_playlist_archive_check.toggled.connect(
         lambda _: _update_adv_badge()
     )
 
@@ -2765,28 +2835,71 @@ class DownloadTabMixin:
         if not url:
             self._set_status("Paste a URL first.", "warning")
             return
+        overrides = get_adv_overrides(self)
+        archive_path = ""
+        if overrides.get("playlist_archive_sync"):
+            from ...paths import source_archive_path
+            archive_path = source_archive_path(url)
+        try:
+            from ...download_options import validate_playlist_options
+            options = validate_playlist_options(
+                items=overrides.get("playlist_items", ""),
+                date_after=overrides.get("playlist_date_after", ""),
+                date_before=overrides.get("playlist_date_before", ""),
+                match_filter=overrides.get("playlist_match_filter", ""),
+                max_downloads=overrides.get("playlist_max_downloads", 0),
+                archive_path=archive_path,
+                break_on_existing=bool(archive_path),
+            )
+        except ValueError as error:
+            self._set_status(str(error), "warning")
+            return
         self.expand_btn.setEnabled(False)
         self._set_status("Probing for playlist/channel entries...", "working")
         self._log(f"[PLAYLIST] Probing: {url}")
         # Run in a throwaway thread to avoid blocking the UI
-        worker = _PlaylistExpandWorker(url)
-        worker.finished.connect(lambda entries, u=url: self._on_expand_done(u, entries))
+        worker = _PlaylistExpandWorker(
+            url,
+            playlist_items=options["items"],
+            date_after=options["date_after"],
+            date_before=options["date_before"],
+            match_filter=options["match_filter"],
+            max_downloads=options["max_downloads"],
+            archive_path=options["archive_path"],
+            break_on_existing=options["break_on_existing"],
+        )
+        worker.finished.connect(
+            lambda entries, u=url, o=options: self._on_expand_done(u, entries, o)
+        )
         worker.error.connect(self._on_expand_error)
         worker.log.connect(self._log)
         self._expand_worker = worker
         worker.start()
 
-    def _on_expand_done(self, source_url, entries):
+    def _on_expand_done(self, source_url, entries, options=None):
         self.expand_btn.setEnabled(True)
         if not entries:
+            if options and options.get("archive_path"):
+                self._log("[PLAYLIST] Incremental archive is already current")
+                self._set_status(
+                    "Archive sync is current; no new playlist entries were queued.",
+                    "success",
+                )
+                return
             self._set_status(
                 "No playlist entries found. This URL may be a single video — use Fetch instead.",
                 "warning",
             )
             return
         added = 0
+        options = options or {}
         for e in entries:
-            if self._queue_add(e.get("url", ""), title=e.get("title", ""), platform="yt-dlp"):
+            if self._queue_add(
+                e.get("url", ""), title=e.get("title", ""),
+                platform="yt-dlp",
+                download_archive=options.get("archive_path", ""),
+                break_on_existing=options.get("break_on_existing", False),
+            ):
                 added += 1
         self._log(f"[PLAYLIST] Queued {added} new of {len(entries)} total entries")
         self._set_status(
@@ -3104,6 +3217,10 @@ class DownloadTabMixin:
             "vod_platform": vod_platform,
             "vod_title": vod_title,
             "vod_channel": vod_channel,
+            "download_archive": str(
+                item.get("download_archive", "") or ""
+            ),
+            "break_on_existing": bool(item.get("break_on_existing", False)),
         }
         vod_date = str(item.get("vod_date", "") or "")
         if vod_date:
@@ -3127,6 +3244,8 @@ class DownloadTabMixin:
         vod_platform="",
         vod_title="",
         vod_channel="",
+        download_archive="",
+        break_on_existing=False,
     ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
@@ -3152,6 +3271,8 @@ class DownloadTabMixin:
             "vod_platform": vod_platform,
             "vod_title": vod_title or title,
             "vod_channel": vod_channel,
+            "download_archive": download_archive,
+            "break_on_existing": break_on_existing,
         }))
         self._persist_config()
         if hasattr(self, "queue_table"):
@@ -3338,6 +3459,8 @@ class DownloadTabMixin:
         worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
+        worker.download_archive = str(item.get("download_archive", "") or "")
+        worker.break_on_existing = bool(item.get("break_on_existing", False))
         worker.parallel_connections = self._parallel_connections
         worker.log.connect(self._log)
         worker.all_done.connect(lambda it=item, inf=info: self._on_queue_item_done(it, inf, out_dir))

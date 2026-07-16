@@ -1715,6 +1715,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.sponsorblock_mark = state.sponsorblock_mark or ""
             worker.sponsorblock_remove = state.sponsorblock_remove or ""
             worker.sponsorblock_api = state.sponsorblock_api or ""
+            worker.download_archive = state.download_archive or ""
+            worker.break_on_existing = bool(state.break_on_existing)
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy

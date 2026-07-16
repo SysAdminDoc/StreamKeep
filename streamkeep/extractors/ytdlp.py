@@ -480,7 +480,11 @@ class YtDlpExtractor(Extractor):
         self._log(log_fn, "All browsers tried — none had valid cookies for this URL.")
         return None
 
-    def list_playlist_entries(self, url, log_fn=None, limit=200):
+    def list_playlist_entries(
+        self, url, log_fn=None, limit=200, *, playlist_items="",
+        date_after="", date_before="", match_filter="", max_downloads=0,
+        archive_path="", break_on_existing=False,
+    ):
         """Probe URL for a playlist/channel. If it's a list container,
         return a list of entries (empty list for single videos)."""
         has_ytdlp = self._has_ytdlp()
@@ -489,10 +493,34 @@ class YtDlpExtractor(Extractor):
         if not has_ytdlp:
             return []
         self._log(log_fn, f"Probing for playlist/channel: {url}")
+        from ..download_options import validate_playlist_options
+        options = validate_playlist_options(
+            items=playlist_items,
+            date_after=date_after,
+            date_before=date_before,
+            match_filter=match_filter,
+            max_downloads=max_downloads,
+            archive_path=archive_path,
+            break_on_existing=break_on_existing,
+        )
         cmd = ytdlp_command() + [
             "--flat-playlist", "--dump-single-json",
             "--playlist-end", str(limit), "--no-warnings",
         ]
+        if options["items"]:
+            cmd.extend(["--playlist-items", options["items"]])
+        if options["date_after"]:
+            cmd.extend(["--dateafter", options["date_after"]])
+        if options["date_before"]:
+            cmd.extend(["--datebefore", options["date_before"]])
+        if options["match_filter"]:
+            cmd.extend(["--match-filters", options["match_filter"]])
+        if options["max_downloads"]:
+            cmd.extend(["--max-downloads", str(options["max_downloads"])])
+        if options["archive_path"]:
+            cmd.extend(["--download-archive", options["archive_path"]])
+            if options["break_on_existing"]:
+                cmd.append("--break-on-existing")
         runtime_status = None
         if log_fn and _is_youtube_url(url):
             runtime_status = ytdlp_runtime_status()
@@ -530,6 +558,8 @@ class YtDlpExtractor(Extractor):
                 "title": (e.get("title") or "Untitled")[:120],
                 "url": entry_url,
                 "duration": e.get("duration"),
+                "id": str(e.get("id") or ""),
+                "extractor_key": str(e.get("extractor_key") or ""),
             })
         return results
 
