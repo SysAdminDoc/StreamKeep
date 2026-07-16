@@ -63,6 +63,17 @@ class DownloadWorker(QThread):
         self.sponsorblock_api = ""
         self.download_archive = ""
         self.break_on_existing = False
+        self.ytdlp_concurrent_fragments = 0
+        self.ytdlp_retries = ""
+        self.ytdlp_fragment_retries = ""
+        self.ytdlp_retry_sleep = ""
+        self.ytdlp_unavailable_fragments = ""
+        self.ytdlp_throttled_rate = ""
+        self.ytdlp_live_from_start = False
+        self.ytdlp_wait_for_video = ""
+        self.ytdlp_embed_chapters = None
+        self.ytdlp_embed_metadata = None
+        self.ytdlp_embed_thumbnail = None
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -113,6 +124,21 @@ class DownloadWorker(QThread):
             state.sponsorblock_api = self.sponsorblock_api or ""
             state.download_archive = self.download_archive or ""
             state.break_on_existing = bool(self.break_on_existing)
+            state.ytdlp_concurrent_fragments = int(
+                self.ytdlp_concurrent_fragments or 0
+            )
+            state.ytdlp_retries = self.ytdlp_retries or ""
+            state.ytdlp_fragment_retries = self.ytdlp_fragment_retries or ""
+            state.ytdlp_retry_sleep = self.ytdlp_retry_sleep or ""
+            state.ytdlp_unavailable_fragments = (
+                self.ytdlp_unavailable_fragments or ""
+            )
+            state.ytdlp_throttled_rate = self.ytdlp_throttled_rate or ""
+            state.ytdlp_live_from_start = bool(self.ytdlp_live_from_start)
+            state.ytdlp_wait_for_video = self.ytdlp_wait_for_video or ""
+            state.ytdlp_embed_chapters = self.ytdlp_embed_chapters
+            state.ytdlp_embed_metadata = self.ytdlp_embed_metadata
+            state.ytdlp_embed_thumbnail = self.ytdlp_embed_thumbnail
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -137,6 +163,7 @@ class DownloadWorker(QThread):
         from ..download_options import (
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
             validate_sponsorblock_options, validate_subtitle_options,
+            validate_ytdlp_transfer_options,
         )
         from ..extractors.ytdlp import ytdlp_command, ytdlp_impersonate_args
 
@@ -162,6 +189,19 @@ class DownloadWorker(QThread):
             mark=self.sponsorblock_mark,
             remove=sponsorblock_remove,
             api_url=self.sponsorblock_api,
+        )
+        transfer_options = validate_ytdlp_transfer_options(
+            concurrent_fragments=self.ytdlp_concurrent_fragments,
+            retries=self.ytdlp_retries,
+            fragment_retries=self.ytdlp_fragment_retries,
+            retry_sleep=self.ytdlp_retry_sleep,
+            unavailable_fragments=self.ytdlp_unavailable_fragments,
+            throttled_rate=self.ytdlp_throttled_rate,
+            live_from_start=self.ytdlp_live_from_start,
+            wait_for_video=self.ytdlp_wait_for_video,
+            embed_chapters=self.ytdlp_embed_chapters,
+            embed_metadata=self.ytdlp_embed_metadata,
+            embed_thumbnail=self.ytdlp_embed_thumbnail,
         )
         format_spec = options["format_spec"]
         if options["audio_format"] and not self.ytdlp_format:
@@ -203,6 +243,32 @@ class DownloadWorker(QThread):
                 cmd.extend(["--cookies", cpath])
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
+        if transfer_options["concurrent_fragments"]:
+            cmd.extend(["-N", str(transfer_options["concurrent_fragments"])])
+        if transfer_options["retries"]:
+            cmd.extend(["--retries", transfer_options["retries"]])
+        if transfer_options["fragment_retries"]:
+            cmd.extend([
+                "--fragment-retries", transfer_options["fragment_retries"]
+            ])
+        if transfer_options["retry_sleep"]:
+            cmd.extend(["--retry-sleep", transfer_options["retry_sleep"]])
+        if transfer_options["unavailable_fragments"] == "skip":
+            cmd.append("--skip-unavailable-fragments")
+        elif transfer_options["unavailable_fragments"] == "abort":
+            cmd.append("--abort-on-unavailable-fragments")
+        if transfer_options["throttled_rate"]:
+            cmd.extend([
+                "--throttled-rate", transfer_options["throttled_rate"]
+            ])
+        if transfer_options["live_from_start"]:
+            cmd.append("--live-from-start")
+        if transfer_options["wait_for_video"]:
+            cmd.extend(["--wait-for-video", transfer_options["wait_for_video"]])
+        for name in ("chapters", "metadata", "thumbnail"):
+            enabled = transfer_options[f"embed_{name}"]
+            if enabled is not None:
+                cmd.append(f"--embed-{name}" if enabled else f"--no-embed-{name}")
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         if subtitle_options["enabled"]:

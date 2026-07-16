@@ -60,6 +60,17 @@ def _reset_adv_overrides(win):
     win.adv_playlist_filter_input.clear()
     win.adv_playlist_max_spin.setValue(0)
     win.adv_playlist_archive_check.setChecked(False)
+    win.adv_ytdlp_fragments_spin.setValue(0)
+    win.adv_ytdlp_retries_input.clear()
+    win.adv_ytdlp_fragment_retries_input.clear()
+    win.adv_ytdlp_retry_sleep_input.clear()
+    win.adv_ytdlp_unavailable_combo.setCurrentIndex(0)
+    win.adv_ytdlp_throttled_input.clear()
+    win.adv_ytdlp_wait_input.clear()
+    win.adv_ytdlp_live_combo.setCurrentIndex(0)
+    win.adv_ytdlp_embed_chapters_combo.setCurrentIndex(0)
+    win.adv_ytdlp_embed_metadata_combo.setCurrentIndex(0)
+    win.adv_ytdlp_embed_thumbnail_combo.setCurrentIndex(0)
     win.adv_override_badge.setVisible(False)
 
 
@@ -154,6 +165,31 @@ def get_adv_overrides(win):
         overrides["playlist_max_downloads"] = playlist_max
     if win.adv_playlist_archive_check.isChecked():
         overrides["playlist_archive_sync"] = True
+    fragments = win.adv_ytdlp_fragments_spin.value()
+    if fragments:
+        overrides["ytdlp_concurrent_fragments"] = fragments
+    for name, widget in (
+        ("retries", win.adv_ytdlp_retries_input),
+        ("fragment_retries", win.adv_ytdlp_fragment_retries_input),
+        ("retry_sleep", win.adv_ytdlp_retry_sleep_input),
+        ("throttled_rate", win.adv_ytdlp_throttled_input),
+        ("wait_for_video", win.adv_ytdlp_wait_input),
+    ):
+        value = widget.text().strip()
+        if value:
+            overrides[f"ytdlp_{name}"] = value
+    unavailable = win.adv_ytdlp_unavailable_combo.currentData()
+    if unavailable:
+        overrides["ytdlp_unavailable_fragments"] = unavailable
+    for name, combo in (
+        ("live_from_start", win.adv_ytdlp_live_combo),
+        ("embed_chapters", win.adv_ytdlp_embed_chapters_combo),
+        ("embed_metadata", win.adv_ytdlp_embed_metadata_combo),
+        ("embed_thumbnail", win.adv_ytdlp_embed_thumbnail_combo),
+    ):
+        value = combo.currentData()
+        if value is not None:
+            overrides[f"ytdlp_{name}"] = value
     return overrides
 
 
@@ -831,12 +867,72 @@ def build_download_tab(win):
     playlist_sync_row.addWidget(win.adv_playlist_archive_check)
     adv_lay.addLayout(playlist_sync_row, 18, 1)
 
+    adv_lay.addWidget(QLabel("yt-dlp fragments:"), 19, 0)
+    transfer_fragment_row = QHBoxLayout()
+    win.adv_ytdlp_fragments_spin = QSpinBox()
+    win.adv_ytdlp_fragments_spin.setRange(0, 32)
+    win.adv_ytdlp_fragments_spin.setSpecialValueText("Global")
+    transfer_fragment_row.addWidget(win.adv_ytdlp_fragments_spin)
+    win.adv_ytdlp_retries_input = QLineEdit()
+    win.adv_ytdlp_retries_input.setPlaceholderText("retries: global/infinite")
+    transfer_fragment_row.addWidget(win.adv_ytdlp_retries_input)
+    win.adv_ytdlp_fragment_retries_input = QLineEdit()
+    win.adv_ytdlp_fragment_retries_input.setPlaceholderText(
+        "fragment retries: global/infinite"
+    )
+    transfer_fragment_row.addWidget(win.adv_ytdlp_fragment_retries_input)
+    adv_lay.addLayout(transfer_fragment_row, 19, 1)
+
+    adv_lay.addWidget(QLabel("yt-dlp retry policy:"), 20, 0)
+    transfer_retry_row = QHBoxLayout()
+    win.adv_ytdlp_retry_sleep_input = QLineEdit()
+    win.adv_ytdlp_retry_sleep_input.setPlaceholderText(
+        "sleep, e.g. fragment:exp=1:20"
+    )
+    transfer_retry_row.addWidget(win.adv_ytdlp_retry_sleep_input)
+    win.adv_ytdlp_unavailable_combo = QComboBox()
+    win.adv_ytdlp_unavailable_combo.addItem("Unavailable: global", userData="")
+    win.adv_ytdlp_unavailable_combo.addItem("Unavailable: skip", userData="skip")
+    win.adv_ytdlp_unavailable_combo.addItem("Unavailable: abort", userData="abort")
+    transfer_retry_row.addWidget(win.adv_ytdlp_unavailable_combo)
+    adv_lay.addLayout(transfer_retry_row, 20, 1)
+
+    adv_lay.addWidget(QLabel("yt-dlp live depth:"), 21, 0)
+    transfer_live_row = QHBoxLayout()
+    win.adv_ytdlp_throttled_input = QLineEdit()
+    win.adv_ytdlp_throttled_input.setPlaceholderText("throttled rate: global")
+    transfer_live_row.addWidget(win.adv_ytdlp_throttled_input)
+    win.adv_ytdlp_wait_input = QLineEdit()
+    win.adv_ytdlp_wait_input.setPlaceholderText("wait seconds or MIN-MAX")
+    transfer_live_row.addWidget(win.adv_ytdlp_wait_input)
+    win.adv_ytdlp_live_combo = QComboBox()
+    win.adv_ytdlp_live_combo.addItem("Live start: global", userData=None)
+    win.adv_ytdlp_live_combo.addItem("Live from start", userData=True)
+    win.adv_ytdlp_live_combo.addItem("Live current edge", userData=False)
+    transfer_live_row.addWidget(win.adv_ytdlp_live_combo)
+    adv_lay.addLayout(transfer_live_row, 21, 1)
+
+    adv_lay.addWidget(QLabel("yt-dlp embedding:"), 22, 0)
+    transfer_embed_row = QHBoxLayout()
+    for name, label in (
+        ("chapters", "Chapters"),
+        ("metadata", "Metadata"),
+        ("thumbnail", "Thumbnail"),
+    ):
+        combo = QComboBox()
+        combo.addItem(f"{label}: global", userData=None)
+        combo.addItem(f"{label}: on", userData=True)
+        combo.addItem(f"{label}: off", userData=False)
+        setattr(win, f"adv_ytdlp_embed_{name}_combo", combo)
+        transfer_embed_row.addWidget(combo)
+    adv_lay.addLayout(transfer_embed_row, 22, 1)
+
     # Reset button
     adv_reset_btn = QPushButton("Reset overrides")
     adv_reset_btn.setObjectName("ghost")
     adv_reset_btn.setFixedWidth(130)
     adv_reset_btn.clicked.connect(lambda: _reset_adv_overrides(win))
-    adv_lay.addWidget(adv_reset_btn, 19, 1)
+    adv_lay.addWidget(adv_reset_btn, 23, 1)
 
     root.addWidget(win.adv_frame)
 
@@ -913,6 +1009,25 @@ def build_download_tab(win):
     win.adv_playlist_archive_check.toggled.connect(
         lambda _: _update_adv_badge()
     )
+    for widget in (
+        win.adv_ytdlp_retries_input,
+        win.adv_ytdlp_fragment_retries_input,
+        win.adv_ytdlp_retry_sleep_input,
+        win.adv_ytdlp_throttled_input,
+        win.adv_ytdlp_wait_input,
+    ):
+        widget.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_ytdlp_fragments_spin.valueChanged.connect(
+        lambda _: _update_adv_badge()
+    )
+    for combo in (
+        win.adv_ytdlp_unavailable_combo,
+        win.adv_ytdlp_live_combo,
+        win.adv_ytdlp_embed_chapters_combo,
+        win.adv_ytdlp_embed_metadata_combo,
+        win.adv_ytdlp_embed_thumbnail_combo,
+    ):
+        combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
 
     # Splitter: segments table + runtime log
     splitter = QSplitter(Qt.Orientation.Vertical)
@@ -1932,6 +2047,8 @@ class DownloadTabMixin:
         worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
+        from ...download_options import apply_ytdlp_transfer_options
+        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
         worker.parallel_connections = self._parallel_connections
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
@@ -2260,6 +2377,9 @@ class DownloadTabMixin:
             "audio_format", "audio_quality", "subtitle_mode",
             "sponsorblock_mode",
         }
+        ytdlp_override_keys.update(
+            key for key in _dl_overrides if key.startswith("ytdlp_")
+        )
         active_ytdlp_overrides = ytdlp_override_keys.intersection(_dl_overrides)
         if active_ytdlp_overrides and fmt_type != "ytdlp_direct":
             self._log(
@@ -2279,6 +2399,7 @@ class DownloadTabMixin:
             return False
         try:
             from ...download_options import (
+                resolve_ytdlp_transfer_options,
                 validate_download_options, validate_sponsorblock_options,
                 validate_subtitle_options,
             )
@@ -2327,6 +2448,9 @@ class DownloadTabMixin:
                     remove=YtDlpExtractor.sponsorblock_remove,
                     api_url=YtDlpExtractor.sponsorblock_api,
                 )
+            transfer_options = resolve_ytdlp_transfer_options(
+                YtDlpExtractor, overrides=_dl_overrides,
+            )
         except ValueError as error:
             self._log(f"[OUTPUT] Invalid per-download settings: {error}")
             self._set_status(str(error), "warning")
@@ -2466,6 +2590,11 @@ class DownloadTabMixin:
         self.download_worker.sponsorblock_mark = sponsorblock_options["mark"]
         self.download_worker.sponsorblock_remove = sponsorblock_options["remove"]
         self.download_worker.sponsorblock_api = sponsorblock_options["api_url"]
+        from ...download_options import apply_ytdlp_transfer_options
+        apply_ytdlp_transfer_options(
+            self.download_worker,
+            transfer_options,
+        )
         self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
         # Pass time-range crop to yt-dlp via --download-sections (F21)
         if fmt_type == "ytdlp_direct" and (crop_start or crop_end):
@@ -3474,6 +3603,8 @@ class DownloadTabMixin:
         worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
         worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
         worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
+        from ...download_options import apply_ytdlp_transfer_options
+        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
         worker.download_archive = str(item.get("download_archive", "") or "")
         worker.break_on_existing = bool(item.get("break_on_existing", False))
         worker.parallel_connections = self._parallel_connections

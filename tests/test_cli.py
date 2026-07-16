@@ -139,3 +139,20 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     assert sponsor_args.sponsorblock_mark == "intro,chapter"
     assert sponsor_args.sponsorblock_remove == "sponsor"
     assert sponsor_args.sponsorblock_api == "https://sponsor.example/api"
+
+    transfer_args = cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "-N", "4", "--retries", "8",
+        "--fragment-retries", "infinite",
+        "--retry-sleep", "fragment:exp=1:20",
+        "--unavailable-fragments", "abort",
+        "--throttled-rate", "250K",
+        "--live-from-start", "--wait-for-video", "30-120",
+        "--embed-chapters", "--no-embed-metadata", "--embed-thumbnail",
+    ])
+    assert transfer_args.concurrent_fragments == 4
+    assert transfer_args.fragment_retries == "infinite"
+    assert transfer_args.live_from_start is True
+    assert transfer_args.embed_chapters is True
+    assert transfer_args.embed_metadata is False
+    assert transfer_args.embed_thumbnail is True

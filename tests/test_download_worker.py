@@ -227,6 +227,39 @@ def test_ytdlp_cmd_uses_incremental_download_archive(tmp_path, monkeypatch):
     assert "--break-on-existing" in cmd
 
 
+def test_ytdlp_cmd_includes_fragment_retry_live_and_embedding_matrix(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/live"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.ytdlp_concurrent_fragments = 4
+    worker.ytdlp_retries = "8"
+    worker.ytdlp_fragment_retries = "infinite"
+    worker.ytdlp_retry_sleep = "fragment:exp=1:20"
+    worker.ytdlp_unavailable_fragments = "abort"
+    worker.ytdlp_throttled_rate = "250K"
+    worker.ytdlp_live_from_start = True
+    worker.ytdlp_wait_for_video = "30-120"
+    worker.ytdlp_embed_chapters = True
+    worker.ytdlp_embed_metadata = False
+    worker.ytdlp_embed_thumbnail = True
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("-N") + 1] == "4"
+    assert cmd[cmd.index("--retries") + 1] == "8"
+    assert cmd[cmd.index("--fragment-retries") + 1] == "infinite"
+    assert cmd[cmd.index("--retry-sleep") + 1] == "fragment:exp=1:20"
+    assert "--abort-on-unavailable-fragments" in cmd
+    assert cmd[cmd.index("--throttled-rate") + 1] == "250K"
+    assert "--live-from-start" in cmd
+    assert cmd[cmd.index("--wait-for-video") + 1] == "30-120"
+    assert "--embed-chapters" in cmd
+    assert "--no-embed-metadata" in cmd
+    assert "--embed-thumbnail" in cmd
+
+
 def test_ytdlp_original_container_does_not_force_merge_or_remux(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"

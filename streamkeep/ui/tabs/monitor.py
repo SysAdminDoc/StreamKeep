@@ -1155,6 +1155,9 @@ class MonitorTabMixin:
         worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
         worker.audio_url = q.audio_url
         worker.parallel_connections = self._parallel_connections
+        from ...download_options import apply_ytdlp_transfer_options
+        from ...extractors.ytdlp import YtDlpExtractor
+        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
         # Live auto-split: when enabled, long live captures are chunked.
         if self._chunk_long_captures:
             worker.chunk_length_secs = int(self._chunk_length_secs or 0)

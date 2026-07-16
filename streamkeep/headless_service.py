@@ -318,6 +318,8 @@ class HeadlessJobService(QObject):
         worker.sponsorblock_api = str(
             self.config.get("sponsorblock_api", "") or ""
         )
+        from .download_options import apply_ytdlp_transfer_options
+        apply_ytdlp_transfer_options(worker, self.config)
         if bool(self.config.get("chunk_long_captures", False)):
             try:
                 worker.chunk_length_secs = max(

@@ -64,6 +64,22 @@ YTDLP_TEMPLATE_DENIED_OPTIONS = frozenset({
 _AUDIO_QUALITY_RE = re.compile(
     r"(?:10|[0-9](?:\.\d+)?)|(?:[1-9][0-9]*(?:\.[0-9]+)?[kKmM])"
 )
+_RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
+_WAIT_FOR_VIDEO_RE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
+_RETRY_SLEEP_RE = re.compile(r"[A-Za-z0-9_.:+*/=,-]+")
+YTDLP_TRANSFER_FIELDS = (
+    "concurrent_fragments",
+    "retries",
+    "fragment_retries",
+    "retry_sleep",
+    "unavailable_fragments",
+    "throttled_rate",
+    "live_from_start",
+    "wait_for_video",
+    "embed_chapters",
+    "embed_metadata",
+    "embed_thumbnail",
+)
 
 
 def _safe_argument(value, label, *, max_len=1024):
@@ -171,6 +187,139 @@ def validate_download_options(
         "audio_format": normalized_audio,
         "audio_quality": quality,
     }
+
+
+def _retry_count(value, label):
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if text == "infinite":
+        return text
+    try:
+        count = int(text)
+    except ValueError as error:
+        raise ValueError(f"{label} must be 0-1000 or infinite") from error
+    if not 0 <= count <= 1000:
+        raise ValueError(f"{label} must be 0-1000 or infinite")
+    return str(count)
+
+
+def validate_ytdlp_transfer_options(
+    *,
+    concurrent_fragments=0,
+    retries="",
+    fragment_retries="",
+    retry_sleep="",
+    unavailable_fragments="",
+    throttled_rate="",
+    live_from_start=False,
+    wait_for_video="",
+    embed_chapters=None,
+    embed_metadata=None,
+    embed_thumbnail=None,
+):
+    """Validate advanced yt-dlp transfer/retry/live controls."""
+    try:
+        concurrent_fragments = int(concurrent_fragments or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Concurrent fragments must be a number") from error
+    if not 0 <= concurrent_fragments <= 32:
+        raise ValueError("Concurrent fragments must be between 1 and 32")
+
+    retry_sleep = _safe_argument(
+        retry_sleep, "Retry sleep expression", max_len=256
+    ).strip()
+    if retry_sleep and not _RETRY_SLEEP_RE.fullmatch(retry_sleep):
+        raise ValueError("Retry sleep expression contains unsupported characters")
+
+    unavailable_fragments = str(unavailable_fragments or "").strip().lower()
+    if unavailable_fragments not in {"", "skip", "abort"}:
+        raise ValueError("Unavailable fragments must be skip or abort")
+
+    throttled_rate = _safe_argument(
+        throttled_rate, "Throttled-rate threshold", max_len=32
+    ).strip()
+    if throttled_rate and not _RATE_RE.fullmatch(throttled_rate):
+        raise ValueError("Throttled-rate threshold must look like 100K or 2M")
+    if throttled_rate and float(throttled_rate.rstrip("bBkKmMgGtT")) <= 0:
+        raise ValueError("Throttled-rate threshold must be greater than zero")
+
+    wait_for_video = _safe_argument(
+        wait_for_video, "Wait-for-video interval", max_len=32
+    ).strip()
+    if wait_for_video:
+        match = _WAIT_FOR_VIDEO_RE.fullmatch(wait_for_video)
+        if not match:
+            raise ValueError("Wait-for-video must be seconds or MIN-MAX seconds")
+        minimum = int(match.group(1))
+        maximum = int(match.group(2) or minimum)
+        if minimum > maximum or maximum > 604800:
+            raise ValueError(
+                "Wait-for-video must be ordered and no longer than seven days"
+            )
+
+    return {
+        "concurrent_fragments": concurrent_fragments,
+        "retries": _retry_count(retries, "Retries"),
+        "fragment_retries": _retry_count(
+            fragment_retries, "Fragment retries"
+        ),
+        "retry_sleep": retry_sleep,
+        "unavailable_fragments": unavailable_fragments,
+        "throttled_rate": throttled_rate,
+        "live_from_start": bool(live_from_start),
+        "wait_for_video": wait_for_video,
+        "embed_chapters": (
+            embed_chapters if isinstance(embed_chapters, bool) else None
+        ),
+        "embed_metadata": (
+            embed_metadata if isinstance(embed_metadata, bool) else None
+        ),
+        "embed_thumbnail": (
+            embed_thumbnail if isinstance(embed_thumbnail, bool) else None
+        ),
+    }
+
+
+def resolve_ytdlp_transfer_options(source=None, *, overrides=None):
+    """Merge a config/object with per-job overrides and validate the result."""
+    source = source or {}
+    overrides = overrides or {}
+    defaults = {
+        "concurrent_fragments": 0,
+        "retries": "",
+        "fragment_retries": "",
+        "retry_sleep": "",
+        "unavailable_fragments": "",
+        "throttled_rate": "",
+        "live_from_start": False,
+        "wait_for_video": "",
+        "embed_chapters": None,
+        "embed_metadata": None,
+        "embed_thumbnail": None,
+    }
+    values = {}
+    for name in YTDLP_TRANSFER_FIELDS:
+        key = f"ytdlp_{name}"
+        if key in overrides:
+            value = overrides[key]
+        elif isinstance(source, dict):
+            value = source.get(key, source.get(name, defaults[name]))
+        else:
+            value = getattr(source, key, defaults[name])
+        values[name] = value
+    normalized = validate_ytdlp_transfer_options(**values)
+    return normalized
+
+
+def apply_ytdlp_transfer_options(worker, source=None, *, overrides=None):
+    """Validate transfer defaults/overrides and apply them to a worker."""
+    normalized = resolve_ytdlp_transfer_options(
+        source, overrides=overrides,
+    )
+    for name, value in normalized.items():
+        setattr(worker, f"ytdlp_{name}", value)
+    return normalized
 
 
 def validate_subtitle_options(

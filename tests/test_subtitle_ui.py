@@ -65,6 +65,25 @@ def _window_with_advanced_controls():
     win.adv_playlist_max_spin = QSpinBox()
     win.adv_playlist_max_spin.setRange(0, 10000)
     win.adv_playlist_archive_check = QCheckBox()
+    win.adv_ytdlp_fragments_spin = QSpinBox()
+    win.adv_ytdlp_fragments_spin.setRange(0, 32)
+    win.adv_ytdlp_retries_input = QLineEdit()
+    win.adv_ytdlp_fragment_retries_input = QLineEdit()
+    win.adv_ytdlp_retry_sleep_input = QLineEdit()
+    win.adv_ytdlp_unavailable_combo = QComboBox()
+    win.adv_ytdlp_unavailable_combo.addItem("global", userData="")
+    win.adv_ytdlp_unavailable_combo.addItem("abort", userData="abort")
+    win.adv_ytdlp_throttled_input = QLineEdit()
+    win.adv_ytdlp_wait_input = QLineEdit()
+    win.adv_ytdlp_live_combo = QComboBox()
+    win.adv_ytdlp_live_combo.addItem("global", userData=None)
+    win.adv_ytdlp_live_combo.addItem("on", userData=True)
+    for name in ("chapters", "metadata", "thumbnail"):
+        combo = QComboBox()
+        combo.addItem("global", userData=None)
+        combo.addItem("on", userData=True)
+        combo.addItem("off", userData=False)
+        setattr(win, f"adv_ytdlp_embed_{name}_combo", combo)
     win.adv_override_badge = QLabel()
     return win
 
@@ -137,3 +156,27 @@ def test_playlist_expansion_controls_build_override_payload():
     assert overrides["playlist_match_filter"] == "duration > 60"
     assert overrides["playlist_max_downloads"] == 3
     assert overrides["playlist_archive_sync"] is True
+
+
+def test_ytdlp_transfer_controls_build_override_payload():
+    win = _window_with_advanced_controls()
+    win.adv_ytdlp_fragments_spin.setValue(4)
+    win.adv_ytdlp_retries_input.setText("8")
+    win.adv_ytdlp_fragment_retries_input.setText("infinite")
+    win.adv_ytdlp_retry_sleep_input.setText("fragment:exp=1:20")
+    win.adv_ytdlp_unavailable_combo.setCurrentIndex(1)
+    win.adv_ytdlp_throttled_input.setText("250K")
+    win.adv_ytdlp_wait_input.setText("30-120")
+    win.adv_ytdlp_live_combo.setCurrentIndex(1)
+    win.adv_ytdlp_embed_chapters_combo.setCurrentIndex(1)
+    win.adv_ytdlp_embed_metadata_combo.setCurrentIndex(2)
+    win.adv_ytdlp_embed_thumbnail_combo.setCurrentIndex(1)
+
+    overrides = get_adv_overrides(win)
+
+    assert overrides["ytdlp_concurrent_fragments"] == 4
+    assert overrides["ytdlp_fragment_retries"] == "infinite"
+    assert overrides["ytdlp_unavailable_fragments"] == "abort"
+    assert overrides["ytdlp_live_from_start"] is True
+    assert overrides["ytdlp_embed_chapters"] is True
+    assert overrides["ytdlp_embed_metadata"] is False

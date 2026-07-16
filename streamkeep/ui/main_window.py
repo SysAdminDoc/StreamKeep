@@ -561,6 +561,27 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         self._parallel_connections = max(1, min(16, conns))
         if hasattr(self, "parallel_spin"):
             self.parallel_spin.setValue(self._parallel_connections)
+        from streamkeep.download_options import validate_ytdlp_transfer_options
+        try:
+            transfer_options = validate_ytdlp_transfer_options(
+                concurrent_fragments=cfg.get("ytdlp_concurrent_fragments", 0),
+                retries=cfg.get("ytdlp_retries", ""),
+                fragment_retries=cfg.get("ytdlp_fragment_retries", ""),
+                retry_sleep=cfg.get("ytdlp_retry_sleep", ""),
+                unavailable_fragments=cfg.get(
+                    "ytdlp_unavailable_fragments", ""
+                ),
+                throttled_rate=cfg.get("ytdlp_throttled_rate", ""),
+                live_from_start=cfg.get("ytdlp_live_from_start", False),
+                wait_for_video=cfg.get("ytdlp_wait_for_video", ""),
+                embed_chapters=cfg.get("ytdlp_embed_chapters"),
+                embed_metadata=cfg.get("ytdlp_embed_metadata"),
+                embed_thumbnail=cfg.get("ytdlp_embed_thumbnail"),
+            )
+        except ValueError:
+            transfer_options = validate_ytdlp_transfer_options()
+        for name, value in transfer_options.items():
+            setattr(YtDlpExtractor, f"ytdlp_{name}", value)
         # v4.15.0: parallel auto-records + chunked live captures.
         try:
             par_ar = int(cfg.get("parallel_autorecords", 2))
@@ -1717,6 +1738,8 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.sponsorblock_api = state.sponsorblock_api or ""
             worker.download_archive = state.download_archive or ""
             worker.break_on_existing = bool(state.break_on_existing)
+            from streamkeep.download_options import apply_ytdlp_transfer_options
+            apply_ytdlp_transfer_options(worker, state)
             worker.cookies_browser = YtDlpExtractor.cookies_browser
             worker.rate_limit = YtDlpExtractor.rate_limit
             worker.proxy = YtDlpExtractor.proxy

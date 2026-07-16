@@ -52,6 +52,18 @@ def _sanitize_bool(value, default=False):
     return value if isinstance(value, bool) else bool(default)
 
 
+def _sanitize_optional_bool(value):
+    return value if isinstance(value, bool) else None
+
+
+def _sanitize_int_range(value, minimum, maximum, default=0):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def _sanitize_segments(value):
     if not isinstance(value, (list, tuple)):
         return []
@@ -144,6 +156,39 @@ def _sanitize_resume_payload(data, output_dir):
         ),
         "break_on_existing": _sanitize_bool(
             data.get("break_on_existing", False)
+        ),
+        "ytdlp_concurrent_fragments": _sanitize_int_range(
+            data.get("ytdlp_concurrent_fragments", 0), 0, 32
+        ),
+        "ytdlp_retries": _sanitize_text(
+            data.get("ytdlp_retries", ""), max_len=16
+        ),
+        "ytdlp_fragment_retries": _sanitize_text(
+            data.get("ytdlp_fragment_retries", ""), max_len=16
+        ),
+        "ytdlp_retry_sleep": _sanitize_text(
+            data.get("ytdlp_retry_sleep", ""), max_len=256
+        ),
+        "ytdlp_unavailable_fragments": _sanitize_text(
+            data.get("ytdlp_unavailable_fragments", ""), max_len=16
+        ),
+        "ytdlp_throttled_rate": _sanitize_text(
+            data.get("ytdlp_throttled_rate", ""), max_len=32
+        ),
+        "ytdlp_live_from_start": _sanitize_bool(
+            data.get("ytdlp_live_from_start", False)
+        ),
+        "ytdlp_wait_for_video": _sanitize_text(
+            data.get("ytdlp_wait_for_video", ""), max_len=32
+        ),
+        "ytdlp_embed_chapters": _sanitize_optional_bool(
+            data.get("ytdlp_embed_chapters")
+        ),
+        "ytdlp_embed_metadata": _sanitize_optional_bool(
+            data.get("ytdlp_embed_metadata")
+        ),
+        "ytdlp_embed_thumbnail": _sanitize_optional_bool(
+            data.get("ytdlp_embed_thumbnail")
         ),
         "quality_name": _sanitize_text(data.get("quality_name", ""), max_len=128),
         "segments": _sanitize_segments(data.get("segments", [])),

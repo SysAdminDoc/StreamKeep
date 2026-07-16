@@ -53,6 +53,17 @@ class ResumeTests(unittest.TestCase):
                         "sponsorblock_api": "https://sponsor.example/api",
                         "download_archive": "C:/archives/source.txt",
                         "break_on_existing": True,
+                        "ytdlp_concurrent_fragments": 4,
+                        "ytdlp_retries": "8",
+                        "ytdlp_fragment_retries": "infinite",
+                        "ytdlp_retry_sleep": "fragment:exp=1:20",
+                        "ytdlp_unavailable_fragments": "abort",
+                        "ytdlp_throttled_rate": "250K",
+                        "ytdlp_live_from_start": True,
+                        "ytdlp_wait_for_video": "30-120",
+                        "ytdlp_embed_chapters": True,
+                        "ytdlp_embed_metadata": False,
+                        "ytdlp_embed_thumbnail": True,
                     }
                 ),
                 encoding="utf-8",
@@ -84,6 +95,17 @@ class ResumeTests(unittest.TestCase):
                 state.download_archive, "C:/archives/source.txt"
             )
             self.assertTrue(state.break_on_existing)
+            self.assertEqual(state.ytdlp_concurrent_fragments, 4)
+            self.assertEqual(state.ytdlp_retries, "8")
+            self.assertEqual(state.ytdlp_fragment_retries, "infinite")
+            self.assertEqual(state.ytdlp_retry_sleep, "fragment:exp=1:20")
+            self.assertEqual(state.ytdlp_unavailable_fragments, "abort")
+            self.assertEqual(state.ytdlp_throttled_rate, "250K")
+            self.assertTrue(state.ytdlp_live_from_start)
+            self.assertEqual(state.ytdlp_wait_for_video, "30-120")
+            self.assertTrue(state.ytdlp_embed_chapters)
+            self.assertFalse(state.ytdlp_embed_metadata)
+            self.assertTrue(state.ytdlp_embed_thumbnail)
 
 
 if __name__ == "__main__":

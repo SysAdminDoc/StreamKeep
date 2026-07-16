@@ -80,6 +80,9 @@ _STRING_CONFIG_KEYS = frozenset({
     "language", "whisper_model", "hf_token", "dismissed_update_tag",
     "companion_proxy_origin", "subtitle_languages", "subtitle_convert",
     "sponsorblock_mark", "sponsorblock_remove", "sponsorblock_api",
+    "ytdlp_retries", "ytdlp_fragment_retries", "ytdlp_retry_sleep",
+    "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
+    "ytdlp_wait_for_video",
     "pp_convert_video_format", "pp_convert_video_codec",
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",
@@ -91,6 +94,8 @@ _BOOL_CONFIG_KEYS = frozenset({
     "check_for_updates", "capture_live_chat", "render_chat_ass",
     "enable_diarization", "notif_sound", "download_subs", "subtitle_auto",
     "subtitle_embed", "sponsorblock",
+    "ytdlp_live_from_start", "ytdlp_embed_chapters",
+    "ytdlp_embed_metadata", "ytdlp_embed_thumbnail",
     "pp_extract_audio", "pp_normalize_loudness", "pp_reencode_h265",
     "pp_contact_sheet", "pp_split_by_chapter", "pp_remove_silence",
     "pp_convert_video", "pp_convert_audio", "pp_convert_delete_source",
@@ -99,6 +104,7 @@ _BOOL_CONFIG_KEYS = frozenset({
 _INT_CONFIG_KEYS = frozenset({
     "segment_idx", "parallel_connections", "parallel_autorecords",
     "max_concurrent_downloads", "chunk_length_secs", "chat_render_width",
+    "ytdlp_concurrent_fragments",
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
 })

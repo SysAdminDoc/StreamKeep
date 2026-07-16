@@ -173,6 +173,17 @@ class ResumeState:
     sponsorblock_api: str = ""
     download_archive: str = ""
     break_on_existing: bool = False
+    ytdlp_concurrent_fragments: int = 0
+    ytdlp_retries: str = ""
+    ytdlp_fragment_retries: str = ""
+    ytdlp_retry_sleep: str = ""
+    ytdlp_unavailable_fragments: str = ""
+    ytdlp_throttled_rate: str = ""
+    ytdlp_live_from_start: bool = False
+    ytdlp_wait_for_video: str = ""
+    ytdlp_embed_chapters: bool | None = None
+    ytdlp_embed_metadata: bool | None = None
+    ytdlp_embed_thumbnail: bool | None = None
     quality_name: str = ""
     # Per-segment state. `segments` stores the original tuples as lists so
     # JSON round-trips cleanly. `completed` is a set-as-list of seg_idx ints.

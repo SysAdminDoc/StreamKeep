@@ -1,9 +1,11 @@
 import pytest
 
 from streamkeep.download_options import (
+    apply_ytdlp_transfer_options,
     validate_download_options, validate_playlist_options,
     validate_sponsorblock_options,
     validate_subtitle_options, validate_ytdlp_template_args,
+    validate_ytdlp_transfer_options,
 )
 
 
@@ -142,3 +144,42 @@ def test_playlist_options_reject_invalid_dates(date):
 def test_break_on_existing_requires_archive():
     with pytest.raises(ValueError, match="requires a download archive"):
         validate_playlist_options(break_on_existing=True)
+
+
+def test_ytdlp_transfer_matrix_validates_and_applies_to_worker():
+    class Worker:
+        pass
+
+    worker = Worker()
+    options = apply_ytdlp_transfer_options(worker, {
+        "ytdlp_concurrent_fragments": 4,
+        "ytdlp_retries": "infinite",
+        "ytdlp_fragment_retries": "12",
+        "ytdlp_retry_sleep": "fragment:exp=1:20",
+        "ytdlp_unavailable_fragments": "abort",
+        "ytdlp_throttled_rate": "250K",
+        "ytdlp_live_from_start": True,
+        "ytdlp_wait_for_video": "30-120",
+        "ytdlp_embed_chapters": True,
+        "ytdlp_embed_metadata": False,
+        "ytdlp_embed_thumbnail": True,
+    })
+
+    assert options["concurrent_fragments"] == 4
+    assert options["fragment_retries"] == "12"
+    assert worker.ytdlp_retry_sleep == "fragment:exp=1:20"
+    assert worker.ytdlp_embed_metadata is False
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"concurrent_fragments": 33},
+    {"retries": "forever"},
+    {"fragment_retries": -1},
+    {"retry_sleep": "1\n--exec=calc"},
+    {"unavailable_fragments": "ignore"},
+    {"throttled_rate": "fast"},
+    {"wait_for_video": "120-30"},
+])
+def test_ytdlp_transfer_matrix_rejects_invalid_values(kwargs):
+    with pytest.raises(ValueError):
+        validate_ytdlp_transfer_options(**kwargs)

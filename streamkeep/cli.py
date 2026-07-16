@@ -127,7 +127,7 @@ def _run_download(args):
 
     from .download_options import (
         validate_download_options, validate_sponsorblock_options,
-        validate_subtitle_options,
+        validate_subtitle_options, validate_ytdlp_transfer_options,
     )
     subtitle_requested = any((
         getattr(args, "sub_langs", ""),
@@ -140,6 +140,19 @@ def _run_download(args):
         getattr(args, "sponsorblock_remove", ""),
         getattr(args, "sponsorblock_api", ""),
     ))
+    transfer_requested = any((
+        getattr(args, "concurrent_fragments", 0),
+        getattr(args, "retries", ""),
+        getattr(args, "fragment_retries", ""),
+        getattr(args, "retry_sleep", ""),
+        getattr(args, "unavailable_fragments", ""),
+        getattr(args, "throttled_rate", ""),
+        getattr(args, "live_from_start", False),
+        getattr(args, "wait_for_video", ""),
+    )) or any(
+        getattr(args, name, None) is not None
+        for name in ("embed_chapters", "embed_metadata", "embed_thumbnail")
+    )
     requested_ytdlp_output = any((
         getattr(args, "format_spec", ""),
         getattr(args, "format_sort", ""),
@@ -149,6 +162,7 @@ def _run_download(args):
         getattr(args, "audio_quality", ""),
         subtitle_requested,
         sponsorblock_requested,
+        transfer_requested,
     ))
     if getattr(args, "audio_format", "") and getattr(args, "container", ""):
         _print_line("Error: Choose either --container or --audio-format, not both.")
@@ -175,6 +189,21 @@ def _run_download(args):
             remove=getattr(args, "sponsorblock_remove", ""),
             api_url=getattr(args, "sponsorblock_api", ""),
         )
+        transfer_options = validate_ytdlp_transfer_options(
+            concurrent_fragments=getattr(args, "concurrent_fragments", 0),
+            retries=getattr(args, "retries", ""),
+            fragment_retries=getattr(args, "fragment_retries", ""),
+            retry_sleep=getattr(args, "retry_sleep", ""),
+            unavailable_fragments=getattr(
+                args, "unavailable_fragments", ""
+            ),
+            throttled_rate=getattr(args, "throttled_rate", ""),
+            live_from_start=getattr(args, "live_from_start", False),
+            wait_for_video=getattr(args, "wait_for_video", ""),
+            embed_chapters=getattr(args, "embed_chapters", None),
+            embed_metadata=getattr(args, "embed_metadata", None),
+            embed_thumbnail=getattr(args, "embed_thumbnail", None),
+        )
         if (output_options["audio_format"] and subtitle_options["enabled"]
                 and subtitle_options["embed"]):
             raise ValueError(
@@ -194,6 +223,29 @@ def _run_download(args):
     from .workers import FetchWorker, DownloadWorker
 
     cfg = load_config()
+    transfer_overrides = {}
+    for name in (
+        "concurrent_fragments", "retries", "fragment_retries",
+        "retry_sleep", "unavailable_fragments", "throttled_rate",
+        "wait_for_video",
+    ):
+        value = getattr(args, name, "")
+        if value not in ("", 0, None):
+            transfer_overrides[f"ytdlp_{name}"] = value
+    if getattr(args, "live_from_start", False):
+        transfer_overrides["ytdlp_live_from_start"] = True
+    for name in ("embed_chapters", "embed_metadata", "embed_thumbnail"):
+        value = getattr(args, name, None)
+        if value is not None:
+            transfer_overrides[f"ytdlp_{name}"] = value
+    from .download_options import resolve_ytdlp_transfer_options
+    try:
+        transfer_options = resolve_ytdlp_transfer_options(
+            cfg, overrides=transfer_overrides,
+        )
+    except ValueError as error:
+        _print_line(f"Error: Invalid yt-dlp transfer settings: {error}")
+        sys.exit(2)
     output_dir = args.output or cfg.get("output_dir", "")
     if not output_dir:
         from .utils import default_output_dir
@@ -288,6 +340,8 @@ def _run_download(args):
         dw.sponsorblock_mark = sponsorblock_options["mark"]
         dw.sponsorblock_remove = sponsorblock_options["remove"]
         dw.sponsorblock_api = sponsorblock_options["api_url"]
+        for name, value in transfer_options.items():
+            setattr(dw, f"ytdlp_{name}", value)
         if args.rate_limit:
             dw.rate_limit = args.rate_limit
         state["dw"] = dw  # prevent GC while event loop runs
@@ -676,6 +730,50 @@ def build_parser():
         "--sponsorblock-api", default="",
         help="Custom SponsorBlock API base URL (HTTPS, or loopback HTTP)",
     )
+    dl.add_argument(
+        "-N", "--concurrent-fragments", type=int, default=0,
+        help="Concurrent HLS/DASH fragments (1-32; default: yt-dlp default)",
+    )
+    dl.add_argument(
+        "--retries", default="",
+        help="Download retries (0-1000 or infinite)",
+    )
+    dl.add_argument(
+        "--fragment-retries", default="",
+        help="Fragment retries (0-1000 or infinite)",
+    )
+    dl.add_argument(
+        "--retry-sleep", default="",
+        help="yt-dlp retry sleep expression, e.g. fragment:exp=1:20",
+    )
+    dl.add_argument(
+        "--unavailable-fragments", default="", choices=["skip", "abort"],
+        help="Skip unavailable fragments or abort the download",
+    )
+    dl.add_argument(
+        "--throttled-rate", default="",
+        help="Treat sustained rates below this threshold as throttled",
+    )
+    dl.add_argument(
+        "--live-from-start", action="store_true",
+        help="Download a live stream from its beginning when supported",
+    )
+    dl.add_argument(
+        "--wait-for-video", default="",
+        help="Wait interval for scheduled streams: seconds or MIN-MAX",
+    )
+    dl.add_argument(
+        "--embed-chapters", action=argparse.BooleanOptionalAction, default=None,
+        help="Embed or explicitly do not embed chapters",
+    )
+    dl.add_argument(
+        "--embed-metadata", action=argparse.BooleanOptionalAction, default=None,
+        help="Embed or explicitly do not embed media metadata",
+    )
+    dl.add_argument(
+        "--embed-thumbnail", action=argparse.BooleanOptionalAction, default=None,
+        help="Embed or explicitly do not embed the thumbnail",
+    )
     dl.add_argument("--config-dir", default=argparse.SUPPRESS,
                     help="Override the config/database directory")
 
@@ -802,6 +900,21 @@ def run_cli(argv=None):
                 setattr(args, name, "")
         if not hasattr(args, "auto_subs"):
             args.auto_subs = False
+        for name, default in (
+            ("concurrent_fragments", 0),
+            ("retries", ""),
+            ("fragment_retries", ""),
+            ("retry_sleep", ""),
+            ("unavailable_fragments", ""),
+            ("throttled_rate", ""),
+            ("live_from_start", False),
+            ("wait_for_video", ""),
+            ("embed_chapters", None),
+            ("embed_metadata", None),
+            ("embed_thumbnail", None),
+        ):
+            if not hasattr(args, name):
+                setattr(args, name, default)
 
     if args.command in ("download", "dl"):
         _run_download(args)

@@ -754,6 +754,33 @@ class SettingsTabMixin:
         rate_limit = self.rate_limit_input.text().strip()
         YtDlpExtractor.rate_limit = rate_limit
         self._config["rate_limit"] = rate_limit
+        from ...download_options import validate_ytdlp_transfer_options
+        try:
+            transfer_options = validate_ytdlp_transfer_options(
+                concurrent_fragments=self.ytdlp_fragments_spin.value(),
+                retries=self.ytdlp_retries_input.text(),
+                fragment_retries=self.ytdlp_fragment_retries_input.text(),
+                retry_sleep=self.ytdlp_retry_sleep_input.text(),
+                unavailable_fragments=(
+                    self.ytdlp_unavailable_combo.currentData() or ""
+                ),
+                throttled_rate=self.ytdlp_throttled_input.text(),
+                live_from_start=self.ytdlp_live_from_start_check.isChecked(),
+                wait_for_video=self.ytdlp_wait_for_video_input.text(),
+                embed_chapters=self.ytdlp_embed_chapters_combo.currentData(),
+                embed_metadata=self.ytdlp_embed_metadata_combo.currentData(),
+                embed_thumbnail=self.ytdlp_embed_thumbnail_combo.currentData(),
+            )
+        except ValueError as error:
+            self._set_status(str(error), "warning")
+            return
+        for name, value in transfer_options.items():
+            key = f"ytdlp_{name}"
+            setattr(YtDlpExtractor, key, value)
+            if value is None:
+                self._config.pop(key, None)
+            else:
+                self._config[key] = value
         # Apply proxy (also routes native extractor curl calls through it)
         proxy = self.proxy_input.text().strip()
         YtDlpExtractor.proxy = proxy
@@ -1960,6 +1987,94 @@ def build_settings_tab(win):
     win.rate_limit_input.setClearButtonEnabled(True)
     rate_row.addWidget(win.rate_limit_input, 1)
     network_lay.addLayout(rate_row)
+
+    transfer_hint = QLabel(
+        "yt-dlp transfer depth applies to direct yt-dlp downloads. Blank or "
+        "zero values retain yt-dlp defaults."
+    )
+    transfer_hint.setObjectName("subtleText")
+    transfer_hint.setWordWrap(True)
+    network_lay.addWidget(transfer_hint)
+
+    fragment_row = QHBoxLayout()
+    fragment_row.addWidget(QLabel("Fragments:"))
+    win.ytdlp_fragments_spin = QSpinBox()
+    win.ytdlp_fragments_spin.setRange(0, 32)
+    win.ytdlp_fragments_spin.setSpecialValueText("yt-dlp default")
+    win.ytdlp_fragments_spin.setValue(int(
+        win._config.get("ytdlp_concurrent_fragments", 0) or 0
+    ))
+    fragment_row.addWidget(win.ytdlp_fragments_spin)
+    fragment_row.addWidget(QLabel("Retries:"))
+    win.ytdlp_retries_input = QLineEdit(str(
+        win._config.get("ytdlp_retries", "") or ""
+    ))
+    win.ytdlp_retries_input.setPlaceholderText("default or infinite")
+    fragment_row.addWidget(win.ytdlp_retries_input)
+    fragment_row.addWidget(QLabel("Fragment retries:"))
+    win.ytdlp_fragment_retries_input = QLineEdit(str(
+        win._config.get("ytdlp_fragment_retries", "") or ""
+    ))
+    win.ytdlp_fragment_retries_input.setPlaceholderText("default or infinite")
+    fragment_row.addWidget(win.ytdlp_fragment_retries_input)
+    network_lay.addLayout(fragment_row)
+
+    retry_row = QHBoxLayout()
+    retry_row.addWidget(QLabel("Retry sleep:"))
+    win.ytdlp_retry_sleep_input = QLineEdit(str(
+        win._config.get("ytdlp_retry_sleep", "") or ""
+    ))
+    win.ytdlp_retry_sleep_input.setPlaceholderText("e.g. fragment:exp=1:20")
+    retry_row.addWidget(win.ytdlp_retry_sleep_input)
+    retry_row.addWidget(QLabel("Unavailable fragments:"))
+    win.ytdlp_unavailable_combo = QComboBox()
+    win.ytdlp_unavailable_combo.addItem("yt-dlp default", userData="")
+    win.ytdlp_unavailable_combo.addItem("Skip", userData="skip")
+    win.ytdlp_unavailable_combo.addItem("Abort download", userData="abort")
+    unavailable = str(
+        win._config.get("ytdlp_unavailable_fragments", "") or ""
+    )
+    index = win.ytdlp_unavailable_combo.findData(unavailable)
+    win.ytdlp_unavailable_combo.setCurrentIndex(max(0, index))
+    retry_row.addWidget(win.ytdlp_unavailable_combo)
+    network_lay.addLayout(retry_row)
+
+    live_row = QHBoxLayout()
+    live_row.addWidget(QLabel("Throttled threshold:"))
+    win.ytdlp_throttled_input = QLineEdit(str(
+        win._config.get("ytdlp_throttled_rate", "") or ""
+    ))
+    win.ytdlp_throttled_input.setPlaceholderText("e.g. 100K")
+    live_row.addWidget(win.ytdlp_throttled_input)
+    live_row.addWidget(QLabel("Wait for scheduled video:"))
+    win.ytdlp_wait_for_video_input = QLineEdit(str(
+        win._config.get("ytdlp_wait_for_video", "") or ""
+    ))
+    win.ytdlp_wait_for_video_input.setPlaceholderText("seconds or MIN-MAX")
+    live_row.addWidget(win.ytdlp_wait_for_video_input)
+    win.ytdlp_live_from_start_check = QCheckBox("Live from start")
+    win.ytdlp_live_from_start_check.setChecked(bool(
+        win._config.get("ytdlp_live_from_start", False)
+    ))
+    live_row.addWidget(win.ytdlp_live_from_start_check)
+    network_lay.addLayout(live_row)
+
+    embed_row = QHBoxLayout()
+    embed_row.addWidget(QLabel("Embed:"))
+    for name, label in (
+        ("chapters", "Chapters"),
+        ("metadata", "Metadata"),
+        ("thumbnail", "Thumbnail"),
+    ):
+        combo = QComboBox()
+        combo.addItem(f"{label}: yt-dlp default", userData=None)
+        combo.addItem(f"{label}: on", userData=True)
+        combo.addItem(f"{label}: off", userData=False)
+        current = win._config.get(f"ytdlp_embed_{name}")
+        combo.setCurrentIndex(1 if current is True else 2 if current is False else 0)
+        setattr(win, f"ytdlp_embed_{name}_combo", combo)
+        embed_row.addWidget(combo)
+    network_lay.addLayout(embed_row)
 
     proxy_row = QHBoxLayout()
     proxy_row.setSpacing(8)

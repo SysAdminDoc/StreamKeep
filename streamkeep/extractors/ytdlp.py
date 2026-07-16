@@ -190,6 +190,17 @@ class YtDlpExtractor(Extractor):
     sponsorblock_mark = ""
     sponsorblock_remove = "sponsor,selfpromo,interaction"
     sponsorblock_api = ""
+    ytdlp_concurrent_fragments = 0
+    ytdlp_retries = ""
+    ytdlp_fragment_retries = ""
+    ytdlp_retry_sleep = ""
+    ytdlp_unavailable_fragments = ""
+    ytdlp_throttled_rate = ""
+    ytdlp_live_from_start = False
+    ytdlp_wait_for_video = ""
+    ytdlp_embed_chapters = None
+    ytdlp_embed_metadata = None
+    ytdlp_embed_thumbnail = None
 
     def _has_ytdlp(self):
         from ..capabilities import CapabilityUnavailableError, require_capability
