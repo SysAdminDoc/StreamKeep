@@ -1211,6 +1211,7 @@ class SettingsTabMixin:
         try:
             for q in list(getattr(self, "_download_queue", [])):
                 queue_items.append({
+                    "job_id": q.get("job_id", ""),
                     "url": q.get("url", ""),
                     "title": q.get("title", ""),
                     "platform": q.get("platform", ""),

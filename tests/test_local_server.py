@@ -109,6 +109,51 @@ class LocalServerTests(unittest.TestCase):
         err = self._expect_error("/ping", 401)
         self.assertEqual(err.get("err"), "token_invalid")
 
+    def test_durable_queue_ack_is_observable_and_cancellable(self):
+        jobs = {}
+
+        def submit(data):
+            job = {
+                "job_id": "job-123", "url": data["url"], "status": "queued",
+            }
+            jobs[job["job_id"]] = job
+            return dict(job)
+
+        def cancel(job_id):
+            job = jobs.get(job_id)
+            if job:
+                job["status"] = "cancelled"
+                return dict(job)
+            return None
+
+        durable_server = LocalCompanionServer()
+        durable_server.queue_submitter = submit
+        durable_server.job_canceller = cancel
+        durable_server.state_provider = lambda: {"queue": list(jobs.values())}
+        durable_server.start()
+        try:
+            queued, status = self._open_json(
+                "/api/queue", server=durable_server,
+                token=durable_server.token, method="POST",
+                data={"url": "https://example.com/video"},
+            )
+            observed, _ = self._open_json(
+                "/api/jobs/job-123", server=durable_server,
+                token=durable_server.token,
+            )
+            cancelled, _ = self._open_json(
+                "/api/jobs/cancel", server=durable_server,
+                token=durable_server.token, method="POST",
+                data={"job_id": "job-123"},
+            )
+        finally:
+            durable_server.stop()
+
+        self.assertEqual(status, 202)
+        self.assertEqual(queued["job_id"], "job-123")
+        self.assertEqual(observed["job"]["status"], "queued")
+        self.assertEqual(cancelled["job"]["status"], "cancelled")
+
     def test_authenticated_ping_allows_localhost_origin(self):
         origin = "http://localhost:8765"
         with self._open(

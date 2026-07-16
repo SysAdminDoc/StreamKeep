@@ -308,10 +308,10 @@ def _run_server(args):
         from .paths import CONFIG_DIR
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    output_dir = getattr(args, "output_dir", "") or ""
+    from .config import load_config, save_config
+    cfg = load_config()
+    output_dir = getattr(args, "output_dir", "") or str(cfg.get("output_dir", "") or "")
     if output_dir:
-        from .config import load_config, save_config
-        cfg = load_config()
         cfg["output_dir"] = output_dir
         save_config(cfg)
 
@@ -322,9 +322,28 @@ def _run_server(args):
     install_file_logging()
 
     from .local_server import LocalCompanionServer
+    from .headless_service import HeadlessJobService
+
+    def _bounded_config_int(key, default, maximum):
+        try:
+            value = int(cfg.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(1, min(maximum, value))
 
     bind_lan = args.bind == "0.0.0.0"
     server = LocalCompanionServer(bind_lan=bind_lan, port=args.port or 0)
+    service = HeadlessJobService(
+        output_dir=output_dir,
+        max_concurrent=_bounded_config_int("max_concurrent_downloads", 3, 8),
+        parallel_connections=_bounded_config_int("parallel_connections", 4, 16),
+        config=cfg,
+    )
+    server.state_provider = service.state_snapshot
+    server.queue_submitter = service.enqueue
+    server.job_canceller = service.cancel
+    server.failure_retrier = service.retry_failure
+    server.failure_discarder = service.discard_failure
 
     fixed_token = getattr(args, "token", "") or ""
     if fixed_token:
@@ -336,6 +355,7 @@ def _run_server(args):
     server.url_received.connect(
         lambda url, action: _print_line(f"[{action}] {url}")
     )
+    recovered = service.start()
     server.start()
 
     _print_line(f"StreamKeep v{VERSION} — server mode")
@@ -346,9 +366,16 @@ def _run_server(args):
         _print_line(f"Config: {config_dir}")
     if output_dir:
         _print_line(f"Output: {output_dir}")
+    if recovered:
+        _print_line(f"Recovered jobs: {recovered}")
     _print_line("Press Ctrl+C to stop.")
 
-    sys.exit(app.exec())
+    try:
+        ret = app.exec()
+    finally:
+        server.stop()
+        service.stop()
+    sys.exit(ret)
 
 
 # ── --list-extractors ───────────────────────────────────────────────

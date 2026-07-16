@@ -102,6 +102,79 @@ class DbMigrationTests(unittest.TestCase):
 
 
 class DbQueueNormalizationTests(unittest.TestCase):
+    def test_queue_job_ids_survive_full_queue_rewrites(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                items = [{"url": "https://example.com/video", "status": "queued"}]
+                db.save_queue(items)
+                first_id = items[0]["job_id"]
+                loaded = db.load_queue()
+                db.save_queue(loaded)
+                reloaded = db.load_queue()
+
+            self.assertTrue(first_id)
+            self.assertEqual(reloaded[0]["job_id"], first_id)
+
+    def test_atomic_queue_transitions_and_restart_recovery(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                first = db.enqueue_queue_job({"url": "https://a.example/video"})
+                second = db.enqueue_queue_job({"url": "https://b.example/video"})
+                third = db.enqueue_queue_job({"url": "https://c.example/video"})
+                db.update_queue_job(first["job_id"], status="downloading", progress=40)
+                db.update_queue_job(third["job_id"], status="finalizing")
+                recovered = db.recover_interrupted_queue_jobs()
+                first_after = db.load_queue_job(first["job_id"])
+                third_after = db.load_queue_job(third["job_id"])
+                cancelled = db.cancel_queue_job(second["job_id"])
+                db.update_queue_job(first["job_id"], status="done")
+                terminal = db.cancel_queue_job(first["job_id"])
+
+            self.assertEqual(recovered, 2)
+            self.assertEqual(first_after["status"], "queued")
+            self.assertEqual(third_after["status"], "queued")
+            self.assertEqual(first_after["progress"], 40)
+            self.assertEqual(cancelled["status"], "cancelled")
+            self.assertEqual(terminal["status"], "done")
+
+    def test_v4_queue_migration_backfills_unique_job_ids(self):
+        import json
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("""
+                CREATE TABLE download_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    url TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT '', quality TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'queued', recurrence TEXT NOT NULL DEFAULT '',
+                    failure_id INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '',
+                    data TEXT NOT NULL DEFAULT '{}'
+                )
+            """)
+            duplicate = json.dumps({"job_id": "legacy", "url": "https://example.com"})
+            conn.executemany(
+                "INSERT INTO download_queue (position, url, data) VALUES (?, ?, ?)",
+                [(0, "https://a.example", duplicate), (1, "https://b.example", duplicate)],
+            )
+            conn.execute("PRAGMA user_version = 4")
+            conn.commit()
+            conn.close()
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                jobs = db.load_queue()
+
+            self.assertEqual(len({job["job_id"] for job in jobs}), 2)
+            self.assertIn("legacy", {job["job_id"] for job in jobs})
+
     def test_save_and_load_queue_preserves_typed_columns(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"

@@ -2639,6 +2639,7 @@ class DownloadTabMixin:
         if not vod_title:
             vod_title = title
         normalized = {
+            "job_id": str(item.get("job_id", "") or ""),
             "url": url,
             "title": title or vod_title or url,
             "platform": platform,

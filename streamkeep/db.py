@@ -17,13 +17,14 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from .paths import CONFIG_DIR
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _write_lock = threading.Lock()
 
@@ -53,6 +54,8 @@ def init_db() -> None:
         if v < SCHEMA_VERSION:
             if v >= 1 and v < 4:
                 _migrate_queue_v4(db)
+            if v >= 1 and v < 5:
+                _migrate_queue_v5(db)
             _apply_schema(db)
             try:
                 db.execute(
@@ -61,6 +64,10 @@ def init_db() -> None:
                 )
             except Exception:
                 pass
+            db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id "
+                "ON download_queue(job_id) WHERE job_id <> ''"
+            )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             db.commit()
     finally:
@@ -113,6 +120,7 @@ def _apply_schema(db):
 
         CREATE TABLE IF NOT EXISTS download_queue (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id      TEXT    NOT NULL DEFAULT '',
             position    INTEGER NOT NULL DEFAULT 0,
             url         TEXT    NOT NULL DEFAULT '',
             title       TEXT    NOT NULL DEFAULT '',
@@ -126,6 +134,8 @@ def _apply_schema(db):
             data        TEXT    NOT NULL DEFAULT '{}'
         );
         CREATE INDEX IF NOT EXISTS idx_queue_pos ON download_queue(position);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id
+            ON download_queue(job_id) WHERE job_id <> '';
 
         CREATE TABLE IF NOT EXISTS archive_manifests (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,6 +229,35 @@ def _migrate_queue_v4(db):
             int(d.get("failure_id", 0) or 0),
             row[0],
         ))
+
+
+def _migrate_queue_v5(db):
+    """Give every persisted queue item a stable, externally visible job ID."""
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(download_queue)").fetchall()
+    }
+    if "job_id" not in existing_cols:
+        db.execute(
+            "ALTER TABLE download_queue ADD COLUMN "
+            "job_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    seen: set[str] = set()
+    rows = db.execute("SELECT id, job_id, data FROM download_queue").fetchall()
+    for row in rows:
+        try:
+            data = json.loads(row[2]) if row[2] else {}
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+        job_id = str(row[1] or data.get("job_id", "")).strip()
+        if not job_id or job_id in seen:
+            job_id = uuid.uuid4().hex
+        seen.add(job_id)
+        data["job_id"] = job_id
+        db.execute(
+            "UPDATE download_queue SET job_id = ?, data = ? WHERE id = ?",
+            (job_id, json.dumps(data, ensure_ascii=False), row[0]),
+        )
 
 
 # ── History CRUD ────────────────────────────────────────────────────
@@ -480,28 +519,11 @@ def load_queue() -> list[dict[str, Any]]:
     db = _connect(readonly=True)
     try:
         rows = db.execute(
-            "SELECT url, title, platform, quality, status, recurrence, "
+            "SELECT job_id, url, title, platform, quality, status, recurrence, "
             "failure_id, created_at, updated_at, data "
             "FROM download_queue ORDER BY position ASC"
         ).fetchall()
-        items = []
-        for r in rows:
-            try:
-                extras = json.loads(r[9]) if r[9] else {}
-            except (json.JSONDecodeError, TypeError):
-                extras = {}
-            item = dict(extras)
-            item.update({
-                "url": r[0] or extras.get("url", ""),
-                "title": r[1] or extras.get("title", ""),
-                "platform": r[2] or extras.get("platform", ""),
-                "quality": r[3] or extras.get("quality", ""),
-                "status": r[4] or extras.get("status", "queued"),
-                "recurrence": r[5] or extras.get("recurrence", ""),
-                "failure_id": r[6] or extras.get("failure_id", 0),
-            })
-            items.append(item)
-        return items
+        return [_queue_row_to_dict(r) for r in rows]
     finally:
         db.close()
 
@@ -514,12 +536,15 @@ def save_queue(items: list[dict[str, Any]]) -> None:
         try:
             db.execute("DELETE FROM download_queue")
             for i, item in enumerate(items):
+                job_id = str(item.get("job_id", "")).strip() or uuid.uuid4().hex
+                item["job_id"] = job_id
                 db.execute(
                     "INSERT INTO download_queue "
-                    "(position, url, title, platform, quality, status, "
+                    "(job_id, position, url, title, platform, quality, status, "
                     " recurrence, failure_id, created_at, updated_at, data) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
+                        job_id,
                         i,
                         str(item.get("url", "")),
                         str(item.get("title", "")),
@@ -543,27 +568,156 @@ def load_queue_by_status(status: str) -> list[dict[str, Any]]:
     db = _connect(readonly=True)
     try:
         rows = db.execute(
-            "SELECT url, title, platform, quality, status, recurrence, "
+            "SELECT job_id, url, title, platform, quality, status, recurrence, "
             "failure_id, created_at, updated_at, data "
             "FROM download_queue WHERE status = ? ORDER BY position ASC",
             (status,),
         ).fetchall()
-        items = []
-        for r in rows:
-            try:
-                extras = json.loads(r[9]) if r[9] else {}
-            except (json.JSONDecodeError, TypeError):
-                extras = {}
-            item = dict(extras)
-            item.update({
-                "url": r[0], "title": r[1], "platform": r[2],
-                "quality": r[3], "status": r[4], "recurrence": r[5],
-                "failure_id": r[6],
-            })
-            items.append(item)
-        return items
+        return [_queue_row_to_dict(r) for r in rows]
     finally:
         db.close()
+
+
+def load_queue_job(job_id: str) -> dict[str, Any] | None:
+    """Return a queue item by its durable public job ID."""
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT job_id, url, title, platform, quality, status, recurrence, "
+            "failure_id, created_at, updated_at, data "
+            "FROM download_queue WHERE job_id = ?",
+            (str(job_id),),
+        ).fetchone()
+        return _queue_row_to_dict(row) if row else None
+    finally:
+        db.close()
+
+
+def enqueue_queue_job(item: dict[str, Any]) -> dict[str, Any]:
+    """Append one durable queue job without rewriting unrelated queue rows."""
+    now = _utc_now_iso()
+    data = dict(item)
+    job_id = str(data.get("job_id", "")).strip() or uuid.uuid4().hex
+    data["job_id"] = job_id
+    data["status"] = str(data.get("status", "queued") or "queued")
+    with _write_lock:
+        db = _connect()
+        try:
+            position = int(db.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM download_queue"
+            ).fetchone()[0])
+            db.execute(
+                "INSERT INTO download_queue "
+                "(job_id, position, url, title, platform, quality, status, "
+                " recurrence, failure_id, created_at, updated_at, data) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    job_id, position, str(data.get("url", "")),
+                    str(data.get("title", "")), str(data.get("platform", "")),
+                    str(data.get("quality", "")), data["status"],
+                    str(data.get("recurrence", "")),
+                    int(data.get("failure_id", 0) or 0),
+                    str(data.get("created_at", "") or now), now,
+                    json.dumps(data, ensure_ascii=False),
+                ),
+            )
+            db.commit()
+        finally:
+            db.close()
+    result = load_queue_job(job_id)
+    if result is None:  # pragma: no cover - protects against external DB deletion
+        raise RuntimeError("Queue job disappeared after insertion")
+    return result
+
+
+def update_queue_job(job_id: str, **changes: Any) -> dict[str, Any] | None:
+    """Atomically merge fields into one durable queue job."""
+    job_id = str(job_id)
+    now = _utc_now_iso()
+    typed = {
+        "url", "title", "platform", "quality", "status", "recurrence",
+        "failure_id",
+    }
+    with _write_lock:
+        db = _connect()
+        try:
+            row = db.execute(
+                "SELECT data FROM download_queue WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                data = json.loads(row[0]) if row[0] else {}
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+            data.update(changes)
+            data["job_id"] = job_id
+            assignments = ["updated_at = ?", "data = ?"]
+            values: list[Any] = [now, json.dumps(data, ensure_ascii=False)]
+            for name in sorted(typed.intersection(changes)):
+                assignments.append(f"{name} = ?")
+                value = changes[name]
+                if name == "failure_id":
+                    value = int(value or 0)
+                else:
+                    value = str(value or "")
+                values.append(value)
+            values.append(job_id)
+            db.execute(
+                f"UPDATE download_queue SET {', '.join(assignments)} "
+                "WHERE job_id = ?",
+                values,
+            )
+            db.commit()
+        finally:
+            db.close()
+    return load_queue_job(job_id)
+
+
+def cancel_queue_job(job_id: str) -> dict[str, Any] | None:
+    """Persist cancellation unless a job is already terminal."""
+    job = load_queue_job(job_id)
+    if job is None or job.get("status") in {"done", "failed", "cancelled"}:
+        return job
+    return update_queue_job(job_id, status="cancelled", cancelled_at=_utc_now_iso())
+
+
+def recover_interrupted_queue_jobs() -> int:
+    """Return service-interrupted jobs to the runnable queue on startup."""
+    with _write_lock:
+        db = _connect()
+        try:
+            result = db.execute(
+                "UPDATE download_queue SET status = 'queued', updated_at = ? "
+                "WHERE status IN "
+                "('fetching', 'downloading', 'finalizing', 'running', 'cancelling')",
+                (_utc_now_iso(),),
+            )
+            db.commit()
+            return int(result.rowcount)
+        finally:
+            db.close()
+
+
+def _queue_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        extras = json.loads(row[10]) if row[10] else {}
+    except (json.JSONDecodeError, TypeError):
+        extras = {}
+    item = dict(extras)
+    item.update({
+        "job_id": row[0],
+        "url": row[1] or extras.get("url", ""),
+        "title": row[2] or extras.get("title", ""),
+        "platform": row[3] or extras.get("platform", ""),
+        "quality": row[4] or extras.get("quality", ""),
+        "status": row[5] or extras.get("status", "queued"),
+        "recurrence": row[6] or extras.get("recurrence", ""),
+        "failure_id": row[7] or extras.get("failure_id", 0),
+        "created_at": row[8] or extras.get("created_at", ""),
+        "updated_at": row[9] or extras.get("updated_at", ""),
+    })
+    return item
 
 
 # ── Row conversion helpers ──────────────────────────────────────────

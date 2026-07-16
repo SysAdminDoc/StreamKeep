@@ -11,7 +11,9 @@ launch has all scopes.  ``rotate_token()`` replaces it atomically;
 
 REST API endpoints (F37):
   GET  /api/status    — active downloads, queue, live channels  [status]
+  GET  /api/jobs/{id} — inspect one durable queue job            [status]
   POST /api/queue     — add a URL to the download queue         [queue]
+  POST /api/jobs/cancel — durably cancel a queue job             [queue]
   GET  /api/library   — search/list recorded VODs               [status]
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
@@ -205,6 +207,10 @@ class LocalCompanionServer:
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
+        self.queue_submitter = None  # callable(dict) -> durable job dict
+        self.job_canceller = None    # callable(job_id) -> durable job dict
+        self.failure_retrier = None  # callable(failure_id) -> durable job dict
+        self.failure_discarder = None  # callable(failure_id) -> bool
         self._bind_lan = bool(bind_lan)
         self._bind_addr = "0.0.0.0" if self._bind_lan else "127.0.0.1"
         self._allowed_hosts = _build_allowed_hosts(self._bind_lan, allowed_hosts)
@@ -242,6 +248,10 @@ class LocalCompanionServer:
             self._token_store,
             self._signals,
             self.state_provider,
+            queue_submitter=self.queue_submitter,
+            job_canceller=self.job_canceller,
+            failure_retrier=self.failure_retrier,
+            failure_discarder=self.failure_discarder,
             allowed_hosts=self._allowed_hosts,
         )
         self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
@@ -300,7 +310,17 @@ def _parse_timestamp(value):
     return None
 
 
-def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=None):
+def _build_handler(
+    token_store,
+    signals,
+    state_provider=None,
+    *,
+    queue_submitter=None,
+    job_canceller=None,
+    failure_retrier=None,
+    failure_discarder=None,
+    allowed_hosts=None,
+):
     allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts(False))
 
     class _Handler(BaseHTTPRequestHandler):
@@ -427,6 +447,9 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
             elif path == "/api/monitor":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_monitor()
+            elif path.startswith("/api/jobs/"):
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_job(path.removeprefix("/api/jobs/"))
             else:
                 self.send_response(404)
                 self._cors()
@@ -443,6 +466,9 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
             elif path == "/api/queue":
                 if self._require_auth(SCOPE_QUEUE):
                     self._handle_api_queue()
+            elif path == "/api/jobs/cancel":
+                if self._require_auth(SCOPE_QUEUE):
+                    self._handle_api_job_cancel()
             elif path == "/api/failures/retry":
                 if self._require_auth(SCOPE_RECOVERY):
                     self._handle_api_failure_retry()
@@ -477,8 +503,20 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
                     clip_start if clip_start is not None else 0.0,
                     clip_end if clip_end is not None else 0.0,
                 )
-            signals.url_received.emit(url, action)
-            self._json_response(200, {"ok": True})
+            if queue_submitter:
+                try:
+                    job = queue_submitter({**data, "url": url, "source": "browser"})
+                except Exception as error:
+                    self._json_response(500, {"ok": False, "err": str(error)})
+                    return
+                self._json_response(202, {
+                    "ok": True,
+                    "job_id": str(job.get("job_id", "")),
+                    "job": job,
+                })
+            else:
+                signals.url_received.emit(url, action)
+                self._json_response(200, {"ok": True})
 
         # ── REST API handlers (F37) ────────────────────────────────
 
@@ -516,14 +554,61 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
                 "channels": state.get("monitor", []),
             })
 
+        def _handle_api_job(self, job_id):
+            job_id = str(job_id or "").strip()
+            if not job_id:
+                self._json_response(400, {"ok": False, "err": "invalid job id"})
+                return
+            state = self._get_state()
+            job = next(
+                (item for item in state.get("queue", [])
+                 if str(item.get("job_id", "")) == job_id),
+                None,
+            )
+            if not job:
+                self._json_response(404, {"ok": False, "err": "job not found"})
+                return
+            self._json_response(200, {"ok": True, "job_id": job_id, "job": job})
+
         def _handle_api_queue(self):
             data = self._read_body()
             url = str(data.get("url") or "").strip()
             if not url.startswith(("http://", "https://")):
                 self._json_response(400, {"ok": False, "err": "invalid url"})
                 return
-            signals.url_received.emit(url, "queue")
-            self._json_response(200, {"ok": True})
+            if not queue_submitter:
+                signals.url_received.emit(url, "queue")
+                self._json_response(200, {"ok": True})
+                return
+            try:
+                job = queue_submitter({**data, "url": url, "source": "rest-api"})
+            except Exception as error:
+                self._json_response(500, {"ok": False, "err": str(error)})
+                return
+            self._json_response(202, {
+                "ok": True,
+                "job_id": str(job.get("job_id", "")),
+                "job": job,
+            })
+
+        def _handle_api_job_cancel(self):
+            data = self._read_body()
+            job_id = str(data.get("job_id") or data.get("id") or "").strip()
+            if not job_id:
+                self._json_response(400, {"ok": False, "err": "invalid job id"})
+                return
+            if not job_canceller:
+                self._json_response(503, {"ok": False, "err": "cancellation unavailable"})
+                return
+            try:
+                job = job_canceller(job_id)
+            except Exception as error:
+                self._json_response(500, {"ok": False, "err": str(error)})
+                return
+            if not job:
+                self._json_response(404, {"ok": False, "err": "job not found"})
+                return
+            self._json_response(200, {"ok": True, "job_id": job_id, "job": job})
 
         def _read_failure_id(self):
             data = self._read_body()
@@ -541,29 +626,50 @@ def _build_handler(token_store, signals, state_provider=None, *, allowed_hosts=N
             if not job_id:
                 return
             try:
-                from . import db as _db
-                job = _db.mark_failed_job_retrying(job_id)
+                if failure_retrier:
+                    queue_job = failure_retrier(job_id)
+                    failure = None
+                else:
+                    from . import db as _db
+                    failure = _db.mark_failed_job_retrying(job_id)
+                    queue_job = None
             except Exception as e:
                 self._json_response(500, {"ok": False, "err": str(e)})
                 return
-            if not job:
+            if not queue_job and not failure:
                 self._json_response(404, {"ok": False, "err": "failure not found"})
                 return
-            signals.failed_job_retry_requested.emit(job_id)
-            self._json_response(200, {"ok": True, "failure": job})
+            if queue_job:
+                self._json_response(202, {
+                    "ok": True,
+                    "job_id": str(queue_job.get("job_id", "")),
+                    "job": queue_job,
+                })
+            else:
+                signals.failed_job_retry_requested.emit(job_id)
+                self._json_response(200, {"ok": True, "failure": failure})
 
         def _handle_api_failure_discard(self):
             job_id = self._read_failure_id()
             if not job_id:
                 return
             try:
-                from . import db as _db
-                _db.mark_failed_job_discarded(job_id)
+                if failure_discarder:
+                    found = failure_discarder(job_id)
+                else:
+                    from . import db as _db
+                    found = _db.load_failed_job(job_id) is not None
+                    if found:
+                        _db.mark_failed_job_discarded(job_id)
             except Exception as e:
                 self._json_response(500, {"ok": False, "err": str(e)})
                 return
-            signals.failed_job_discard_requested.emit(job_id)
-            self._json_response(200, {"ok": True})
+            if not found:
+                self._json_response(404, {"ok": False, "err": "failure not found"})
+                return
+            if not failure_discarder:
+                signals.failed_job_discard_requested.emit(job_id)
+            self._json_response(200, {"ok": True, "failure_id": job_id})
 
         def _serve_web_ui(self):
             body = _WEB_UI_HTML.encode("utf-8")

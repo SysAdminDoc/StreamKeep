@@ -103,7 +103,7 @@ python StreamKeep.py --server --port 8765
 
 The local server binds to localhost by default, validates bearer tokens in constant time, checks Host headers to resist DNS rebinding, and restricts browser companion access to local/chrome-extension origins.
 When LAN access is enabled in Settings or with `server --bind 0.0.0.0`, StreamKeep only accepts Host and Origin values that match this machine's local interface names or IP addresses, and the token is still required for API calls.
-Authenticated `/api/status` responses include retryable failure records, and `/api/failures/retry` plus `/api/failures/discard` update the recovery ledger.
+In server mode, `POST /api/queue` writes a durable SQLite job before returning `202` with a `job_id`. Use `GET /api/jobs/{job_id}` or `/api/status` to observe fetch, download, finalization, and terminal state; `POST /api/jobs/cancel` persists cancellation. Eligible interrupted jobs resume on restart, completed jobs appear in `/api/library`, and `/api/failures/retry` creates an observable retry job with its own durable acknowledgement.
 
 ## Browser Companion
 
