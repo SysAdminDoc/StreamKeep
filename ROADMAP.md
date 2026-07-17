@@ -172,9 +172,3 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: One documented convention (Sentence case, matching the newer dialogs) is applied consistently across every button/label; catalogs regenerated; i18n and GUI-smoke assertions updated.
   Complexity: M
 
-- [ ] P3 — Deterministic first speed sample in the parallel HTTP downloader
-  Why: `parallel_http_download` snapshots `last_bytes = sum(bytes_done)` after the worker threads start. Resumed/pre-complete parts credit their bytes synchronously inside the worker, so depending on scheduling the first ~0.4s speed/ETA sample can spike or read zero. Cosmetic (display only), but nondeterministic.
-  Evidence: `streamkeep/http.py` `parallel_http_download` (thread start loop, then `last_bytes` snapshot and the progress-window speed calc).
-  Touches: baseline accounting for pre-completed parts before threads start.
-  Acceptance: The displayed speed/ETA is stable from the first tick regardless of how many parts resumed; unit coverage over a mixed resumed/fresh part set.
-  Complexity: S

@@ -680,15 +680,30 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                 except Exception:
                     pass
 
+    # Credit already-complete (resumed) parts into the byte total up front so
+    # the first progress sample's speed/ETA baseline is deterministic. Without
+    # this, a resumed part might or might not have credited its bytes by the
+    # time `last_bytes` is snapshotted below (the worker does it on its own
+    # thread), making the first ~0.4s speed reading spike or read zero.
+    if resume_allowed:
+        for i, start, end in ranges:
+            expected = end - start + 1
+            try:
+                if (os.path.exists(part_paths[i])
+                        and os.path.getsize(part_paths[i]) == expected):
+                    bytes_done[i] = expected
+            except OSError:
+                pass
+
     threads = []
     proxy_url = _resolve_proxy(url)
+    last_report = time.time()
+    last_bytes = sum(bytes_done)
     for i, start, end in ranges:
         t = threading.Thread(target=worker, args=(i, start, end), daemon=True)
         t.start()
         threads.append(t)
 
-    last_report = time.time()
-    last_bytes = sum(bytes_done)
     while any(t.is_alive() for t in threads):
         if cancel_check and cancel_check():
             with lock:
