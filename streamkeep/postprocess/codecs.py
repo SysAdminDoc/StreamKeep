@@ -68,7 +68,7 @@ def detect_ffmpeg_encoders():
         for line in r.stdout.splitlines():
             # Format: " V..... libx264              libx264 H.264 ..."
             s = line.strip()
-            if not s or not s[0] in "VAS":
+            if not s or s[0] not in "VAS":
                 continue
             parts = s.split()
             if len(parts) >= 2 and parts[0].startswith("V"):

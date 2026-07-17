@@ -34,6 +34,11 @@ CDN_DOMAINS = [
 
 QUALITIES = ["chunked", "720p60", "720p30", "480p30", "360p30", "160p30"]
 
+# Twitch login names: 3-25 chars, letters/digits/underscore only. Validating
+# up front keeps a malformed channel out of the request paths and avoids
+# firing hundreds of junk HEAD probes (6 domains x 6 qualities x ~13 stamps).
+_VALID_CHANNEL = re.compile(r"^[A-Za-z0-9_]{3,25}$")
+
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -144,6 +149,11 @@ def recover_vod(channel, stream_id, timestamp, log_fn=None):
 
 def recover_channel_vods(channel, year, month, log_fn=None, progress_fn=None):
     """Full recovery pipeline: scrape tracker -> brute-force CDN -> return StreamInfo list."""
+    channel = (channel or "").strip()
+    if not _VALID_CHANNEL.match(channel):
+        if log_fn:
+            log_fn(f"[RECOVER] Invalid Twitch channel name: {channel!r}")
+        return []
     streams = _scrape_twitchtracker(channel, year, month, log_fn)
     if not streams:
         return []

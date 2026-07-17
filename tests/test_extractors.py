@@ -282,6 +282,24 @@ class TestKickExtractorResolve(unittest.TestCase):
         self.assertEqual(cursor, "2")
 
     @patch(f"{_KICK}.curl_json")
+    def test_list_vods_pagination_full_page_with_sourceless(self, mock_curl_json):
+        # A full API page (20 items) where one lacks a source must still page:
+        # the cursor is keyed off the raw page length, not the filtered list.
+        page = [
+            {
+                "session_title": f"VOD {i}",
+                "created_at": "2024-01-01",
+                "source": "" if i == 5 else f"https://cdn.kick.com/vod{i}.m3u8",
+                "duration": 1000,
+            }
+            for i in range(20)
+        ]
+        mock_curl_json.return_value = page
+        vods, cursor = self.ext.list_vods("https://kick.com/streamer")
+        self.assertEqual(len(vods), 19)
+        self.assertEqual(cursor, "2")
+
+    @patch(f"{_KICK}.curl_json")
     def test_list_vods_skips_no_source(self, mock_curl_json):
         mock_curl_json.return_value = [
             {"session_title": "No source", "source": ""},
@@ -805,6 +823,34 @@ class TestSoundCloudExtractorResolve(unittest.TestCase):
         self.assertEqual(len(info.qualities), 1)
         self.assertEqual(info.qualities[0].format_type, "mp4")
         self.assertEqual(info.channel, "artist")
+
+    @patch(f"{_SOUNDCLOUD}.curl_json")
+    @patch(f"{_SOUNDCLOUD}.curl")
+    def test_resolve_null_duration_does_not_crash(self, mock_curl, mock_curl_json):
+        # SoundCloud can return an explicit "duration": null; dict.get(k, 0)
+        # returns None (not the default), so None / 1000 used to raise.
+        SoundCloudExtractor._client_id = "cached_id"
+        mock_curl_json.side_effect = [
+            {
+                "title": "No Duration",
+                "duration": None,
+                "media": {
+                    "transcodings": [
+                        {
+                            "url": "https://api-v2.soundcloud.com/media/abc/stream",
+                            "format": {
+                                "protocol": "progressive",
+                                "mime_type": "audio/mpeg",
+                            },
+                        },
+                    ]
+                },
+            },
+            {"url": "https://cf-media.sndcdn.com/stream.mp3"},
+        ]
+        info = self.ext.resolve("https://soundcloud.com/artist/no-dur")
+        self.assertIsNotNone(info)
+        self.assertEqual(info.total_secs, 0)
 
     @patch(f"{_SOUNDCLOUD}.curl_json")
     @patch(f"{_SOUNDCLOUD}.curl")

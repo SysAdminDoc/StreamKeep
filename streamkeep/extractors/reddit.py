@@ -64,7 +64,7 @@ class RedditExtractor(Extractor):
             url=url,
             title=post.get("title", ""),
             channel=str(post.get("subreddit") or self.extract_channel_id(url) or ""),
-            total_secs=rv.get("duration", 0),
+            total_secs=rv.get("duration") or 0,
         )
         info.duration_str = fmt_duration(info.total_secs)
 

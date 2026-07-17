@@ -201,7 +201,10 @@ class KickExtractor(Extractor):
                 channel=slug,
             ))
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
-        next_cursor = str(page + 1) if len(vods) >= 20 else None
+        # Page on the raw API count, not the source-filtered list: a full page
+        # that contains a source-less VOD would otherwise stop pagination early
+        # and silently drop every later page.
+        next_cursor = str(page + 1) if len(data) >= 20 else None
         return vods, next_cursor
 
     def resolve(self, url, log_fn=None):

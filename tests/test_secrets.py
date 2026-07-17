@@ -51,6 +51,22 @@ class SecretsTests(unittest.TestCase):
         legacy = "b64:" + base64.b64encode(b"secret").decode("ascii")
         self.assertEqual(secrets.unprotect(legacy), "secret")
 
+    def test_unprotect_fails_closed_on_dpapi_decrypt_failure(self):
+        # A dpapi: blob that can't be decrypted (wrong machine/user, or a
+        # non-Windows host) must NOT return the ciphertext string as plaintext.
+        with mock.patch("streamkeep.secrets.sys.platform", "win32"), \
+             mock.patch("streamkeep.secrets._dpapi_unprotect", return_value=None):
+            self.assertEqual(secrets.unprotect("dpapi:garbageblob"), "")
+        with mock.patch("streamkeep.secrets.sys.platform", "linux"):
+            self.assertEqual(secrets.unprotect("dpapi:garbageblob"), "")
+
+    def test_unprotect_fails_closed_on_keyring_miss(self):
+        with mock.patch.object(secrets, "_keyring_get", return_value=None):
+            self.assertEqual(secrets.unprotect("kr:some-ref"), "")
+
+    def test_unprotect_fails_closed_on_bad_b64(self):
+        self.assertEqual(secrets.unprotect("b64:!!!not-base64!!!"), "")
+
     def test_nested_config_secrets_are_references_and_exports_are_empty(self):
         cfg = {
             "theme": "dark",

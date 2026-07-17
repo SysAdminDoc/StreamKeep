@@ -369,21 +369,28 @@ def unprotect(stored):
     if not stored:
         return ""
 
-    if stored.startswith("dpapi:") and sys.platform == "win32":
-        result = _dpapi_unprotect(stored[6:])
-        if result is not None:
-            return result
+    # For recognized secure prefixes, fail closed: if decryption is
+    # unavailable or fails, return "" rather than leaking the stored
+    # ciphertext/reference string as if it were the plaintext secret
+    # (which would then be cached and used as a token/URL).
+    if stored.startswith("dpapi:"):
+        if sys.platform == "win32":
+            result = _dpapi_unprotect(stored[6:])
+            if result is not None:
+                return result
+        return ""
 
     if stored.startswith("kr:"):
         result = _keyring_get(stored[3:])
         if result is not None:
             return result
+        return ""
 
     if stored.startswith("b64:"):
         try:
             return base64.b64decode(stored[4:]).decode("utf-8")
         except Exception:
-            return stored
+            return ""
 
     # Legacy plaintext — return as-is
     return stored
