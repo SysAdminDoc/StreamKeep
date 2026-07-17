@@ -158,13 +158,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
   Complexity: L
 
-- [ ] P3 — Auto-trigger podcast sidecar download at finalize from the originating feed
-  Why: `streamkeep/podcast_sidecars.py` fully discovers/downloads/refreshes transcript+chapter sidecars and is reachable via the `podcast-sidecars` CLI, but the desktop download pipeline discards the feed URL at queue-add (the enclosure becomes the item URL), so sidecars are not fetched automatically next to a GUI-downloaded episode.
-  Evidence: `streamkeep/podcast_sidecars.py::sync_podcast_sidecars`, `ui/tabs/download.py::_queue_add`/`_on_vod_queue_selected` (feed URL not retained), `workers/finalize.py`.
-  Touches: carry the feed URL from the podcast VOD listing through `_queue_add` → queue item → finalize task; a finalize hook calling `sync_podcast_sidecars`; queue-state serialization tolerance for the new key.
-  Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
-  Complexity: S-M
-
 - [ ] P3 — Normalize button/label capitalization to one house style
   Why: Primary buttons and section labels mix Title Case (e.g. "Clear History", "Add Channel", "Load More VODs", "Download Selected") with Sentence case (e.g. "Recycle selected", "Rename selected", "Save profile", "Export Clip"). The Monitor and Download-VOD surfaces are almost entirely Title Case while dialogs are Sentence case, so the product reads as several design systems.
   Evidence: `streamkeep/ui/tabs/monitor.py`, `download.py`, `history.py`, `storage.py`, `settings*.py`, and the dialog modules; every literal is i18n-extracted, so a sweep must regenerate `streamkeep_en.ts`/`_es.ts` and recompile the `.qm`.

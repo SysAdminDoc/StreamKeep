@@ -240,7 +240,8 @@ class DownloadSingleMixin:
 
     # ── Fetch / resolve ─────────────────────────────────────────
 
-    def _on_fetch(self, vod_source=None, vod_platform=None, vod_title=None, vod_channel=None):
+    def _on_fetch(self, vod_source=None, vod_platform=None, vod_title=None,
+                 vod_channel=None, feed_url=None):
         url = self.url_input.text().strip()
         if not url:
             return
@@ -250,6 +251,7 @@ class DownloadSingleMixin:
             "vod_platform": vod_platform or "",
             "vod_title": vod_title or "",
             "vod_channel": vod_channel or "",
+            "feed_url": feed_url or "",
         }
         # Track recent URLs for the autocomplete dropdown
         if not vod_source:
@@ -317,6 +319,13 @@ class DownloadSingleMixin:
         if info is None:
             self._on_fetch_error("Extractor returned no stream info")
             return
+        # Carry the originating podcast feed (from the VOD listing) onto the
+        # resolved info so finalize can fetch transcript/chapter sidecars.
+        if not getattr(info, "feed_url", ""):
+            request = getattr(self, "_last_fetch_request", {}) or {}
+            feed_url = request.get("feed_url", "")
+            if feed_url:
+                info.feed_url = feed_url
         self.stream_info = info
         _populate_adv_subtitles(self, info)
         self.fetch_btn.setEnabled(True)

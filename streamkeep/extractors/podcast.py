@@ -126,6 +126,7 @@ class PodcastRSSExtractor(Extractor):
                 title=title, date=date, source=enc_url,
                 is_live=False, viewers=0, duration=dur_str,
                 duration_ms=0, platform="Podcast", channel="",
+                feed_url=url,
             ))
 
         self._log(log_fn, f"Found {len(vods)} episode(s)")

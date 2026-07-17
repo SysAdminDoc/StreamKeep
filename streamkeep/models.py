@@ -126,6 +126,10 @@ class StreamInfo:
     thumbnail_url: str = ""
     chapters: list[dict[str, str | float]] = field(default_factory=list)  # list of {title, start, end}
     subtitles: list[SubtitleInfo] = field(default_factory=list)
+    # Originating podcast RSS feed, when this download came from a browsed
+    # feed. Lets finalize auto-fetch transcript/chapter sidecars for the
+    # episode (the enclosure URL alone doesn't reference its feed).
+    feed_url: str = ""
 
 
 @dataclass
@@ -139,6 +143,7 @@ class VODInfo:
     duration_ms: int = 0
     platform: str = ""
     channel: str = ""
+    feed_url: str = ""  # originating RSS feed (podcast episodes)
 
 
 @dataclass

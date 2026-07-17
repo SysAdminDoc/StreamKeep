@@ -305,6 +305,7 @@ class DownloadQueueMixin:
         vod_platform = str(item.get("vod_platform", "") or "").strip()
         vod_title = str(item.get("vod_title", "") or "").strip()
         vod_channel = str(item.get("vod_channel", "") or "").strip()
+        feed_url = str(item.get("feed_url", "") or "").strip()
         if not vod_source and url.isdigit() and platform.lower() == "twitch":
             # Older queue entries stored Twitch VOD IDs as plain URLs, which
             # breaks auto-start because extractor detection expects an actual URL.
@@ -326,6 +327,7 @@ class DownloadQueueMixin:
             "vod_platform": vod_platform,
             "vod_title": vod_title,
             "vod_channel": vod_channel,
+            "feed_url": feed_url,
             "download_archive": str(
                 item.get("download_archive", "") or ""
             ),
@@ -363,6 +365,7 @@ class DownloadQueueMixin:
         vod_platform="",
         vod_title="",
         vod_channel="",
+        feed_url="",
         download_archive="",
         break_on_existing=False,
         ytdlp_template_name="",
@@ -400,6 +403,7 @@ class DownloadQueueMixin:
             "vod_platform": vod_platform,
             "vod_title": vod_title or title,
             "vod_channel": vod_channel,
+            "feed_url": feed_url,
             "download_archive": download_archive,
             "break_on_existing": break_on_existing,
             "ytdlp_template_name": ytdlp_template_name,
@@ -543,6 +547,10 @@ class DownloadQueueMixin:
             self._log(f"[QUEUE] Fetch failed: {item.get('title', '')[:60]}")
             self._advance_queue()
             return
+        # Carry the originating podcast feed from the queue item onto the
+        # resolved info so finalize can fetch this episode's sidecars.
+        if not getattr(info, "feed_url", "") and item.get("feed_url"):
+            info.feed_url = item["feed_url"]
         # Pick the best quality
         q_data = None
         if info.qualities:

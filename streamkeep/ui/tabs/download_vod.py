@@ -163,6 +163,7 @@ class DownloadVodMixin:
                 vod_platform=vod.platform,
                 vod_title=vod.title,
                 vod_channel=vod.channel,
+                feed_url=getattr(vod, "feed_url", ""),
             )
             if ok:
                 added += 1
@@ -184,6 +185,7 @@ class DownloadVodMixin:
                     vod_platform=vod.platform,
                     vod_title=vod.title,
                     vod_channel=vod.channel,
+                    feed_url=getattr(vod, "feed_url", ""),
                 )
                 return
         self._log("No VOD checked.")
@@ -330,6 +332,10 @@ class DownloadVodMixin:
         if not self._batch_active or self._batch_idx >= self._batch_total:
             return
         vod = self._batch_vods[self._batch_idx]
+        # Carry the originating podcast feed onto the resolved info so finalize
+        # can fetch this episode's transcript/chapter sidecars.
+        if info is not None and not getattr(info, "feed_url", "") and getattr(vod, "feed_url", ""):
+            info.feed_url = vod.feed_url
 
         # Pick quality (prefer 1080p/source)
         playlist_url = None

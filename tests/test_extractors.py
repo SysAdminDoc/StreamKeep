@@ -1277,6 +1277,9 @@ class TestPodcastRSSExtractorResolve(unittest.TestCase):
         self.assertEqual(vods[1].title, "Episode 2 & More")
         self.assertEqual(vods[1].duration, "45m 30s")
         self.assertEqual(vods[0].platform, "Podcast")
+        # The originating feed is retained so finalize can fetch sidecars.
+        self.assertEqual(vods[0].feed_url, "https://example.com/podcast.rss")
+        self.assertEqual(vods[1].feed_url, "https://example.com/podcast.rss")
         self.assertIsNone(cursor)
 
     @patch(f"{_PODCAST}.curl")

@@ -69,6 +69,13 @@ class FinalizeWorker(QThread):
             return ""
         return fmt_size(total) if total > 0 else ""
 
+    def _podcast_feed_url(self, task, info):
+        """Return the originating RSS feed for a podcast episode, or ''."""
+        platform = str(getattr(info, "platform", "") or task.get("platform", ""))
+        if platform.lower() != "podcast":
+            return ""
+        return str(task.get("feed_url", "") or getattr(info, "feed_url", "") or "")
+
     def _planned_steps(self, task, info, snapshot):
         steps = [("Saving metadata", "metadata")]
         if task.get("write_nfo"):
@@ -77,11 +84,44 @@ class FinalizeWorker(QThread):
             steps.append(("Exporting chapters", "chapters"))
         if task.get("download_chat") and self._chat_vod_id(info):
             steps.append(("Downloading chat", "chat"))
+        if self._podcast_feed_url(task, info):
+            steps.append(("Fetching podcast sidecars", "sidecars"))
         if self._has_postprocess_work(snapshot):
             steps.append(("Running post-processing", "postprocess"))
         if task.get("record_manifest", True):
             steps.append(("Capturing integrity manifest", "manifest"))
         return steps
+
+    def _run_podcast_sidecars(self, task, info, out_dir, file_base):
+        """Fetch transcript/chapter sidecars for a podcast episode from its
+        originating feed, writing them next to the recording. Best-effort:
+        a missing feed, network error, or empty result is non-fatal."""
+        feed_url = self._podcast_feed_url(task, info)
+        enclosure = str(getattr(info, "url", "") or "")
+        if not feed_url or not enclosure or not out_dir:
+            return
+        try:
+            from ..image_fetch import fetch_url_bytes
+            from ..podcast_sidecars import sync_podcast_sidecars
+            feed_bytes = fetch_url_bytes(
+                feed_url, max_bytes=16 * 1024 * 1024,
+                accept="application/rss+xml, application/xml, text/xml, */*",
+            )
+        except Exception as e:
+            self.log.emit(f"[SIDECARS] Could not fetch feed: {e}")
+            return
+        try:
+            manifest = sync_podcast_sidecars(
+                feed_bytes.decode("utf-8", errors="replace"),
+                enclosure, out_dir, file_base or "episode",
+                log_fn=self.log.emit,
+            )
+        except Exception as e:
+            self.log.emit(f"[SIDECARS] Sidecar sync failed: {e}")
+            return
+        if manifest:
+            kinds = ", ".join(sorted({entry.get("kind", "?") for entry in manifest}))
+            self.log.emit(f"[SIDECARS] Wrote {len(manifest)} sidecar(s): {kinds}")
 
     def _emit_progress(self, label, index, total):
         self.progress.emit(label, index, total)
@@ -164,6 +204,10 @@ class FinalizeWorker(QThread):
                         ingest_replay_dir(out_dir, log_fn=self.log.emit)
                     except Exception as e:
                         self.log.emit(f"[CHAT] Replay normalization skipped: {e}")
+                if self._podcast_feed_url(task, info) and not self._interrupted():
+                    step_no += 1
+                    self._emit_progress("Fetching podcast sidecars", step_no, total_steps)
+                    self._run_podcast_sidecars(task, info, out_dir, file_base)
                 if self._has_postprocess_work(snapshot) and not self._interrupted():
                     step_no += 1
                     self._emit_progress("Running post-processing", step_no, total_steps)

@@ -241,6 +241,7 @@ class DownloadFinalizeMixin:
             "history_url": url,
             "info": info_copy,
             "file_base": file_base,
+            "feed_url": (getattr(info_copy, "feed_url", "") if info_copy else ""),
             "write_nfo": bool(self._write_nfo and info_copy),
             "download_chat": bool(TwitchExtractor.download_chat_enabled and info_copy),
             "postprocess_snapshot": self._postprocess_snapshot() if info_copy else {},
