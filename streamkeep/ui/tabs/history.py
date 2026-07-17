@@ -174,7 +174,12 @@ def build_history_tab(win):
     # Enable hover preview (F46)
     win.history_table.setMouseTracking(True)
     win.history_table.cellEntered.connect(win._on_history_cell_hover)
-    style_table(win.history_table, 72)
+    style_table(
+        win.history_table,
+        72,
+        accessible_name="Download history",
+        accessible_description="Completed downloads; use arrow keys to navigate rows",
+    )
     card_lay.addWidget(win.history_table)
 
     lay.addWidget(card, 1)

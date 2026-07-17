@@ -26,10 +26,19 @@ class _SparklineWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data = []
+        self.setAccessibleName("Archive size trend")
+        self.setAccessibleDescription("No storage trend data")
 
     def set_data(self, values):
         """*values* is a list of numeric values (bytes)."""
         self._data = list(values)[-90:]
+        if self._data:
+            self.setAccessibleDescription(
+                f"{len(self._data)} daily samples; minimum {fmt_size(min(self._data))}; "
+                f"maximum {fmt_size(max(self._data))}; latest {fmt_size(self._data[-1])}"
+            )
+        else:
+            self.setAccessibleDescription("No storage trend data")
         self.update()
 
     def paintEvent(self, event):
@@ -239,7 +248,12 @@ def build_storage_tab(win):
     win.storage_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.storage_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.storage_table.itemSelectionChanged.connect(win._on_storage_selection_changed)
-    style_table(win.storage_table, 72)
+    style_table(
+        win.storage_table,
+        72,
+        accessible_name="Archive storage",
+        accessible_description="Recording folders; use Space to select rows",
+    )
     card_lay.addWidget(win.storage_table)
 
     win.storage_empty_label = QLabel(

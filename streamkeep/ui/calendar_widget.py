@@ -85,6 +85,11 @@ class _GridCanvas(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(400)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Weekly stream schedule")
+        self.setAccessibleDescription(
+            "No scheduled streams; use arrow keys to navigate schedule blocks"
+        )
         self._segments = []   # list of (day_idx, hour_frac, seg_dict, color)
         self._channel_colors = {}
         self._hovered_idx = -1
@@ -106,6 +111,12 @@ class _GridCanvas(QWidget):
                 self._channel_colors[channel] = colors[idx]
             color = self._channel_colors[channel]
             self._segments.append((day_idx, hour_frac, seg, color))
+        if self._segments and self._selected_idx < 0:
+            self._selected_idx = 0
+        summary = f"{len(self._segments)} scheduled stream blocks"
+        if self._segments and self._selected_idx >= 0:
+            summary += f"; selected {self._tooltip_for_segment(self._segments[self._selected_idx][2])}"
+        self.setAccessibleDescription(summary)
         self.update()
 
     def _grid_metrics(self):
@@ -341,10 +352,36 @@ class _GridCanvas(QWidget):
         idx = self._segment_index_at(event.position())
         if idx >= 0:
             self._selected_idx = idx
+            self.setAccessibleDescription(
+                f"Selected {self._tooltip_for_segment(self._segments[idx][2])}"
+            )
             self.update()
             self.block_clicked.emit(self._segments[idx][2])
             return
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if not self._segments:
+            return super().keyPressEvent(event)
+        key = event.key()
+        if key in (Qt.Key.Key_Left, Qt.Key.Key_Up):
+            self._selected_idx = max(0, self._selected_idx - 1)
+        elif key in (Qt.Key.Key_Right, Qt.Key.Key_Down):
+            self._selected_idx = min(len(self._segments) - 1, self._selected_idx + 1)
+        elif key == Qt.Key.Key_Home:
+            self._selected_idx = 0
+        elif key == Qt.Key.Key_End:
+            self._selected_idx = len(self._segments) - 1
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.block_clicked.emit(self._segments[self._selected_idx][2])
+            event.accept()
+            return
+        else:
+            return super().keyPressEvent(event)
+        segment = self._segments[self._selected_idx][2]
+        self.setAccessibleDescription(f"Selected {self._tooltip_for_segment(segment)}")
+        self.update()
+        event.accept()
 
     def mouseMoveEvent(self, event):
         self._update_hover(event.position(), event.globalPosition().toPoint())

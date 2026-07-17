@@ -83,7 +83,12 @@ class NotificationLogDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 160)
         self.table.setColumnWidth(1, 86)
-        style_table(self.table, row_height=38)
+        style_table(
+            self.table,
+            row_height=38,
+            accessible_name="Notifications",
+            accessible_description="Recent StreamKeep notifications",
+        )
         results_content.addWidget(self.table)
 
         self.empty_card, self.empty_title, self.empty_body = make_empty_state(

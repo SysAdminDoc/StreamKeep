@@ -71,11 +71,14 @@ NATIVE_PROXY = ""
 # working until a future pass switches each call site.
 from .widgets import (
     TAB_STYLE,
+    configure_accessibility,
     make_metric_card,
     make_field_block,
+    set_accessible,
     wrap_scroll_page,
     style_table,
     set_metric,
+    update_accessible_status,
 )
 from .tabs.download import build_download_tab, DownloadTabMixin
 from .tabs.history import build_history_tab, HistoryTabMixin
@@ -275,10 +278,13 @@ class StreamKeep(
 
     def _setup_shortcuts(self):
         """Register global keyboard shortcuts for power-user operation."""
-        # Tab switching: Ctrl+1..5
-        for i in range(min(5, self._stack.count())):
+        # Tab switching: Ctrl+1..6. Keyboard switches move focus into the
+        # selected workflow; pointer-driven switches preserve pointer focus.
+        for i in range(self._stack.count()):
             sc = QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self)
-            sc.activated.connect(lambda idx=i: self._switch_tab(idx))
+            sc.activated.connect(
+                lambda idx=i: self._switch_tab(idx, focus_page=True)
+            )
         # Fetch / download: Enter triggers fetch when URL input has focus,
         # otherwise starts download if the button is enabled.
         sc_enter = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
@@ -289,6 +295,8 @@ class StreamKeep(
         # Focus search on History: Ctrl+F
         sc_find = QShortcut(QKeySequence("Ctrl+F"), self)
         sc_find.activated.connect(self._shortcut_focus_search)
+        sc_url = QShortcut(QKeySequence("Ctrl+L"), self)
+        sc_url.activated.connect(self._shortcut_focus_url)
         # Delete selected items (tab-aware): Delete key
         sc_del = QShortcut(QKeySequence(Qt.Key.Key_Delete), self)
         sc_del.activated.connect(self._shortcut_delete_selected)
@@ -310,6 +318,8 @@ class StreamKeep(
             self.stop_btn.setToolTip("Stop  (Esc)")
         if hasattr(self, "history_search"):
             self.history_search.setToolTip("Search history  (Ctrl+F)")
+        if hasattr(self, "url_input"):
+            self.url_input.setToolTip("Source URL  (Ctrl+L)")
 
     def _shortcut_enter(self):
         """Enter key: fetch if URL input focused/non-empty, else start download."""
@@ -330,6 +340,12 @@ class StreamKeep(
         if hasattr(self, "history_search"):
             self.history_search.setFocus()
             self.history_search.selectAll()
+
+    def _shortcut_focus_url(self):
+        """Ctrl+L: move directly to the primary URL workflow."""
+        self._switch_tab(0)
+        self.url_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.url_input.selectAll()
 
     def _shortcut_delete_selected(self):
         """Delete key: remove selected items from the active tab's table."""
@@ -1337,6 +1353,13 @@ class StreamKeep(
         )
         self.status_label.setText(message)
         self.status_label.setToolTip(message)
+        set_accessible(self.status_pill, f"Application state: {label}")
+        update_accessible_status(
+            self.status_label,
+            message,
+            tone=tone,
+            label="Application status",
+        )
         self._refresh_shell_overview()
 
     def _refresh_shell_overview(self):
@@ -1409,6 +1432,11 @@ class StreamKeep(
         self._global_search.setPlaceholderText("Search downloads, URLs, channels, or podcasts…")
         self._global_search.setClearButtonEnabled(True)
         self._global_search.setObjectName("globalSearch")
+        set_accessible(
+            self._global_search,
+            "Search StreamKeep",
+            "Search downloads, URLs, monitored channels, and podcasts",
+        )
         self._global_search.setMinimumHeight(42)
         self._global_search.setMaximumWidth(760)
         self._global_search_timer = QTimer(self)
@@ -1453,6 +1481,13 @@ class StreamKeep(
         self._tab_names = ["Download", "Monitor", "History", "Storage", "Analytics", "Settings"]
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setChecked(i == 0)
+            set_accessible(
+                btn,
+                f"{name} tab",
+                f"Switch to {name}; keyboard shortcut Ctrl+{i + 1}",
+            )
             btn.setObjectName("tabActive" if i == 0 else "tab")
             btn.setStyleSheet(TAB_STYLE())
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
@@ -1489,6 +1524,7 @@ class StreamKeep(
         footer_lay.setSpacing(10)
 
         self.status_pill = QLabel("Standby")
+        set_accessible(self.status_pill, "Application state: Standby")
         footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignTop)
 
         self.status_label = QLabel("")
@@ -1497,6 +1533,11 @@ class StreamKeep(
         footer_lay.addWidget(self.status_label, 1)
 
         self.overall_progress = QProgressBar()
+        set_accessible(
+            self.overall_progress,
+            "Current operation progress",
+            "Progress for the active download or processing operation",
+        )
         self.overall_progress.setFixedWidth(220)
         self.overall_progress.setFixedHeight(10)
         self.overall_progress.setVisible(False)
@@ -1524,14 +1565,47 @@ class StreamKeep(
         footer_lay.addWidget(self.shell_snapshot_meta)
         root.addWidget(footer)
 
+        configure_accessibility(
+            self,
+            owner=self,
+            page_name="StreamKeep main window",
+            names={
+                "url_input": ("Source URL", "Paste a stream, VOD, podcast, or media URL"),
+                "table": (
+                    "Available stream segments",
+                    "Use arrow keys to navigate and Enter to toggle download segments",
+                ),
+                "queue_table": ("Download queue", "Queued and active download jobs"),
+                "monitor_table": ("Monitored channels", "Channels and their current live state"),
+                "history_table": ("Download history", "Completed downloads; use arrow keys to navigate rows"),
+                "storage_table": ("Archive storage", "Recording folders; use Space to select rows"),
+            },
+        )
         self._set_status("Paste a URL to begin.", "idle")
         QTimer.singleShot(0, lambda: self._download_scroll.verticalScrollBar().setValue(0))
 
-    def _switch_tab(self, idx):
+    def _switch_tab(self, idx, *, focus_page=False):
         self._stack.setCurrentIndex(idx)
         for i, btn in enumerate(self._tab_btns):
             btn.setObjectName("tabActive" if i == idx else "tab")
+            btn.setChecked(i == idx)
+            btn.setAccessibleDescription(
+                f"{'Current tab' if i == idx else 'Switch to ' + self._tab_names[i]}; "
+                f"keyboard shortcut Ctrl+{i + 1}"
+            )
             btn.setStyleSheet(TAB_STYLE())
+        if focus_page:
+            targets = (
+                "url_input",
+                "monitor_url_input",
+                "history_search",
+                "storage_table",
+                "analytics_range_combo",
+                "theme_combo",
+            )
+            target = getattr(self, targets[idx], None) if idx < len(targets) else None
+            if target is not None and target.isEnabled() and not target.isHidden():
+                target.setFocus(Qt.FocusReason.ShortcutFocusReason)
         # Auto-scan Storage the first time the user opens the tab in a
         # session, and on every subsequent visit (cheap on small archives,
         # user can stop by switching away). Deferred so the tab paints

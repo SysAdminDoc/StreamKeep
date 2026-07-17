@@ -34,9 +34,12 @@ from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_durati
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
 from .widgets import (
+    bind_label,
+    configure_accessibility,
     make_dialog_hero,
     make_dialog_section,
     make_status_banner,
+    set_accessible,
     update_status_banner,
 )
 
@@ -108,11 +111,18 @@ class ScrubberView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFixedHeight(THUMB_H + 30)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        set_accessible(
+            self,
+            "Clip timeline handles",
+            "Press Space to choose the start or end handle, then use arrow keys to adjust it",
+        )
         self.setStyleSheet("background: transparent;")
         self._thumb_items = []
         self._start_ratio = 0.0
         self._end_ratio = 1.0
         self._drag_target = None   # "start" | "end" | None
+        self._keyboard_target = "start"
         self._strip_width = THUMB_COUNT * THUMB_W
         self._build_strip()
 
@@ -233,6 +243,39 @@ class ScrubberView(QGraphicsView):
         self._end_handle.setRect(ex - 2, -2, 4, THUMB_H + 4)
         self._dim_left.setRect(0, 0, max(0, sx), THUMB_H)
         self._dim_right.setRect(ex, 0, max(0, self._strip_width - ex), THUMB_H)
+        self.setAccessibleDescription(
+            f"Start {self._start_ratio * 100:.1f} percent; "
+            f"end {self._end_ratio * 100:.1f} percent; "
+            f"keyboard controls {self._keyboard_target} handle"
+        )
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self._keyboard_target = (
+                "end" if self._keyboard_target == "start" else "start"
+            )
+            self._refresh_handles()
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            step = 0.001 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.01
+            delta = -step if event.key() == Qt.Key.Key_Left else step
+            if self._keyboard_target == "start":
+                self.set_handles(
+                    max(0.0, min(self._end_ratio, self._start_ratio + delta)),
+                    self._end_ratio,
+                )
+                ratio = self._start_ratio
+            else:
+                self.set_handles(
+                    self._start_ratio,
+                    min(1.0, max(self._start_ratio, self._end_ratio + delta)),
+                )
+                ratio = self._end_ratio
+            self.preview_requested.emit(ratio)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def resizeEvent(self, event):
         # Scale the scene so the strip fills the view width exactly.
@@ -423,6 +466,13 @@ class WaveformWidget(QWidget):
         self._end_ratio = 1.0
         self.setFixedHeight(WAVE_H)
         self.setMinimumWidth(200)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._seek_ratio = 0.0
+        set_accessible(
+            self,
+            "Audio waveform preview",
+            "Use Left and Right arrows to move the preview position",
+        )
 
     def set_peaks(self, peaks):
         self._peaks = peaks
@@ -487,6 +537,19 @@ class WaveformWidget(QWidget):
         if event.buttons() & Qt.MouseButton.LeftButton and self.width() > 0:
             ratio = max(0.0, min(1.0, event.pos().x() / self.width()))
             self.seek_requested.emit(ratio)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            step = 0.01 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.05
+            delta = -step if event.key() == Qt.Key.Key_Left else step
+            self._seek_ratio = max(0.0, min(1.0, self._seek_ratio + delta))
+            self.setAccessibleDescription(
+                f"Preview position {self._seek_ratio * 100:.0f} percent"
+            )
+            self.seek_requested.emit(self._seek_ratio)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class ClipDialog(QDialog):
@@ -619,15 +682,19 @@ class ClipDialog(QDialog):
         range_row.setSpacing(10)
         in_col = QVBoxLayout()
         in_col.setSpacing(4)
-        in_col.addWidget(QLabel("Start (HH:MM:SS)"))
+        start_label = QLabel("Start (HH:MM:SS)")
+        in_col.addWidget(start_label)
         self.start_input = QLineEdit("00:00:00.000")
+        bind_label(start_label, self.start_input, name="Clip start time")
         self.start_input.editingFinished.connect(self._on_text_changed)
         in_col.addWidget(self.start_input)
         range_row.addLayout(in_col, 1)
         out_col = QVBoxLayout()
         out_col.setSpacing(4)
-        out_col.addWidget(QLabel("End (HH:MM:SS)"))
+        end_label = QLabel("End (HH:MM:SS)")
+        out_col.addWidget(end_label)
         self.end_input = QLineEdit(format_hhmmss(default_end))
+        bind_label(end_label, self.end_input, name="Clip end time")
         self.end_input.editingFinished.connect(self._on_text_changed)
         out_col.addWidget(self.end_input)
         range_row.addLayout(out_col, 1)
@@ -757,6 +824,19 @@ class ClipDialog(QDialog):
         self.trim_btn.clicked.connect(self._on_trim)
         btn_row.addWidget(self.trim_btn)
         root.addLayout(btn_row)
+
+        configure_accessibility(
+            self,
+            owner=self,
+            page_name="Clip studio dialog",
+            names={
+                "range_list": ("Clip ranges", "Ranges included in the exported clip"),
+                "social_combo": "Export platform preset",
+                "out_input": "Clip output path",
+                "progress": "Clip export progress",
+                "log_view": "Clip export log",
+            },
+        )
 
         if not self._duration:
             self._set_status(

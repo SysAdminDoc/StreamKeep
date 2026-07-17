@@ -232,7 +232,12 @@ def build_monitor_tab(win):
     win.monitor_table.verticalHeader().setVisible(False)
     win.monitor_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.monitor_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    style_table(win.monitor_table, 44)
+    style_table(
+        win.monitor_table,
+        44,
+        accessible_name="Monitored channels",
+        accessible_description="Channels and their current live and recording state",
+    )
     table_lay.addWidget(win.monitor_table)
 
     lay.addWidget(table_card, 1)
@@ -813,12 +818,17 @@ class MonitorTabMixin:
             cell_lay.setContentsMargins(2, 2, 2, 2)
             cell_lay.setSpacing(4)
             edit_btn = QPushButton("Edit")
+            edit_btn.setAccessibleName(f"Edit monitored channel {e.channel_id or e.url}")
             edit_btn.setObjectName("ghost")
             edit_btn.setFixedHeight(28)
             edit_btn.setToolTip("Edit per-channel profile: output folder, quality, schedule, retention.")
             edit_btn.clicked.connect(lambda checked, idx=i: self._on_monitor_edit(idx))
             cell_lay.addWidget(edit_btn)
             rm_btn = QPushButton("Stop" if e.is_recording else "Remove")
+            rm_btn.setAccessibleName(
+                f"{'Stop and remove' if e.is_recording else 'Remove'} monitored channel "
+                f"{e.channel_id or e.url}"
+            )
             rm_btn.setObjectName("ghost")
             rm_btn.setFixedHeight(28)
             if e.is_recording:

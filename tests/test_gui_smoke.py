@@ -1,7 +1,10 @@
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QLineEdit, QSplitter
+from PyQt6.QtWidgets import (
+    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFrame,
+    QLineEdit, QPlainTextEdit, QSlider, QSplitter, QTextEdit,
+)
 
 from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, QualityInfo
 
@@ -115,6 +118,34 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             )
             assert window._stack.count() == len(window._tab_names) == 6
             assert [button.text() for button in window._tab_btns] == window._tab_names
+            assert all(button.isCheckable() for button in window._tab_btns)
+            assert [button.isChecked() for button in window._tab_btns] == [
+                True, False, False, False, False, False,
+            ]
+            assert window._global_search.accessibleName() == "Search StreamKeep"
+            assert window.url_input.accessibleName() == "Source URL"
+            for table, expected_name in (
+                (window.table, "Available stream segments"),
+                (window.queue_table, "Download queue"),
+                (window.monitor_table, "Monitored channels"),
+                (window.history_table, "Download history"),
+                (window.storage_table, "Archive storage"),
+            ):
+                assert table.focusPolicy() == Qt.FocusPolicy.StrongFocus
+                assert table.accessibleName() == expected_name
+                assert table.property("accessibilityConfigured") is True
+            interactive_types = (
+                QAbstractButton, QAbstractItemView, QAbstractSpinBox,
+                QComboBox, QLineEdit, QPlainTextEdit, QSlider, QTextEdit,
+            )
+            unnamed = []
+            for attr_name, control in vars(window).items():
+                if not isinstance(control, interactive_types):
+                    continue
+                if control.accessibleName().strip():
+                    continue
+                unnamed.append(f"{attr_name}:{type(control).__name__}")
+            assert unnamed == []
 
             # The compact visual system keeps navigation and the primary
             # capture controls above the queue/activity working surface.
@@ -167,7 +198,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert [check.isChecked() for check, _track in window._track_checks] == [
                 True, False, True,
             ]
-            window._track_checks[1][0].setChecked(True)
+            window.track_table.cellActivated.emit(1, 1)
             assert [check.isChecked() for check, track in window._track_checks
                     if track.kind == "video"] == [False, True]
             assert "border-radius: 999px" not in window.status_pill.styleSheet()
@@ -226,6 +257,22 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 qt_application.processEvents()
                 assert window._stack.currentIndex() == index
                 assert window._tab_btns[index].objectName() == "tabActive", name
+                assert window._tab_btns[index].isChecked(), name
+                assert sum(button.isChecked() for button in window._tab_btns) == 1
+
+            previous_revision = window.status_label.property(
+                "accessibleStatusRevision"
+            )
+            window._set_status("The download could not be started.", "error")
+            assert window.status_label.accessibleName() == (
+                "Application status: The download could not be started."
+            )
+            assert window.status_label.accessibleDescription() == (
+                "error status update"
+            )
+            assert window.status_label.property("accessibleStatusRevision") > (
+                previous_revision
+            )
 
             assert install_translator("en", qt_application) is True
             assert "es" in available_languages()
@@ -285,6 +332,17 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert monitor_dialog.ytdlp_template_combo.currentData() == (
                 "Archive headers"
             )
+            from streamkeep.ui.recover_dialog import RecoverDialog
+            import streamkeep.ui.clip_dialog as clip_dialog
+            recover_dialog = RecoverDialog(window)
+            with mock.patch.object(clip_dialog, "probe_duration", return_value=0.0):
+                trim_dialog = clip_dialog.ClipDialog(window, str(recording_media))
+            assert recover_dialog.channel_input.accessibleName() == "Twitch channel"
+            assert recover_dialog.table.accessibleName() == "Recoverable VODs"
+            assert recover_dialog.channel_input.focusPolicy() != Qt.FocusPolicy.NoFocus
+            assert trim_dialog.start_input.accessibleName() == "Clip start time"
+            assert trim_dialog.start_input.focusPolicy() != Qt.FocusPolicy.NoFocus
+            assert trim_dialog.scrubber.accessibleName() == "Clip timeline handles"
             dialogs = [
                 NotificationLogDialog(window, window._notifications),
                 monitor_dialog,
@@ -300,6 +358,8 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                     ],
                 ),
                 OnboardingWizard(window, config=config),
+                recover_dialog,
+                trim_dialog,
             ]
             for dialog in dialogs:
                 assert dialog.windowTitle()

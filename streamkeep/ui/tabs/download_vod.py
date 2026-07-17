@@ -76,6 +76,7 @@ class DownloadVodMixin:
 
         for i, v in enumerate(vod_list):
             cb = QCheckBox()
+            cb.setAccessibleName(f"Select VOD {i + 1}: {v.title}")
             cb.stateChanged.connect(lambda _state, row=i: self._on_vod_cb_toggled(row))
             cb_widget = QWidget()
             cb_lay = QHBoxLayout(cb_widget)
@@ -225,6 +226,7 @@ class DownloadVodMixin:
         self.vod_table.setRowCount(len(self._vod_list))
         for i, v in enumerate(new_vods, start=start_row):
             cb = QCheckBox()
+            cb.setAccessibleName(f"Select VOD {i + 1}: {v.title}")
             cb.stateChanged.connect(lambda _state, row=i: self._on_vod_cb_toggled(row))
             cb_widget = QWidget()
             cb_lay = QHBoxLayout(cb_widget)

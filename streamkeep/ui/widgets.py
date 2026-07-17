@@ -10,8 +10,9 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QTextEdit, QVBoxLayout,
+    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QDialog, QFrame,
+    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..theme import CAT
@@ -52,6 +53,134 @@ class _BadgeLookup(dict):
 PLATFORM_BADGES = _BadgeLookup()
 
 
+def _accessible_text(value):
+    """Return concise plain text suitable for an accessible widget name."""
+    text = str(value or "").replace("&", "").replace("…", "").strip()
+    return " ".join(text.rstrip(":").split())
+
+
+def _humanize_widget_name(value):
+    """Turn a Python/object name into a stable user-facing control name."""
+    text = str(value or "").strip("_").replace("_", " ")
+    for suffix in (" input", " combo", " spin", " check", " cb", " btn"):
+        if text.endswith(suffix):
+            text = text[:-len(suffix)]
+            break
+    words = []
+    acronyms = {"url": "URL", "vod": "VOD", "hls": "HLS", "iv": "IV"}
+    for word in text.split():
+        words.append(acronyms.get(word.lower(), word.capitalize()))
+    return " ".join(words)
+
+
+def set_accessible(widget, name, description=""):
+    """Set an explicit accessible name and optional description."""
+    clean_name = _accessible_text(name)
+    clean_description = _accessible_text(description)
+    if clean_name:
+        widget.setAccessibleName(clean_name)
+    if clean_description:
+        widget.setAccessibleDescription(clean_description)
+    return widget
+
+
+def bind_label(label, control, *, name="", description=""):
+    """Associate a visible label with its keyboard-focusable control."""
+    label.setBuddy(control)
+    return set_accessible(
+        control,
+        name or label.text(),
+        description or label.toolTip(),
+    )
+
+
+def configure_accessibility(root, *, owner=None, page_name="", names=None):
+    """Apply explicit names/descriptions to a widget subtree.
+
+    ``owner`` lets builders reuse their meaningful ``win.<control>`` attribute
+    names rather than duplicating labels. ``names`` may override those names by
+    attribute name. Native Qt roles and states remain intact.
+    """
+    names = names or {}
+    if page_name:
+        set_accessible(root, page_name)
+
+    attributes = {}
+    if owner is not None:
+        for attr_name, value in vars(owner).items():
+            if isinstance(value, QWidget) and (value is root or root.isAncestorOf(value)):
+                attributes[id(value)] = attr_name
+
+    widgets = [root, *root.findChildren(QWidget)]
+    for widget in widgets:
+        attr_name = attributes.get(id(widget), "")
+        explicit = names.get(attr_name, "")
+        if isinstance(explicit, tuple):
+            explicit_name, explicit_description = explicit
+        else:
+            explicit_name, explicit_description = explicit, ""
+
+        candidate = explicit_name or widget.accessibleName()
+        if not candidate and isinstance(widget, QAbstractButton):
+            candidate = widget.text() or widget.toolTip()
+        if not candidate and isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            candidate = widget.placeholderText()
+        if not candidate and attr_name:
+            candidate = _humanize_widget_name(attr_name)
+        if not candidate and widget.objectName():
+            candidate = _humanize_widget_name(widget.objectName())
+
+        is_interactive = isinstance(
+            widget,
+            (
+                QAbstractButton,
+                QAbstractItemView,
+                QComboBox,
+                QLineEdit,
+                QPlainTextEdit,
+                QProgressBar,
+                QSlider,
+                QAbstractSpinBox,
+                QTextEdit,
+            ),
+        )
+        if is_interactive and candidate:
+            description = explicit_description or widget.toolTip()
+            set_accessible(widget, candidate, description)
+            widget.setProperty("accessibilityConfigured", True)
+
+    focusable_types = (
+        QAbstractButton,
+        QAbstractItemView,
+        QComboBox,
+        QLineEdit,
+        QPlainTextEdit,
+        QSlider,
+        QAbstractSpinBox,
+        QTextEdit,
+    )
+    for index, widget in enumerate(widgets):
+        if not isinstance(widget, QLabel) or widget.buddy() is not None:
+            continue
+        if widget.objectName() != "fieldLabel":
+            continue
+        for candidate in widgets[index + 1:index + 7]:
+            if isinstance(candidate, focusable_types) and candidate.isEnabled():
+                widget.setBuddy(candidate)
+                if not candidate.accessibleName():
+                    set_accessible(candidate, widget.text(), widget.toolTip())
+                break
+
+
+def update_accessible_status(widget, text, *, tone="info", label="Status"):
+    """Expose a changing status as text plus a non-color state description."""
+    message = _accessible_text(text) or "No message"
+    state = _accessible_text(tone) or "info"
+    set_accessible(widget, f"{label}: {message}", f"{state} status update")
+    revision = int(widget.property("accessibleStatusRevision") or 0) + 1
+    widget.setProperty("accessibleStatusRevision", revision)
+
+
 def TAB_STYLE():
     """Build the compact, text-led navigation style from the live theme."""
     return f"""
@@ -68,6 +197,10 @@ QPushButton#tab {{
 QPushButton#tab:hover {{
     color: {CAT['text']};
     background-color: transparent;
+}}
+QPushButton#tab:focus, QPushButton#tabActive:focus {{
+    border: 1px solid {CAT['accent']};
+    border-bottom: 2px solid {CAT['accent']};
 }}
 QPushButton#tabActive {{
     background-color: transparent;
@@ -226,6 +359,12 @@ def make_status_banner(title="", body="", tone="info"):
 
     lay.addWidget(title_label)
     lay.addWidget(body_label)
+    update_accessible_status(
+        card,
+        " — ".join(part for part in (title, body) if part),
+        tone=tone,
+    )
+    set_accessible(title_label, f"Status: {title or 'No message'}")
     card.setVisible(bool(title or body))
     return card, title_label, body_label
 
@@ -240,6 +379,13 @@ def update_status_banner(card, title_label, body_label, *, title="", body="", to
     if style is not None:
         style.unpolish(card)
         style.polish(card)
+    update_accessible_status(
+        card,
+        " — ".join(part for part in (title, body) if part),
+        tone=tone,
+    )
+    set_accessible(title_label, f"Status: {title or 'No message'}")
+    set_accessible(body_label, body or title or "No message")
     card.setVisible(bool(title or body))
 
 
@@ -520,23 +666,30 @@ def wrap_scroll_page(page):
     scroll.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    # At 200% scaling and the supported minimum window size, dense settings
+    # rows can exceed the viewport. Keep every control reachable instead of
+    # clipping the right edge.
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     scroll.viewport().setObjectName("chrome")
     scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll.setWidget(page)
     return scroll
 
 
-def style_table(table, row_height=46):
+def style_table(table, row_height=46, *, accessible_name="", accessible_description=""):
     """Apply the premium midnight theme to a QTableWidget."""
     table.setAlternatingRowColors(True)
     table.setShowGrid(False)
     table.setWordWrap(False)
-    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    table.setTabKeyNavigation(True)
     table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     table.verticalHeader().setDefaultSectionSize(row_height)
     table.horizontalHeader().setHighlightSections(False)
+    if accessible_name:
+        set_accessible(table, accessible_name, accessible_description)
+    table.setProperty("accessibilityConfigured", True)
 
 
 def set_metric(value_label, sub_label, value, sub=""):

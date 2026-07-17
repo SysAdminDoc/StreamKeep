@@ -310,6 +310,9 @@ def _populate_track_table(win):
     win.track_table.setRowCount(len(tracks))
     for row, track in enumerate(tracks):
         checkbox = QCheckBox()
+        checkbox.setAccessibleName(
+            f"Include {track.kind} track: {track.label or track.id}"
+        )
         checkbox.setChecked(track.id in selected_ids)
         checkbox.toggled.connect(
             lambda checked, cb=checkbox, item=track:

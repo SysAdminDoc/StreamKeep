@@ -541,6 +541,7 @@ class DownloadSingleMixin:
             duration = end - start
             cb = QCheckBox()
             cb.setChecked(True)
+            cb.setAccessibleName(f"Include segment {i + 1}")
             cb.stateChanged.connect(lambda _state, self=self: self._refresh_download_summary())
             cb_w = QWidget()
             cb_l = QHBoxLayout(cb_w)
@@ -566,6 +567,7 @@ class DownloadSingleMixin:
             self.table.setItem(i, 2, t_item)
 
             pbar = QProgressBar()
+            pbar.setAccessibleName(f"Segment {i + 1} download progress")
             if total_secs <= 0:
                 pbar.setMaximum(0)
             else:

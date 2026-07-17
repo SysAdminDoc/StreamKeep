@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
 
 from ..theme import CAT
 from .widgets import (
+    bind_label,
+    configure_accessibility,
     make_dialog_hero,
     make_dialog_section,
     make_empty_state,
@@ -79,26 +81,36 @@ class RecoverDialog(QDialog):
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
 
-        input_row.addWidget(self._field_label("Channel"))
+        channel_label = self._field_label("Channel")
+        input_row.addWidget(channel_label)
         self.channel_input = QLineEdit()
         self.channel_input.setPlaceholderText("streamer_name")
         self.channel_input.setClearButtonEnabled(True)
         self.channel_input.setMaximumWidth(230)
         self.channel_input.returnPressed.connect(self._on_search)
+        bind_label(
+            channel_label,
+            self.channel_input,
+            description="Exact Twitch channel name without the full URL",
+        )
         input_row.addWidget(self.channel_input)
 
-        input_row.addWidget(self._field_label("Month"))
+        month_label = self._field_label("Month")
+        input_row.addWidget(month_label)
         self.month_combo = QComboBox()
         now = datetime.datetime.now()
         for i in range(1, 13):
             self.month_combo.addItem(datetime.date(2000, i, 1).strftime("%B"), i)
         self.month_combo.setCurrentIndex(max(0, now.month - 1))
+        bind_label(month_label, self.month_combo)
         input_row.addWidget(self.month_combo)
 
-        input_row.addWidget(self._field_label("Year"))
+        year_label = self._field_label("Year")
+        input_row.addWidget(year_label)
         self.year_spin = QSpinBox()
         self.year_spin.setRange(2016, now.year)
         self.year_spin.setValue(now.year)
+        bind_label(year_label, self.year_spin)
         input_row.addWidget(self.year_spin)
 
         self.search_btn = QPushButton("Search recovery window")
@@ -130,7 +142,11 @@ class RecoverDialog(QDialog):
         self.table.setColumnWidth(0, 200)
         self.table.setColumnWidth(1, 150)
         self.table.setColumnWidth(2, 110)
-        style_table(self.table)
+        style_table(
+            self.table,
+            accessible_name="Recoverable VODs",
+            accessible_description="Recovered streams available to send to Download",
+        )
         results_content.addWidget(self.table)
 
         self.empty_card, self.empty_title, self.empty_body = make_empty_state(
@@ -151,6 +167,18 @@ class RecoverDialog(QDialog):
         btn_row.addWidget(close_btn)
         root.addLayout(btn_row)
 
+        configure_accessibility(
+            self,
+            owner=self,
+            page_name="Deleted VOD recovery dialog",
+            names={
+                "channel_input": "Twitch channel",
+                "month_combo": "Recovery month",
+                "year_spin": "Recovery year",
+                "table": ("Recoverable VODs", "Use arrow keys to navigate results"),
+                "count_label": "Recovery result count",
+            },
+        )
         self._refresh_results_table()
 
     def _field_label(self, text):

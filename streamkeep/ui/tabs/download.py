@@ -301,7 +301,18 @@ def build_download_tab(win):
     win.vod_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.vod_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.vod_table.setMaximumHeight(300)
-    style_table(win.vod_table, 42)
+    style_table(
+        win.vod_table,
+        42,
+        accessible_name="Available VODs",
+        accessible_description="Use arrow keys to navigate and Enter to select a VOD",
+    )
+    win.vod_table.cellActivated.connect(
+        lambda row, _column: (
+            win._vod_checks[row].toggle()
+            if 0 <= row < len(win._vod_checks) else None
+        )
+    )
     vod_main_lay.addWidget(win.vod_table)
 
     vod_btn_row = QHBoxLayout()
@@ -437,7 +448,18 @@ def build_download_tab(win):
     win.track_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.track_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.track_table.setMaximumHeight(240)
-    style_table(win.track_table, 36)
+    style_table(
+        win.track_table,
+        36,
+        accessible_name="Media tracks",
+        accessible_description="Use arrow keys to navigate and Enter to toggle media tracks",
+    )
+    win.track_table.cellActivated.connect(
+        lambda row, _column: (
+            win._track_checks[row][0].toggle()
+            if 0 <= row < len(win._track_checks) else None
+        )
+    )
     track_lay.addWidget(win.track_table)
     win.track_section.setVisible(False)
     win._track_checks = []
@@ -625,7 +647,12 @@ def build_download_tab(win):
         QAbstractItemView.EditTrigger.NoEditTriggers
     )
     win.adv_sponsorblock_table.setMaximumHeight(270)
-    style_table(win.adv_sponsorblock_table, 34)
+    style_table(
+        win.adv_sponsorblock_table,
+        34,
+        accessible_name="SponsorBlock categories",
+        accessible_description="Choose categories to remove from the download",
+    )
     win.adv_sponsorblock_action_combos = {}
     for row, (category, label) in enumerate(SPONSORBLOCK_CATEGORIES.items()):
         item = QTableWidgetItem(label)
@@ -925,7 +952,18 @@ def build_download_tab(win):
     win.table.verticalHeader().setVisible(False)
     win.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    style_table(win.table, 46)
+    style_table(
+        win.table,
+        46,
+        accessible_name="Available stream segments",
+        accessible_description="Use arrow keys to navigate and Enter to toggle download segments",
+    )
+    win.table.cellActivated.connect(
+        lambda row, _column: (
+            win._segment_checks[row].toggle()
+            if 0 <= row < len(win._segment_checks) else None
+        )
+    )
     table_lay.addWidget(win.table)
     splitter.addWidget(table_frame)
 
@@ -1016,7 +1054,12 @@ def build_download_tab(win):
     win.queue_table.verticalHeader().setVisible(False)
     win.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    style_table(win.queue_table, 36)
+    style_table(
+        win.queue_table,
+        36,
+        accessible_name="Download queue",
+        accessible_description="Queued and active download jobs",
+    )
     qcard_lay.addWidget(win.queue_table)
     win.queue_empty_state = QFrame()
     empty_lay = QVBoxLayout(win.queue_empty_state)

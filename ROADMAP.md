@@ -91,13 +91,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P1 — Next
 
-- [ ] P1 — Restore full keyboard and assistive-technology operation
-  Why: All tables explicitly reject focus and no controls expose explicit accessible names/descriptions, buddy labels, tab order, or async status announcements.
-  Evidence: `streamkeep/ui/widgets.py:530-535`; zero accessibility API calls across UI/player; WCAG 2.2 and Qt accessibility guidance.
-  Touches: shared widgets, all major tabs/dialogs, custom-painted calendar/storage/analytics/waveform controls, status messaging, accessibility tests.
-  Acceptance: Core URL-to-download, monitor, history, storage, settings, clip, and recovery flows complete keyboard-only; tables retain focus/navigation; names/roles/states and progress/error announcements are exposed; focus is visible and unobscured; 200% scaling and system high-contrast smoke tests have no clipped controls or color-only state.
-  Complexity: L
-
 - [ ] P1 — Page large archives through Qt model/view and database queries
   Why: Loading all history rows, cell widgets, and thumbnail work cannot scale to the large archives the product targets.
   Evidence: `streamkeep/db.py::load_history`, `streamkeep/ui/tabs/history.py`; Qt model/view `canFetchMore`/`fetchMore`; refines the existing “Deeper library views for very large archives” item.

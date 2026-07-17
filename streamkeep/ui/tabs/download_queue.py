@@ -778,11 +778,13 @@ class DownloadQueueMixin:
             move_lay.setContentsMargins(2, 2, 2, 2)
             move_lay.setSpacing(2)
             up_btn = QPushButton("↑")
+            up_btn.setAccessibleName(f"Move queue item {i + 1} up")
             up_btn.setObjectName("ghost")
             up_btn.setFixedWidth(28)
             up_btn.setToolTip("Move up")
             up_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, -1))
             down_btn = QPushButton("↓")
+            down_btn.setAccessibleName(f"Move queue item {i + 1} down")
             down_btn.setObjectName("ghost")
             down_btn.setFixedWidth(28)
             down_btn.setToolTip("Move down")
@@ -800,6 +802,7 @@ class DownloadQueueMixin:
             self.queue_table.setCellWidget(i, 4, move_widget)
             # Remove button
             rm_btn = QPushButton("Remove")
+            rm_btn.setAccessibleName(f"Remove queue item {i + 1}")
             rm_btn.setObjectName("secondary")
             rm_btn.clicked.connect(lambda _c=False, row=i: self._queue_remove(row))
             if locked:

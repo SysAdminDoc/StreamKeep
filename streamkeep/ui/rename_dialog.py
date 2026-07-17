@@ -148,7 +148,11 @@ class RenameDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 340)
-        style_table(self.table)
+        style_table(
+            self.table,
+            accessible_name="Rename preview",
+            accessible_description="Current and proposed recording names",
+        )
         preview_content.addWidget(self.table)
 
         self.empty_card, self.empty_title, self.empty_body = make_empty_state(

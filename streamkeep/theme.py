@@ -919,6 +919,10 @@ QPushButton {{
 }}
 QPushButton:hover {{ background-color: {p['surface1']}; }}
 QPushButton:pressed {{ background-color: {p['surface2']}; }}
+QPushButton:focus {{
+    border: 2px solid {p['accent']};
+    padding: 6px 11px;
+}}
 QPushButton:disabled {{ background-color: {p['panelSoft']}; color: {p['overlay0']}; }}
 QPushButton#primary {{
     background-color: {p['accent']};
@@ -953,6 +957,9 @@ QTableWidget {{
     selection-background-color: {p['surface0']};
     selection-color: {p['text']};
     font-size: 14px;
+}}
+QTableWidget:focus, QListWidget:focus, QTreeWidget:focus {{
+    border: 2px solid {p['accent']};
 }}
 QTableWidget::item {{
     padding: 8px 9px;
@@ -1018,6 +1025,10 @@ QProgressBar {{
     color: transparent;
 }}
 QProgressBar::chunk {{ background-color: {p['accent']}; border-radius: 4px; }}
+QCheckBox:focus, QRadioButton:focus, QSlider:focus {{
+    border: 1px solid {p['accent']};
+    border-radius: 4px;
+}}
 QCheckBox, QRadioButton {{ color: {p['text']}; spacing: 7px; }}
 QCheckBox::indicator {{
     width: 16px; height: 16px; border-radius: 3px;

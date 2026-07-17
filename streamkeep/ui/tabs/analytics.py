@@ -28,10 +28,13 @@ class BarChartWidget(QWidget):
         self.setMinimumHeight(140)
         self._data = []   # list of (label, value)
         self._title = ""
+        self.setAccessibleName("Downloads over time chart")
 
     def set_data(self, data, title=""):
         self._data = list(data)
         self._title = title
+        points = ", ".join(f"{label}: {value}" for label, value in self._data)
+        self.setAccessibleDescription(points or "No download trend data")
         self.update()
 
     def paintEvent(self, event):
@@ -74,10 +77,13 @@ class DonutChartWidget(QWidget):
         self.setMinimumSize(160, 160)
         self._data = []   # list of (label, value, color_hex)
         self._title = ""
+        self.setAccessibleName("Platform breakdown chart")
 
     def set_data(self, data, title=""):
         self._data = list(data)
         self._title = title
+        points = ", ".join(f"{label}: {value}" for label, value, _ in self._data)
+        self.setAccessibleDescription(points or "No platform data")
         self.update()
 
     def paintEvent(self, event):
@@ -121,10 +127,13 @@ class HBarChartWidget(QWidget):
         self.setMinimumHeight(120)
         self._data = []
         self._title = ""
+        self.setAccessibleName("Top channels chart")
 
     def set_data(self, data, title=""):
         self._data = list(data)[:8]
         self._title = title
+        points = ", ".join(f"{label}: {value}" for label, value in self._data)
+        self.setAccessibleDescription(points or "No channel data")
         self.update()
 
     def paintEvent(self, event):
