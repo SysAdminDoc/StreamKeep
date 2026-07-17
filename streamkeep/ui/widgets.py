@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSlider, QTextEdit, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..theme import CAT, get_density
@@ -186,6 +186,7 @@ def TAB_STYLE():
     """Build the compact, text-led navigation style from the live theme."""
     density = get_density()
     vertical = density["padding"] + 2
+    nav_font_size = max(13, density["font_size"] - 2)
     return f"""
 QPushButton#tab {{
     background-color: transparent;
@@ -194,7 +195,7 @@ QPushButton#tab {{
     border-bottom: 2px solid transparent;
     padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
     font-weight: 600;
-    font-size: {density['font_size']}px;
+    font-size: {nav_font_size}px;
     border-radius: 0;
 }}
 QPushButton#tab:hover {{
@@ -202,7 +203,8 @@ QPushButton#tab:hover {{
     background-color: transparent;
 }}
 QPushButton#tab:focus, QPushButton#tabActive:focus {{
-    border: 1px solid {CAT['accent']};
+    background-color: {CAT['panelHi']};
+    border: none;
     border-bottom: 2px solid {CAT['accent']};
 }}
 QPushButton#tabActive {{
@@ -212,7 +214,7 @@ QPushButton#tabActive {{
     border-bottom: 2px solid {CAT['accent']};
     padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
     font-weight: 700;
-    font-size: {density['font_size']}px;
+    font-size: {nav_font_size}px;
     border-radius: 0;
 }}
 """
@@ -331,6 +333,11 @@ def make_dialog_section(title="", body=""):
         body_label = QLabel(body)
         body_label.setObjectName("sectionBody")
         body_label.setWordWrap(True)
+        body_label.setMinimumWidth(0)
+        body_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         lay.addWidget(body_label)
 
     content = QVBoxLayout()
@@ -358,6 +365,11 @@ def make_status_banner(title="", body="", tone="info"):
     body_label = QLabel(body)
     body_label.setObjectName("statusBody")
     body_label.setWordWrap(True)
+    body_label.setMinimumWidth(0)
+    body_label.setSizePolicy(
+        QSizePolicy.Policy.Ignored,
+        QSizePolicy.Policy.Preferred,
+    )
     body_label.setVisible(bool(body))
 
     lay.addWidget(title_label)

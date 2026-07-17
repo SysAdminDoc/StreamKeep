@@ -1,3 +1,4 @@
+import threading
 from unittest import mock
 
 from PyQt6.QtCore import Qt
@@ -164,12 +165,74 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.scan_lan_check.text() == "Allow LAN for this scan"
             assert not window.scan_lan_check.isChecked()
             assert window.download_settings_action.isCheckable()
-            assert window.batch_import_btn.objectName() == "commandGhost"
-            assert window.download_advanced_btn.objectName() == "commandGhost"
+            assert window.batch_import_btn.objectName() == "secondary"
+            assert window.download_advanced_btn.objectName() == "secondary"
+            assert window.queue_table.columnCount() == 7
+            window._download_queue = [
+                    {
+                        "status": "queued",
+                        "platform": "Direct",
+                        "title": "First item",
+                        "added": "now",
+                        "url": "https://example.com/first",
+                    },
+                {
+                    "status": "queued",
+                        "platform": "Direct",
+                        "title": "Second item",
+                        "added": "now",
+                        "url": "https://example.com/second",
+                },
+            ]
+            window._refresh_queue_table()
+            assert window.queue_selected_label.text() == "2 selected"
+            assert window.queue_table.cellWidget(0, 0).findChild(QAbstractButton).isChecked()
+            assert window.queue_table.cellWidget(0, 2) is not None
+            assert window.queue_table.cellWidget(0, 3) is not None
+            window.queue_table.cellWidget(1, 0).findChild(QAbstractButton).setChecked(False)
+            assert window.queue_selected_label.text() == "1 selected"
+            window._on_queue_header_clicked(0)
+            assert window.queue_selected_label.text() == "2 selected"
+            window._on_queue_pause_selected()
+            assert [item["status"] for item in window._download_queue] == [
+                "paused", "paused",
+            ]
+            assert window.queue_start_btn.isEnabled()
+            window._on_queue_item_progress(
+                window._download_queue[0],
+                62,
+                "1.2 GB | 18.7 MB/s | ETA 00:01:24",
+            )
+            assert window._download_queue[0]["progress"] == 62
+            assert window._download_queue[0]["speed"] == "18.7 MB/s"
+            assert window._download_queue[0]["eta"] == "00:01:24"
+            assert window._queue_progress_bars[id(window._download_queue[0])].value() == 62
+            window._download_queue = []
+            window._refresh_queue_table()
+            assert window._format_activity_message(
+                "[QUEUE] Starting: Example",
+                when=main_window.datetime(2026, 7, 17, 14, 32, 10),
+            ) == "14:32:10  Starting: Example"
+            worker = threading.Thread(
+                target=lambda: window._log("[SEARCH] Indexed from worker thread")
+            )
+            worker.start()
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+            qt_application.processEvents()
+            assert "Indexed from worker thread" in window.log_text.toPlainText()
             assert [button.text() for button in window.settings_nav_buttons] == [
                 "General", "Access", "Downloads", "Companion",
                 "Automation", "Library", "Processing",
             ]
+            settings_page = window._stack.widget(5).widget()
+            assert settings_page.property("responsiveLayout") is True
+            assert [
+                window.companion_scope_sub.text(),
+                window.companion_remote_sub.text(),
+                window.companion_token_sub.text(),
+            ] == ["This PC", "Not running", "Not running"]
+            assert window.theme_combo.itemText(0) == "Dark"
             assert all(
                 button.objectName() == "commandGhost"
                 for button in window.settings_nav_buttons
@@ -349,7 +412,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window._tab_btns[0].text() == "Descargar"
             assert window._tab_btns[2].text() == "Historial"
             assert window.download_hero_title.text() == "Origen detectado"
-            assert window.fetch_btn.text() == "Obtener"
+            assert window.fetch_btn.text() == "Resolver"
             assert window.history_search.placeholderText().startswith("Buscar título")
             assert window.status_label.text() == "El idioma se actualizó en StreamKeep."
             # Stable-value combos that still consume currentText() do not have

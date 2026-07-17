@@ -8,7 +8,7 @@ This file is a thin launcher. All code lives in the `streamkeep/` package:
 - streamkeep.postprocess     — ffmpeg converter + post-processing
 - streamkeep.http            — curl-based HTTP helpers
 - streamkeep.config          — JSON config persistence
-- streamkeep.theme           — Catppuccin QSS stylesheet
+- streamkeep.theme           — token-driven StreamKeep QSS stylesheet
 - streamkeep.models          — StreamInfo / VODInfo / QualityInfo / etc.
 - streamkeep.utils           — fmt/safe_filename/default_output_dir helpers
 - streamkeep.monitor         — channel live-detection monitor

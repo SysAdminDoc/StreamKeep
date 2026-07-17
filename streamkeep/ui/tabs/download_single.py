@@ -264,7 +264,7 @@ class DownloadSingleMixin:
                     "warning",
                 )
         self.fetch_btn.setEnabled(False)
-        self.fetch_btn.setText("Fetching")
+        self.fetch_btn.setText("Resolving")
         self.download_btn.setEnabled(False)
         self.open_folder_btn.setVisible(False)
         if hasattr(self, "trim_btn"):
@@ -320,7 +320,7 @@ class DownloadSingleMixin:
         self.stream_info = info
         _populate_adv_subtitles(self, info)
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText("Fetch")
+        self.fetch_btn.setText("Resolve")
         self._update_badge(info.platform)
 
         # Populate qualities
@@ -429,7 +429,7 @@ class DownloadSingleMixin:
 
     def _on_fetch_error(self, err):
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText("Fetch")
+        self.fetch_btn.setText("Resolve")
         self._log(f"[ERROR] {err}")
         self._record_failed_job(
             stage="fetch",

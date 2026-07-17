@@ -1,6 +1,7 @@
 """Download tab — URL input, VOD picker, segments table, queue, log."""
 
-from PyQt6.QtCore import Qt, QStringListModel
+from PyQt6.QtCore import QPoint, QRectF, Qt, QStringListModel
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygon
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
@@ -9,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ...utils import default_output_dir as _default_output_dir
+from ...theme import CAT
 from ..widgets import make_field_block, path_label, style_table
 from .download_queue import DownloadQueueMixin
 from .download_vod import DownloadVodMixin
@@ -35,6 +37,64 @@ __all__ = [
 ]
 
 
+class _ResponsiveQueueTable(QTableWidget):
+    """Keep the queue useful at the supported 1020px minimum width."""
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = self.viewport().width()
+        # The complete operational matrix belongs on wide windows. At the
+        # supported minimum size, keep identity, state, and progress visible
+        # and fold secondary diagnostics away instead of scrolling sideways.
+        for column, hidden in (
+            (1, width < 860),   # Source
+            (4, width < 980),   # Speed
+            (5, width < 900),   # ETA
+            (6, width < 760),   # Size
+        ):
+            self.setColumnHidden(column, hidden)
+
+
+def _download_icon(kind):
+    """Draw restrained line icons without relying on platform icon themes."""
+    pixmap = QPixmap(20, 20)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(CAT["subtext1"]))
+    pen.setWidthF(1.6)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    if kind == "play":
+        painter.setBrush(QColor(CAT["subtext1"]))
+        painter.drawPolygon(QPolygon([QPoint(6, 4), QPoint(16, 10), QPoint(6, 16)]))
+    elif kind == "pause":
+        painter.drawLine(7, 4, 7, 16)
+        painter.drawLine(13, 4, 13, 16)
+    elif kind == "remove":
+        painter.drawRect(6, 7, 8, 10)
+        painter.drawLine(4, 6, 16, 6)
+        painter.drawLine(8, 3, 12, 3)
+    elif kind == "retry":
+        painter.drawArc(QRectF(4, 4, 12, 12), 35 * 16, 285 * 16)
+        painter.drawLine(4, 7, 4, 3)
+        painter.drawLine(4, 3, 8, 3)
+    elif kind == "import":
+        painter.drawLine(10, 3, 10, 13)
+        painter.drawLine(6, 9, 10, 13)
+        painter.drawLine(14, 9, 10, 13)
+        painter.drawLine(4, 16, 16, 16)
+    else:
+        painter.save()
+        painter.translate(10, 10)
+        painter.rotate(-38)
+        painter.drawRoundedRect(QRectF(-8, -3, 9, 6), 3, 3)
+        painter.drawRoundedRect(QRectF(-1, -3, 9, 6), 3, 3)
+        painter.restore()
+    painter.end()
+    return QIcon(pixmap)
+
+
 
 
 def build_download_tab(win):
@@ -47,15 +107,16 @@ def build_download_tab(win):
     hero = QFrame()
     hero.setObjectName("pageHeader")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(2, 2, 2, 4)
+    hero_lay.setContentsMargins(16, 14, 16, 2)
     hero_lay.setSpacing(2)
 
     win.download_hero_title = QLabel("New download")
-    win.download_hero_title.setObjectName("heroTitle")
+    win.download_hero_title.setObjectName("composerTitle")
     win.download_hero_title.setWordWrap(True)
     win.download_hero_body = QLabel("Video, stream, podcast, or direct media.")
     win.download_hero_body.setObjectName("heroBody")
     win.download_hero_body.setWordWrap(True)
+    win.download_hero_body.setVisible(False)
     hero_lay.addWidget(win.download_hero_title)
     hero_lay.addWidget(win.download_hero_body)
 
@@ -147,7 +208,7 @@ def build_download_tab(win):
     url_card = QFrame()
     url_card.setObjectName("composerCard")
     url_lay = QVBoxLayout(url_card)
-    url_lay.setContentsMargins(0, 4, 0, 4)
+    url_lay.setContentsMargins(16, 0, 16, 34)
     url_lay.setSpacing(6)
 
     url_header = QVBoxLayout()
@@ -159,14 +220,27 @@ def build_download_tab(win):
     url_lay.addLayout(url_header)
 
     url_row = QHBoxLayout()
-    url_row.setSpacing(10)
+    url_row.setSpacing(14)
+    source_field = QFrame()
+    source_field.setObjectName("sourceField")
+    source_field_lay = QHBoxLayout(source_field)
+    source_field_lay.setContentsMargins(0, 0, 0, 0)
+    source_field_lay.setSpacing(0)
+    source_icon = QLabel()
+    source_icon.setObjectName("sourceLinkIcon")
+    source_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    source_icon.setFixedWidth(46)
+    source_icon.setToolTip("Media source URL")
+    source_icon.setPixmap(_download_icon("link").pixmap(18, 18))
+    source_field_lay.addWidget(source_icon)
+
     win.url_input = QLineEdit()
     win.url_input.setObjectName("sourceComposer")
     win.url_input.setPlaceholderText(
         "Paste a stream, channel, VOD, or direct media URL…"
     )
     win.url_input.setClearButtonEnabled(True)
-    win.url_input.setMinimumHeight(38)
+    win.url_input.setMinimumHeight(48)
     win.url_input.returnPressed.connect(lambda: win._on_fetch())
     win.url_input.textChanged.connect(win._on_url_changed)
     # Recent URLs autocomplete dropdown
@@ -176,7 +250,8 @@ def build_download_tab(win):
     win._recent_url_completer.setFilterMode(Qt.MatchFlag.MatchContains)
     win._recent_url_completer.setMaxVisibleItems(10)
     win.url_input.setCompleter(win._recent_url_completer)
-    url_row.addWidget(win.url_input, 1)
+    source_field_lay.addWidget(win.url_input, 1)
+    url_row.addWidget(source_field, 1)
 
     win.platform_badge = QLabel("")
     win.platform_badge.setFixedHeight(40)
@@ -186,22 +261,25 @@ def build_download_tab(win):
     url_row.addWidget(win.platform_badge)
 
     paste_btn = QPushButton("Paste")
-    paste_btn.setObjectName("secondary")
+    paste_btn.setObjectName("commandGhost")
     paste_btn.setToolTip("Paste a URL from the clipboard")
     paste_btn.clicked.connect(win.url_input.paste)
-    url_row.addWidget(paste_btn)
+    paste_btn.setVisible(False)
 
-    win.fetch_btn = QPushButton("Fetch")
+    win.fetch_btn = QPushButton("Resolve")
     win.fetch_btn.setObjectName("primary")
-    win.fetch_btn.setMinimumWidth(116)
-    win.fetch_btn.setMinimumHeight(38)
+    win.fetch_btn.setMinimumWidth(104)
+    win.fetch_btn.setMinimumHeight(48)
     win.fetch_btn.clicked.connect(win._on_fetch)
     url_row.addWidget(win.fetch_btn)
 
     win.batch_import_btn = QPushButton("Import")
-    win.batch_import_btn.setObjectName("commandGhost")
+    win.batch_import_btn.setObjectName("secondary")
     win.batch_import_btn.setToolTip("Import URLs from a text file (one per line) and queue them all (F44)")
     win.batch_import_btn.clicked.connect(win._on_batch_url_import)
+    win.batch_import_btn.setIcon(_download_icon("import"))
+    win.batch_import_btn.setMinimumWidth(118)
+    win.batch_import_btn.setMinimumHeight(48)
 
     # Keep secondary intake paths reachable without making every action
     # compete with the URL field. Hidden proxy widgets preserve the worker
@@ -227,8 +305,10 @@ def build_download_tab(win):
     win.queue_btn.setVisible(False)
 
     more_btn = QPushButton("Advanced")
-    more_btn.setObjectName("commandGhost")
+    more_btn.setObjectName("secondary")
     win.download_advanced_btn = more_btn
+    more_btn.setMinimumWidth(162)
+    more_btn.setMinimumHeight(48)
     more_menu = QMenu(more_btn)
     queue_action = more_menu.addAction("Add URL to queue")
     queue_action.triggered.connect(win.queue_btn.click)
@@ -256,15 +336,9 @@ def build_download_tab(win):
     win.adv_overrides_action = more_menu.addAction("Per-download overrides")
     win.adv_overrides_action.setCheckable(True)
     more_btn.setMenu(more_menu)
+    url_row.addWidget(win.batch_import_btn)
+    url_row.addWidget(more_btn)
     url_lay.addLayout(url_row)
-
-    command_row = QHBoxLayout()
-    command_row.setContentsMargins(2, 0, 0, 0)
-    command_row.setSpacing(4)
-    command_row.addWidget(win.batch_import_btn)
-    command_row.addWidget(more_btn)
-    command_row.addStretch(1)
-    url_lay.addLayout(command_row)
 
     win.info_label = QLabel("")
     win.info_label.setObjectName("streamInfo")
@@ -924,7 +998,7 @@ def build_download_tab(win):
     table_frame = QFrame()
     table_frame.setObjectName("dataPane")
     table_lay = QVBoxLayout(table_frame)
-    table_lay.setContentsMargins(4, 10, 4, 4)
+    table_lay.setContentsMargins(12, 10, 12, 8)
     table_lay.setSpacing(8)
 
     table_header = QHBoxLayout()
@@ -980,27 +1054,39 @@ def build_download_tab(win):
     log_frame = QFrame()
     log_frame.setObjectName("activityPane")
     log_lay = QVBoxLayout(log_frame)
-    log_lay.setContentsMargins(18, 14, 14, 10)
-    log_lay.setSpacing(8)
+    log_lay.setContentsMargins(0, 0, 0, 0)
+    log_lay.setSpacing(0)
 
-    log_header = QHBoxLayout()
+    activity_toolbar = QFrame()
+    activity_toolbar.setObjectName("paneToolbar")
+    log_header = QHBoxLayout(activity_toolbar)
+    log_header.setContentsMargins(16, 9, 12, 9)
     log_copy = QVBoxLayout()
     log_copy.setSpacing(3)
     sec3 = QLabel("Activity")
     sec3.setObjectName("sectionTitle")
     log_copy.addWidget(sec3)
     log_header.addLayout(log_copy, 1)
-    clear_log_btn = QPushButton("Clear Log")
-    clear_log_btn.setObjectName("ghost")
-    clear_log_btn.clicked.connect(lambda: win.log_text.clear())
-    log_header.addWidget(clear_log_btn)
-    log_lay.addLayout(log_header)
+    log_lay.addWidget(activity_toolbar)
 
     win.log_text = QTextEdit()
     win.log_text.setObjectName("log")
     win.log_text.setReadOnly(True)
-    win.log_text.setPlainText("Ready")
+    win.log_text.setPlainText("No activity yet.")
     log_lay.addWidget(win.log_text)
+    activity_footer = QFrame()
+    activity_footer.setObjectName("paneFooter")
+    activity_footer_lay = QHBoxLayout(activity_footer)
+    activity_footer_lay.setContentsMargins(14, 10, 12, 10)
+    win.activity_count_label = QLabel("No events yet")
+    win.activity_count_label.setObjectName("footerMeta")
+    activity_footer_lay.addWidget(win.activity_count_label)
+    activity_footer_lay.addStretch(1)
+    clear_log_btn = QPushButton("Clear")
+    clear_log_btn.setObjectName("footerAction")
+    clear_log_btn.clicked.connect(win._clear_activity)
+    activity_footer_lay.addWidget(clear_log_btn)
+    log_lay.addWidget(activity_footer)
     splitter.addWidget(log_frame)
     splitter.setSizes([450, 220])
     root.addWidget(splitter, 1)
@@ -1026,50 +1112,90 @@ def build_download_tab(win):
     win.download_btn.setEnabled(False)
     win.download_btn.clicked.connect(win._on_download)
     dl_row.addWidget(win.download_btn)
-    root.addLayout(dl_row)
+    # These actions only make sense after a source has resolved into segments.
+    # Keep them in that contextual surface instead of pinning disabled controls
+    # to the bottom of the default queue workspace.
+    table_lay.addLayout(dl_row)
 
     # Queue panel — shows pending items
     queue_card = QFrame()
     queue_card.setObjectName("queuePane")
     qcard_lay = QVBoxLayout(queue_card)
-    qcard_lay.setContentsMargins(14, 14, 14, 10)
-    qcard_lay.setSpacing(8)
-    queue_header = QHBoxLayout()
+    qcard_lay.setContentsMargins(0, 0, 0, 0)
+    qcard_lay.setSpacing(0)
+    queue_toolbar = QFrame()
+    queue_toolbar.setObjectName("paneToolbar")
+    queue_header = QHBoxLayout(queue_toolbar)
+    queue_header.setContentsMargins(20, 9, 12, 9)
+    queue_header.setSpacing(8)
     qt = QLabel("Queue")
     qt.setObjectName("sectionTitle")
     queue_header.addWidget(qt)
-    queue_header.addStretch()
-    clear_queue_btn = QPushButton("Clear Queue")
-    clear_queue_btn.setObjectName("ghost")
-    clear_queue_btn.clicked.connect(win._on_clear_queue)
-    queue_header.addWidget(clear_queue_btn)
-    qcard_lay.addLayout(queue_header)
-    win.queue_table = QTableWidget()
-    win.queue_table.setColumnCount(6)
+    queue_header.addStretch(1)
+    win.queue_selected_label = QLabel("0 selected")
+    win.queue_selected_label.setObjectName("toolbarMeta")
+    queue_header.addWidget(win.queue_selected_label)
+    win.queue_start_btn = QPushButton("Start")
+    win.queue_start_btn.setObjectName("toolbarAction")
+    win.queue_start_btn.setIcon(_download_icon("play"))
+    win.queue_start_btn.clicked.connect(win._on_queue_start_selected)
+    queue_header.addWidget(win.queue_start_btn)
+    win.queue_pause_btn = QPushButton("Pause")
+    win.queue_pause_btn.setObjectName("toolbarAction")
+    win.queue_pause_btn.setIcon(_download_icon("pause"))
+    win.queue_pause_btn.setToolTip("Hold selected pending jobs; active transfers continue")
+    win.queue_pause_btn.clicked.connect(win._on_queue_pause_selected)
+    queue_header.addWidget(win.queue_pause_btn)
+    win.queue_remove_btn = QPushButton("Remove")
+    win.queue_remove_btn.setObjectName("toolbarAction")
+    win.queue_remove_btn.setIcon(_download_icon("remove"))
+    win.queue_remove_btn.clicked.connect(win._on_queue_remove_selected)
+    queue_header.addWidget(win.queue_remove_btn)
+    win.queue_retry_btn = QPushButton("Retry")
+    win.queue_retry_btn.setObjectName("toolbarAction")
+    win.queue_retry_btn.setIcon(_download_icon("retry"))
+    win.queue_retry_btn.clicked.connect(win._on_queue_retry_selected)
+    queue_header.addWidget(win.queue_retry_btn)
+    win.queue_pause_all_btn = QPushButton("Pause all")
+    win.queue_pause_all_btn.setObjectName("toolbarEmphasis")
+    win.queue_pause_all_btn.setIcon(_download_icon("pause"))
+    win.queue_pause_all_btn.setToolTip("Hold every pending job; active transfers continue")
+    win.queue_pause_all_btn.clicked.connect(win._on_queue_pause_all)
+    queue_header.addWidget(win.queue_pause_all_btn)
+    qcard_lay.addWidget(queue_toolbar)
+
+    win.queue_table = _ResponsiveQueueTable()
+    win.queue_table.setObjectName("downloadQueue")
+    win.queue_table.setColumnCount(7)
     win.queue_table.setHorizontalHeaderLabels(
-        ["Status", "Platform", "Title", "Added / Scheduled", "", ""]
+        ["Name", "Source", "Status", "Progress", "Speed", "ETA", "Size"]
     )
     qh = win.queue_table.horizontalHeader()
-    qh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-    qh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-    qh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    qh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    qh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+    qh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
     qh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
     qh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
     qh.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-    win.queue_table.setColumnWidth(0, 96)
-    win.queue_table.setColumnWidth(1, 90)
-    win.queue_table.setColumnWidth(3, 160)
-    win.queue_table.setColumnWidth(4, 66)   # move up/down
-    win.queue_table.setColumnWidth(5, 84)   # remove
+    qh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+    win.queue_table.setColumnWidth(0, 318)
+    win.queue_table.setColumnWidth(1, 220)
+    win.queue_table.setColumnWidth(2, 118)
+    win.queue_table.setColumnWidth(3, 132)
+    win.queue_table.setColumnWidth(4, 82)
+    win.queue_table.setColumnWidth(5, 78)
+    win.queue_table.setColumnWidth(6, 82)
     win.queue_table.verticalHeader().setVisible(False)
     win.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     win.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     style_table(
         win.queue_table,
-        36,
+        105,
         accessible_name="Download queue",
-        accessible_description="Queued and active download jobs",
+        accessible_description="Selected queued and active download jobs with progress details",
     )
+    win.queue_table.setShowGrid(True)
+    win.queue_table.horizontalHeader().sectionClicked.connect(win._on_queue_header_clicked)
     qcard_lay.addWidget(win.queue_table)
     win.queue_empty_state = QFrame()
     empty_lay = QVBoxLayout(win.queue_empty_state)
@@ -1086,6 +1212,15 @@ def build_download_tab(win):
     empty_lay.addWidget(empty_body)
     empty_lay.addStretch(2)
     qcard_lay.addWidget(win.queue_empty_state, 1)
+    queue_footer = QFrame()
+    queue_footer.setObjectName("paneFooter")
+    queue_footer_lay = QHBoxLayout(queue_footer)
+    queue_footer_lay.setContentsMargins(18, 10, 18, 10)
+    win.queue_footer_meta = QLabel("0 downloads")
+    win.queue_footer_meta.setObjectName("footerMeta")
+    queue_footer_lay.addWidget(win.queue_footer_meta)
+    queue_footer_lay.addStretch(1)
+    qcard_lay.addWidget(queue_footer)
     root.addWidget(queue_card)
 
     # Main working surface: queue and activity share the viewport. Segment
@@ -1107,7 +1242,7 @@ def build_download_tab(win):
     work_surface.addWidget(log_frame)
     work_surface.setStretchFactor(0, 2)
     work_surface.setStretchFactor(1, 1)
-    work_surface.setSizes([860, 420])
+    work_surface.setSizes([960, 420])
     root.insertWidget(work_index, work_surface, 1)
     win.segments_section = table_frame
     win.segments_section.setVisible(False)

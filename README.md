@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="icon.png" alt="StreamKeep logo" width="144" height="144">
+</p>
+
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.36.3-blue)
+![Version](https://img.shields.io/badge/version-4.36.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)

@@ -174,34 +174,40 @@ class SettingsCompanionMixin:
 
         if hasattr(self, "companion_scope_value"):
             self.companion_scope_value.setText("LAN enabled" if bind_lan else "Local only")
-            self.companion_scope_sub.setText(
-                "Other trusted devices can reach the server"
+            scope_detail = (
+                "Trusted devices can connect through the HTTPS reverse proxy."
                 if bind_lan else
-                "Only this PC can reach the companion"
+                "Only this PC can reach the companion."
             )
+            self.companion_scope_sub.setText("HTTPS proxy" if bind_lan else "This PC")
+            self.companion_scope_sub.setToolTip(scope_detail)
         if hasattr(self, "companion_remote_value"):
             if running:
                 self.companion_remote_value.setText("Ready")
-                self.companion_remote_sub.setText(local_url)
+                self.companion_remote_sub.setText(f"Port {srv.port}")
+                self.companion_remote_sub.setToolTip(local_url)
             elif enabled and error_text:
                 self.companion_remote_value.setText("Error")
-                self.companion_remote_sub.setText(error_text[:72])
+                self.companion_remote_sub.setText("Needs attention")
+                self.companion_remote_sub.setToolTip(error_text)
             elif enabled:
                 self.companion_remote_value.setText("Starting")
-                self.companion_remote_sub.setText("Waiting for the local listener")
+                self.companion_remote_sub.setText("Local listener")
+                self.companion_remote_sub.setToolTip("")
             else:
                 self.companion_remote_value.setText("Off")
-                self.companion_remote_sub.setText("Enable the companion to expose a local URL")
+                self.companion_remote_sub.setText("Not running")
+                self.companion_remote_sub.setToolTip("")
         if hasattr(self, "companion_token_value"):
             if pairing_code:
                 self.companion_token_value.setText("Ready")
-                self.companion_token_sub.setText("One use, expires within 5 minutes")
+                self.companion_token_sub.setText("Expires in 5 min")
             elif running:
                 self.companion_token_value.setText("Generate")
-                self.companion_token_sub.setText(f"Extension port: {srv.port}")
+                self.companion_token_sub.setText("One-time code")
             else:
                 self.companion_token_value.setText("Waiting")
-                self.companion_token_sub.setText("Codes are available only while running")
+                self.companion_token_sub.setText("Not running")
 
         if hasattr(self, "companion_rotate_token_btn"):
             self.companion_rotate_token_btn.setEnabled(running)

@@ -117,7 +117,7 @@ class DownloadVodMixin:
         self._vod_last_checked_row = -1  # shift-click anchor
         self.vod_widget.setVisible(True)
         self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText("Fetch")
+        self.fetch_btn.setText("Resolve")
         self._refresh_vod_summary()
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setVisible(bool(next_cursor))

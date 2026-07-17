@@ -8,22 +8,22 @@ Consumer code that reads ``CAT["blue"]`` etc. continues to work — the
 dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
-CAT_MOCHA = {
-    "base": "#07131e", "mantle": "#091722", "crust": "#050e16",
-    "surface0": "#102635", "surface1": "#173142", "surface2": "#203d50",
-    "overlay0": "#587080", "overlay1": "#718795",
-    "text": "#f2f5f7", "subtext0": "#a6b5c0", "subtext1": "#c8d1d7",
+STREAMKEEP_DARK = {
+    "base": "#111318", "mantle": "#0d0f13", "crust": "#090b0e",
+    "surface0": "#252a33", "surface1": "#303641", "surface2": "#3b4350",
+    "overlay0": "#687180", "overlay1": "#87909d",
+    "text": "#f2f3f5", "subtext0": "#aeb4bd", "subtext1": "#c9cdd3",
     "lavender": "#b4befe", "blue": "#89b4fa", "sapphire": "#74c7ec",
     "sky": "#89dceb", "teal": "#94e2d5", "green": "#a6e3a1",
     "yellow": "#f9e2af", "peach": "#fab387", "maroon": "#eba0ac",
     "red": "#f38ba8", "mauve": "#cba6f7", "pink": "#f5c2e7",
     "flamingo": "#f2cdcd", "rosewater": "#f5e0dc",
-    "panel": "#0a1b28", "panelHi": "#0d2231", "panelSoft": "#081722",
-    "stroke": "#213746", "muted": "#91a4b1", "accent": "#24bfe9",
-    "accentSoft": "#70d7b2", "gold": "#f0c77a",
+    "panel": "#171a20", "panelHi": "#1d2128", "panelSoft": "#14171c",
+    "stroke": "#2b3039", "muted": "#9ca3af", "accent": "#8b9cf7",
+    "accentSoft": "#66c7bd", "gold": "#e8b86b",
 }
 
-CAT_LATTE = {
+STREAMKEEP_LIGHT = {
     "base": "#eff1f5", "mantle": "#e6e9ef", "crust": "#dce0e8",
     "surface0": "#ccd0da", "surface1": "#bcc0cc", "surface2": "#acb0be",
     "overlay0": "#9ca0b0", "overlay1": "#8c8fa1",
@@ -40,7 +40,7 @@ CAT_LATTE = {
 
 # CAT is the "live" palette — mutated in-place so all ``CAT["x"]`` refs
 # across the app pick up theme changes without reimporting.
-CAT = dict(CAT_MOCHA)
+CAT = dict(STREAMKEEP_DARK)
 
 CAT_HIGH_CONTRAST = {
     "base": "#000000", "mantle": "#0a0a0a", "crust": "#000000",
@@ -57,7 +57,11 @@ CAT_HIGH_CONTRAST = {
     "accentSoft": "#55ff55", "gold": "#ffff55",
 }
 
-THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE, "high_contrast": CAT_HIGH_CONTRAST}
+THEMES = {
+    "dark": STREAMKEEP_DARK,
+    "light": STREAMKEEP_LIGHT,
+    "high_contrast": CAT_HIGH_CONTRAST,
+}
 
 # Layout density presets (F75)
 DENSITY_COMPACT = {
@@ -65,7 +69,7 @@ DENSITY_COMPACT = {
     "radius": 5, "scale": 0.82, "thumb_w": 80, "name": "compact",
 }
 DENSITY_COZY = {
-    "font_size": 16, "row_height": 52, "padding": 7, "control_h": 40,
+    "font_size": 16, "row_height": 46, "padding": 6, "control_h": 38,
     "radius": 6, "scale": 0.92, "thumb_w": 104, "name": "cozy",
 }
 DENSITY_SPACIOUS = {
@@ -157,7 +161,7 @@ QMainWindow, QDialog {{
 }}
 QWidget {{
     color: {p['text']};
-    font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+    font-family: 'Segoe UI', 'Arial', sans-serif;
     font-size: {font_size}px;
 }}
 QWidget#chrome, QAbstractScrollArea#chrome,
@@ -165,19 +169,42 @@ QAbstractScrollArea#chrome > QWidget#chrome {{
     background-color: transparent;
     border: none;
 }}
-QFrame#appHeader, QFrame#pageHeader {{
+QFrame#appHeader {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QFrame#pageHeader {{
     background-color: transparent;
     border: none;
 }}
 QFrame#appNav {{
     background-color: transparent;
     border: none;
-    border-bottom: 1px solid {p['stroke']};
 }}
 QFrame#composerCard {{
     background-color: transparent;
     border: none;
     border-radius: 0;
+}}
+QFrame#sourceField {{
+    background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
+    border-radius: 5px;
+}}
+QFrame#paneToolbar {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QFrame#paneFooter {{
+    background-color: transparent;
+    border: none;
+    border-top: 1px solid {p['stroke']};
+}}
+QFrame#queueName, QFrame#queueStatus, QFrame#queueProgress {{
+    background-color: transparent;
+    border: none;
 }}
 QFrame#optionsRow, QFrame#fieldBlock,
 QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
@@ -188,8 +215,8 @@ QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
 QFrame#queuePane, QFrame#activityPane, QFrame#dataPane,
 QFrame#analyticsPanel {{
     background-color: {p['panelSoft']};
-    border: none;
-    border-radius: 4px;
+    border: 1px solid {p['stroke']};
+    border-radius: 6px;
 }}
 QFrame#activityPane {{ background-color: {p['panel']}; }}
 QFrame#settingsNav {{
@@ -248,7 +275,7 @@ QLabel {{
 }}
 QLabel#appBrand {{
     color: {p['text']};
-    font-size: 22px;
+    font-size: 21px;
     font-weight: 750;
 }}
 QLabel#title {{
@@ -258,12 +285,17 @@ QLabel#title {{
 }}
 QLabel#heroTitle {{
     color: {p['text']};
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 750;
+}}
+QLabel#composerTitle {{
+    color: {p['text']};
+    font-size: 15px;
+    font-weight: 600;
 }}
 QLabel#heroBody, QLabel#dialogBody {{
     color: {p['subtext0']};
-    font-size: 14px;
+    font-size: 15px;
 }}
 QLabel#sectionTitle {{
     color: {p['text']};
@@ -273,11 +305,11 @@ QLabel#sectionTitle {{
 QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint,
 QLabel#subtleText, QLabel#statusBody {{
     color: {p['muted']};
-    font-size: 14px;
+    font-size: 15px;
 }}
 QLabel#fieldLabel, QLabel#metricLabel {{
     color: {p['subtext0']};
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 650;
 }}
 QLabel#metricValue, QLabel#shellStatValue {{
@@ -290,9 +322,22 @@ QLabel#footerMeta, QLabel#statusLabel {{
     color: {p['muted']};
     font-size: 14px;
 }}
+QLabel#toolbarMeta {{ color: {p['subtext0']}; font-size: 14px; }}
+QLabel#queueTitle {{ color: {p['text']}; font-size: 13px; font-weight: 600; }}
+QLabel#queueMeta {{ color: {p['muted']}; font-size: 12px; }}
+QLabel#queueStatusText, QLabel#queueProgressText {{
+    color: {p['subtext1']};
+    font-size: 13px;
+}}
+QLabel#sourceLinkIcon {{
+    color: {p['subtext1']};
+    border: none;
+    border-right: 1px solid {p['stroke']};
+    font-size: 20px;
+}}
 QLabel#dialogEyebrow, QLabel#eyebrow {{
     color: {p['accent']};
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
 }}
 QLabel#dialogTitle {{
@@ -345,11 +390,18 @@ QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
     selection-background-color: {p['accent']};
     selection-color: {on_accent};
 }}
-QLineEdit#globalSearch {{ background-color: {p['panel']}; }}
-QLineEdit#sourceComposer {{
-    background-color: {p['panel']};
-    min-height: 28px;
+QLineEdit#globalSearch {{
+    background-color: {p['panelSoft']};
+    font-size: 14px;
 }}
+QLineEdit#sourceComposer {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    min-height: 30px;
+    font-size: 14px;
+}}
+QLineEdit#sourceComposer:hover, QLineEdit#sourceComposer:focus {{ border: none; }}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover,
 QTimeEdit:hover, QDateEdit:hover {{ border-color: {p['overlay0']}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
@@ -391,6 +443,43 @@ QPushButton#commandGhost {{
     padding-right: 12px;
 }}
 QPushButton#commandGhost:hover {{ color: {p['text']}; background-color: transparent; }}
+QPushButton#headerIcon {{
+    background-color: transparent;
+    color: {p['subtext1']};
+    border: none;
+    border-radius: 5px;
+    padding: 0;
+    font-size: 20px;
+    font-weight: 500;
+}}
+QPushButton#headerIcon:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#toolbarAction {{
+    background-color: transparent;
+    color: {p['subtext1']};
+    border: none;
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 13px;
+    font-weight: 500;
+}}
+QPushButton#toolbarAction:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#toolbarEmphasis {{
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border: none;
+    border-radius: 3px;
+    padding: 5px 10px;
+    font-size: 13px;
+    font-weight: 550;
+}}
+QPushButton#footerAction {{
+    background-color: transparent;
+    color: {p['accent']};
+    border: none;
+    padding: 2px 4px;
+    font-size: 13px;
+    font-weight: 500;
+}}
 QPushButton#toggleAccent {{ background-color: transparent; color: {p['subtext1']}; }}
 QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {p['accent']}; }}
 QPushButton#danger {{ background-color: {p['red']}; color: {_accent_text(p['red'])}; }}
@@ -411,6 +500,23 @@ QTableWidget, QTableView, QTreeWidget {{
     selection-background-color: {p['surface0']};
     selection-color: {p['text']};
     font-size: {font_size}px;
+}}
+QTableWidget#downloadQueue {{
+    background-color: transparent;
+    gridline-color: {p['stroke']};
+    font-size: 13px;
+}}
+QTableWidget#downloadQueue::item {{
+    padding: 0 7px;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
+QTableWidget#downloadQueue QHeaderView::section {{
+    background-color: {p['panelSoft']};
+    color: {p['subtext0']};
+    font-size: 13px;
+    font-weight: 600;
+    padding: 11px 7px;
 }}
 QTableWidget:focus, QTableView:focus, QListWidget:focus, QTreeWidget:focus {{
     border: 2px solid {p['accent']};
@@ -444,8 +550,9 @@ QTextEdit, QPlainTextEdit {{
 }}
 QTextEdit#log {{
     color: {p['subtext0']};
-    font-family: 'Cascadia Mono', 'Consolas', monospace;
-    font-size: 12px;
+    font-family: 'Segoe UI', 'Arial', sans-serif;
+    font-size: 14px;
+    padding: 12px 14px;
 }}
 QListWidget, QListWidget#globalResults, QListWidget#playerChapterList {{
     background-color: {p['panel']};
@@ -479,6 +586,7 @@ QProgressBar {{
     color: transparent;
 }}
 QProgressBar::chunk {{ background-color: {p['accent']}; border-radius: 4px; }}
+QProgressBar#queueProgressBar {{ height: 8px; min-height: 8px; max-height: 8px; }}
 QCheckBox:focus, QRadioButton:focus, QSlider:focus {{
     border: 1px solid {p['accent']};
     border-radius: 4px;
@@ -576,7 +684,7 @@ def apply_visual_system(theme="dark", density="cozy", accent="", app=None):
     _active_theme = theme
     resolved_theme = _detect_system_theme() if theme == "system" else theme
     CAT.clear()
-    CAT.update(THEMES.get(resolved_theme, CAT_MOCHA))
+    CAT.update(THEMES.get(resolved_theme, STREAMKEEP_DARK))
     _active_accent = _normalize_accent(accent)
     if _active_accent:
         CAT["accent"] = _active_accent

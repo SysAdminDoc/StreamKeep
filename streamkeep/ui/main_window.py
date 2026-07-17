@@ -7,6 +7,7 @@ predictable file layout and keeps the runtime unchanged.
 """
 
 import json
+import html
 import os
 import subprocess
 from datetime import datetime
@@ -18,10 +19,10 @@ from PyQt6.QtWidgets import (
     QFrame, QStackedWidget, QSystemTrayIcon,
     QMenu, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QKeySequence, QPixmap, QPainter,
-    QBrush, QShortcut,
+    QBrush, QPen, QShortcut,
 )
 
 # Package re-exports under legacy underscore-prefixed names so the existing
@@ -64,6 +65,31 @@ from .main_window_jobs import MainWindowJobsMixin
 NATIVE_PROXY = ""
 
 
+def _chrome_icon(kind):
+    """Draw small palette-aware shell icons without font-glyph dependencies."""
+    pixmap = QPixmap(22, 22)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(CAT["subtext1"]))
+    pen.setWidthF(1.7)
+    painter.setPen(pen)
+    if kind == "search":
+        painter.drawEllipse(4, 4, 10, 10)
+        painter.drawLine(13, 13, 18, 18)
+    elif kind == "settings":
+        for y, x in ((5, 8), (11, 14), (17, 6)):
+            painter.drawLine(3, y, 19, y)
+            painter.setBrush(QColor(CAT["panel"]))
+            painter.drawEllipse(x - 2, y - 2, 4, 4)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+    else:
+        painter.drawEllipse(3, 3, 16, 16)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "?")
+    painter.end()
+    return QIcon(pixmap)
+
+
 # ── Main Window ───────────────────────────────────────────────────────────
 
 # Platform badges, tab CSS, and widget builders live in streamkeep.ui.widgets.
@@ -94,8 +120,11 @@ class StreamKeep(
     MainWindowJobsMixin, HistoryTabMixin, MonitorTabMixin, SettingsTabMixin,
     DownloadTabMixin, StorageTabMixin, QMainWindow,
 ):
+    _log_requested = pyqtSignal(str)
+
     def __init__(self, *, startup_check=False):
         super().__init__()
+        self._log_requested.connect(self._log)
         self._startup_check = bool(startup_check)
         self.setWindowTitle(f"StreamKeep v{VERSION}")
         self.setMinimumSize(1020, 800)
@@ -1370,6 +1399,9 @@ class StreamKeep(
         }
         self.status_label.setText(translated_message)
         self.status_label.setToolTip(translated_message)
+        idle = tone == "idle"
+        self.status_pill.setVisible(not idle)
+        self.status_label.setVisible(not idle)
         set_accessible(
             self.status_pill,
             tr_format(
@@ -1437,74 +1469,32 @@ class StreamKeep(
         central.setObjectName("chrome")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(24, 10, 24, 6)
-        root.setSpacing(7)
+        root.setContentsMargins(16, 8, 16, 6)
+        root.setSpacing(8)
 
         header_card = QFrame()
         header_card.setObjectName("appHeader")
+        header_card.setMinimumHeight(78)
         header_lay = QVBoxLayout(header_card)
         header_lay.setContentsMargins(0, 0, 0, 0)
         header_lay.setSpacing(0)
 
         header_top = QHBoxLayout()
-        header_top.setContentsMargins(0, 0, 0, 8)
-        header_top.setSpacing(18)
+        header_top.setContentsMargins(16, 6, 16, 12)
+        header_top.setSpacing(24)
         title = QLabel("StreamKeep")
         title.setObjectName("appBrand")
-        title.setMinimumWidth(180)
+        title.setMinimumWidth(148)
         header_top.addWidget(title)
-
-        self._global_search = QLineEdit()
-        self._global_search.setPlaceholderText("Search downloads, URLs, channels, or podcasts…")
-        self._global_search.setClearButtonEnabled(True)
-        self._global_search.setObjectName("globalSearch")
-        set_accessible(
-            self._global_search,
-            "Search StreamKeep",
-            "Search downloads, URLs, monitored channels, and podcasts",
-        )
-        self._global_search.setMinimumHeight(40)
-        self._global_search.setMaximumWidth(820)
-        self._global_search_timer = QTimer(self)
-        self._global_search_timer.setSingleShot(True)
-        self._global_search_timer.setInterval(300)
-        self._global_search_timer.timeout.connect(self._on_global_search)
-        self._global_search.textChanged.connect(
-            lambda: self._global_search_timer.start()
-        )
-        self._global_search.returnPressed.connect(self._on_global_search)
-        header_top.addWidget(self._global_search, 1)
-
-        self.notif_button = QPushButton("Alerts 0")
-        self.notif_button.setObjectName("ghost")
-        self.notif_button.setMinimumWidth(86)
-        self.notif_button.setToolTip("Recent notifications")
-        self.notif_button.clicked.connect(self._on_show_notifications)
-        header_top.addWidget(self.notif_button)
-
-        settings_quick = QPushButton("Settings")
-        settings_quick.setObjectName("ghost")
-        settings_quick.clicked.connect(lambda: self._switch_tab(5))
-        header_top.addWidget(settings_quick)
-        header_lay.addLayout(header_top)
-
-        # These labels retain the existing overview state contract without
-        # turning operational counts into a dashboard card.
-        self.shell_snapshot_value = QLabel("Ready to capture", header_card)
-        self.shell_snapshot_value.setVisible(False)
-        self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}", header_card)
-        self.shell_snapshot_detail.setVisible(False)
-        self.shell_snapshot_meta = QLabel("0 active  •  0 queued")
-        self.shell_snapshot_meta.setObjectName("footerMeta")
 
         tab_shell = QFrame()
         tab_shell.setObjectName("appNav")
         tab_lay = QHBoxLayout(tab_shell)
         tab_lay.setContentsMargins(0, 0, 0, 0)
-        tab_lay.setSpacing(34)
+        tab_lay.setSpacing(26)
 
         self._tab_btns = []
-        self._tab_names = ["Download", "Monitor", "History", "Storage", "Analytics", "Settings"]
+        self._tab_names = ["Download", "Monitor", "History", "Analytics", "Storage", "Settings"]
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
             btn.setCheckable(True)
@@ -1519,8 +1509,65 @@ class StreamKeep(
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
-        tab_lay.addStretch(1)
-        header_lay.addWidget(tab_shell)
+        header_top.addWidget(tab_shell)
+        header_top.addStretch(1)
+
+        self._global_search = QLineEdit()
+        self._global_search.setPlaceholderText("Search downloads…")
+        self._global_search.setClearButtonEnabled(True)
+        self._global_search.setObjectName("globalSearch")
+        self._global_search.addAction(
+            _chrome_icon("search"), QLineEdit.ActionPosition.TrailingPosition
+        )
+        set_accessible(
+            self._global_search,
+            "Search StreamKeep",
+            "Search downloads, URLs, monitored channels, and podcasts",
+        )
+        self._global_search.setFixedWidth(316)
+        self._global_search.setMinimumHeight(42)
+        self._global_search_timer = QTimer(self)
+        self._global_search_timer.setSingleShot(True)
+        self._global_search_timer.setInterval(300)
+        self._global_search_timer.timeout.connect(self._on_global_search)
+        self._global_search.textChanged.connect(
+            lambda: self._global_search_timer.start()
+        )
+        self._global_search.returnPressed.connect(self._on_global_search)
+        header_top.addWidget(self._global_search)
+
+        self.notif_button = QPushButton("")
+        self.notif_button.setObjectName("headerIcon")
+        self.notif_button.setIcon(_chrome_icon("help"))
+        self.notif_button.setFixedSize(42, 42)
+        self.notif_button.setAccessibleName("Notifications")
+        self.notif_button.setToolTip("Recent notifications")
+        self.notif_button.clicked.connect(self._on_show_notifications)
+        header_top.addWidget(self.notif_button)
+
+        self.header_settings_btn = QPushButton("")
+        self.header_settings_btn.setObjectName("headerIcon")
+        self.header_settings_btn.setIcon(_chrome_icon("settings"))
+        self.header_settings_btn.setFixedSize(42, 42)
+        self.header_settings_btn.setAccessibleName("Open Settings")
+        self.header_settings_btn.setToolTip("Open Settings")
+        self.header_settings_btn.clicked.connect(
+            lambda: self._switch_tab(self._tab_names.index("Settings"))
+        )
+        header_top.addWidget(self.header_settings_btn)
+
+        header_lay.addLayout(header_top)
+
+        # These labels retain the existing overview state contract without
+        # turning operational counts into a dashboard card.
+        self.shell_snapshot_value = QLabel("Ready to capture", header_card)
+        self.shell_snapshot_value.setVisible(False)
+        self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}", header_card)
+        self.shell_snapshot_detail.setVisible(False)
+        self.shell_snapshot_meta = QLabel("0 active  •  0 queued")
+        self.shell_snapshot_meta.setObjectName("footerMeta")
+        self.shell_snapshot_meta.setVisible(False)
+
         root.addWidget(header_card)
 
         # Global search results dropdown (hidden until needed)
@@ -1537,14 +1584,15 @@ class StreamKeep(
         self._stack.addWidget(self._download_scroll)
         self._stack.addWidget(self._wrap_scroll_page(build_monitor_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_history_tab(self)))
-        self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
         from .tabs.analytics import build_analytics_tab
         self._stack.addWidget(self._wrap_scroll_page(build_analytics_tab(self)))
+        self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
         self._stack.addWidget(self._wrap_scroll_page(build_settings_tab(self)))
         root.addWidget(self._stack, 1)
 
         footer = QFrame()
         footer.setObjectName("statusBar")
+        footer.setMinimumHeight(17)
         footer_lay = QHBoxLayout(footer)
         footer_lay.setContentsMargins(0, 5, 0, 0)
         footer_lay.setSpacing(10)
@@ -1610,6 +1658,11 @@ class StreamKeep(
         self._set_status("Paste a URL to begin.", "idle")
         QTimer.singleShot(0, lambda: self._download_scroll.verticalScrollBar().setValue(0))
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_global_search"):
+            self._global_search.setVisible(event.size().width() >= 1240)
+
     def _switch_tab(self, idx, *, focus_page=False):
         self._stack.setCurrentIndex(idx)
         for i, btn in enumerate(self._tab_btns):
@@ -1625,8 +1678,8 @@ class StreamKeep(
                 "url_input",
                 "monitor_url_input",
                 "history_search",
-                "storage_table",
                 "analytics_range",
+                "storage_table",
                 "theme_combo",
             )
             target = getattr(self, targets[idx], None) if idx < len(targets) else None
@@ -1683,8 +1736,69 @@ class StreamKeep(
     _LOG_SOFT_MAX_BLOCKS = 5000
     _LOG_TRIM_BLOCKS = 1000
 
+    @staticmethod
+    def _format_activity_message(msg, when=None):
+        """Turn a diagnostic log message into a calm, timestamped event row."""
+        stamp = (when or datetime.now()).strftime("%H:%M:%S")
+        formatted = []
+        for line in str(msg or "").splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            if text.startswith("[") and "]" in text:
+                end = text.find("]")
+                if end > 1:
+                    text = text[end + 1:].strip()
+            formatted.append(f"{stamp}  {text}")
+        return "\n".join(formatted)
+
+    @staticmethod
+    def _activity_tone_color(msg):
+        text = str(msg or "").lower()
+        if any(word in text for word in ("error", "failed", "denied", "cancelled")):
+            return CAT["red"]
+        if any(word in text for word in ("warning", "unavailable", "retry", "attention")):
+            return CAT["gold"]
+        if any(word in text for word in ("ready", "complete", "resolved", "success")):
+            return CAT["accentSoft"]
+        return CAT["accent"]
+
+    def _clear_activity(self):
+        if not hasattr(self, "log_text"):
+            return
+        self.log_text.clear()
+        self.log_text.setPlainText("No activity yet.")
+        self._activity_event_count = 0
+        if hasattr(self, "activity_count_label"):
+            self.activity_count_label.setText("No events yet")
+
     def _log(self, msg):
-        self.log_text.append(msg)
+        if QThread.currentThread() is not self.thread():
+            self._log_requested.emit(str(msg or ""))
+            return
+        lines = [line.strip() for line in str(msg or "").splitlines() if line.strip()]
+        if lines and getattr(self, "_activity_event_count", 0) == 0:
+            self.log_text.clear()
+        for line in lines:
+            display_message = self._format_activity_message(line)
+            if not display_message:
+                continue
+            stamp, _, event = display_message.partition("  ")
+            color = self._activity_tone_color(line)
+            self.log_text.append(
+                "<div style='margin: 0 0 13px 0;'>"
+                f"<span style='color:{CAT['muted']};'>{html.escape(stamp)}</span>"
+                f"&nbsp;&nbsp;<span style='color:{color};'>●</span>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;<span style='color:{CAT['text']};'>{html.escape(event)}</span>"
+                "</div>"
+            )
+            self._activity_event_count = getattr(self, "_activity_event_count", 0) + 1
+        if hasattr(self, "activity_count_label"):
+            count = min(getattr(self, "_activity_event_count", 0), self._LOG_SOFT_MAX_BLOCKS)
+            self.activity_count_label.setText(
+                f"Showing latest {count} event{'s' if count != 1 else ''}"
+                if count else "No events yet"
+            )
         doc = self.log_text.document()
         if doc.blockCount() > self._LOG_SOFT_MAX_BLOCKS:
             try:
@@ -1777,10 +1891,12 @@ class StreamKeep(
             return
         unread = self._notifications.unread
         if unread > 0:
-            self.notif_button.setText(f"Alerts {unread}")
-            self.notif_button.setStyleSheet("font-weight: 700;")
+            self.notif_button.setText(str(unread))
+            self.notif_button.setToolTip(f"Recent notifications ({unread} unread)")
+            self.notif_button.setStyleSheet(f"color: {CAT['accent']}; font-weight: 700;")
         else:
-            self.notif_button.setText("Alerts 0")
+            self.notif_button.setText("")
+            self.notif_button.setToolTip("Recent notifications")
             self.notif_button.setStyleSheet("")
 
     def _on_show_notifications(self):

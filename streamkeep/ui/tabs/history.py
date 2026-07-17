@@ -56,6 +56,7 @@ def build_history_tab(win):
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
+    body.setVisible(False)
     hero_copy.addWidget(kicker)
     hero_copy.addWidget(title)
     hero_copy.addWidget(body)
@@ -310,8 +311,8 @@ class HistoryTabMixin:
                 )
         else:
             if hasattr(self, "history_filter_summary"):
-                self.history_filter_summary.setText("History fills in automatically")
-            self.history_summary_label.setText("Download history builds automatically after each completed job.")
+                self.history_filter_summary.setText("No downloads yet")
+            self.history_summary_label.setText("Completed downloads appear here.")
 
     # ── Remove entries whose folders were recycled ───────────────────
 

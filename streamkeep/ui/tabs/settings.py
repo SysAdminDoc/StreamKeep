@@ -273,6 +273,7 @@ class SettingsTabMixin(
 def build_settings_tab(win):
     """Build the Settings tab page. Stashes widget refs on `win.*`."""
     page = QWidget()
+    page.setProperty("responsiveLayout", True)
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(6)
@@ -304,6 +305,7 @@ def build_settings_tab(win):
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
+    body.setVisible(False)
     hero_copy.addWidget(kicker)
     hero_copy.addWidget(title)
     hero_copy.addWidget(body)
@@ -327,7 +329,7 @@ def build_settings_tab(win):
     config_card, _, _ = make_metric_card(
         "Config",
         CONFIG_FILE.name,
-        str(CONFIG_FILE.parent),
+        "Local preferences",
     )
     secrets_card, _, _ = make_metric_card(
         "Secrets",
@@ -337,6 +339,7 @@ def build_settings_tab(win):
     settings_metrics.addWidget(theme_card)
     settings_metrics.addWidget(config_card, 1)
     settings_metrics.addWidget(secrets_card)
+    config_card.setToolTip(str(CONFIG_FILE))
     hero_lay.addLayout(settings_metrics)
     lay.addWidget(hero)
 
@@ -390,8 +393,8 @@ def build_settings_tab(win):
     controls_row.setSpacing(10)
     win.theme_combo = QComboBox()
     win.theme_combo.setProperty("i18nTranslateItems", True)
-    win.theme_combo.addItem("Dark (Catppuccin Mocha)", "dark")
-    win.theme_combo.addItem("Light (Catppuccin Latte)", "light")
+    win.theme_combo.addItem("Dark", "dark")
+    win.theme_combo.addItem("Light", "light")
     win.theme_combo.addItem("System", "system")
     win.theme_combo.addItem("High Contrast", "high_contrast")
     idx = max(0, win.theme_combo.findData(current_theme))
@@ -445,8 +448,9 @@ def build_settings_tab(win):
     theme_lay.addLayout(controls_row)
     card_lay.addWidget(theme_bar)
 
-    # Default Output + Toolchain (side by side)
-    sections_top = QHBoxLayout()
+    # Keep the output path and runtime health readable at the supported
+    # minimum width instead of forcing a horizontal settings scrollbar.
+    sections_top = QVBoxLayout()
     sections_top.setSpacing(12)
 
     general_block, general_lay = make_field_block(
@@ -476,35 +480,37 @@ def build_settings_tab(win):
     ff_card, _, _ = make_metric_card(
         "FFmpeg",
         ffmpeg["state"].title(),
-        f"{ffmpeg.get('version') or 'not found'} · {ffmpeg['provenance']}"[:96],
+        str(ffmpeg.get("version") or "Not found"),
     )
     yt_card, _, _ = make_metric_card(
         "yt-dlp",
         yt_status.get("summary", "Missing"),
-        yt_status.get("detail", "")[:96],
+        str(yt_status.get("yt_dlp_version") or "Not found"),
     )
     curl_card, _, _ = make_metric_card(
         "curl",
         curl["state"].title(),
-        f"{curl.get('version') or 'not found'} · {curl['provenance']}"[:96],
+        str(curl.get("version") or "Not found"),
     )
     pillow_card, _, _ = make_metric_card(
         "Pillow",
         pillow["state"].title(),
-        f"{pillow.get('version') or 'not found'} · {pillow['provenance']}"[:96],
+        str(pillow.get("version") or "Not found"),
     )
-    tools_metrics = QVBoxLayout()
+    for runtime_card, detail in (
+        (ff_card, ffmpeg.get("detail", "")),
+        (yt_card, yt_status.get("detail", "")),
+        (curl_card, curl.get("detail", "")),
+        (pillow_card, pillow.get("detail", "")),
+    ):
+        runtime_card.setToolTip(str(detail or ""))
+
+    tools_metrics = QHBoxLayout()
     tools_metrics.setSpacing(10)
-    tools_row_primary = QHBoxLayout()
-    tools_row_primary.setSpacing(10)
-    tools_row_primary.addWidget(ff_card)
-    tools_row_primary.addWidget(yt_card)
-    tools_row_secondary = QHBoxLayout()
-    tools_row_secondary.setSpacing(10)
-    tools_row_secondary.addWidget(curl_card)
-    tools_row_secondary.addWidget(pillow_card)
-    tools_metrics.addLayout(tools_row_primary)
-    tools_metrics.addLayout(tools_row_secondary)
+    tools_metrics.addWidget(ff_card)
+    tools_metrics.addWidget(yt_card)
+    tools_metrics.addWidget(curl_card)
+    tools_metrics.addWidget(pillow_card)
     tools_lay.addLayout(tools_metrics)
     sections_top.addWidget(tools_block, 1)
     card_lay.addLayout(sections_top)
@@ -555,6 +561,7 @@ def build_settings_tab(win):
     win.cookies_clear_btn.setFixedWidth(70)
     win.cookies_clear_btn.clicked.connect(win._on_clear_cookies)
     row_import.addWidget(win.cookies_clear_btn)
+    row_import.addStretch(1)
     cookies_lay.addLayout(row_import)
 
     win.cookies_scan_label = QLabel("")
@@ -1184,17 +1191,17 @@ def build_settings_tab(win):
     scope_card, win.companion_scope_value, win.companion_scope_sub = make_metric_card(
         "Access scope",
         "Local only",
-        "Recommended default",
+        "Recommended",
     )
     remote_card, win.companion_remote_value, win.companion_remote_sub = make_metric_card(
         "Web remote",
         "Off",
-        "Enable the companion to expose a local control page",
+        "Local control",
     )
     token_card, win.companion_token_value, win.companion_token_sub = make_metric_card(
         "Pairing code",
         "Waiting",
-        "Generate only when a client is ready",
+        "5-minute code",
     )
     companion_metrics.addWidget(scope_card)
     companion_metrics.addWidget(remote_card)

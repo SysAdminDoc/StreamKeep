@@ -59,6 +59,7 @@ def build_monitor_tab(win):
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
+    body.setVisible(False)
     hero_copy.addWidget(kicker)
     hero_copy.addWidget(title)
     hero_copy.addWidget(body)
@@ -155,7 +156,7 @@ def build_monitor_tab(win):
     manage_lay.addLayout(controls_row)
 
     win.monitor_summary_label = QLabel(
-        "Add a channel URL to start passive live monitoring."
+        "Add a channel to start monitoring."
     )
     win.monitor_summary_label.setObjectName("subtleText")
     manage_lay.addWidget(win.monitor_summary_label)
@@ -325,7 +326,7 @@ class MonitorTabMixin:
                 summary_parts.append(f"{pending} queued to retry")
             self.monitor_summary_label.setText(" • ".join(summary_parts))
         else:
-            self.monitor_summary_label.setText("Add a channel URL to start passive live monitoring.")
+            self.monitor_summary_label.setText("Add a channel to start monitoring.")
 
         if hasattr(self, "monitor_table_hint"):
             calendar_on = bool(
@@ -348,11 +349,11 @@ class MonitorTabMixin:
                     )
                 else:
                     self.monitor_table_hint.setText(
-                        "Entries refresh automatically and stay ready to trigger auto-record when a stream goes live."
+                        "Updates automatically; auto-record is ready."
                     )
             else:
                 self.monitor_table_hint.setText(
-                    "Entries refresh automatically and can trigger auto-recording when a stream goes live."
+                    "Updates automatically."
                 )
         self._refresh_shell_overview()
 

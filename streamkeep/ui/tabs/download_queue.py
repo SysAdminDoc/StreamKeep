@@ -5,13 +5,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QMenu,
-    QPushButton,
+    QProgressBar,
     QTableWidgetItem,
-    QWidget,
+    QVBoxLayout,
 )
 
 from ... import db as _db
@@ -321,6 +324,13 @@ class DownloadQueueMixin:
             failure_id = 0
         if failure_id:
             normalized["failure_id"] = failure_id
+        for key in (
+            "quality", "container", "thumbnail_path", "thumbnail_url",
+            "progress", "speed", "eta", "size", "size_bytes",
+        ):
+            value = item.get(key)
+            if value not in (None, ""):
+                normalized[key] = value
         return normalized
 
     def _queue_add(
@@ -560,6 +570,13 @@ class DownloadQueueMixin:
             return
         # Create and start the DownloadWorker
         self._set_queue_item_status(item, "downloading")
+        item["quality"] = (
+            (q_data.resolution or q_data.name) if q_data else "Best available"
+        )
+        item["container"] = (
+            (q_data.format_type if q_data else fmt_type).replace("ytdlp_direct", "MP4").upper()
+        )
+        item["thumbnail_url"] = str(getattr(info, "thumbnail_url", "") or "")
         self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
         worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
         worker.audio_url = audio_url
@@ -627,6 +644,14 @@ class DownloadQueueMixin:
         worker.break_on_existing = bool(item.get("break_on_existing", False))
         worker.parallel_connections = self._parallel_connections
         worker.log.connect(self._log)
+        worker.progress.connect(
+            lambda _segment, pct, status, it=item:
+            self._on_queue_item_progress(it, pct, status)
+        )
+        worker.segment_done.connect(
+            lambda _segment, size, it=item:
+            self._on_queue_item_segment_done(it, size)
+        )
         worker.all_done.connect(lambda it=item, inf=info: self._on_queue_item_done(it, inf, out_dir))
         worker.error.connect(lambda _idx, err, it=item: self._on_queue_item_error(it, err))
         self._queue_workers[item_id] = worker
@@ -722,94 +747,343 @@ class DownloadQueueMixin:
         self._log(f"[QUEUE] Error: {item.get('title', '')[:60]} — {err}")
         self._advance_queue()
 
+    @staticmethod
+    def _queue_status_color(status, is_scheduled=False):
+        if is_scheduled:
+            return CAT["peach"]
+        if status in ("fetching", "downloading"):
+            return CAT["accent"]
+        if status in ("done", "ready"):
+            return CAT["accentSoft"]
+        if status in ("failed", "cancelled"):
+            return CAT["red"]
+        if status == "paused":
+            return CAT["muted"]
+        return CAT["gold"]
+
+    @staticmethod
+    def _queue_thumbnail(item):
+        path = str(item.get("thumbnail_path", "") or "")
+        pixmap = QPixmap(path) if path and os.path.isfile(path) else QPixmap()
+        if not pixmap.isNull():
+            return pixmap.scaled(
+                112, 62,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+        # A deterministic abstract preview keeps rows scannable before remote
+        # metadata has supplied artwork; it is intentionally quiet, not a
+        # platform badge or fake media frame.
+        pixmap = QPixmap(112, 62)
+        pixmap.fill(QColor(CAT["surface0"]))
+        painter = QPainter(pixmap)
+        seed = sum(ord(char) for char in str(item.get("title", "")))
+        gradient = QLinearGradient(0, 0, 112, 62)
+        gradient.setColorAt(0.0, QColor(CAT["panelHi"]))
+        gradient.setColorAt(1.0, QColor(CAT["accent"]).darker(170 + seed % 35))
+        painter.fillRect(pixmap.rect(), gradient)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(CAT["accent"]), 2))
+        for offset in range(-20, 150, 18):
+            rise = 10 + ((seed + offset) % 22)
+            painter.drawLine(offset, 62, offset + 44, rise)
+        painter.end()
+        return pixmap
+
+    def _queue_name_widget(self, item, check):
+        frame = QFrame()
+        frame.setObjectName("queueName")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(8, 7, 8, 7)
+        layout.setSpacing(10)
+
+        layout.addWidget(check)
+
+        thumbnail = QLabel()
+        thumbnail.setObjectName("queueThumbnail")
+        thumbnail.setFixedSize(112, 62)
+        thumbnail.setPixmap(self._queue_thumbnail(item))
+        thumbnail.setScaledContents(True)
+        layout.addWidget(thumbnail)
+
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(3)
+        title = QLabel(str(item.get("title", "") or item.get("url", ""))[:80])
+        title.setObjectName("queueTitle")
+        title.setToolTip(str(item.get("title", "") or item.get("url", "")))
+        meta_parts = [
+            str(item.get("quality", "") or "").strip(),
+            str(item.get("container", "") or "").strip(),
+        ]
+        meta = QLabel("  ·  ".join(part for part in meta_parts if part) or str(item.get("platform", "?")))
+        meta.setObjectName("queueMeta")
+        copy.addStretch(1)
+        copy.addWidget(title)
+        copy.addWidget(meta)
+        copy.addStretch(1)
+        layout.addLayout(copy, 1)
+        return frame
+
+    def _queue_status_widget(self, status, display_status, color):
+        frame = QFrame()
+        frame.setObjectName("queueStatus")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(8, 0, 4, 0)
+        layout.setSpacing(7)
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color: {color}; font-size: 11px;")
+        text = QLabel(display_status)
+        text.setObjectName("queueStatusText")
+        text.setToolTip(status.replace("_", " ").strip().title())
+        layout.addWidget(dot)
+        layout.addWidget(text)
+        layout.addStretch(1)
+        return frame
+
+    def _queue_progress_widget(self, item):
+        frame = QFrame()
+        frame.setObjectName("queueProgress")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(8, 0, 6, 0)
+        layout.setSpacing(7)
+        progress = QProgressBar()
+        progress.setObjectName("queueProgressBar")
+        progress.setRange(0, 100)
+        progress.setValue(max(0, min(100, int(item.get("progress", 0) or 0))))
+        progress.setTextVisible(False)
+        progress.setFixedWidth(76)
+        progress.setAccessibleName(f"Progress for {item.get('title', 'queue item')}")
+        label = QLabel(f"{progress.value()}%")
+        label.setObjectName("queueProgressText")
+        layout.addWidget(progress)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return frame, progress, label
+
+    def _selected_queue_items(self):
+        return [q for q in self._download_queue if q.get("_ui_selected", True)]
+
+    def _on_queue_item_selected(self, item, checked):
+        item["_ui_selected"] = bool(checked)
+        self._refresh_queue_toolbar()
+
+    def _on_queue_header_clicked(self, section):
+        if section != 0 or not self._download_queue:
+            return
+        checked = not all(q.get("_ui_selected", True) for q in self._download_queue)
+        for item in self._download_queue:
+            item["_ui_selected"] = checked
+        self._refresh_queue_table()
+
+    def _refresh_queue_toolbar(self):
+        selected = self._selected_queue_items()
+        if hasattr(self, "queue_selected_label"):
+            self.queue_selected_label.setText(f"{len(selected)} selected")
+        statuses = {str(item.get("status", "queued")) for item in selected}
+        locked = {"fetching", "downloading"}
+        removable = any(str(item.get("status", "queued")) not in locked for item in selected)
+        if hasattr(self, "queue_start_btn"):
+            self.queue_start_btn.setEnabled(bool(selected) and bool(statuses & {"queued", "paused"}))
+            self.queue_pause_btn.setEnabled(bool(selected) and "queued" in statuses)
+            self.queue_remove_btn.setEnabled(removable)
+            self.queue_retry_btn.setEnabled(bool(statuses & {"failed", "cancelled"}))
+            self.queue_pause_all_btn.setEnabled(
+                any(item.get("status", "queued") == "queued" for item in self._download_queue)
+            )
+
+    def _on_queue_start_selected(self):
+        selected = self._selected_queue_items()
+        changed = False
+        for item in selected:
+            if item.get("status") == "paused":
+                item["status"] = "queued"
+                changed = True
+        if changed:
+            self._queue_status_changed()
+        self._advance_queue()
+        self._set_status("Selected queue jobs are ready to start.", "success")
+
+    def _on_queue_pause_selected(self):
+        changed = 0
+        for item in self._selected_queue_items():
+            if item.get("status", "queued") == "queued":
+                item["status"] = "paused"
+                changed += 1
+        if changed:
+            self._queue_status_changed()
+        self._set_status(f"Held {changed} pending queue job(s).", "success" if changed else "idle")
+
+    def _on_queue_pause_all(self):
+        changed = 0
+        for item in self._download_queue:
+            if item.get("status", "queued") == "queued":
+                item["status"] = "paused"
+                changed += 1
+        if changed:
+            self._queue_status_changed()
+        self._set_status(f"Held {changed} pending queue job(s).", "success" if changed else "idle")
+
+    def _on_queue_remove_selected(self):
+        locked = {"fetching", "downloading"}
+        removable = [
+            index for index, item in enumerate(self._download_queue)
+            if item.get("_ui_selected", True) and item.get("status", "queued") not in locked
+        ]
+        for index in reversed(removable):
+            self._download_queue.pop(index)
+        if removable:
+            self._queue_status_changed()
+        self._set_status(
+            f"Removed {len(removable)} queue job(s).",
+            "success" if removable else "warning",
+        )
+
+    def _on_queue_retry_selected(self):
+        retried = 0
+        for item in self._selected_queue_items():
+            if item.get("status") not in ("failed", "cancelled"):
+                continue
+            failure_id = int(item.get("failure_id", 0) or 0)
+            if failure_id:
+                if self._retry_failed_job(failure_id):
+                    retried += 1
+            else:
+                item["status"] = "queued"
+                item["note"] = "retry requested"
+                retried += 1
+        if retried:
+            self._queue_status_changed()
+            self._advance_queue()
+        self._set_status(f"Retrying {retried} queue job(s).", "success" if retried else "warning")
+
+    @staticmethod
+    def _queue_display_bytes(item):
+        try:
+            explicit = int(item.get("size_bytes", 0) or 0)
+        except (TypeError, ValueError):
+            explicit = 0
+        if explicit > 0:
+            return explicit
+        text = str(item.get("size", "") or "").strip().upper().replace("IB", "B")
+        import re
+        match = re.search(r"([\d.]+)\s*(KB|MB|GB|TB|B)", text)
+        if not match:
+            return 0
+        value = float(match.group(1))
+        scale = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3, "TB": 1024 ** 4}
+        return int(value * scale[match.group(2)])
+
+    def _refresh_queue_footer(self):
+        if not hasattr(self, "queue_footer_meta"):
+            return
+        total = len(self._download_queue)
+        active = sum(
+            item.get("status") in ("fetching", "downloading")
+            for item in self._download_queue
+        )
+        ready = sum(
+            item.get("status") in ("queued", "paused", "ready")
+            for item in self._download_queue
+        )
+        total_bytes = sum(self._queue_display_bytes(item) for item in self._download_queue)
+        parts = [
+            f"{total} download{'s' if total != 1 else ''}",
+            f"{active} downloading",
+            f"{ready} ready",
+        ]
+        if total_bytes:
+            parts.append(f"{_fmt_size(total_bytes)} total")
+        self.queue_footer_meta.setText("   |   ".join(parts))
+
+    def _on_queue_item_progress(self, item, percent, status):
+        item["progress"] = max(0, min(100, int(percent or 0)))
+        pieces = [piece.strip() for piece in str(status or "").split("|") if piece.strip()]
+        for piece in pieces:
+            if piece.upper().startswith("ETA "):
+                item["eta"] = piece[4:].strip()
+            elif "/S" in piece.upper():
+                item["speed"] = piece
+            elif any(unit in piece.upper() for unit in ("KB", "MB", "GB", "KIB", "MIB", "GIB")):
+                item["size"] = piece.split("/")[0].strip()
+        row = getattr(self, "_queue_row_by_id", {}).get(id(item))
+        if row is None:
+            return
+        progress = getattr(self, "_queue_progress_bars", {}).get(id(item))
+        label = getattr(self, "_queue_progress_labels", {}).get(id(item))
+        if progress is not None:
+            progress.setValue(item["progress"])
+        if label is not None:
+            label.setText(f"{item['progress']}%")
+        for column, key in ((4, "speed"), (5, "eta"), (6, "size")):
+            cell = self.queue_table.item(row, column)
+            if cell is not None:
+                cell.setText(str(item.get(key, "") or "—"))
+        self._refresh_queue_footer()
+
+    def _on_queue_item_segment_done(self, item, size):
+        item["progress"] = 100
+        item["size"] = str(size or item.get("size", ""))
+        self._on_queue_item_progress(item, 100, item["size"])
+
     def _refresh_queue_table(self):
         if not hasattr(self, "queue_table"):
             return
         queue_count = len(self._download_queue)
         self.queue_table.setRowCount(queue_count)
+        self._queue_checks = []
+        self._queue_row_by_id = {}
+        self._queue_progress_bars = {}
+        self._queue_progress_labels = {}
         if hasattr(self, "queue_empty_state"):
             self.queue_empty_state.setVisible(queue_count == 0)
         if queue_count:
-            self.queue_table.setMinimumHeight(220)
+            self.queue_table.setMinimumHeight(260)
             self.queue_table.setMaximumHeight(16777215)
         else:
             self.queue_table.setMinimumHeight(48)
             self.queue_table.setMaximumHeight(58)
         now = datetime.now()
-        for i, q in enumerate(self._download_queue):
-            # Compute effective status: "scheduled" if start_at is in the future
-            status = q.get("status", "queued")
-            locked = (
-                q is self._queue_active_item
-                or id(q) in self._queue_workers
-                or id(q) in self._queue_fetch_workers
-                or status in ("fetching", "downloading")
-            )
-            start_at = q.get("start_at", "")
+        for row, item in enumerate(self._download_queue):
+            self._queue_row_by_id[id(item)] = row
+            status = str(item.get("status", "queued") or "queued")
+            start_at = str(item.get("start_at", "") or "")
             is_scheduled = False
             if start_at and status == "queued":
                 try:
-                    ts = datetime.fromisoformat(start_at)
-                    if ts > now:
-                        is_scheduled = True
+                    is_scheduled = datetime.fromisoformat(start_at) > now
                 except Exception:
                     pass
-            display_status = "SCHEDULED" if is_scheduled else status.upper()
-            status_item = QTableWidgetItem(display_status)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if is_scheduled:
-                status_item.setForeground(QColor(CAT["peach"]))
-            elif status in ("fetching", "downloading"):
-                status_item.setForeground(QColor(CAT["blue"]))
-            elif status == "queued":
-                status_item.setForeground(QColor(CAT["yellow"]))
-            elif status in ("failed", "cancelled"):
-                status_item.setForeground(QColor(CAT["red"]))
-            self.queue_table.setItem(i, 0, status_item)
-            self.queue_table.setItem(i, 1, QTableWidgetItem(q.get("platform", "?")))
-            self.queue_table.setItem(i, 2, QTableWidgetItem(q.get("title", "")[:80]))
-            # Added / Scheduled column
-            added = q.get("added", "")
-            if is_scheduled:
-                added = f"@ {start_at[:16].replace('T', ' ')}"
-            self.queue_table.setItem(i, 3, QTableWidgetItem(added))
-            # Move up/down buttons (single cell with two stacked buttons)
-            move_widget = QWidget()
-            move_lay = QHBoxLayout(move_widget)
-            move_lay.setContentsMargins(2, 2, 2, 2)
-            move_lay.setSpacing(2)
-            up_btn = QPushButton("↑")
-            up_btn.setAccessibleName(f"Move queue item {i + 1} up")
-            up_btn.setObjectName("ghost")
-            up_btn.setFixedWidth(28)
-            up_btn.setToolTip("Move up")
-            up_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, -1))
-            down_btn = QPushButton("↓")
-            down_btn.setAccessibleName(f"Move queue item {i + 1} down")
-            down_btn.setObjectName("ghost")
-            down_btn.setFixedWidth(28)
-            down_btn.setToolTip("Move down")
-            down_btn.clicked.connect(lambda _c=False, row=i: self._queue_move(row, 1))
-            if i == 0 or locked:
-                up_btn.setEnabled(False)
-            if i == len(self._download_queue) - 1 or locked:
-                down_btn.setEnabled(False)
-            if locked:
-                tip = "Active jobs stay pinned until the current fetch/download finishes."
-                up_btn.setToolTip(tip)
-                down_btn.setToolTip(tip)
-            move_lay.addWidget(up_btn)
-            move_lay.addWidget(down_btn)
-            self.queue_table.setCellWidget(i, 4, move_widget)
-            # Remove button
-            rm_btn = QPushButton("Remove")
-            rm_btn.setAccessibleName(f"Remove queue item {i + 1}")
-            rm_btn.setObjectName("secondary")
-            rm_btn.clicked.connect(lambda _c=False, row=i: self._queue_remove(row))
-            if locked:
-                rm_btn.setEnabled(False)
-                rm_btn.setToolTip("Stop the current job before removing it from the queue.")
-            self.queue_table.setCellWidget(i, 5, rm_btn)
+            display_status = "Scheduled" if is_scheduled else status.replace("_", " ").title()
+            color = self._queue_status_color(status, is_scheduled)
+
+            check = QCheckBox()
+            check.setChecked(bool(item.get("_ui_selected", True)))
+            check.setAccessibleName(f"Select queue job {row + 1}: {item.get('title', '')}")
+            check.toggled.connect(
+                lambda checked, queue_item=item: self._on_queue_item_selected(queue_item, checked)
+            )
+            self._queue_checks.append(check)
+            self.queue_table.setCellWidget(row, 0, self._queue_name_widget(item, check))
+            source = QTableWidgetItem(str(item.get("url", "") or "—"))
+            source.setToolTip(str(item.get("url", "") or ""))
+            source.setForeground(QColor(CAT["muted"]))
+            self.queue_table.setItem(row, 1, source)
+            self.queue_table.setCellWidget(
+                row, 2, self._queue_status_widget(status, display_status, color)
+            )
+            progress_shell, progress, progress_label = self._queue_progress_widget(item)
+            self._queue_progress_bars[id(item)] = progress
+            self._queue_progress_labels[id(item)] = progress_label
+            self.queue_table.setCellWidget(row, 3, progress_shell)
+            for column, key in ((4, "speed"), (5, "eta"), (6, "size")):
+                cell = QTableWidgetItem(str(item.get(key, "") or "—"))
+                cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.queue_table.setItem(row, column, cell)
+
+        self._refresh_queue_toolbar()
+        self._refresh_queue_footer()
         self._refresh_shell_overview()
 
     def _queue_move(self, idx, direction):
