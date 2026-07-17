@@ -10,9 +10,10 @@ import os
 
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-    QVBoxLayout, QWidget,
+    QVBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from ..i18n import TranslatableWidget
 
 from ..ui.widgets import ask_premium_text_input
 
@@ -23,7 +24,7 @@ def _fmt_time(secs):
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
-class ChapterPanel(QWidget):
+class ChapterPanel(TranslatableWidget):
     """Collapsible sidebar listing chapters + bookmarks with seek-on-click."""
 
     seek_requested = pyqtSignal(float)          # seconds

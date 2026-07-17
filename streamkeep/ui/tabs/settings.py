@@ -359,6 +359,7 @@ def build_settings_tab(win):
     theme_copy.addWidget(theme_hint)
     theme_row.addLayout(theme_copy, 1)
     win.theme_combo = QComboBox()
+    win.theme_combo.setProperty("i18nTranslateItems", True)
     win.theme_combo.addItem("Dark (Catppuccin Mocha)", "dark")
     win.theme_combo.addItem("Light (Catppuccin Latte)", "light")
     win.theme_combo.addItem("System", "system")
@@ -371,7 +372,12 @@ def build_settings_tab(win):
     language_label.setObjectName("fieldLabel")
     theme_row.addWidget(language_label)
     win.language_combo = QComboBox()
-    language_labels = {"en": "English", "es": "Spanish"}
+    win.language_combo.setProperty("i18nTranslateItems", True)
+    language_labels = {
+        "en": "English",
+        "es": "Español",
+        "qps-ploc": "Pseudo (layout test)",
+    }
     for lang in available_languages():
         win.language_combo.addItem(language_labels.get(lang, lang), lang)
     lang_idx = max(0, win.language_combo.findData(win._config.get("language", "en")))

@@ -133,6 +133,10 @@ In server mode, `POST /api/queue` writes a durable SQLite job before returning `
 
 All primary controls and tables participate in keyboard focus and expose explicit assistive-technology names, descriptions, roles, states, and textual progress/error status. Use `Ctrl+1` through `Ctrl+6` to switch tabs and focus each tab's primary control, `Ctrl+L` for the source URL, `Ctrl+F` for History search, `Ctrl+A` to select table rows, `Delete` for the active table's removal action, `Enter` to activate or toggle the current choice, and `Esc` to stop an active operation. Custom clip timeline, waveform, and schedule controls provide arrow-key navigation; their accessible descriptions report the current selection.
 
+### Desktop Languages
+
+Choose English or Spanish under Settings → Appearance; the open shell, dialogs, table headings, status messages, and embedded player surfaces update immediately without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`, and `python -m streamkeep.i18n.compile_translations` refreshes the catalogs before compiling the matching QM assets included in frozen builds.
+
 ## Browser Companion
 
 The Chrome/Edge/Firefox companion extension lives in `browser-extension/`.
@@ -208,6 +212,7 @@ Run the lightweight validation bundle before release:
 
 ```powershell
 python -m compileall StreamKeep.py streamkeep tests
+python -m streamkeep.i18n.extract_translations --check
 python -m streamkeep.i18n.compile_translations
 python packaging/versioning.py
 python -m pytest -q

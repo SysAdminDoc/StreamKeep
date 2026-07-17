@@ -2,11 +2,12 @@
 
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from ..theme import CAT
+from ..i18n import TranslatableDialog
 from .widgets import (
     make_dialog_hero,
     make_dialog_section,
@@ -17,7 +18,7 @@ from .widgets import (
 )
 
 
-class NotificationLogDialog(QDialog):
+class NotificationLogDialog(TranslatableDialog):
     """Modal dialog showing the full notification history."""
 
     def __init__(self, parent, center):

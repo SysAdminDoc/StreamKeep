@@ -14,10 +14,11 @@ Usage::
 import os
 
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QTimer
+from ..i18n import TranslatableDialog
 
 from ..ui.widgets import (
     make_dialog_hero,
@@ -44,7 +45,7 @@ class _StreamSlot:
         self.muted = True        # only one stream plays audio at a time
 
 
-class SyncViewer(QDialog):
+class SyncViewer(TranslatableDialog):
     """Dialog showing 2-4 synchronized mpv players in a grid."""
 
     def __init__(self, parent=None):

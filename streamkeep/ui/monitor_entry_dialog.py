@@ -2,10 +2,11 @@
 
 from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QScrollArea, QSpinBox, QTimeEdit,
     QVBoxLayout, QWidget,
 )
+from ..i18n import TranslatableDialog
 
 from .widgets import (
     make_dialog_hero,
@@ -18,7 +19,7 @@ from .widgets import (
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-class MonitorEntryDialog(QDialog):
+class MonitorEntryDialog(TranslatableDialog):
     """Edit overrides for a single MonitorEntry."""
 
     def __init__(self, parent, entry, *, globals_preview=None):

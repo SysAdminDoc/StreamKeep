@@ -283,7 +283,19 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             qt_application.processEvents()
             assert window._config["language"] == "es"
             assert current_language() == "es"
+            assert window._tab_btns[0].text() == "Descargar"
+            assert window._tab_btns[2].text() == "Historial"
+            assert window.download_hero_title.text() == "Origen detectado"
+            assert window.fetch_btn.text() == "Obtener"
+            assert window.history_search.placeholderText().startswith("Buscar título")
+            assert window.status_label.text() == "El idioma se actualizó en StreamKeep."
+            # Stable-value combos that still consume currentText() do not have
+            # their semantic values translated under the user-facing locale.
+            assert window.storage_platform_filter.currentText() == "All"
+            assert window.theme_combo.currentText().startswith("Oscuro")
             assert install_translator("en", qt_application) is True
+            assert window._tab_btns[0].text() == "Download"
+            assert window.download_hero_title.text() == "Source detected"
 
             # Queue-complete power action (V24): the control exists, defaults
             # to the safe "none", and its selection round-trips into config.

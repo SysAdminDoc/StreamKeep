@@ -5,9 +5,10 @@ Extended with 5-band EQ, dynaudnorm toggle, and mono/stereo toggle (F56).
 
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSlider,
-    QVBoxLayout, QWidget,
+    QVBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from ..i18n import TranslatableWidget
 
 def _fmt_time(secs):
     s = max(0, int(secs or 0))
@@ -15,7 +16,7 @@ def _fmt_time(secs):
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
-class PlayerControls(QWidget):
+class PlayerControls(TranslatableWidget):
     """Transport bar: play/pause, seek slider, volume, speed, subtitle picker."""
 
     seek_requested = pyqtSignal(float)      # absolute seconds

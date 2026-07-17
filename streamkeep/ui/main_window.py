@@ -36,6 +36,7 @@ from streamkeep.config import (
 from streamkeep.theme import CAT
 from streamkeep.models import HistoryEntry
 from streamkeep.notifications import NotificationCenter
+from streamkeep.i18n import tr, tr_format, translate_widget_tree
 from streamkeep.utils import (
     default_output_dir as _default_output_dir,
     DEFAULT_FOLDER_TEMPLATE,
@@ -198,6 +199,7 @@ class StreamKeep(
         self.clipboard_monitor = ClipboardMonitor()
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
+        translate_widget_tree(self)
         # History is restored by _apply_config(), which immediately refreshes
         # the table and may queue thumbnails for existing recordings.  Create
         # every loader before applying persisted state so non-empty libraries
@@ -1341,17 +1343,36 @@ class StreamKeep(
             "error": ("Error", CAT["red"]),
         }
         label, color = tones.get(tone, tones["idle"])
-        self.status_pill.setText(label)
+        translated_label = tr(label, context="Status")
+        translated_message = tr(message, context="Status")
+        self.status_pill._streamkeep_i18n_source = {"text": label}
+        self.status_pill._streamkeep_i18n_last = {"text": translated_label}
+        self.status_pill.setText(translated_label)
         self.status_pill.setStyleSheet(
             f"color: {color}; background: transparent; border: none; "
             "padding: 0; font-size: 13px; font-weight: 700;"
         )
-        self.status_label.setText(message)
-        self.status_label.setToolTip(message)
-        set_accessible(self.status_pill, f"Application state: {label}")
+        self.status_label._streamkeep_i18n_source = {
+            "text": message,
+            "toolTip": message,
+        }
+        self.status_label._streamkeep_i18n_last = {
+            "text": translated_message,
+            "toolTip": translated_message,
+        }
+        self.status_label.setText(translated_message)
+        self.status_label.setToolTip(translated_message)
+        set_accessible(
+            self.status_pill,
+            tr_format(
+                "Application state: {state}",
+                context="Accessibility",
+                state=translated_label,
+            ),
+        )
         update_accessible_status(
             self.status_label,
-            message,
+            translated_message,
             tone=tone,
             label="Application status",
         )

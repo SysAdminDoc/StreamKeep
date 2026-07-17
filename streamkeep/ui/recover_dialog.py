@@ -5,11 +5,12 @@ import datetime
 from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from ..theme import CAT
+from ..i18n import TranslatableDialog
 from .widgets import (
     bind_label,
     configure_accessibility,
@@ -48,7 +49,7 @@ class _RecoverWorker(QThread):
         self.done.emit(results)
 
 
-class RecoverDialog(QDialog):
+class RecoverDialog(TranslatableDialog):
     """VOD recovery dialog."""
 
     download_requested = pyqtSignal(str)  # M3U8 URL

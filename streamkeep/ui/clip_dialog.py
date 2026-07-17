@@ -21,7 +21,7 @@ import subprocess
 from PyQt6.QtCore import Qt, QRectF, QThread, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsPixmapItem,
+    QCheckBox, QComboBox, QFileDialog, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QProgressBar, QPushButton, QScrollArea,
     QSlider, QTextEdit, QVBoxLayout, QWidget,
@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 from ..theme import CAT
+from ..i18n import TranslatableDialog
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
@@ -552,7 +553,7 @@ class WaveformWidget(QWidget):
         super().keyPressEvent(event)
 
 
-class ClipDialog(QDialog):
+class ClipDialog(TranslatableDialog):
     """Modal dialog that runs a ClipWorker with a visual scrubber."""
 
     def __init__(self, parent, source_path, *, default_end=None):

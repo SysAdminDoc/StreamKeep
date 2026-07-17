@@ -1,11 +1,12 @@
 """First-run onboarding wizard — polished multi-step setup for new users."""
 
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QHBoxLayout, QLabel, QPushButton,
     QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..capabilities import format_capability_problem, get_runtime_capabilities
+from ..i18n import TranslatableDialog
 from ..extractors.ytdlp import ytdlp_runtime_status
 from ..utils import default_output_dir
 from .widgets import (
@@ -16,7 +17,7 @@ from .widgets import (
 )
 
 
-class OnboardingWizard(QDialog):
+class OnboardingWizard(TranslatableDialog):
     """Multi-step first-run setup wizard."""
 
     _STEP_TITLES = [

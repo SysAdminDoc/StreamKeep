@@ -11,11 +11,12 @@ Usage (from PlayerPanel)::
     # When closed, mpv_widget is re-parented back to the PlayerPanel
 """
 
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal
+from ..i18n import TranslatableWidget
 
 
-class PiPWindow(QWidget):
+class PiPWindow(TranslatableWidget):
     """Floating mini player with always-on-top + frameless + drag-to-move."""
 
     closed = pyqtSignal()          # emitted when PiP is dismissed

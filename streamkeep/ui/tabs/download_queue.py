@@ -29,6 +29,7 @@ from ...utils import (
     safe_filename as _safe_filename,
 )
 from ...workers import DownloadWorker, FetchWorker
+from ...i18n import TranslatableDialog
 from ..widgets import ask_premium_confirmation, ask_premium_text_input
 
 
@@ -43,7 +44,7 @@ class DownloadQueueMixin:
         )
         import re as _re
 
-        dlg = QDialog(self)
+        dlg = TranslatableDialog(self)
         dlg.setWindowTitle("Batch URL Import")
         dlg.setMinimumSize(600, 400)
         layout = QVBoxLayout(dlg)

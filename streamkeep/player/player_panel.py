@@ -8,16 +8,17 @@ metadata display (title, channel, duration).
 import os
 
 from PyQt6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout,
+    QFrame, QHBoxLayout, QLabel, QVBoxLayout,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from ..i18n import TranslatableDialog
 
 from .mpv_widget import MpvWidget
 from .player_controls import PlayerControls
 from .chapter_panel import ChapterPanel
 
 
-class PlayerPanel(QDialog):
+class PlayerPanel(TranslatableDialog):
     """Standalone player dialog.
 
     Usage::

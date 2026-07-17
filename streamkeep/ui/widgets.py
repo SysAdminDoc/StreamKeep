@@ -10,12 +10,13 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QDialog, QFrame,
+    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from ..theme import CAT
+from ..i18n import TranslatableDialog
 
 
 # Platform badge mapping — key → (CAT colour key, display text).
@@ -436,7 +437,7 @@ def _run_premium_dialog(
     details_monospaced=False,
 ):
     """Run a premium confirmation/info dialog and return the chosen action."""
-    dlg = QDialog(parent)
+    dlg = TranslatableDialog(parent)
     dlg.setWindowTitle(title)
     dlg.setModal(True)
     dlg.setMinimumWidth(max(420, int(min_width or 420)))
@@ -541,7 +542,7 @@ def ask_premium_text_input(
     strip_result=True,
 ):
     """Show a premium text-input dialog and return ``(text, accepted)``."""
-    dlg = QDialog(parent)
+    dlg = TranslatableDialog(parent)
     dlg.setWindowTitle(title)
     dlg.setModal(True)
     dlg.setMinimumWidth(max(420, int(min_width or 420)))

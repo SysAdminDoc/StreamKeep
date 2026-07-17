@@ -91,13 +91,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P1 — Next
 
-- [ ] P1 — Complete Qt internationalization instead of loading inert catalogs
-  Why: The translator is installed, but hundreds of UI strings bypass translation and the 23-message catalogs cannot produce a translated workflow.
-  Evidence: `streamkeep/i18n.py`, translation catalogs, UI/player scan with zero `tr()`/`translate()` calls; Qt localization guidance.
-  Touches: all UI/player strings, `lupdate`/`lrelease` build flow, plural/context handling, runtime retranslation, translation tests.
-  Acceptance: User-facing strings are extractable; switching language retranslates the live shell and dialogs without restart; Spanish covers the core URL/download/history/settings/error flows; plural and dynamic-status strings use contexts; a pseudo-locale catches clipping; frozen builds contain matching `.qm` files.
-  Complexity: L
-
 - [ ] P1 — Consolidate and activate the visual-system controls
   Why: High-contrast, density, and accent APIs are dead code while duplicate legacy/active styles and per-tab dimensions keep visual behavior inconsistent.
   Evidence: `streamkeep/theme.py:45-79,1049`, `streamkeep/ui/widgets.py`, fixed-size/fixed-width usage across UI modules; offscreen dark/light/high-contrast render audit on 2026-07-15.

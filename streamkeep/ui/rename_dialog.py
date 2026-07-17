@@ -6,11 +6,12 @@ from datetime import datetime
 
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from ..theme import CAT
+from ..i18n import TranslatableDialog
 from .widgets import (
     make_dialog_hero,
     make_dialog_section,
@@ -73,7 +74,7 @@ def _resolve_template(template, meta, seq):
     return result.strip() or f"recording_{seq}"
 
 
-class RenameDialog(QDialog):
+class RenameDialog(TranslatableDialog):
     """Batch rename dialog for History entries."""
 
     _PRESETS = [

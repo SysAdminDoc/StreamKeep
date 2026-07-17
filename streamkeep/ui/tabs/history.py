@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from streamkeep import db as _db
+from streamkeep.i18n import TranslatableDialog, tr, tr_format, tr_n
 from streamkeep.models import HistoryEntry
 from streamkeep.postprocess import PostProcessor
 from streamkeep.verify import (
@@ -221,25 +222,40 @@ class HistoryTabMixin:
             len(items) for items in getattr(self, "_transcript_hits", {}).values()
         )
 
-        self._set_metric(self.history_count_value, self.history_count_sub, str(total), "saved downloads")
-        latest_value = latest.date if latest else "No entries"
-        latest_sub = (latest.title if latest else "Completed downloads appear here")[:40]
+        self._set_metric(
+            self.history_count_value,
+            self.history_count_sub,
+            str(total),
+            tr_n("%n saved download(s)", total, context="History"),
+        )
+        latest_value = latest.date if latest else tr("No entries")
+        latest_sub = (
+            latest.title if latest else tr("Completed downloads appear here")
+        )[:40]
         self._set_metric(self.history_latest_value, self.history_latest_sub, latest_value, latest_sub)
 
         # Compute top platform and top channel from history
         if hasattr(self, "history_platform_value"):
             if total:
                 top_plat, top_plat_n = summary["top_platform"]
-                plat_share = f"{top_plat_n} / {total} downloads" if top_plat_n else "no data"
+                plat_share = (
+                    tr_format(
+                        "{platform_count} / {total} downloads",
+                        context="History",
+                        platform_count=top_plat_n,
+                        total=total,
+                    )
+                    if top_plat_n else tr("no data", context="History")
+                )
                 self._set_metric(self.history_platform_value, self.history_platform_sub,
                                  top_plat or "—", plat_share)
                 top_ch, top_ch_n = summary["top_channel"]
                 if top_ch:
                     self._set_metric(self.history_channel_value, self.history_channel_sub,
-                                     top_ch[:24], f"{top_ch_n} download(s)")
+                                     top_ch[:24], tr_n("%n download(s)", top_ch_n, context="History"))
                 else:
                     self._set_metric(self.history_channel_value, self.history_channel_sub,
-                                     "—", "no channel data")
+                                     "—", tr("no channel data", context="History"))
             else:
                 self._set_metric(self.history_platform_value, self.history_platform_sub,
                                  "—", "appears most in history")
@@ -251,7 +267,12 @@ class HistoryTabMixin:
             if query and transcript_mode:
                 if hasattr(self, "history_filter_summary"):
                     self.history_filter_summary.setText(
-                        f"{visible} matching download(s) • {transcript_hits} transcript hit(s)"
+                        tr_format(
+                            "{downloads} matching download(s) • {hits} transcript hit(s)",
+                            context="History",
+                            downloads=visible,
+                            hits=transcript_hits,
+                        )
                     )
                 if visible:
                     self.history_summary_label.setText(
@@ -264,7 +285,12 @@ class HistoryTabMixin:
             elif query:
                 if hasattr(self, "history_filter_summary"):
                     self.history_filter_summary.setText(
-                        f"Showing {visible} of {total} download(s)"
+                        tr_format(
+                            "Showing {visible} of {total} download(s)",
+                            context="History",
+                            visible=visible,
+                            total=total,
+                        )
                     )
                 if visible:
                     self.history_summary_label.setText(
@@ -276,7 +302,9 @@ class HistoryTabMixin:
                     )
             else:
                 if hasattr(self, "history_filter_summary"):
-                    self.history_filter_summary.setText(f"Showing all {total} download(s)")
+                    self.history_filter_summary.setText(
+                        tr_n("Showing all %n download(s)", total, context="History")
+                    )
                 self.history_summary_label.setText(
                     "Double-click a row to open the saved folder in Explorer. Use search to filter by title, platform, channel, folder, or source URL."
                 )
@@ -661,7 +689,7 @@ class HistoryTabMixin:
     def _add_bookmark_dialog(self, h):
         """Show a dialog to add a named timestamp bookmark to a recording (F38)."""
         from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLineEdit
-        dlg = QDialog(self)
+        dlg = TranslatableDialog(self)
         dlg.setWindowTitle("Add Bookmark")
         dlg.setMinimumWidth(340)
         form = QFormLayout(dlg)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile .ts translation source files into .qm binary files.
+"""Extract UI strings and compile .ts sources into .qm binary files.
 
 Usage:
     python -m streamkeep.i18n.compile_translations
@@ -39,6 +39,9 @@ def _find_lrelease():
 
 
 def compile_all():
+    from .extract_translations import update_catalogs
+
+    update_catalogs()
     lrelease = _find_lrelease()
     if not lrelease:
         print("ERROR: lrelease not found. Install PyQt6-tools or Qt Linguist.")

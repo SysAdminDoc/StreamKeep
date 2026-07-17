@@ -12,8 +12,8 @@ Usage::
     widget.toggle_pause()
 """
 
-from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from ..i18n import TranslatableWidget
 
 _MPV_AVAILABLE = None
 
@@ -31,7 +31,7 @@ def is_mpv_available():
     return _MPV_AVAILABLE
 
 
-class MpvWidget(QWidget):
+class MpvWidget(TranslatableWidget):
     """Qt widget hosting an embedded mpv player.
 
     Signals:

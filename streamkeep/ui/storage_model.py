@@ -4,6 +4,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtGui import QPixmap
 
 from ..utils import fmt_size
+from ..i18n import tr
 
 
 class StorageTableModel(QAbstractTableModel):
@@ -22,7 +23,7 @@ class StorageTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[section] if 0 <= section < len(self.HEADERS) else None
+            return tr(self.HEADERS[section]) if 0 <= section < len(self.HEADERS) else None
         return None
 
     def flags(self, index):

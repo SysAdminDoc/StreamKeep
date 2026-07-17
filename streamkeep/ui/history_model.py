@@ -8,6 +8,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt6.QtGui import QColor, QPixmap
 
 from .. import db
+from ..i18n import tr
 from ..models import HistoryEntry
 from ..theme import CAT
 
@@ -55,7 +56,7 @@ class HistoryTableModel(QAbstractTableModel):
             and orientation == Qt.Orientation.Horizontal
             and 0 <= section < len(self.HEADERS)
         ):
-            return self.HEADERS[section]
+            return tr(self.HEADERS[section])
         return None
 
     def flags(self, index):
@@ -76,7 +77,7 @@ class HistoryTableModel(QAbstractTableModel):
             return self._thumbnails.get(entry.db_id)
         if role == Qt.ItemDataRole.DisplayRole:
             if column == 0:
-                return "Missing" if orphan else "Loading"
+                return tr("Missing") if orphan else tr("Loading")
             if column == 1:
                 return entry.date
             if column == 2:

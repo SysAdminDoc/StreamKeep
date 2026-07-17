@@ -546,10 +546,12 @@ class SettingsPreferencesMixin:
                 "Alert": "warning",
                 "Error": "error",
             }
-            current_tone = pill_to_tone.get(
-                self.status_pill.text() if hasattr(self, "status_pill") else "Standby",
-                "idle",
-            )
+            pill_source = "Standby"
+            if hasattr(self, "status_pill"):
+                pill_source = getattr(
+                    self.status_pill, "_streamkeep_i18n_source", {}
+                ).get("text", self.status_pill.text())
+            current_tone = pill_to_tone.get(pill_source, "idle")
             self._set_status(self.status_label.text() or "Theme updated.", current_tone)
         self._refresh_notif_badge()
         self._persist_config()
@@ -559,7 +561,7 @@ class SettingsPreferencesMixin:
         if install_translator(lang):
             self._config["language"] = lang
             self._set_status(
-                "Language setting saved. Restart StreamKeep to refresh all labels.",
+                "Language updated across StreamKeep.",
                 "success",
             )
         else:
