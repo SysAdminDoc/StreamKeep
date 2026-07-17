@@ -38,7 +38,7 @@ def _launcher_has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check", "import-har",
+        "startup-check", "import-har", "podcast-sidecars",
         "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
         "--internal-ytdlp",

@@ -716,6 +716,46 @@ def _run_har_import(args):
                 _print_line(f"    {header_argv[i]} {header_argv[i + 1]!r}")
 
 
+def _run_podcast_sidecars(args):
+    """Discover and download an episode's transcript/chapter sidecars."""
+    from .image_fetch import ImageFetchError, fetch_url_bytes
+    from .podcast_sidecars import sync_podcast_sidecars
+    from .utils import safe_filename
+
+    out_dir = str(getattr(args, "out_dir", "") or "")
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as error:
+        _print_line(f"Error: cannot create output directory: {error}")
+        sys.exit(2)
+    try:
+        feed_bytes = fetch_url_bytes(
+            str(args.feed), max_bytes=16 * 1024 * 1024,
+            accept="application/rss+xml, application/xml, text/xml, */*",
+        )
+    except (ImageFetchError, OSError) as error:
+        _print_line(f"Error: could not fetch feed: {error}")
+        sys.exit(2)
+    feed_body = feed_bytes.decode("utf-8", errors="replace")
+
+    base = str(getattr(args, "base", "") or "").strip()
+    if not base:
+        import urllib.parse
+        name = urllib.parse.urlsplit(str(args.enclosure)).path.rsplit("/", 1)[-1]
+        base = safe_filename(os.path.splitext(name)[0] or "episode")
+    manifest = sync_podcast_sidecars(
+        feed_body, str(args.enclosure), out_dir, base, log_fn=_print_line,
+    )
+    if not manifest:
+        _print_line("No transcript or chapter sidecars found for this episode.")
+        return
+    for entry in manifest:
+        _print_line(
+            f"{entry['kind']}: {entry['file']} "
+            f"({entry.get('language') or 'und'}) sha256={entry['sha256'][:12]}"
+        )
+
+
 def _run_protocol_register(args):
     """Register the per-user streamkeep:// handler (Windows)."""
     from .protocol import register_windows_protocol
@@ -959,6 +999,21 @@ def build_parser():
     har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- podcast transcript/chapter sidecars (Podcast Namespace) --
+    ps_p = sub.add_parser(
+        "podcast-sidecars",
+        help="Discover and download an episode's transcript/chapter sidecars",
+    )
+    ps_p.add_argument("feed", help="Podcast RSS feed URL")
+    ps_p.add_argument("enclosure", help="Episode enclosure (media) URL")
+    ps_p.add_argument("out_dir", help="Directory to write sidecars into")
+    ps_p.add_argument(
+        "--base", default="",
+        help="Sidecar base filename (default: derived from the enclosure)",
+    )
+    ps_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                      help="Override the config/database directory")
+
     # -- streamkeep:// protocol handler + bookmarklet (V23) --
     sub.add_parser(
         "register-protocol",
@@ -1092,6 +1147,8 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "import-har":
         _run_har_import(args)
+    elif args.command == "podcast-sidecars":
+        _run_podcast_sidecars(args)
     elif args.command == "register-protocol":
         _run_protocol_register(args)
     elif args.command == "unregister-protocol":
@@ -1111,7 +1168,7 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check", "import-har",
+        "startup-check", "import-har", "podcast-sidecars",
         "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

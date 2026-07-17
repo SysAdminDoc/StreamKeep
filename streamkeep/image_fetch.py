@@ -127,6 +127,50 @@ def _read_capped(resp, max_bytes):
     return data
 
 
+def fetch_url_bytes(
+    url,
+    *,
+    max_bytes=DEFAULT_MAX_BYTES,
+    timeout=DEFAULT_TIMEOUT,
+    accept="*/*",
+):
+    """Fetch *url* into bounded bytes through the shared SSRF-safe policy.
+
+    HTTP(S)-only, each redirect hop re-validated and address-pinned, with a
+    hard byte cap. This is the generic transport that :func:`fetch_image_bytes`
+    and other remote pulls (e.g. podcast transcript/chapter sidecars) share so
+    there is one connection policy. Raises :class:`ImageFetchError`.
+    """
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        scheme, host, port, address, path = _validate_target(current)
+        conn_cls = (
+            _PinnedHTTPSConnection if scheme == "https" else _PinnedHTTPConnection
+        )
+        conn = conn_cls(host, port, address, timeout)
+        try:
+            conn.request(
+                "GET", path,
+                headers={"User-Agent": CURL_UA, "Accept": accept},
+            )
+            resp = conn.getresponse()
+            if resp.status in _REDIRECT_STATUSES:
+                location = resp.getheader("Location")
+                resp.read()
+                if not location:
+                    raise ImageFetchError("redirect response had no Location")
+                current = urllib.parse.urljoin(current, location)
+                continue
+            if resp.status != 200:
+                raise ImageFetchError(f"unexpected HTTP status {resp.status}")
+            return _read_capped(resp, max_bytes)
+        except (OSError, http.client.HTTPException) as e:
+            raise ImageFetchError(f"request failed: {e}") from e
+        finally:
+            conn.close()
+    raise ImageFetchError("too many redirects")
+
+
 def fetch_image_bytes(
     url,
     *,
@@ -140,38 +184,13 @@ def fetch_image_bytes(
     enforces the byte limit, and rejects any payload whose magic bytes are not
     in *allowed_formats*. Returns ``(data, format_name)``.
     """
-    current = url
-    for _ in range(MAX_REDIRECTS + 1):
-        scheme, host, port, address, path = _validate_target(current)
-        conn_cls = (
-            _PinnedHTTPSConnection if scheme == "https" else _PinnedHTTPConnection
-        )
-        conn = conn_cls(host, port, address, timeout)
-        try:
-            conn.request(
-                "GET", path,
-                headers={"User-Agent": CURL_UA, "Accept": "image/*"},
-            )
-            resp = conn.getresponse()
-            if resp.status in _REDIRECT_STATUSES:
-                location = resp.getheader("Location")
-                resp.read()
-                if not location:
-                    raise ImageFetchError("redirect response had no Location")
-                current = urllib.parse.urljoin(current, location)
-                continue
-            if resp.status != 200:
-                raise ImageFetchError(f"unexpected HTTP status {resp.status}")
-            data = _read_capped(resp, max_bytes)
-        except (OSError, http.client.HTTPException) as e:
-            raise ImageFetchError(f"image request failed: {e}") from e
-        finally:
-            conn.close()
-        fmt = detect_image_format(data)
-        if fmt is None or fmt not in allowed_formats:
-            raise ImageFetchError("payload is not an allowed image format")
-        return data, fmt
-    raise ImageFetchError("too many redirects")
+    data = fetch_url_bytes(
+        url, max_bytes=max_bytes, timeout=timeout, accept="image/*"
+    )
+    fmt = detect_image_format(data)
+    if fmt is None or fmt not in allowed_formats:
+        raise ImageFetchError("payload is not an allowed image format")
+    return data, fmt
 
 
 def decode_image(

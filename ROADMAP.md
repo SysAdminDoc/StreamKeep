@@ -170,12 +170,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Each adapter type has a versioned interface, declared permissions/dependencies, timeouts/cancellation, typed outcomes, compatibility diagnostics, and a minimal sample test; unsupported manifest versions fail closed; no plugin directory is appended globally to `sys.path`.
   Complexity: L
 
-- [ ] P2 — Download podcast transcript/chapter sidecars from feed metadata with hashes and refresh
-  Why: The WebVTT and Podcast Namespace JSON parsers are now correct and import into the search/player model, but `<podcast:transcript>` / `<podcast:chapters>` URLs are not yet discovered from feeds, fetched into per-recording sidecars, hashed for change detection, or refreshed.
-  Evidence: `streamkeep/extractors/podcast.py` (feed item parsing), `parse_podcast_chapters_json`, `streamkeep/search.py` transcript indexing, `streamkeep/workers/finalize.py`.
-  Touches: podcast feed parsing (transcript/chapter URL + type + language), sidecar downloader (bounded, hashed), finalize/refresh wiring, tests.
-  Acceptance: Eligible episodes discover transcript/chapter URLs with type and language, download them into hashed sidecars next to the recording, skip re-download when the hash is unchanged, and feed the existing (now-correct) parsers; malformed/absent metadata is non-fatal.
-  Complexity: M
 
 ### P3 — Under Consideration
 
@@ -233,6 +227,13 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Touches: a per-job "capture YouTube chat replay" option, yt-dlp `--sub-langs live_chat`/`--write-subs` wiring, Settings/CLI, bounded/cancellable behavior.
   Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; the downloaded replay is normalized by the existing pipeline; unavailable replay is non-fatal.
   Complexity: S
+
+- [ ] P3 — Auto-trigger podcast sidecar download at finalize from the originating feed
+  Why: `streamkeep/podcast_sidecars.py` fully discovers/downloads/refreshes transcript+chapter sidecars and is reachable via the `podcast-sidecars` CLI, but the desktop download pipeline discards the feed URL at queue-add (the enclosure becomes the item URL), so sidecars are not fetched automatically next to a GUI-downloaded episode.
+  Evidence: `streamkeep/podcast_sidecars.py::sync_podcast_sidecars`, `ui/tabs/download.py::_queue_add`/`_on_vod_queue_selected` (feed URL not retained), `workers/finalize.py`.
+  Touches: carry the feed URL from the podcast VOD listing through `_queue_add` → queue item → finalize task; a finalize hook calling `sync_podcast_sidecars`; queue-state serialization tolerance for the new key.
+  Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
+  Complexity: S-M
 
 - [ ] P3 — Surface bilingual-subtitle and LRC options in the Settings post-processing UI
   Why: The bilingual-merge and LRC-export transforms, config keys, and PostProcessor step are implemented and persist via `pp_bilingual_*`/`pp_lrc_*`, but there are no Settings checkboxes/inputs to toggle them from the GUI yet.

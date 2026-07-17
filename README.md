@@ -105,6 +105,7 @@ python StreamKeep.py import-har capture.har --json
 python StreamKeep.py register-protocol
 python StreamKeep.py bookmarklet
 python StreamKeep.py "streamkeep://download?url=https://example.com/video"
+python StreamKeep.py podcast-sidecars https://feed.example.com/rss https://cdn.example.com/ep1.mp3 C:\Podcasts\Show --base ep1
 python StreamKeep.py server --bind 127.0.0.1 --port 8765
 python StreamKeep.py server --trusted-proxy-origin https://streamkeep.example.lan --port 8765
 python StreamKeep.py backup create C:\Backups\StreamKeep.skbackup
