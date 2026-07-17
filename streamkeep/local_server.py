@@ -39,6 +39,12 @@ from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+PRODUCT_REST_PATHS = frozenset({
+    "POST /pair",
+    "POST /api/queue",
+    "POST /api/failures/retry",
+})
+
 SCOPE_STATUS = "status"
 SCOPE_QUEUE = "queue"
 SCOPE_RECOVERY = "recovery"

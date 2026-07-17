@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-StreamKeep is a local-first desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs. It combines native extractors, yt-dlp fallback, channel monitoring, queue management, post-processing, an embedded player, a local web gallery, upload adapters, and a CLI/server mode in one PyQt6 application.
+StreamKeep is a local-first desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs. It combines native extractors, yt-dlp fallback, channel monitoring, queue management, post-processing, an embedded player, and a CLI/server mode in one PyQt6 application.
 
 ![StreamKeep screenshot](https://github.com/user-attachments/assets/3b92c55c-9ae3-4025-8f44-3119b492fe8f)
 
@@ -46,7 +46,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 - Persist history, monitor entries, and queue state in `%APPDATA%\StreamKeep\library.db`.
 - Keep user preferences in `%APPDATA%\StreamKeep\config.json`; portable mode uses `portable.txt` beside the executable and stores data under `data/`.
-- Search across history, monitor entries, queue rows, transcripts, notes, and tags.
+- Search across history, monitor entries, queue rows, transcripts, and tags.
 - Scan storage by platform/channel/title, detect orphaned files, and recycle selected recordings through the OS recycle bin.
 - Capture SHA-256 archive manifests for completed recordings, then right-click History rows to verify or rescan the manifest when files intentionally change.
 
@@ -60,32 +60,24 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 - Convert video and audio after download or through the standalone batch converter.
 - Use GPU encoders when available: NVENC, Intel Quick Sync, AMD AMF, and VideoToolbox.
-- Generate contact sheets, thumbnails, chapters, subtitle files, transcripts, summaries, highlights, silence-removed cuts, RSS feeds, and local gallery share pages.
-- Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, emote-aware chat rendering, and optional LLM summaries.
+- Generate contact sheets, thumbnails, chapters, subtitle files, transcripts, highlights, and silence-removed cuts.
+- Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
 
-### Uploads, Backup, and Plugins
+### Backup and Recovery
 
-- Upload finished media to S3-compatible storage, Backblaze B2/MinIO, FTP/SFTP, and WebDAV.
 - Create secret-free `.skbackup` archives containing preferences, database/archive state, tags, notifications, and optional redacted logs. Account credentials and cookies are excluded from ordinary create/restore operations.
 - Transfer authentication state only with an explicit `.sksbackup` protected by Argon2id and AES-256-GCM; wrong passwords and modified backups fail authentication before restore.
 - Export/import preferences through a versioned, size-bounded JSON format. Imports show a redacted diff and keep hooks, webhooks, proxies, cookie sources, control servers, media-server auto-import, and lifecycle cleanup disabled until each capability is approved separately.
-- Load plugin manifests only after trust consent; untrusted plugins are skipped.
 
-Plugins live under the active config directory in `plugins/`. A plugin is a package or module directory containing `plugin.json`:
+### Experimental Modules (Not Release Claims)
 
-```json
-{
-  "id": "example-extractor",
-  "name": "Example Extractor",
-  "version": "1.0.0",
-  "author": "You",
-  "description": "Adds support for example.com",
-  "enabled": true,
-  "trusted": false
-}
-```
+The source tree contains early engines and unit-tested helpers that are not yet wired to a supported GUI, CLI, or REST caller. They are excluded from the shipped-capability registry until the corresponding roadmap item adds a reachable integration path:
 
-Supported extension points are custom extractors, post-processing filters, and upload destinations. Plugins run in-process with the same privileges as StreamKeep, so they should stay untrusted until the user has reviewed the source.
+- **Gallery/RSS publishing** — gallery and feed generators exist, but no authenticated publishing workflow calls them.
+- **Upload delivery** — S3-compatible, FTP/SFTP, and WebDAV adapters exist, but no supported surface starts an upload job.
+- **Plugin adapters** — manifest discovery and trust validation exist, but approved plugins are not loaded by application startup.
+- **LLM summaries** and **Smart thumbnails** — intelligence workers exist without user-reachable controls or commands.
+- **Native notifications** and **Recording notes** — storage/adapters exist without a supported lifecycle hook or editor.
 
 ### CLI and Server Mode
 
@@ -93,6 +85,8 @@ Supported extension points are custom extractors, post-processing filters, and u
 python StreamKeep.py --help
 python StreamKeep.py --version
 python StreamKeep.py extractors
+python StreamKeep.py db info
+python StreamKeep.py snapshot --output C:\Support\streamkeep-diagnostic.zip
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
 python StreamKeep.py download "https://example.com/video" --format "bv*+ba/b" --format-sort-preset prefer-av1 --container mkv
 python StreamKeep.py download "https://example.com/video" --audio-format opus --audio-quality 128K

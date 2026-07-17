@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import importlib.metadata
 import importlib.util
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from .paths import _CREATE_NO_WINDOW
@@ -24,6 +26,267 @@ MINIMUM_VERSIONS = {
     "ffmpeg": "8.1.2",
     "ffprobe": "8.1.2",
 }
+
+
+@dataclass(frozen=True)
+class ReachableProductPath:
+    """A supported user entry point with an integration test that exercises it."""
+
+    kind: str
+    target: str
+    test_nodeid: str
+
+
+@dataclass(frozen=True)
+class ProductCapabilityClaim:
+    """One product capability's release-claim status and reachable paths."""
+
+    id: str
+    description: str
+    status: str
+    readme_token: str
+    paths: tuple[ReachableProductPath, ...] = ()
+    reason: str = ""
+
+
+PRODUCT_CAPABILITY_CLAIMS = (
+    ProductCapabilityClaim(
+        "desktop-capture", "Desktop capture and queue workflow", "shipped",
+        "Paste a supported URL",
+        (ReachableProductPath(
+            "gui", "Download",
+            "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "channel-monitor", "Desktop channel monitor", "shipped",
+        "Monitor Kick and Twitch channels",
+        (ReachableProductPath(
+            "gui", "Monitor",
+            "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "archive-library", "History, storage, and archive inspection", "shipped",
+        "Persist history, monitor entries, and queue state",
+        (ReachableProductPath(
+            "gui", "History",
+            "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "cli-download", "Headless download dispatch", "shipped",
+        "StreamKeep.py download",
+        (ReachableProductPath(
+            "cli", "download",
+            "tests/test_capability_reachability.py::test_download_cli_reaches_worker_dispatch",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "extractor-listing", "Extractor discovery from automation", "shipped",
+        "StreamKeep.py extractors",
+        (ReachableProductPath(
+            "cli", "extractors",
+            "tests/test_capability_reachability.py::test_extractor_cli_reaches_listing_dispatch",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "database-maintenance", "Headless database maintenance", "shipped",
+        "StreamKeep.py db info",
+        (ReachableProductPath(
+            "cli", "db",
+            "tests/test_cli.py::test_db_command_dispatches_headlessly_and_binds_config_root",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "diagnostic-snapshot", "Privacy-redacted diagnostic snapshot", "shipped",
+        "StreamKeep.py snapshot",
+        (ReachableProductPath(
+            "cli", "snapshot",
+            "tests/test_cli.py::test_snapshot_command_accepts_config_root_before_subcommand",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "backup", "Secret-free and encrypted-secret backup workflows", "shipped",
+        "StreamKeep.py backup create",
+        (ReachableProductPath(
+            "cli", "backup",
+            "tests/test_cli.py::test_backup_command_is_headless_and_secret_free",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "har-import", "HAR media-link import", "shipped",
+        "StreamKeep.py import-har",
+        (ReachableProductPath(
+            "cli", "import-har",
+            "tests/test_har.py::test_cli_import_har_prints_urls",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "podcast-sidecars", "Podcast transcript and chapter sidecars", "shipped",
+        "StreamKeep.py podcast-sidecars",
+        (ReachableProductPath(
+            "cli", "podcast-sidecars",
+            "tests/test_podcast_sidecars.py::test_cli_podcast_sidecars_downloads_and_reports",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "protocol-handoff", "streamkeep protocol and bookmarklet handoff", "shipped",
+        "streamkeep://",
+        (ReachableProductPath(
+            "cli", "bookmarklet",
+            "tests/test_protocol.py::test_cli_bookmarklet_command_prints_bookmarklet",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "durable-web-queue", "Authenticated durable web queue", "shipped",
+        "POST /api/queue",
+        (ReachableProductPath(
+            "rest", "POST /api/queue",
+            "tests/test_local_server.py::LocalServerTests::test_durable_queue_ack_is_observable_and_cancellable",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "failure-recovery", "Persisted failure retry and discard", "shipped",
+        "/api/failures/retry",
+        (ReachableProductPath(
+            "rest", "POST /api/failures/retry",
+            "tests/test_local_server.py::LocalServerTests::test_status_and_failure_actions_expose_retryable_jobs",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "browser-companion", "Scoped browser companion pairing", "shipped",
+        "Send to Queue",
+        (ReachableProductPath(
+            "rest", "POST /pair",
+            "tests/test_local_server.py::LocalServerTests::test_one_time_pairing_mints_origin_bound_scoped_token",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "packaged-startup", "Offscreen packaged startup contract", "shipped",
+        "artifact suite exercises",
+        (ReachableProductPath(
+            "cli", "startup-check",
+            "tests/test_artifact_startup.py::test_source_startup_contract_is_offscreen_and_isolated",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "gallery-publishing", "Authenticated local gallery publishing", "experimental",
+        "Gallery/RSS publishing", reason="No GUI, CLI, or REST caller invokes gallery.py.",
+    ),
+    ProductCapabilityClaim(
+        "upload-delivery", "Secure upload and media-server delivery", "experimental",
+        "Upload delivery", reason="Adapters exist but no supported caller starts UploadWorker.",
+    ),
+    ProductCapabilityClaim(
+        "plugin-adapters", "Third-party plugin adapters", "experimental",
+        "Plugin adapters", reason="Discovery exists but startup never loads approved plugins.",
+    ),
+    ProductCapabilityClaim(
+        "llm-summaries", "Cloud or local LLM summaries", "experimental",
+        "LLM summaries", reason="The summary worker has no supported user entry point.",
+    ),
+    ProductCapabilityClaim(
+        "smart-thumbnails", "Content-scored smart thumbnails", "experimental",
+        "Smart thumbnails", reason="The intelligence worker has no supported user entry point.",
+    ),
+    ProductCapabilityClaim(
+        "rss-publishing", "Recording RSS feed publishing", "experimental",
+        "Gallery/RSS publishing", reason="Feed generation is not wired to a supported caller.",
+    ),
+    ProductCapabilityClaim(
+        "native-notifications", "Native desktop notification adapter", "experimental",
+        "Native notifications", reason="The adapter is not invoked by the desktop lifecycle.",
+    ),
+    ProductCapabilityClaim(
+        "recording-notes", "Recording note authoring", "experimental",
+        "Recording notes", reason="Note storage exists without a GUI, CLI, or REST editor.",
+    ),
+)
+
+
+def get_product_capability_claims(*, status=None):
+    """Return immutable release claims, optionally filtered by status."""
+    if status is None:
+        return PRODUCT_CAPABILITY_CLAIMS
+    return tuple(claim for claim in PRODUCT_CAPABILITY_CLAIMS if claim.status == status)
+
+
+def _test_node_exists(root, nodeid):
+    parts = str(nodeid).split("::")
+    path = Path(root) / parts[0]
+    if not path.is_file() or len(parts) < 2:
+        return False
+    try:
+        nodes = ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body
+    except (OSError, SyntaxError, UnicodeError):
+        return False
+    for name in parts[1:]:
+        match = next(
+            (
+                node for node in nodes
+                if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == name
+            ),
+            None,
+        )
+        if match is None:
+            return False
+        nodes = getattr(match, "body", ())
+    return True
+
+
+def validate_product_capability_claims(root, *, claims=PRODUCT_CAPABILITY_CLAIMS):
+    """Return release-gate errors for orphaned, untested, or undocumented claims."""
+    root = Path(root)
+    problems = []
+    seen = set()
+    try:
+        readme = (root / "README.md").read_text(encoding="utf-8")
+    except OSError as error:
+        return [f"README.md could not be read: {error}"]
+
+    from .cli import build_parser
+    parser = build_parser()
+    cli_paths = set()
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict):
+            cli_paths.update(choices)
+    try:
+        from .local_server import PRODUCT_REST_PATHS
+    except ImportError:
+        PRODUCT_REST_PATHS = frozenset()
+
+    for claim in claims:
+        if claim.id in seen:
+            problems.append(f"duplicate capability id: {claim.id}")
+        seen.add(claim.id)
+        if claim.status not in {"shipped", "experimental"}:
+            problems.append(f"{claim.id}: unsupported status {claim.status!r}")
+        if claim.readme_token not in readme:
+            problems.append(f"{claim.id}: README token missing: {claim.readme_token!r}")
+        if claim.status == "experimental":
+            if claim.paths:
+                problems.append(f"{claim.id}: experimental capability must not claim a path")
+            if not claim.reason:
+                problems.append(f"{claim.id}: experimental capability needs a reason")
+            continue
+        if not claim.paths:
+            problems.append(f"{claim.id}: shipped capability has no reachable path")
+            continue
+        for path in claim.paths:
+            if path.kind == "cli" and path.target not in cli_paths:
+                problems.append(f"{claim.id}: CLI path {path.target!r} is not registered")
+            elif path.kind == "rest" and path.target not in PRODUCT_REST_PATHS:
+                problems.append(f"{claim.id}: REST path {path.target!r} is not registered")
+            elif path.kind == "gui" and not path.target:
+                problems.append(f"{claim.id}: GUI path is empty")
+            elif path.kind not in {"cli", "rest", "gui"}:
+                problems.append(f"{claim.id}: unsupported path kind {path.kind!r}")
+            if not _test_node_exists(root, path.test_nodeid):
+                problems.append(f"{claim.id}: integration test missing: {path.test_nodeid}")
+    return problems
 
 _CACHE = None
 _CACHE_LOCK = threading.Lock()

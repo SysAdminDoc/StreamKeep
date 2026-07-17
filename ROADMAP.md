@@ -98,13 +98,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: A clean local environment builds the same declared capability set twice; dependency/browser/tool revisions are locked and hash-verified; SBOM and license inventory describe the frozen artifact; one version source stamps app/README/MSIX/Flatpak; Flatpak installs from valid package metadata; artifact smoke runs before release.
   Complexity: L
 
-- [ ] P1 — Gate shipped capability claims on reachable integration paths
-  Why: Numerous modules added on 2026-07-01 have unit tests but no GUI/CLI/server caller, so code existence is being mistaken for product completion.
-  Evidence: `streamkeep/backup.py`, `disk_monitor.py`, `bandwidth.py`, `channel_stats.py`, `feed.py`, `gallery.py`, `notes.py`, `intelligence/`, `native_notify.py`, `plugins.py`, `integrations/sidecar_profiles.py`, `http.py`, `storage.py`; README and `COMPLETED.md` claims.
-  Touches: capability registry, README/completed-state generation or validation, integration smokes, each affected entry point.
-  Acceptance: Every claimed shipped capability has a user-reachable path and an end-to-end test that asserts its result; otherwise it is labeled experimental/unavailable and omitted from release claims; the release check fails on orphaned claims or unreachable actions.
-  Complexity: M
-
 - [ ] P1 — Restore full keyboard and assistive-technology operation
   Why: All tables explicitly reject focus and no controls expose explicit accessible names/descriptions, buddy labels, tab order, or async status announcements.
   Evidence: `streamkeep/ui/widgets.py:530-535`; zero accessibility API calls across UI/player; WCAG 2.2 and Qt accessibility guidance.
@@ -227,4 +220,3 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Touches: carry the feed URL from the podcast VOD listing through `_queue_add` → queue item → finalize task; a finalize hook calling `sync_podcast_sidecars`; queue-state serialization tolerance for the new key.
   Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
   Complexity: S-M
-
