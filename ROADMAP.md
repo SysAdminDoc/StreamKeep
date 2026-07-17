@@ -221,13 +221,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
   Complexity: L
 
-- [ ] P3 — Add an opt-in YouTube live-chat replay download trigger
-  Why: The replay normalizer and finalize ingest are implemented and tested (any `*.live_chat.json` yt-dlp produces is flattened into the shared chat model), but there is no explicit GUI/CLI toggle to make yt-dlp fetch the replay for eligible YouTube VODs.
-  Evidence: `streamkeep/chat/youtube_replay.py`, `workers/finalize.py::ingest_replay_dir`, `streamkeep/subtitles.py::ytdlp_sub_args`.
-  Touches: a per-job "capture YouTube chat replay" option, yt-dlp `--sub-langs live_chat`/`--write-subs` wiring, Settings/CLI, bounded/cancellable behavior.
-  Acceptance: Eligible YouTube VODs can opt into bounded, cancellable replay capture; the downloaded replay is normalized by the existing pipeline; unavailable replay is non-fatal.
-  Complexity: S
-
 - [ ] P3 — Auto-trigger podcast sidecar download at finalize from the originating feed
   Why: `streamkeep/podcast_sidecars.py` fully discovers/downloads/refreshes transcript+chapter sidecars and is reachable via the `podcast-sidecars` CLI, but the desktop download pipeline discards the feed URL at queue-add (the enclosure becomes the item URL), so sidecars are not fetched automatically next to a GUI-downloaded episode.
   Evidence: `streamkeep/podcast_sidecars.py::sync_podcast_sidecars`, `ui/tabs/download.py::_queue_add`/`_on_vod_queue_selected` (feed URL not retained), `workers/finalize.py`.

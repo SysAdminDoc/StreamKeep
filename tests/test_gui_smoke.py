@@ -264,6 +264,14 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window._config["pp_lrc_lang"] == "ja"
             assert PostProcessor.bilingual_secondary_lang == "es"
 
+            # YouTube live-chat replay opt-in (P3): toggle exists and persists.
+            from streamkeep.extractors.ytdlp import YtDlpExtractor
+            assert window.capture_youtube_chat_check.isChecked() is False
+            window.capture_youtube_chat_check.setChecked(True)
+            window._on_save_settings()
+            assert window._config["capture_youtube_chat"] is True
+            assert YtDlpExtractor.capture_youtube_chat is True
+
             monitor_dialog = MonitorEntryDialog(
                 window,
                 MonitorEntry(

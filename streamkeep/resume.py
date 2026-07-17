@@ -184,6 +184,9 @@ def _sanitize_resume_payload(data, output_dir):
             data.get("ytdlp_audio_quality", ""), max_len=32
         ),
         "download_subs": _sanitize_bool(data.get("download_subs", False)),
+        "capture_youtube_chat": _sanitize_bool(
+            data.get("capture_youtube_chat", False)
+        ),
         "subtitle_languages": _sanitize_text(
             data.get("subtitle_languages", ""), max_len=1024
         ),

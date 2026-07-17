@@ -696,3 +696,56 @@ def test_aria2c_routing_rejects_option_smuggling_source(tmp_path):
         worker._build_ytdlp_download_cmd(
             os.path.join(str(tmp_path), "video.%(ext)s")
         )
+
+
+def test_youtube_chat_replay_folds_live_chat_into_sub_langs(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://www.youtube.com/watch?v=oshdvLLtl3U"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.capture_youtube_chat = True
+    worker.download_subs = True
+    worker.subtitle_languages = "en.*,en"
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    assert "--write-subs" in cmd
+    assert cmd[cmd.index("--sub-langs") + 1] == "en.*,en,live_chat"
+
+
+def test_youtube_chat_replay_standalone_when_subs_disabled(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://www.youtube.com/watch?v=oshdvLLtl3U"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.capture_youtube_chat = True
+    worker.download_subs = False
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    assert cmd[cmd.index("--sub-langs") + 1] == "live_chat"
+    # Chat-only capture never tries to auto-download or embed captions.
+    assert "--write-auto-subs" not in cmd
+    assert "--no-embed-subs" in cmd
+
+
+def test_youtube_chat_replay_ignored_for_non_youtube(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.capture_youtube_chat = True
+    worker.download_subs = False
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    assert "--sub-langs" not in cmd
+    assert "live_chat" not in " ".join(cmd)
+
+
+def test_youtube_chat_replay_off_by_default(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://www.youtube.com/watch?v=oshdvLLtl3U"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    worker.download_subs = False
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+    assert "live_chat" not in " ".join(cmd)

@@ -58,6 +58,9 @@ class DownloadWorker(QThread):
         self.subtitle_auto = True
         self.subtitle_convert = ""
         self.subtitle_embed = True
+        # Opt-in: fetch the YouTube live-chat replay as a live_chat.json sidecar
+        # (finalize normalizes it into the shared chat model). YouTube only.
+        self.capture_youtube_chat = False
         self.sponsorblock = False
         self.sponsorblock_mark = ""
         self.sponsorblock_remove = ""
@@ -149,6 +152,7 @@ class DownloadWorker(QThread):
             state.ytdlp_audio_format = self.ytdlp_audio_format or ""
             state.ytdlp_audio_quality = self.ytdlp_audio_quality or ""
             state.download_subs = bool(self.download_subs)
+            state.capture_youtube_chat = bool(self.capture_youtube_chat)
             state.subtitle_languages = self.subtitle_languages or ""
             state.subtitle_auto = bool(self.subtitle_auto)
             state.subtitle_convert = self.subtitle_convert or ""
@@ -362,19 +366,29 @@ class DownloadWorker(QThread):
                 cmd.append(f"--embed-{name}" if enabled else f"--no-embed-{name}")
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
-        if subtitle_options["enabled"]:
-            cmd.extend([
-                "--write-subs",
-                "--sub-langs", subtitle_options["languages"],
-            ])
-            cmd.append(
-                "--write-auto-subs" if subtitle_options["automatic"]
-                else "--no-write-auto-subs"
-            )
-            if subtitle_options["convert"]:
-                cmd.extend(["--convert-subs", subtitle_options["convert"]])
-            can_embed = subtitle_options["embed"] and not options["audio_format"]
-            cmd.append("--embed-subs" if can_embed else "--no-embed-subs")
+        from ..extractors.ytdlp import _is_youtube_url as _yt_url
+        capture_chat = bool(self.capture_youtube_chat) and _yt_url(
+            self._effective_ytdlp_source()
+        )
+        if subtitle_options["enabled"] or capture_chat:
+            langs = subtitle_options["languages"] if subtitle_options["enabled"] else ""
+            if capture_chat:
+                # live_chat is a pseudo-subtitle language yt-dlp writes as a
+                # <name>.live_chat.json sidecar; finalize ingests it.
+                langs = (langs + ",live_chat") if langs else "live_chat"
+            cmd.extend(["--write-subs", "--sub-langs", langs])
+            if subtitle_options["enabled"]:
+                cmd.append(
+                    "--write-auto-subs" if subtitle_options["automatic"]
+                    else "--no-write-auto-subs"
+                )
+                if subtitle_options["convert"]:
+                    cmd.extend(["--convert-subs", subtitle_options["convert"]])
+                can_embed = subtitle_options["embed"] and not options["audio_format"]
+                cmd.append("--embed-subs" if can_embed else "--no-embed-subs")
+            else:
+                # Chat-only capture: live_chat cannot be embedded or converted.
+                cmd.append("--no-embed-subs")
         if sponsorblock_options["enabled"]:
             if sponsorblock_options["mark"]:
                 cmd.extend([

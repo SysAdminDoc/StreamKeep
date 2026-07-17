@@ -1059,6 +1059,13 @@ class SettingsTabMixin:
         YtDlpExtractor.subtitle_auto = subtitle_options["automatic"]
         YtDlpExtractor.subtitle_convert = subtitle_options["convert"]
         YtDlpExtractor.subtitle_embed = subtitle_options["embed"]
+        if hasattr(self, "capture_youtube_chat_check"):
+            YtDlpExtractor.capture_youtube_chat = (
+                self.capture_youtube_chat_check.isChecked()
+            )
+            self._config["capture_youtube_chat"] = (
+                self.capture_youtube_chat_check.isChecked()
+            )
         self._config["download_subs"] = subtitle_options["enabled"]
         self._config["subtitle_languages"] = subtitle_options["languages"]
         self._config["subtitle_auto"] = subtitle_options["automatic"]
@@ -2908,10 +2915,22 @@ def build_settings_tab(win):
     if not bool(win._config.get("subtitle_embed", True)):
         win.subs_delivery_combo.setCurrentIndex(1)
     subs_output_row.addWidget(win.subs_delivery_combo, 1)
+    win.capture_youtube_chat_check = QCheckBox(
+        "Capture YouTube live-chat replay (live_chat.json) for VODs"
+    )
+    win.capture_youtube_chat_check.setChecked(
+        bool(win._config.get("capture_youtube_chat", False))
+    )
+    win.capture_youtube_chat_check.setToolTip(
+        "For eligible YouTube VODs, also fetch the live-chat replay. It is "
+        "normalized into StreamKeep's chat pipeline at finalize; unavailable "
+        "replay is non-fatal."
+    )
     win.sponsorblock_check = QCheckBox("Enable SponsorBlock by default")
     yt_lay.addWidget(win.subs_check)
     yt_lay.addLayout(subs_languages_row)
     yt_lay.addLayout(subs_output_row)
+    yt_lay.addWidget(win.capture_youtube_chat_check)
     yt_lay.addWidget(win.sponsorblock_check)
 
     from ...download_options import (
@@ -2974,6 +2993,7 @@ def build_settings_tab(win):
 
     win.subs_check.setChecked(bool(win._config.get("download_subs", False)))
     YtDlpExtractor.download_subs = win.subs_check.isChecked()
+    YtDlpExtractor.capture_youtube_chat = win.capture_youtube_chat_check.isChecked()
     YtDlpExtractor.subtitle_languages = win.subs_languages_input.text()
     YtDlpExtractor.subtitle_auto = win.subs_auto_check.isChecked()
     YtDlpExtractor.subtitle_convert = saved_sub_convert

@@ -349,6 +349,7 @@ def _run_download(args):
         dw.ytdlp_audio_format = output_options["audio_format"]
         dw.ytdlp_audio_quality = output_options["audio_quality"]
         dw.download_subs = subtitle_options["enabled"]
+        dw.capture_youtube_chat = bool(getattr(args, "youtube_chat", False))
         dw.subtitle_languages = subtitle_options["languages"]
         dw.subtitle_auto = subtitle_options["automatic"]
         dw.subtitle_convert = subtitle_options["convert"]
@@ -848,6 +849,11 @@ def build_parser():
     dl.add_argument(
         "--sub-delivery", default="", choices=["embed", "sidecar"],
         help="Embed subtitles or keep sidecar files (default: embed)",
+    )
+    dl.add_argument(
+        "--youtube-chat", action="store_true",
+        help="For YouTube VODs, also fetch the live-chat replay "
+             "(live_chat.json), normalized into the chat pipeline at finalize",
     )
     dl.add_argument(
         "--sponsorblock-mark", default="",

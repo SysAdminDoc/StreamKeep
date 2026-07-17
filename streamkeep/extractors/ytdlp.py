@@ -182,6 +182,7 @@ class YtDlpExtractor(Extractor):
     rate_limit = ""
     proxy = ""
     download_subs = False
+    capture_youtube_chat = False
     subtitle_languages = "en.*,en"
     subtitle_auto = True
     subtitle_convert = ""

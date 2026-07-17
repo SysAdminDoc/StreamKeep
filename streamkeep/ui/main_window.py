@@ -1803,6 +1803,7 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
             worker.ytdlp_audio_format = state.ytdlp_audio_format or ""
             worker.ytdlp_audio_quality = state.ytdlp_audio_quality or ""
             worker.download_subs = bool(state.download_subs)
+            worker.capture_youtube_chat = bool(state.capture_youtube_chat)
             worker.subtitle_languages = state.subtitle_languages or ""
             worker.subtitle_auto = bool(state.subtitle_auto)
             worker.subtitle_convert = state.subtitle_convert or ""

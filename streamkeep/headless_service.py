@@ -300,6 +300,7 @@ class HeadlessJobService(QObject):
         worker.rate_limit = str(self.config.get("rate_limit", "") or "")
         worker.proxy = str(self.config.get("proxy", "") or "")
         worker.download_subs = bool(self.config.get("download_subs", False))
+        worker.capture_youtube_chat = bool(self.config.get("capture_youtube_chat", False))
         worker.subtitle_languages = str(
             self.config.get("subtitle_languages", "en.*,en") or ""
         )

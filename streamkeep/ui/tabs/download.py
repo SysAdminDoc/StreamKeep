@@ -2233,6 +2233,7 @@ class DownloadTabMixin:
         worker.rate_limit = YtDlpExtractor.rate_limit
         worker.proxy = YtDlpExtractor.proxy
         worker.download_subs = YtDlpExtractor.download_subs
+        worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
         worker.subtitle_languages = YtDlpExtractor.subtitle_languages
         worker.subtitle_auto = YtDlpExtractor.subtitle_auto
         worker.subtitle_convert = YtDlpExtractor.subtitle_convert
@@ -2842,6 +2843,7 @@ class DownloadTabMixin:
         self.download_worker.rate_limit = _dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit
         self.download_worker.proxy = YtDlpExtractor.proxy
         self.download_worker.download_subs = subtitle_options["enabled"]
+        self.download_worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
         self.download_worker.subtitle_languages = subtitle_options["languages"]
         self.download_worker.subtitle_auto = subtitle_options["automatic"]
         self.download_worker.subtitle_convert = subtitle_options["convert"]
@@ -3961,6 +3963,7 @@ class DownloadTabMixin:
         worker.rate_limit = rl
         worker.proxy = YtDlpExtractor.proxy
         worker.download_subs = YtDlpExtractor.download_subs
+        worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
         worker.subtitle_languages = YtDlpExtractor.subtitle_languages
         worker.subtitle_auto = YtDlpExtractor.subtitle_auto
         worker.subtitle_convert = YtDlpExtractor.subtitle_convert
@@ -4365,6 +4368,7 @@ class DownloadTabMixin:
                 state.ytdlp_audio_format = worker.ytdlp_audio_format or ""
                 state.ytdlp_audio_quality = worker.ytdlp_audio_quality or ""
                 state.download_subs = bool(worker.download_subs)
+                state.capture_youtube_chat = bool(worker.capture_youtube_chat)
                 state.subtitle_languages = worker.subtitle_languages or ""
                 state.subtitle_auto = bool(worker.subtitle_auto)
                 state.subtitle_convert = worker.subtitle_convert or ""

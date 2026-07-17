@@ -256,6 +256,7 @@ class ResumeState:
     ytdlp_audio_format: str = ""
     ytdlp_audio_quality: str = ""
     download_subs: bool = False
+    capture_youtube_chat: bool = False
     subtitle_languages: str = ""
     subtitle_auto: bool = True
     subtitle_convert: str = ""

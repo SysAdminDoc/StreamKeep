@@ -98,6 +98,7 @@ python StreamKeep.py download "https://example.com/video" --format "bv*+ba/b" --
 python StreamKeep.py download "https://example.com/video" --audio-format opus --audio-quality 128K
 python StreamKeep.py download "https://example.com/video" --sponsorblock-mark intro,chapter --sponsorblock-remove sponsor
 python StreamKeep.py download "https://example.com/video" --sub-langs en,es --auto-subs --convert-subs srt --sub-delivery sidecar
+python StreamKeep.py download "https://www.youtube.com/watch?v=VIDEO" --youtube-chat
 python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite --fragment-retries 20 --retry-sleep "fragment:exp=1:20" --live-from-start
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
 python StreamKeep.py import-har capture.har --headers
