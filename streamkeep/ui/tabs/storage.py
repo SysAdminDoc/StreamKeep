@@ -4,16 +4,20 @@ Read-only scan by default. Delete actions always route through
 send2trash so nothing is ever permanently removed from inside the app.
 """
 
+import json
 import os
 
 from PyQt6.QtCore import QPoint, QThread, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QMenu, QPushButton, QTableView,
+    QLabel, QMenu, QPushButton, QTableView, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
+from ...maintenance import (
+    apply_maintenance, load_pending_plan, plan_maintenance, save_pending_plan,
+)
 from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
@@ -37,6 +41,37 @@ class _StorageScanWorker(QThread):
             )
             if not self.isInterruptionRequested():
                 self.scanned.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class _MaintenanceWorker(QThread):
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, root, config, *, plan=None, approved=None, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.config = dict(config or {})
+        self.plan = plan
+        self.approved = list(approved or ())
+
+    def run(self):
+        try:
+            if self.plan is None:
+                result = plan_maintenance(
+                    self.root, config=self.config,
+                    cancel_fn=self.isInterruptionRequested,
+                )
+                save_pending_plan(result)
+            else:
+                result = apply_maintenance(
+                    self.plan, self.approved,
+                    cancel_fn=self.isInterruptionRequested,
+                )
+            self.completed.emit(result)
+        except InterruptedError:
+            self.completed.emit(None)
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -170,6 +205,66 @@ def build_storage_tab(win):
     win.storage_delete_btn.clicked.connect(win._on_storage_delete_selected)
     act_lay.addWidget(win.storage_delete_btn)
     lay.addWidget(action_card)
+
+    maintenance_card = QFrame()
+    maintenance_card.setObjectName("card")
+    maintenance_lay = QVBoxLayout(maintenance_card)
+    maintenance_lay.setContentsMargins(18, 16, 18, 16)
+    maintenance_lay.setSpacing(10)
+    maintenance_title = QLabel("Archive Maintenance")
+    maintenance_title.setObjectName("sectionTitle")
+    maintenance_body = QLabel(
+        "Preview disk-to-library imports, missing or moved recordings, backup "
+        "and integrity health, disk thresholds, and search-index work before "
+        "approving any change. Every applied action is backed up and audited."
+    )
+    maintenance_body.setObjectName("sectionBody")
+    maintenance_body.setWordWrap(True)
+    maintenance_lay.addWidget(maintenance_title)
+    maintenance_lay.addWidget(maintenance_body)
+    maintenance_actions = QHBoxLayout()
+    maintenance_actions.setSpacing(8)
+    win.maintenance_preview_btn = QPushButton("Preview Maintenance")
+    win.maintenance_preview_btn.setObjectName("primary")
+    win.maintenance_preview_btn.clicked.connect(win._on_maintenance_preview)
+    maintenance_actions.addWidget(win.maintenance_preview_btn)
+    win.maintenance_apply_btn = QPushButton("Apply Approved")
+    win.maintenance_apply_btn.setEnabled(False)
+    win.maintenance_apply_btn.clicked.connect(win._on_maintenance_apply)
+    maintenance_actions.addWidget(win.maintenance_apply_btn)
+    win.maintenance_cancel_btn = QPushButton("Cancel")
+    win.maintenance_cancel_btn.setObjectName("ghost")
+    win.maintenance_cancel_btn.setEnabled(False)
+    win.maintenance_cancel_btn.clicked.connect(win._on_maintenance_cancel)
+    maintenance_actions.addWidget(win.maintenance_cancel_btn)
+    maintenance_actions.addStretch(1)
+    maintenance_lay.addLayout(maintenance_actions)
+    win.maintenance_summary = QLabel("No maintenance preview yet.")
+    win.maintenance_summary.setObjectName("subtleText")
+    win.maintenance_summary.setWordWrap(True)
+    maintenance_lay.addWidget(win.maintenance_summary)
+    win.maintenance_tree = QTreeWidget()
+    win.maintenance_tree.setHeaderLabels(["Apply", "Action", "Details"])
+    win.maintenance_tree.setRootIsDecorated(False)
+    win.maintenance_tree.setAlternatingRowColors(True)
+    win.maintenance_tree.setMinimumHeight(150)
+    win.maintenance_tree.setAccessibleName("Archive maintenance preview")
+    win.maintenance_tree.setAccessibleDescription(
+        "Check only maintenance actions that should be applied"
+    )
+    win.maintenance_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    win.maintenance_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    win.maintenance_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    maintenance_lay.addWidget(win.maintenance_tree)
+    lay.addWidget(maintenance_card)
+    try:
+        pending_plan = load_pending_plan()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        pending_plan = None
+    if pending_plan is not None:
+        QTimer.singleShot(
+            0, lambda plan=pending_plan: win._on_maintenance_preview_done(plan)
+        )
 
     # ── Filter row (F13) ────────────────────────────────────────────
     filter_card = QFrame()
@@ -412,6 +507,144 @@ class StorageTabMixin:
         self.storage_rescan_btn.setEnabled(True)
         self._log(f"[STORAGE] Scan failed: {message}")
         self._set_status("Storage scan failed. See the log for details.", "error")
+
+    def _set_maintenance_running(self, running):
+        self.maintenance_preview_btn.setEnabled(not running)
+        self.maintenance_apply_btn.setEnabled(
+            not running and getattr(self, "_maintenance_plan", None) is not None
+        )
+        self.maintenance_cancel_btn.setEnabled(running)
+
+    def _on_maintenance_preview(self):
+        current = getattr(self, "_maintenance_worker", None)
+        if current is not None and current.isRunning():
+            return
+        self._maintenance_plan = None
+        self.maintenance_tree.clear()
+        self.maintenance_summary.setText("Building a read-only archive preview…")
+        self._set_maintenance_running(True)
+        self._set_status("Previewing archive maintenance in the background.", "working")
+        worker = _MaintenanceWorker(
+            self._storage_scan_root(), self._config, parent=self
+        )
+        worker.completed.connect(self._on_maintenance_preview_done)
+        worker.failed.connect(self._on_maintenance_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._maintenance_worker = worker
+        worker.start()
+
+    def _on_maintenance_preview_done(self, plan):
+        self._maintenance_worker = None
+        if plan is None:
+            self.maintenance_summary.setText("Maintenance preview cancelled. No changes were made.")
+            self._set_maintenance_running(False)
+            self._set_status("Maintenance preview cancelled.", "idle")
+            return
+        self._maintenance_plan = plan
+        self.maintenance_tree.clear()
+        for action in plan.actions:
+            item = QTreeWidgetItem(["", action.label, action.detail])
+            item.setData(0, Qt.ItemDataRole.UserRole, action.action_id)
+            item.setCheckState(
+                0, Qt.CheckState.Unchecked if action.kind == "remove_missing"
+                else Qt.CheckState.Checked,
+            )
+            if action.kind == "remove_missing":
+                item.setToolTip(0, "Destructive library cleanup is never preselected.")
+            self.maintenance_tree.addTopLevelItem(item)
+        diag = plan.diagnostics
+        library = diag["library"]
+        disk = diag["disk"]
+        database = diag["database"]
+        backup_status = diag["backup"]["status"]
+        self.maintenance_summary.setText(
+            f"{len(plan.actions)} proposed action(s): {library['untracked']} orphaned on disk, "
+            f"{library['missing']} missing, {library['moved']} moved. "
+            f"Database: {database.get('quick_check', 'unknown')}; "
+            f"backup: {backup_status}; disk: {disk['status']} "
+            f"({disk['free_gb']:.2f} GiB free; warning at {disk['warning_gb']:.2f}, "
+            f"critical at {disk['critical_gb']:.2f})."
+        )
+        self._set_maintenance_running(False)
+        self._set_status("Maintenance preview ready for approval.", "success")
+
+    def _on_maintenance_apply(self):
+        plan = getattr(self, "_maintenance_plan", None)
+        if plan is None:
+            return
+        approved = []
+        details = []
+        for index in range(self.maintenance_tree.topLevelItemCount()):
+            item = self.maintenance_tree.topLevelItem(index)
+            if item.checkState(0) == Qt.CheckState.Checked:
+                approved.append(str(item.data(0, Qt.ItemDataRole.UserRole)))
+                details.append(f"- {item.text(1)}: {item.text(2)}")
+        if not approved:
+            self._set_status("Select at least one maintenance action to apply.", "warning")
+            return
+        if not ask_premium_confirmation(
+            self,
+            title="Apply approved archive maintenance?",
+            body=(f"Apply {len(approved)} selected action(s) from the current preview. "
+                  "StreamKeep creates a backup first and records every outcome."),
+            eyebrow="MAINTENANCE", badge_text="Backup first", tone="warning",
+            summary_title="Only checked actions will run.",
+            summary_body="If the library changed since preview, the batch is refused.",
+            details_title="Approved actions", details_body="\n".join(details),
+            primary_label="Create Backup and Apply", secondary_label="Cancel",
+            default_action="secondary", min_width=680,
+        ):
+            return
+        self._set_maintenance_running(True)
+        self._set_status("Applying approved maintenance in the background.", "working")
+        worker = _MaintenanceWorker(
+            plan.root, self._config, plan=plan, approved=approved, parent=self
+        )
+        worker.completed.connect(self._on_maintenance_apply_done)
+        worker.failed.connect(self._on_maintenance_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._maintenance_worker = worker
+        worker.start()
+
+    def _on_maintenance_apply_done(self, result):
+        self._maintenance_worker = None
+        self._maintenance_plan = None
+        self._set_maintenance_running(False)
+        self.maintenance_apply_btn.setEnabled(False)
+        if result is None or result.status == "cancelled":
+            self.maintenance_summary.setText(
+                "Maintenance stopped between actions; completed actions remain audited. Preview again."
+            )
+            self._set_status("Maintenance cancelled safely between actions.", "warning")
+            return
+        self.maintenance_summary.setText(
+            f"Maintenance {result.status}: {result.applied} applied, "
+            f"{result.failed} failed, {result.skipped} skipped. "
+            f"Backup: {result.backup_path or 'not created'}."
+        )
+        for error in result.errors:
+            self._log(f"[MAINTENANCE] {error}")
+        tone = "success" if result.status == "completed" and not result.failed else "warning"
+        self._set_status(
+            f"Archive maintenance {result.status}: {result.applied} action(s) applied.", tone
+        )
+        self._on_storage_rescan()
+
+    def _on_maintenance_cancel(self):
+        worker = getattr(self, "_maintenance_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            self.maintenance_cancel_btn.setEnabled(False)
+            self.maintenance_summary.setText("Stopping safely between maintenance actions…")
+
+    def _on_maintenance_failed(self, message):
+        self._maintenance_worker = None
+        self._maintenance_plan = None
+        self._set_maintenance_running(False)
+        self.maintenance_apply_btn.setEnabled(False)
+        self.maintenance_summary.setText("Maintenance failed before completion. No unreported action ran.")
+        self._log(f"[MAINTENANCE] {message}")
+        self._set_status("Archive maintenance failed. See the log for details.", "error")
 
     def _on_storage_context_menu(self, pos):
         if not hasattr(self, "storage_table"):

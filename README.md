@@ -50,6 +50,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Open and search large archives through snapshot-stable, keyset-paged SQLite/Qt models; History metadata search uses FTS indexes and loads 100 rows at a time instead of creating one widget per recording.
 - Scan storage by platform/channel/title, detect orphaned files, and recycle selected recordings through the OS recycle bin.
 - Storage scans run in an interruptible background worker, and History/Storage schedule thumbnails only for visible and near-visible rows while cancelling stale page work.
+- Use Storage → Archive Maintenance to build a read-only preview of orphaned disk folders, import candidates, missing or uniquely moved library entries, database integrity, latest backup, disk warning/critical thresholds, note-sidecar coverage, and search-index/statistics work. Apply only individually checked actions: StreamKeep refuses stale previews, creates a secret-free backup first, commits each action atomically, preserves recording sidecars, and records outcomes in an append-only maintenance audit. Interrupted previews change nothing; interrupted apply batches stop safely between audited actions and can be previewed again after restart.
 - Capture SHA-256 archive manifests for completed recordings, then right-click History rows to verify or rescan the manifest when files intentionally change.
 
 ### Player and Clip Tools

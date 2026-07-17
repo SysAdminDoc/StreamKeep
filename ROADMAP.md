@@ -93,13 +93,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P2 — Later
 
-- [ ] P2 — Expose archive maintenance as one dry-run-first workflow
-  Why: Reconcile/import, backup, disk alerts, notes, bandwidth, and channel statistics exist separately but were not reachable as an archive-maintenance workflow on 2026-07-15.
-  Evidence: dormant modules `streamkeep/storage.py`, `backup.py`, `disk_monitor.py`, `notes.py`, `bandwidth.py`, and `channel_stats.py`; Tube Archivist/Pinchflat archive operations.
-  Touches: Storage/History/Analytics/Settings surfaces, maintenance coordinator, background workers, SQLite, integration tests.
-  Acceptance: A maintenance screen previews disk-to-library imports, missing/orphaned/moved files, backup/integrity status, disk thresholds, and index/stat rebuild effects; user approval applies an auditable batch; cancellation/restart is safe; no sidecar or history data is overwritten silently.
-  Complexity: XL
-
 - [ ] P2 — Complete authenticated gallery and RSS publishing
   Why: Generators and registry code exist without persisted sharing lifecycle or server routes, so advertised local publishing is unreachable.
   Evidence: `streamkeep/gallery.py`, `streamkeep/feed.py`, `streamkeep/local_server.py`; Pinchflat RSS and self-hosted archive patterns; depends on the existing gallery-ID entropy item and safe LAN boundary.

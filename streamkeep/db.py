@@ -1373,6 +1373,25 @@ def run_optimize() -> str:
             db.close()
 
 
+def rebuild_history_indexes() -> tuple[bool, str]:
+    """Rebuild the external-content History FTS index and planner statistics."""
+    if not DB_PATH.is_file():
+        return False, "Database file does not exist"
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+            db.execute("ANALYZE")
+            db.execute("PRAGMA optimize")
+            db.commit()
+            return True, "History search index and planner statistics rebuilt"
+        except sqlite3.Error as exc:
+            db.rollback()
+            return False, str(exc)
+        finally:
+            db.close()
+
+
 def checkpoint_wal() -> tuple[bool, str]:
     """Force a WAL checkpoint (TRUNCATE mode). Returns (ok, detail)."""
     if not DB_PATH.is_file():
@@ -1449,7 +1468,8 @@ def db_diagnostics() -> dict[str, Any]:
 
         counts = {}
         for table in ("history", "monitor_channels", "download_queue",
-                       "archive_manifests", "failed_jobs"):
+                      "archive_manifests", "failed_jobs", "bandwidth_daily",
+                      "channel_polls"):
             try:
                 counts[table] = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             except sqlite3.Error:

@@ -214,6 +214,24 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             )
             assert not window._download_metric_state.isVisible()
 
+            # Archive maintenance exposes an explicit dry-run/approval surface.
+            from streamkeep.maintenance import plan_maintenance
+            orphan_dir = tmp_path / "orphan-recording"
+            orphan_dir.mkdir()
+            (orphan_dir / "video.mp4").write_bytes(b"orphan fixture")
+            maintenance_plan = plan_maintenance(
+                tmp_path,
+                config={"archive_backup_dir": str(tmp_path / "backups")},
+                db_module=main_window._db,
+            )
+            window._on_maintenance_preview_done(maintenance_plan)
+            assert window.maintenance_tree.accessibleName() == (
+                "Archive maintenance preview"
+            )
+            assert window.maintenance_tree.topLevelItemCount() >= 2
+            assert window.maintenance_apply_btn.isEnabled()
+            assert "orphaned on disk" in window.maintenance_summary.text()
+
             # A browser clip handoff prefills the crop range before the fetch
             # that follows reads it (V-clip-handoff).
             window.crop_start_input.clear()

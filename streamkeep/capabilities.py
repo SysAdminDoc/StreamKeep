@@ -75,6 +75,14 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
+        "archive-maintenance", "Dry-run-first archive maintenance", "shipped",
+        "Archive Maintenance",
+        (ReachableProductPath(
+            "gui", "Storage → Archive Maintenance",
+            "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+        ),),
+    ),
+    ProductCapabilityClaim(
         "cli-download", "Headless download dispatch", "shipped",
         "StreamKeep.py download",
         (ReachableProductPath(
