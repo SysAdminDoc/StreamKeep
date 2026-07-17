@@ -12,6 +12,7 @@ Usage::
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -761,6 +762,34 @@ def _run_podcast_sidecars(args):
         )
 
 
+def _run_credentials_check(args):
+    """Validate stored platform credentials and the cookie profile.
+
+    Exit code 1 when any probe reports a hard failure (invalid/expired/
+    insufficient-scope); rate-limited, unsupported, network, and
+    no-credential outcomes are advisory and keep exit code 0.
+    """
+    from . import credential_check as cc
+
+    timeout = int(getattr(args, "timeout", 15) or 15)
+    target = getattr(args, "platform", "all") or "all"
+    if target == "all":
+        results = cc.probe_all(timeout=timeout)
+    else:
+        results = [cc.probe_platform(target, timeout=timeout)]
+
+    if getattr(args, "json", False):
+        _print_line(json.dumps([r.as_dict() for r in results], indent=2))
+    else:
+        for r in results:
+            extra = f" - {r.detail}" if r.detail else ""
+            _print_line(f"  {r.platform:<10s} {r.label}{extra}")
+
+    hard_fail = {cc.INVALID, cc.EXPIRED, cc.INSUFFICIENT_SCOPE}
+    if any(r.status in hard_fail for r in results):
+        sys.exit(1)
+
+
 def _run_protocol_register(args):
     """Register the per-user streamkeep:// handler (Windows)."""
     from .protocol import register_windows_protocol
@@ -1041,6 +1070,22 @@ def build_parser():
     ).add_argument("--config-dir", default=argparse.SUPPRESS,
                    help="Override the config/database directory")
 
+    cred_p = sub.add_parser(
+        "credentials",
+        help="Validate stored platform credentials and the cookie profile",
+    )
+    cred_p.add_argument(
+        "platform", nargs="?", default="all",
+        choices=["all", "twitch", "youtube", "kick", "cookies"],
+        help="Which credential to check (default: all)",
+    )
+    cred_p.add_argument("--json", action="store_true",
+                        help="Emit redacted results as JSON")
+    cred_p.add_argument("--timeout", type=int, default=15,
+                        help="Per-probe network timeout in seconds")
+    cred_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                        help="Override the config/database directory")
+
     # -- packaged startup contract --
     startup_p = sub.add_parser(
         "startup-check",
@@ -1159,6 +1204,8 @@ def run_cli(argv=None):
         _run_har_import(args)
     elif args.command == "podcast-sidecars":
         _run_podcast_sidecars(args)
+    elif args.command == "credentials":
+        _run_credentials_check(args)
     elif args.command == "register-protocol":
         _run_protocol_register(args)
     elif args.command == "unregister-protocol":
@@ -1178,7 +1225,7 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check", "import-har", "podcast-sidecars",
+        "startup-check", "import-har", "podcast-sidecars", "credentials",
         "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

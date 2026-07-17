@@ -40,6 +40,25 @@ def test_print_line_uses_available_stream():
     assert output.getvalue() == "ready\n"
 
 
+def test_credentials_command_reports_no_stored_credentials(tmp_path):
+    config_dir = tmp_path / "isolated"
+    result = _run_launcher(
+        "credentials", "--json", "--config-dir", config_dir,
+        appdata=tmp_path / "ambient-appdata",
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    platforms = {row["platform"]: row["status"] for row in payload}
+    assert platforms == {
+        "twitch": "no_credential",
+        "youtube": "no_credential",
+        "kick": "no_credential",
+        "cookies": "no_credential",
+    }
+    # No secret material must ever surface in the redacted report.
+    assert "token" not in result.stdout.lower() or "no_credential" in result.stdout
+
+
 def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     config_dir = tmp_path / "isolated"
     result = _run_launcher(

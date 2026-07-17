@@ -149,20 +149,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: An immutable schema-versioned job spec is built and validated once, serializes without secrets, rejects unsupported future versions, migrates existing queue/resume payloads, and produces equivalent sanitized command plans from GUI, CLI, REST/headless, and monitor fixtures; workers receive the spec instead of field-by-field mutation.
   Complexity: L
 
-- [ ] P1 — Split portable and MSIX build/update contracts
-  Why: The tracked spec produces one-file output, the MSIX builder requires a directory, and the updater self-replaces `sys.executable` even though MSIX content is package-managed.
-  Evidence: `StreamKeep.spec`, `packaging/msix/build_msix.py`, `streamkeep/updater.py`; https://learn.microsoft.com/en-us/windows/msix/app-installer/auto-update-and-repair--overview.
-  Touches: PyInstaller targets, MSIX/App Installer manifests, updater/update runtime, signing/SBOM/version stamping, artifact smokes.
-  Acceptance: Portable EXE retains signed last-known-good self-replacement; MSIX is built from an explicit signed onedir target and updates only through signed App Installer/Store semantics; each artifact reports its channel, refuses the other's updater, and passes clean install, upgrade, interrupted-update, repair, rollback, and uninstall smoke tests.
-  Complexity: L
-
-- [ ] P1 — Add live credential and cookie-profile validation
-  Why: Settings currently reports stored-value presence as “authenticated,” so private/age-restricted failures are discovered only after queueing and are hard to distinguish from extractor/network failure.
-  Evidence: `streamkeep/accounts.py::credential_status`, `streamkeep/ui/tabs/settings.py::_update_cookies_status`; https://github.com/JunkFood02/Seal/issues/2026; https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp; extends V19/V20 without replacing them.
-  Touches: account/cookie services, platform-specific safe probes, Settings and pre-queue status, diagnostics, secret-redaction tests.
-  Acceptance: A cancellable non-downloading probe reports valid, expired/revoked, insufficient scope, rate-limited, unsupported, or network failure for configured Twitch/YouTube/Kick/cookie profiles; it records only redacted time/status metadata, never secrets or signed URLs, and V20 can surface the result before queueing while offline operation remains available.
-  Complexity: M
-
 #### P2 — Later
 
 - [ ] P2 — Add an operations view over queue, monitor, and failure state

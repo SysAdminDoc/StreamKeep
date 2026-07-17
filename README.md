@@ -56,6 +56,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Storage scans run in an interruptible background worker, and History/Storage schedule thumbnails only for visible and near-visible rows while cancelling stale page work.
 - Use Storage → Archive Maintenance to build a read-only preview of orphaned disk folders, import candidates, missing or uniquely moved library entries, database integrity, latest backup, disk warning/critical thresholds, note-sidecar coverage, and search-index/statistics work. Apply only individually checked actions: StreamKeep refuses stale previews, creates a secret-free backup first, commits each action atomically, preserves recording sidecars, and records outcomes in an append-only maintenance audit. Interrupted previews change nothing; interrupted apply batches stop safely between audited actions and can be previewed again after restart.
 - Capture SHA-256 archive manifests for completed recordings, then right-click History rows to verify or rescan the manifest when files intentionally change.
+- Validate stored platform credentials and the imported cookie profile without downloading: Settings → Platform Accounts / Cookies has a **Check** button (and `python StreamKeep.py credentials`) that reports valid, expired/revoked, insufficient-scope, rate-limited, unsupported, or network-error per platform. The probe records only redacted status metadata — never the token, cookie values, or any signed URL — and cookie validation runs entirely locally.
 
 ### Player and Clip Tools
 
@@ -102,6 +103,8 @@ python StreamKeep.py download "https://example.com/video" --sub-langs en,es --au
 python StreamKeep.py download "https://www.youtube.com/watch?v=VIDEO" --youtube-chat
 python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite --fragment-retries 20 --retry-sleep "fragment:exp=1:20" --live-from-start
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
+python StreamKeep.py credentials
+python StreamKeep.py credentials twitch --json
 python StreamKeep.py import-har capture.har --headers
 python StreamKeep.py import-har capture.har --json
 python StreamKeep.py register-protocol

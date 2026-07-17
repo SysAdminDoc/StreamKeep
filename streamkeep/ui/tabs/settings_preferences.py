@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFileDialog
 
 from ...extractors.ytdlp import YtDlpExtractor
@@ -14,6 +15,44 @@ from ...utils import (
     scan_browser_cookies as _scan_browser_cookies,
 )
 from ..widgets import ask_premium_confirmation, show_premium_message
+
+
+class _CredentialProbeWorker(QThread):
+    """Run non-downloading credential probes off the UI thread.
+
+    Emits ``result_ready(ProbeResult)`` per platform and ``finished_all()``
+    when done. Cancellable so a slow network never blocks Settings.
+    """
+
+    result_ready = pyqtSignal(object)
+    finished_all = pyqtSignal()
+
+    def __init__(self, platforms, timeout=12, parent=None):
+        super().__init__(parent)
+        self._platforms = list(platforms)
+        self._timeout = timeout
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        from ...credential_check import (
+            NETWORK_ERROR, ProbeResult, probe_platform,
+        )
+        for platform in self._platforms:
+            if self._cancel:
+                break
+            try:
+                res = probe_platform(
+                    platform, timeout=self._timeout,
+                    cancel_check=lambda: self._cancel,
+                )
+            except Exception as exc:  # a probe must never crash the worker
+                res = ProbeResult(platform, NETWORK_ERROR, str(exc))
+            if not self._cancel:
+                self.result_ready.emit(res)
+        self.finished_all.emit()
 
 
 class SettingsPreferencesMixin:
@@ -221,6 +260,57 @@ class SettingsPreferencesMixin:
                 inputs[plat_key][0].clear()
                 inputs[plat_key][1].setText(credential_status(plat_key))
         self._set_status("All platform tokens cleared.", "success")
+
+    def _on_check_account_tokens(self):
+        """Validate stored platform credentials with a live, cancellable probe."""
+        # Persist anything freshly typed so we validate what will actually be used.
+        self._on_save_account_tokens()
+        self._start_credential_probe(["twitch", "youtube", "kick"])
+
+    def _start_credential_probe(self, platforms):
+        worker = getattr(self, "_cred_probe_worker", None)
+        if worker is not None and worker.isRunning():
+            return  # a check is already in flight
+        inputs = getattr(self, "_account_inputs", {})
+        for plat in platforms:
+            entry = inputs.get(plat)
+            if entry:
+                entry[1].setText("Checking…")
+                entry[1].setToolTip("")
+        btn = getattr(self, "acct_check_btn", None)
+        if btn is not None:
+            btn.setEnabled(False)
+        self._cred_probe_worker = _CredentialProbeWorker(platforms, parent=self)
+        self._cred_probe_worker.result_ready.connect(self._on_credential_result)
+        self._cred_probe_worker.finished_all.connect(self._on_credential_probe_done)
+        self._cred_probe_worker.start()
+        self._set_status("Checking platform credentials…", "info")
+
+    def _on_credential_result(self, result):
+        entry = getattr(self, "_account_inputs", {}).get(result.platform)
+        if entry:
+            entry[1].setText(result.label)
+            entry[1].setToolTip(result.detail or "")
+        self._log(
+            f"[ACCOUNTS] {result.platform}: {result.status}"
+            + (f" ({result.detail})" if result.detail else "")
+        )
+
+    def _on_credential_probe_done(self):
+        btn = getattr(self, "acct_check_btn", None)
+        if btn is not None:
+            btn.setEnabled(True)
+        self._set_status("Credential check complete.", "success")
+
+    def _on_check_cookies(self):
+        """Validate the imported cookie profile locally (no request)."""
+        from ...credential_check import probe_cookies
+        result = probe_cookies()
+        label = getattr(self, "cookies_status_label", None)
+        if label is not None:
+            text = f"{result.label}: {result.detail}" if result.detail else result.label
+            label.setText(text)
+        self._set_status(f"Cookies: {result.label}", result.tone)
 
     # ── Proxy pool ───────────────────────────────────────────────────
 
