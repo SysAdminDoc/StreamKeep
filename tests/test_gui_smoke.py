@@ -159,6 +159,20 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.download_hero_title.text() == "New download"
             assert window.scan_lan_check.text() == "Allow LAN for this scan"
             assert not window.scan_lan_check.isChecked()
+            assert window.download_settings_action.isCheckable()
+            assert window.time_range_action.isCheckable()
+            assert window.adv_overrides_action.isCheckable()
+            assert window.download_settings_panel.isHidden()
+            assert window.adv_frame.isHidden()
+            window.download_settings_action.setChecked(True)
+            assert not window.download_settings_panel.isHidden()
+            window.download_settings_action.setChecked(False)
+            assert window.download_settings_panel.isHidden()
+            window.time_range_action.setChecked(True)
+            assert window.download_settings_action.isChecked()
+            assert not window.time_range_panel.isHidden()
+            window.time_range_action.setChecked(False)
+            window.download_settings_action.setChecked(False)
             assert window.adv_ytdlp_template_combo.findData(
                 "Archive headers"
             ) >= 0

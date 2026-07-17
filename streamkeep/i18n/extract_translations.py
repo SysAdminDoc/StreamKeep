@@ -66,10 +66,19 @@ SPANISH_CORE = {
         "Pegue una URL de emisión, canal, VOD o archivo multimedia…",
     ("StreamKeep", "Fetch"): "Obtener",
     ("StreamKeep", "Fetching"): "Obteniendo",
+    ("StreamKeep", "Import"): "Importar",
     ("StreamKeep", "Import URLs"): "Importar URL",
     ("StreamKeep", "Paste"): "Pegar",
     ("StreamKeep", "Scan page"): "Escanear página",
+    ("StreamKeep", "Scan page for media"):
+        "Buscar contenido multimedia en la página",
     ("StreamKeep", "Allow LAN for this scan"): "Permitir LAN para este análisis",
+    ("StreamKeep", "Allow LAN for next scan"):
+        "Permitir LAN en el próximo análisis",
+    ("StreamKeep", "Add URL to queue"): "Añadir URL a la cola",
+    ("StreamKeep", "Download settings"): "Opciones de descarga",
+    ("StreamKeep", "Per-download overrides"):
+        "Ajustes específicos de la descarga",
     ("StreamKeep", "Download Selected"): "Descargar selección",
     ("StreamKeep", "Download All Checked"): "Descargar todos los marcados",
     ("StreamKeep", "Quality:"): "Calidad:",

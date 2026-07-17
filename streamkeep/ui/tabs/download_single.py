@@ -1465,6 +1465,8 @@ class DownloadSingleMixin:
             self._set_status("Scan Page expects a full http(s) URL.", "warning")
             return
         self.scan_btn.setEnabled(False)
+        if hasattr(self, "scan_action"):
+            self.scan_action.setEnabled(False)
         allow_lan = self.scan_lan_check.isChecked()
         self.scan_lan_check.setChecked(False)
         self._set_status("Scanning page for media links...", "working")
@@ -1484,6 +1486,8 @@ class DownloadSingleMixin:
 
     def _on_scan_done(self, links):
         self.scan_btn.setEnabled(True)
+        if hasattr(self, "scan_action"):
+            self.scan_action.setEnabled(True)
         if not links:
             self._set_status(
                 "No media links found. Try Fetch or Expand Playlist instead.",
@@ -1505,6 +1509,8 @@ class DownloadSingleMixin:
 
     def _on_scan_error(self, err):
         self.scan_btn.setEnabled(True)
+        if hasattr(self, "scan_action"):
+            self.scan_action.setEnabled(True)
         self._log(f"[SCRAPE] {err}")
         self._set_status(f"Scan failed: {err}", "error")
 

@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir
 from ..widgets import make_field_block, path_label, style_table
 from .download_queue import DownloadQueueMixin
@@ -148,8 +147,8 @@ def build_download_tab(win):
     url_card = QFrame()
     url_card.setObjectName("composerCard")
     url_lay = QVBoxLayout(url_card)
-    url_lay.setContentsMargins(12, 10, 12, 10)
-    url_lay.setSpacing(7)
+    url_lay.setContentsMargins(0, 4, 0, 4)
+    url_lay.setSpacing(6)
 
     url_header = QVBoxLayout()
     url_header.setSpacing(4)
@@ -185,56 +184,60 @@ def build_download_tab(win):
     win.platform_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
     url_row.addWidget(win.platform_badge)
 
+    paste_btn = QPushButton("Paste")
+    paste_btn.setObjectName("secondary")
+    paste_btn.setToolTip("Paste a URL from the clipboard")
+    paste_btn.clicked.connect(win.url_input.paste)
+    url_row.addWidget(paste_btn)
+
     win.fetch_btn = QPushButton("Fetch")
     win.fetch_btn.setObjectName("primary")
     win.fetch_btn.setMinimumWidth(116)
     win.fetch_btn.setMinimumHeight(38)
     win.fetch_btn.clicked.connect(win._on_fetch)
     url_row.addWidget(win.fetch_btn)
-    url_lay.addLayout(url_row)
 
-    utility_bar = QFrame()
-    utility_bar.setObjectName("optionsRow")
-    utility_lay = QHBoxLayout(utility_bar)
-    utility_lay.setContentsMargins(0, 0, 0, 0)
-    utility_lay.setSpacing(8)
-
-    win.batch_import_btn = QPushButton("Import URLs")
+    win.batch_import_btn = QPushButton("Import")
     win.batch_import_btn.setObjectName("secondary")
     win.batch_import_btn.setToolTip("Import URLs from a text file (one per line) and queue them all (F44)")
     win.batch_import_btn.clicked.connect(win._on_batch_url_import)
-    utility_lay.addWidget(win.batch_import_btn)
+    url_row.addWidget(win.batch_import_btn)
 
-    paste_btn = QPushButton("Paste")
-    paste_btn.setObjectName("secondary")
-    paste_btn.setToolTip("Paste a URL from the clipboard")
-    paste_btn.clicked.connect(win.url_input.paste)
-    utility_lay.addWidget(paste_btn)
-
-    win.scan_btn = QPushButton("Scan page")
-    win.scan_btn.setObjectName("secondary")
+    # Keep secondary intake paths reachable without making every action
+    # compete with the URL field. Hidden proxy widgets preserve the worker
+    # mixins' existing enable/disable contracts.
+    win.scan_btn = QPushButton("Scan page", url_card)
+    win.scan_btn.setAccessibleName("Scan page for media")
     win.scan_btn.setToolTip("Fetch the URL as HTML and extract all video/media links it references")
     win.scan_btn.clicked.connect(win._on_scan_page)
-    utility_lay.addWidget(win.scan_btn)
+    win.scan_btn.setVisible(False)
 
-    win.scan_lan_check = QCheckBox("Allow LAN for this scan")
+    win.scan_lan_check = QCheckBox("Allow LAN for this scan", url_card)
+    win.scan_lan_check.setAccessibleName("Allow LAN for this scan")
     win.scan_lan_check.setToolTip(
         "One scan only: allow RFC1918/ULA page targets. Loopback, link-local, "
         "cloud metadata, and other special addresses remain blocked."
     )
-    utility_lay.addWidget(win.scan_lan_check)
+    win.scan_lan_check.setVisible(False)
 
-    win.queue_btn = QPushButton("Queue")
-    win.queue_btn.setObjectName("secondary")
+    win.queue_btn = QPushButton("Queue", url_card)
+    win.queue_btn.setAccessibleName("Add URL to queue")
     win.queue_btn.setToolTip("Add the current URL to the download queue")
     win.queue_btn.clicked.connect(win._on_queue_url)
-    utility_lay.addWidget(win.queue_btn)
+    win.queue_btn.setVisible(False)
 
-    utility_lay.addStretch(1)
-
-    more_btn = QPushButton("More")
-    more_btn.setObjectName("ghost")
+    more_btn = QPushButton("Advanced")
+    more_btn.setObjectName("secondary")
     more_menu = QMenu(more_btn)
+    queue_action = more_menu.addAction("Add URL to queue")
+    queue_action.triggered.connect(win.queue_btn.click)
+    win.scan_action = more_menu.addAction("Scan page for media")
+    win.scan_action.triggered.connect(win.scan_btn.click)
+    win.scan_lan_action = more_menu.addAction("Allow LAN for next scan")
+    win.scan_lan_action.setCheckable(True)
+    win.scan_lan_action.toggled.connect(win.scan_lan_check.setChecked)
+    win.scan_lan_check.toggled.connect(win.scan_lan_action.setChecked)
+    more_menu.addSeparator()
     win.expand_btn = more_menu.addAction("Expand playlist")
     win.expand_btn.setToolTip("Queue every item from a playlist or channel")
     win.expand_btn.triggered.connect(win._on_expand_playlist)
@@ -244,9 +247,16 @@ def build_download_tab(win):
     win.clip_btn = more_menu.addAction("Clipboard watch")
     win.clip_btn.setCheckable(True)
     win.clip_btn.triggered.connect(win._on_toggle_clipboard)
+    more_menu.addSeparator()
+    win.download_settings_action = more_menu.addAction("Download settings")
+    win.download_settings_action.setCheckable(True)
+    win.time_range_action = more_menu.addAction("Time range")
+    win.time_range_action.setCheckable(True)
+    win.adv_overrides_action = more_menu.addAction("Per-download overrides")
+    win.adv_overrides_action.setCheckable(True)
     more_btn.setMenu(more_menu)
-    utility_lay.addWidget(more_btn)
-    url_lay.addWidget(utility_bar)
+    url_row.addWidget(more_btn)
+    url_lay.addLayout(url_row)
 
     win.info_label = QLabel("")
     win.info_label.setObjectName("streamInfo")
@@ -346,6 +356,7 @@ def build_download_tab(win):
     # Controls card — quality / segment / output folder
     controls_card = QFrame()
     controls_card.setObjectName("optionsRow")
+    win.download_settings_panel = controls_card
     controls_lay = QGridLayout(controls_card)
     controls_lay.setContentsMargins(4, 4, 4, 6)
     controls_lay.setHorizontalSpacing(18)
@@ -373,6 +384,7 @@ def build_download_tab(win):
 
     # Time-range crop (F21) — optional start/end for partial downloads
     crop_block, crop_lay = make_field_block("Time range (optional)")
+    win.time_range_panel = crop_block
     crop_row = QHBoxLayout()
     crop_row.setSpacing(8)
     crop_start_label = QLabel("Start:")
@@ -415,6 +427,15 @@ def build_download_tab(win):
     controls_lay.setColumnStretch(2, 2)
     controls_lay.setColumnStretch(3, 2)
     crop_block.setVisible(False)
+    controls_card.setVisible(False)
+    win.download_settings_action.toggled.connect(controls_card.setVisible)
+
+    def _on_time_range_toggle(checked):
+        crop_block.setVisible(checked)
+        if checked:
+            win.download_settings_action.setChecked(True)
+
+    win.time_range_action.toggled.connect(_on_time_range_toggle)
     root.addWidget(controls_card)
 
     win.track_section = QFrame()
@@ -467,27 +488,6 @@ def build_download_tab(win):
     root.addWidget(win.track_section)
 
     # ── Per-Download Settings Override (F18) ──────────────────────
-    adv_toggle_row = QHBoxLayout()
-    adv_toggle_row.setSpacing(6)
-    range_toggle_btn = QPushButton("Time range")
-    range_toggle_btn.setObjectName("ghost")
-    range_toggle_btn.setCheckable(True)
-    range_toggle_btn.toggled.connect(crop_block.setVisible)
-    adv_toggle_row.addWidget(range_toggle_btn)
-    win.adv_toggle_btn = QPushButton("Advanced")
-    win.adv_toggle_btn.setObjectName("ghost")
-    win.adv_toggle_btn.setCheckable(True)
-    win.adv_override_badge = QLabel("")
-    win.adv_override_badge.setStyleSheet(
-        f"background:transparent; color:{CAT['peach']}; border:none; "
-        f"font-size:12px; font-weight:700; padding:0 4px;"
-    )
-    win.adv_override_badge.setVisible(False)
-    adv_toggle_row.addWidget(win.adv_toggle_btn)
-    adv_toggle_row.addWidget(win.adv_override_badge)
-    adv_toggle_row.addStretch(1)
-    root.addLayout(adv_toggle_row)
-
     win.adv_frame = QFrame()
     win.adv_frame.setObjectName("optionsRow")
     win.adv_frame.setVisible(False)
@@ -814,16 +814,17 @@ def build_download_tab(win):
 
     def _on_adv_toggle(checked):
         win.adv_frame.setVisible(checked)
-        win.adv_toggle_btn.setText("Hide advanced" if checked else "Advanced")
-    win.adv_toggle_btn.toggled.connect(_on_adv_toggle)
+    win.adv_overrides_action.toggled.connect(_on_adv_toggle)
 
     # Populate PP preset choices and wire badge updates
     _populate_adv_pp(win)
 
     def _update_adv_badge():
         active = bool(get_adv_overrides(win))
-        win.adv_override_badge.setVisible(active)
-        win.adv_override_badge.setText("Modified" if active else "")
+        win.adv_overrides_action.setText(
+            "Per-download overrides · Modified"
+            if active else "Per-download overrides"
+        )
 
     win.adv_pp_combo.currentIndexChanged.connect(lambda _: _update_adv_badge())
     win.adv_rate_input.textChanged.connect(lambda _: _update_adv_badge())

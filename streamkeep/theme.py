@@ -175,9 +175,9 @@ QFrame#appNav {{
     border-bottom: 1px solid {p['stroke']};
 }}
 QFrame#composerCard {{
-    background-color: {p['panel']};
+    background-color: transparent;
     border: none;
-    border-radius: {radius}px;
+    border-radius: 0;
 }}
 QFrame#optionsRow, QFrame#workSection, QFrame#fieldBlock,
 QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
