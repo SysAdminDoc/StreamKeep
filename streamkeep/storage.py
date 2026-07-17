@@ -72,7 +72,7 @@ def _platform_from_path(dir_path, root):
     return "Unknown"
 
 
-def scan_storage(root, max_depth=3):
+def scan_storage(root, max_depth=3, *, cancel_fn=None):
     """Walk `root` and return a StorageScan. Skips hidden dirs and dot-files."""
     scan = StorageScan()
     if not root or not os.path.isdir(root):
@@ -81,6 +81,8 @@ def scan_storage(root, max_depth=3):
     # group_key -> StorageGroup
     groups = {}
     for dirpath, dirnames, filenames in os.walk(root):
+        if cancel_fn is not None and cancel_fn():
+            break
         depth = dirpath.rstrip(os.sep).count(os.sep) - base_depth
         if depth > max_depth:
             dirnames[:] = []

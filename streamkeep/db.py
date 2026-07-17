@@ -15,6 +15,7 @@ migration so future schema changes are orderly.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -26,7 +27,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _write_lock = threading.Lock()
 
@@ -58,6 +59,8 @@ def init_db() -> None:
             if v >= 1 and v < 6:
                 _migrate_monitor_v6(db)
             _apply_schema(db)
+            if v < 7:
+                db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
             try:
                 db.execute(
                     "CREATE INDEX IF NOT EXISTS idx_queue_status "
@@ -96,6 +99,36 @@ def _apply_schema(db):
         CREATE INDEX IF NOT EXISTS idx_history_channel  ON history(channel);
         CREATE INDEX IF NOT EXISTS idx_history_date     ON history(date);
         CREATE INDEX IF NOT EXISTS idx_history_url      ON history(url);
+        CREATE INDEX IF NOT EXISTS idx_history_path     ON history(path);
+        CREATE INDEX IF NOT EXISTS idx_history_id_date  ON history(id DESC, date);
+        CREATE INDEX IF NOT EXISTS idx_history_day
+            ON history(substr(date, 1, 10));
+        CREATE INDEX IF NOT EXISTS idx_history_title_nocase
+            ON history(title COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_history_platform_nocase
+            ON history(platform COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_history_channel_nocase
+            ON history(channel COLLATE NOCASE);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
+            title, platform, channel, path, url,
+            content='history', content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_update
+        AFTER UPDATE OF title, platform, channel, path, url ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
 
         CREATE TABLE IF NOT EXISTS monitor_channels (
             id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,6 +325,211 @@ def load_history() -> list[dict[str, Any]]:
         db.close()
 
 
+def history_snapshot_id() -> int:
+    """Return the newest history id for a stable paged-query snapshot."""
+    db = _connect(readonly=True)
+    try:
+        row = db.execute("SELECT COALESCE(MAX(id), 0) FROM history").fetchone()
+        return int(row[0] or 0)
+    finally:
+        db.close()
+
+
+def _history_fts_query(query: str) -> str:
+    """Build a literal prefix-token FTS query from untrusted user text."""
+    tokens = re.findall(r"\w+", str(query or "").lower(), flags=re.UNICODE)
+    return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"*' for token in tokens)
+
+
+def query_history_page(
+    *,
+    query: str = "",
+    limit: int = 100,
+    before_id: int | None = None,
+    snapshot_id: int | None = None,
+    recording_paths: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Return one newest-first history page using stable keyset pagination."""
+    limit = max(1, min(1000, int(limit or 100)))
+    snapshot_id = int(snapshot_id if snapshot_id is not None else history_snapshot_id())
+    before_id = int(before_id if before_id is not None else snapshot_id + 1)
+    paths_filter = recording_paths is not None
+    paths = [str(path) for path in (recording_paths or []) if path]
+    if paths_filter and not paths:
+        return []
+    fts_query = _history_fts_query(query)
+    where = ["h.id <= ?", "h.id < ?"]
+    params: list[Any] = [snapshot_id, before_id]
+    join = ""
+    if fts_query:
+        join = "JOIN history_fts ON history_fts.rowid = h.id"
+        where.append("history_fts MATCH ?")
+        params.append(fts_query)
+    if paths:
+        placeholders = ",".join("?" for _ in paths)
+        where.append(f"h.path IN ({placeholders})")
+        params.extend(paths)
+    params.append(limit)
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            f"SELECT h.* FROM history h {join} "
+            f"WHERE {' AND '.join(where)} ORDER BY h.id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [_row_to_history_dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def count_history_query(
+    *,
+    query: str = "",
+    snapshot_id: int | None = None,
+    recording_paths: list[str] | tuple[str, ...] | None = None,
+) -> int:
+    """Count a paged history query against the same snapshot boundary."""
+    snapshot_id = int(snapshot_id if snapshot_id is not None else history_snapshot_id())
+    paths_filter = recording_paths is not None
+    paths = [str(path) for path in (recording_paths or []) if path]
+    if paths_filter and not paths:
+        return 0
+    fts_query = _history_fts_query(query)
+    where = ["h.id <= ?"]
+    params: list[Any] = [snapshot_id]
+    join = ""
+    if fts_query:
+        join = "JOIN history_fts ON history_fts.rowid = h.id"
+        where.append("history_fts MATCH ?")
+        params.append(fts_query)
+    if paths:
+        placeholders = ",".join("?" for _ in paths)
+        where.append(f"h.path IN ({placeholders})")
+        params.extend(paths)
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            f"SELECT COUNT(*) FROM history h {join} WHERE {' AND '.join(where)}",
+            params,
+        ).fetchone()
+        return int(row[0] or 0)
+    finally:
+        db.close()
+
+
+def iter_history(*, newest_first=False, page_size=500):
+    """Yield history rows in bounded pages without materializing the archive."""
+    snapshot = history_snapshot_id()
+    before_id = snapshot + 1
+    if newest_first:
+        while True:
+            page = query_history_page(
+                limit=page_size,
+                before_id=before_id,
+                snapshot_id=snapshot,
+            )
+            if not page:
+                return
+            yield from page
+            before_id = int(page[-1]["id"])
+    else:
+        after_id = 0
+        page_size = max(1, min(1000, int(page_size or 500)))
+        while True:
+            db = _connect(readonly=True)
+            try:
+                rows = db.execute(
+                    "SELECT * FROM history WHERE id > ? AND id <= ? "
+                    "ORDER BY id ASC LIMIT ?",
+                    (after_id, snapshot, page_size),
+                ).fetchall()
+            finally:
+                db.close()
+            if not rows:
+                return
+            for row in rows:
+                yield _row_to_history_dict(row)
+            after_id = int(rows[-1]["id"])
+
+
+def search_history(query: str, *, limit=15) -> list[dict[str, Any]]:
+    """Return a bounded newest-first metadata search for global search."""
+    return query_history_page(query=query, limit=limit)
+
+
+def history_summary() -> dict[str, Any]:
+    """Return indexed/aggregate values used by the shell and History hero."""
+    db = _connect(readonly=True)
+    try:
+        total = int(db.execute("SELECT COUNT(*) FROM history").fetchone()[0] or 0)
+        latest_row = db.execute(
+            "SELECT * FROM history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        platform_row = db.execute(
+            "SELECT platform, COUNT(*) AS n FROM history WHERE platform <> '' "
+            "GROUP BY platform ORDER BY n DESC, platform ASC LIMIT 1"
+        ).fetchone()
+        channel_row = db.execute(
+            "SELECT channel, COUNT(*) AS n FROM history WHERE channel <> '' "
+            "GROUP BY channel ORDER BY n DESC, channel ASC LIMIT 1"
+        ).fetchone()
+        return {
+            "total": total,
+            "latest": _row_to_history_dict(latest_row) if latest_row else None,
+            "top_platform": tuple(platform_row) if platform_row else ("", 0),
+            "top_channel": tuple(channel_row) if channel_row else ("", 0),
+        }
+    finally:
+        db.close()
+
+
+def history_analytics(cutoff_date: str = "") -> dict[str, Any]:
+    """Return aggregate analytics without loading individual history rows."""
+    where = "WHERE substr(date, 1, 10) >= ?" if cutoff_date else ""
+    params = (cutoff_date,) if cutoff_date else ()
+    size_gb = """
+        SUM(CASE
+            WHEN upper(trim(size)) LIKE '% TB' THEN CAST(size AS REAL) * 1024.0
+            WHEN upper(trim(size)) LIKE '% GB' THEN CAST(size AS REAL)
+            WHEN upper(trim(size)) LIKE '% MB' THEN CAST(size AS REAL) / 1024.0
+            WHEN upper(trim(size)) LIKE '% KB' THEN CAST(size AS REAL) / 1048576.0
+            ELSE 0 END)
+    """
+    db = _connect(readonly=True)
+    try:
+        totals = db.execute(
+            f"SELECT COUNT(*), COALESCE({size_gb}, 0) FROM history {where}",
+            params,
+        ).fetchone()
+        platforms = db.execute(
+            f"SELECT platform, COUNT(*) AS n FROM history {where} "
+            f"{'AND' if where else 'WHERE'} platform <> '' "
+            "GROUP BY platform ORDER BY n DESC, platform ASC LIMIT 8",
+            params,
+        ).fetchall()
+        channels = db.execute(
+            f"SELECT channel, COUNT(*) AS n FROM history {where} "
+            f"{'AND' if where else 'WHERE'} channel <> '' "
+            "GROUP BY channel ORDER BY n DESC, channel ASC LIMIT 8",
+            params,
+        ).fetchall()
+        daily_desc = db.execute(
+            f"SELECT substr(date, 1, 10) AS day, COUNT(*) AS n FROM history {where} "
+            f"{'AND' if where else 'WHERE'} length(date) >= 10 "
+            "GROUP BY day ORDER BY day DESC LIMIT 30",
+            params,
+        ).fetchall()
+        return {
+            "total": int(totals[0] or 0),
+            "size_gb": float(totals[1] or 0),
+            "platforms": [tuple(row) for row in platforms],
+            "channels": [tuple(row) for row in channels],
+            "daily": list(reversed([tuple(row) for row in daily_desc])),
+        }
+    finally:
+        db.close()
+
+
 def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
     """Insert a single history entry. Returns the new row id."""
     with _write_lock:
@@ -415,6 +653,33 @@ def find_history_by_url(url: str) -> dict[str, Any] | None:
         row = db.execute(
             "SELECT * FROM history WHERE url=? ORDER BY id DESC LIMIT 1",
             (str(url),),
+        ).fetchone()
+        return _row_to_history_dict(row) if row else None
+    finally:
+        db.close()
+
+
+def find_latest_history(*, channel="", title="", platform="") -> dict[str, Any] | None:
+    """Return the newest row matching indexed exact metadata fields."""
+    where = []
+    params = []
+    if channel:
+        where.append("channel = ? COLLATE NOCASE")
+        params.append(str(channel))
+    if title:
+        where.append("title = ? COLLATE NOCASE")
+        params.append(str(title))
+    if platform:
+        where.append("platform = ? COLLATE NOCASE")
+        params.append(str(platform))
+    if not where:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            f"SELECT * FROM history WHERE {' AND '.join(where)} "
+            "ORDER BY id DESC LIMIT 1",
+            params,
         ).fetchone()
         return _row_to_history_dict(row) if row else None
     finally:

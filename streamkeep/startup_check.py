@@ -128,6 +128,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
         config_dir = Path(CONFIG_DIR).resolve()
         _prepare_fixture(config_dir, fixture)
 
+        from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication, QMainWindow
         app = QApplication.instance() or QApplication(["StreamKeep", "startup-check"])
 
@@ -153,11 +154,13 @@ def run_startup_check(*, ready_file, fixture="empty"):
             widget for widget in top_levels if isinstance(widget, QMainWindow)
         ]
         visible_top_levels = [widget for widget in top_levels if widget.isVisible()]
-        thumbnail_label = (
-            window.history_table.cellWidget(0, 0)
-            if window.history_table.rowCount() else None
+        thumbnail_pixmap = (
+            window.history_model.data(
+                window.history_model.index(0, 0),
+                Qt.ItemDataRole.DecorationRole,
+            )
+            if window.history_model.rowCount() else None
         )
-        thumbnail_pixmap = thumbnail_label.pixmap() if thumbnail_label else None
         thumbnail_rendered = bool(
             thumbnail_pixmap is not None and not thumbnail_pixmap.isNull()
         )
@@ -181,8 +184,8 @@ def run_startup_check(*, ready_file, fixture="empty"):
                 int(counts.get(name, -1)) == value
                 for name, value in expected.items()
             ),
-            "history_loaded": len(window._history) == expected["history"],
-            "history_table_initialized": window.history_table.rowCount()
+            "history_loaded": window.history_model.total_count == expected["history"],
+            "history_table_initialized": window.history_model.rowCount()
             == expected["history"],
             "thumbnail_loader_initialized": all(hasattr(window, name) for name in (
                 "_history_thumb_loader", "_storage_thumb_loader", "_preview_loader"
@@ -216,8 +219,8 @@ def run_startup_check(*, ready_file, fixture="empty"):
             "ready": all(checks.values()),
             "config_dir": str(config_dir),
             "database": diagnostics,
-            "history_loaded": len(window._history),
-            "history_table_rows": window.history_table.rowCount(),
+            "history_loaded": window.history_model.total_count,
+            "history_table_rows": window.history_model.rowCount(),
             "thumbnail_rendered": thumbnail_rendered,
             "qt_application_instances": 1 if QApplication.instance() is app else 0,
             "application_windows": len(application_windows),

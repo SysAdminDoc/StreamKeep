@@ -27,6 +27,7 @@ class ThumbLoader(QObject):
         super().__init__(parent)
         self._pending = deque()                  # (row_key, media_path)
         self._in_flight = {}                     # row_key -> ThumbWorker
+        self._wanted = set()
         self._max = int(max_concurrent)
         self._size = size
 
@@ -35,6 +36,7 @@ class ThumbLoader(QObject):
         immediately on the event loop. De-dups by row_key."""
         if not media_path or not os.path.exists(media_path):
             return
+        self._wanted.add(row_key)
         if row_key in self._in_flight:
             return
         cache = single_thumb_path(media_path)
@@ -51,8 +53,23 @@ class ThumbLoader(QObject):
         self._pump()
 
     def clear(self):
-        """Forget all pending requests (but let in-flight workers finish)."""
-        self._pending.clear()
+        """Cancel stale pending/in-flight requests after a view change."""
+        self.retain(set())
+
+    def retain(self, row_keys):
+        """Keep only requests associated with the current visible window."""
+        row_keys = set(row_keys)
+        self._pending = deque(
+            (key, path) for key, path in self._pending if key in row_keys
+        )
+        self._wanted.intersection_update(row_keys)
+        for key, worker in self._in_flight.items():
+            if key in row_keys:
+                continue
+            try:
+                worker.cancel()
+            except Exception:
+                pass
 
     def _pump(self):
         while self._pending and len(self._in_flight) < self._max:
@@ -69,11 +86,14 @@ class ThumbLoader(QObject):
             worker.start()
 
     def _on_worker_thumb(self, row_key, path):
+        if row_key not in self._wanted:
+            return
         pix = QPixmap(path)
         if not pix.isNull():
             self.thumb_ready.emit(row_key, pix)
 
     def _on_worker_done(self, row_key):
+        self._wanted.discard(row_key)
         w = self._in_flight.pop(row_key, None)
         if w is not None:
             try:

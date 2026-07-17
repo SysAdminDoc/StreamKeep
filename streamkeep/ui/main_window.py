@@ -365,18 +365,11 @@ class StreamKeep(
                 {idx.row() for idx in self.history_table.selectionModel().selectedRows()},
                 reverse=True,
             )
-            view = getattr(self, "_history_view", list(reversed(self._history)))
             db_ids_to_delete = []
             for row in sel:
-                if 0 <= row < len(view):
-                    try:
-                        h = view[row]
-                        real = self._history.index(h)
-                        self._history.pop(real)
-                        if getattr(h, "db_id", 0):
-                            db_ids_to_delete.append(h.db_id)
-                    except ValueError:
-                        pass
+                h = self.history_model.entry_at(row)
+                if h is not None and getattr(h, "db_id", 0):
+                    db_ids_to_delete.append(h.db_id)
             if db_ids_to_delete:
                 _db.delete_history_entries(db_ids_to_delete)
             if sel:
@@ -774,13 +767,8 @@ class StreamKeep(
             self.bw_start_spin.setValue(self._bandwidth_rule["start_hour"])
             self.bw_end_spin.setValue(self._bandwidth_rule["end_hour"])
             self.bw_limit_input.setText(self._bandwidth_rule["limit"])
-        # Restore history from DB (F41)
-        for h in _db.load_history():
-            try:
-                entry = HistoryEntry.from_dict(h)
-                self._history.append(entry)
-            except Exception:
-                continue
+        # History stays in SQLite and is fetched incrementally by the Qt model.
+        # Do not materialize the full archive during startup.
         self._refresh_history_table()
         self._refresh_download_summary()
         self._refresh_monitor_summary()
@@ -788,7 +776,7 @@ class StreamKeep(
         # Build transcript search index in background (F27)
         if not self._startup_check:
             from ..search import index_all_async
-            index_all_async(self._history, log_fn=self._log)
+            index_all_async(None, log_fn=self._log)
 
     def _persist_config(self):
         cfg = self._config
@@ -1163,6 +1151,13 @@ class StreamKeep(
                 bfw.wait(1500)
             except Exception:
                 pass
+        storage_worker = getattr(self, "_storage_scan_worker", None)
+        if storage_worker is not None and storage_worker.isRunning():
+            try:
+                storage_worker.requestInterruption()
+                storage_worker.wait(1500)
+            except Exception:
+                pass
         arw = getattr(self, "_auto_record_resolve_worker", None)
         if arw is not None and arw.isRunning():
             try:
@@ -1368,7 +1363,7 @@ class StreamKeep(
             return
 
         queued = len(self._download_queue)
-        archived = len(self._history)
+        archived = _db.history_count()
         active_jobs = sum(
             1 for q in self._download_queue
             if q.get("status") in ("fetching", "downloading")
@@ -1600,7 +1595,7 @@ class StreamKeep(
                 "monitor_url_input",
                 "history_search",
                 "storage_table",
-                "analytics_range_combo",
+                "analytics_range",
                 "theme_combo",
             )
             target = getattr(self, targets[idx], None) if idx < len(targets) else None
@@ -1856,19 +1851,13 @@ class StreamKeep(
         cap = 15  # max results per source
 
         # History search
-        count = 0
-        for h in reversed(self._history):
-            if count >= cap:
-                break
-            if (query in (h.title or "").lower()
-                    or query in (h.channel or "").lower()
-                    or query in (h.platform or "").lower()):
-                item = QListWidgetItem(
-                    f"[History] {h.platform}: {h.channel} - {h.title[:50]}"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, ("history", h))
-                items.append(item)
-                count += 1
+        for row in _db.search_history(query, limit=cap):
+            h = HistoryEntry.from_dict(row)
+            item = QListWidgetItem(
+                f"[History] {h.platform}: {h.channel} - {h.title[:50]}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, ("history", h))
+            items.append(item)
 
         # Monitor search
         count = 0

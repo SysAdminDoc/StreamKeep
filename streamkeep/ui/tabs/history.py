@@ -6,27 +6,26 @@ that ``self`` is the full main-window instance at runtime.
 """
 
 import os
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableView,
+    QVBoxLayout, QWidget,
 )
 
 from streamkeep import db as _db
 from streamkeep.models import HistoryEntry
 from streamkeep.postprocess import PostProcessor
-from streamkeep.theme import CAT
 from streamkeep.verify import (
     STATUS_OK,
     rescan_archive_manifest,
     verify_archive_manifest,
 )
+from ..history_model import HistoryTableModel
 from ..widgets import make_metric_card, style_table
 
 
@@ -148,11 +147,9 @@ def build_history_tab(win):
     search_wrap.addLayout(search_row)
     card_lay.addWidget(search_card)
 
-    win.history_table = QTableWidget()
-    win.history_table.setColumnCount(7)
-    win.history_table.setHorizontalHeaderLabels(
-        ["", "Date", "Platform", "Title", "Quality", "Size", "Path"]
-    )
+    win.history_table = QTableView()
+    win.history_model = HistoryTableModel(win)
+    win.history_table.setModel(win.history_model)
     hh = win.history_table.horizontalHeader()
     hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
     hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
@@ -167,13 +164,21 @@ def build_history_tab(win):
     win.history_table.setColumnWidth(4, 110)
     win.history_table.setColumnWidth(5, 88)
     win.history_table.verticalHeader().setVisible(False)
-    win.history_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    win.history_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     win.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     win.history_table.doubleClicked.connect(win._on_history_double_click)
     # Enable hover preview (F46)
     win.history_table.setMouseTracking(True)
-    win.history_table.cellEntered.connect(win._on_history_cell_hover)
+    win.history_table.entered.connect(
+        lambda index: win._on_history_cell_hover(index.row(), index.column())
+    )
+    win.history_table.verticalScrollBar().valueChanged.connect(
+        lambda _value: QTimer.singleShot(0, win._schedule_visible_history_thumbnails)
+    )
+    win.history_model.rowsInserted.connect(
+        lambda *_args: QTimer.singleShot(0, win._schedule_visible_history_thumbnails)
+    )
     style_table(
         win.history_table,
         72,
@@ -200,11 +205,13 @@ class HistoryTabMixin:
     # ── Summary / metrics ────────────────────────────────────────────
 
     def _refresh_history_summary(self):
-        if not hasattr(self, "history_count_value"):
+        if not hasattr(self, "history_count_value") or not hasattr(self, "history_model"):
             return
-        total = len(self._history)
-        latest = self._history[-1] if self._history else None
-        visible = len(getattr(self, "_history_view", self._history))
+        summary = _db.history_summary()
+        total = summary["total"]
+        latest_data = summary["latest"]
+        latest = HistoryEntry.from_dict(latest_data) if latest_data else None
+        visible = self.history_model.total_count
         query = self.history_search.text().strip() if hasattr(self, "history_search") else ""
         transcript_mode = (
             hasattr(self, "transcript_search_check")
@@ -222,20 +229,12 @@ class HistoryTabMixin:
         # Compute top platform and top channel from history
         if hasattr(self, "history_platform_value"):
             if total:
-                plat_counts = Counter(h.platform for h in self._history if h.platform)
-                top_plat, top_plat_n = (plat_counts.most_common(1) or [("—", 0)])[0]
+                top_plat, top_plat_n = summary["top_platform"]
                 plat_share = f"{top_plat_n} / {total} downloads" if top_plat_n else "no data"
                 self._set_metric(self.history_platform_value, self.history_platform_sub,
                                  top_plat or "—", plat_share)
-                # Top channel: prefer stored creator/channel metadata, then fall back
-                # to a conservative URL-derived guess for older history rows.
-                ch_counts = Counter()
-                for h in self._history:
-                    key = self._history_channel_label(h)
-                    if key:
-                        ch_counts[key] += 1
-                if ch_counts:
-                    top_ch, top_ch_n = ch_counts.most_common(1)[0]
+                top_ch, top_ch_n = summary["top_channel"]
+                if top_ch:
                     self._set_metric(self.history_channel_value, self.history_channel_sub,
                                      top_ch[:24], f"{top_ch_n} download(s)")
                 else:
@@ -298,11 +297,11 @@ class HistoryTabMixin:
             path = getattr(entry, "path", "") or ""
             return os.path.realpath(path) if path else ""
 
-        db_ids = [
-            h.db_id for h in self._history
-            if getattr(h, "db_id", 0) and _entry_real_path(h) in real_paths
-        ]
-        self._history = [h for h in self._history if _entry_real_path(h) not in real_paths]
+        db_ids = []
+        for row in _db.iter_history(page_size=500):
+            entry = HistoryEntry.from_dict(row)
+            if entry.db_id and _entry_real_path(entry) in real_paths:
+                db_ids.append(entry.db_id)
         if db_ids:
             _db.delete_history_entries(db_ids)
         self._refresh_history_table()
@@ -318,7 +317,6 @@ class HistoryTabMixin:
         )
         # Persist to SQLite immediately (F41)
         entry.db_id = _db.save_history_entry(entry.to_dict())
-        self._history.append(entry)
         self._refresh_history_table()
         self._schedule_persist_config()
         return entry
@@ -327,13 +325,13 @@ class HistoryTabMixin:
         query = ""
         if hasattr(self, "history_search"):
             query = self.history_search.text().strip().lower()
-        ordered = list(reversed(self._history))
         # Transcript FTS search mode (F27)
         transcript_mode = (
             hasattr(self, "transcript_search_check")
             and self.transcript_search_check.isChecked()
         )
         self._transcript_hits = {}  # path -> list of {text, start_sec, end_sec}
+        recording_paths = ()
         if query and transcript_mode:
             from ...search import search_transcripts
             try:
@@ -345,69 +343,55 @@ class HistoryTabMixin:
                 rp = h["recording_path"]
                 hit_paths.add(rp)
                 self._transcript_hits.setdefault(rp, []).append(h)
-            ordered = [h for h in ordered if h.path in hit_paths]
-        elif query:
-            ordered = [
-                h for h in ordered
-                if query in (h.title or "").lower()
-                or query in (h.platform or "").lower()
-                or query in (self._history_channel_label(h) or "").lower()
-                or query in (h.path or "").lower()
-                or query in (h.url or "").lower()
-            ]
-        self._history_view = ordered  # used by double-click handler
-        self.history_table.setRowCount(len(ordered))
-        _dim_color = QColor(CAT["overlay0"])
-        _warn_prefix = "⚠ "  # ⚠
-        for i, h in enumerate(ordered):
-            # Check if the recorded path still exists on disk (F14 orphan detection).
-            orphan = bool(h.path) and not os.path.isdir(h.path)
-            # Column 0 = thumbnail cell (lazy-loaded).
-            thumb_label = QLabel()
-            thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            thumb_label.setStyleSheet(
-                f"background-color: {CAT['mantle']}; border-radius: 6px; color: {CAT['overlay0']};"
-            )
-            thumb_label.setText(_warn_prefix if orphan else "…")
-            self.history_table.setCellWidget(i, 0, thumb_label)
-            # Data columns 1..6
-            # Build title with watch/favorite indicators (F38)
-            title_display = h.title or ""
-            status_prefix = ""
-            if getattr(h, "favorite", False):
-                status_prefix += "★ "  # ★
-            if getattr(h, "watched", False):
-                status_prefix += "✓ "  # ✓
-            elif getattr(h, "watch_position_secs", 0) > 0:
-                status_prefix += "▶ "  # ▶
-            title_display = status_prefix + title_display
-            for col, val in enumerate([h.date, h.platform, title_display, h.quality, h.size, h.path], start=1):
-                display = val
-                if orphan and col == 6 and val:
-                    display = val + "  (missing)"
-                item = QTableWidgetItem(display)
-                if col in (1, 2, 4, 5):
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                if orphan:
-                    item.setForeground(_dim_color)
-                elif getattr(h, "watched", False) and col == 3:
-                    item.setForeground(QColor(CAT["overlay0"]))
-                # Transcript search hit snippet as tooltip (F27)
-                if col == 3 and h.path and h.path in self._transcript_hits:
-                    snippets = self._transcript_hits[h.path][:3]
-                    tip_lines = []
-                    for s in snippets:
-                        mins = int(s["start_sec"]) // 60
-                        secs = int(s["start_sec"]) % 60
-                        tip_lines.append(f"[{mins}:{secs:02d}] {s['text']}")
-                    item.setToolTip("\n".join(tip_lines))
-                self.history_table.setItem(i, col, item)
-            # Queue a thumb request (skip orphans — no file to thumbnail).
-            if not orphan:
-                media = self._first_media_file(h.path) if h.path else ""
-                if media and hasattr(self, "_history_thumb_loader"):
-                    self._history_thumb_loader.request((h.path, h.title), media)
+            recording_paths = tuple(hit_paths)
+        selected_ids = {
+            entry.db_id
+            for index in self.history_table.selectionModel().selectedRows()
+            if (entry := self.history_model.entry_at(index.row())) is not None
+        }
+        self.history_model.set_filter(
+            "" if transcript_mode else query,
+            recording_paths=recording_paths if transcript_mode else None,
+        )
+        self.history_model.set_transcript_hits(
+            hit for hits in self._transcript_hits.values() for hit in hits
+        )
+        for entry_id in selected_ids:
+            row = self.history_model.row_for_id(entry_id)
+            if row >= 0:
+                self.history_table.selectRow(row)
+        QTimer.singleShot(0, self._schedule_visible_history_thumbnails)
         self._refresh_history_summary()
+
+    def _history_entry_at(self, row):
+        return self.history_model.entry_at(row) if hasattr(self, "history_model") else None
+
+    def _schedule_visible_history_thumbnails(self):
+        if not hasattr(self, "_history_thumb_loader") or not hasattr(self, "history_model"):
+            return
+        count = self.history_model.rowCount()
+        if not count:
+            self._history_thumb_loader.clear()
+            return
+        top = self.history_table.indexAt(QPoint(0, 0)).row()
+        bottom = self.history_table.indexAt(
+            QPoint(0, max(0, self.history_table.viewport().height() - 1))
+        ).row()
+        if top < 0:
+            top = 0
+        if bottom < top:
+            bottom = min(count - 1, top + 12)
+        requests = []
+        for row in range(max(0, top - 2), min(count, bottom + 3)):
+            entry = self.history_model.entry_at(row)
+            if entry is None or not entry.path or not os.path.isdir(entry.path):
+                continue
+            media = self._first_media_file(entry.path)
+            if media:
+                requests.append((entry.db_id, media))
+        self._history_thumb_loader.retain(entry_id for entry_id, _media in requests)
+        for entry_id, media in requests:
+            self._history_thumb_loader.request(entry_id, media)
 
     def _first_media_file(self, dir_path):
         if not dir_path or not os.path.isdir(dir_path):
@@ -426,29 +410,22 @@ class HistoryTabMixin:
         return ""
 
     def _on_history_thumb_ready(self, row_key, pix):
-        """Loader emitted a thumb — find the matching row and paint it."""
-        view = getattr(self, "_history_view", None) or []
-        for i, h in enumerate(view):
-            if (h.path, h.title) == row_key:
-                label = self.history_table.cellWidget(i, 0)
-                if label is not None:
-                    label.setPixmap(pix.scaled(
-                        100, 56,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    ))
-                return
+        """Loader emitted a thumb for a stable history id."""
+        self.history_model.set_thumbnail(row_key, pix.scaled(
+            100, 56,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
 
     # ── Hover Preview (F46) ──────────────────────────────────────────
 
     def _on_history_cell_hover(self, row, col):
         """When the mouse enters a history table row, start the animated
         preview on the thumbnail column (col 0)."""
-        view = getattr(self, "_history_view", None) or []
-        if row < 0 or row >= len(view):
+        h = self._history_entry_at(row)
+        if h is None:
             self._preview_loader.stop_preview()
             return
-        h = view[row]
         if not h.path or not os.path.isdir(h.path):
             self._preview_loader.stop_preview()
             return
@@ -461,22 +438,18 @@ class HistoryTabMixin:
         if not media:
             self._preview_loader.stop_preview()
             return
-        self._preview_loader.start_preview((row, "history"), media)
+        self._preview_loader.start_preview((h.db_id, "history"), media)
 
     def _on_preview_frame(self, row_key, pix):
         """PreviewLoader emitted a frame — update the thumbnail cell."""
-        row, source = row_key
-        if source == "history":
-            table = self.history_table
-        else:
+        entry_id, source = row_key
+        if source != "history":
             return
-        label = table.cellWidget(row, 0)
-        if label is not None:
-            label.setPixmap(pix.scaled(
-                100, 56,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+        self.history_model.set_thumbnail(entry_id, pix.scaled(
+            100, 56,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
 
     def _on_history_search(self, _text):
         self._refresh_history_table()
@@ -496,10 +469,9 @@ class HistoryTabMixin:
         if not idx.isValid():
             return
         row = idx.row()
-        view = getattr(self, "_history_view", list(reversed(self._history)))
-        if row >= len(view):
+        h = self._history_entry_at(row)
+        if h is None:
             return
-        h = view[row]
         menu = QMenu(self)
         open_act = menu.addAction("Open Folder")
         open_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
@@ -539,7 +511,10 @@ class HistoryTabMixin:
         bookmark_act = menu.addAction("Add bookmark…")
         # Multi-stream sync (F54) — show when 2+ rows are selected
         selected_rows = sorted({idx.row() for idx in table.selectionModel().selectedRows()})
-        sync_entries = [view[r] for r in selected_rows if 0 <= r < len(view)]
+        sync_entries = [
+            entry for row in selected_rows
+            if (entry := self._history_entry_at(row)) is not None
+        ]
         sync_act = menu.addAction(f"Watch together ({len(sync_entries)} streams)")
         sync_act.setEnabled(len(sync_entries) >= 2)
         menu.addSeparator()
@@ -548,13 +523,16 @@ class HistoryTabMixin:
         rename_act = menu.addAction("Batch Rename…")
         remove_act = menu.addAction("Remove from History")
         # Orphan cleanup (F14) — only show when orphans exist
-        orphan_count = sum(
-            1 for e in self._history if e.path and not os.path.isdir(e.path)
-        )
+        loaded_entries = self.history_model.loaded_entries()
+        loaded_orphans = [
+            entry for entry in loaded_entries
+            if entry.path and not os.path.isdir(entry.path)
+        ]
+        orphan_count = len(loaded_orphans)
         remove_missing_act = None
         if orphan_count > 0:
             remove_missing_act = menu.addAction(
-                f"Remove missing entries ({orphan_count})"
+                f"Remove loaded missing entries ({orphan_count})"
             )
         chosen = menu.exec(table.viewport().mapToGlobal(pos))
         if chosen == sync_act and len(sync_entries) >= 2:
@@ -604,30 +582,22 @@ class HistoryTabMixin:
             self._add_bookmark_dialog(h)
         elif chosen == rename_act:
             from ..rename_dialog import RenameDialog
-            entries = [e for e in self._history if e.path and os.path.isdir(e.path)]
+            entries = [
+                entry for entry in (sync_entries or [h])
+                if entry.path and os.path.isdir(entry.path)
+            ]
             if entries:
                 RenameDialog(self, entries).exec()
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:
-            try:
-                real = self._history.index(h)
-                self._history.pop(real)
-                if getattr(h, "db_id", 0):
-                    _db.delete_history_entries([h.db_id])
-                self._refresh_history_table()
-                self._persist_config()
-            except ValueError:
-                pass
+            if getattr(h, "db_id", 0):
+                _db.delete_history_entries([h.db_id])
+            self._refresh_history_table()
+            self._persist_config()
         elif remove_missing_act and chosen == remove_missing_act:
-            orphans = [e for e in self._history if e.path and not os.path.isdir(e.path)]
-            orphan_db_ids = [e.db_id for e in orphans if getattr(e, "db_id", 0)]
-            before = len(self._history)
-            self._history = [
-                e for e in self._history
-                if not e.path or os.path.isdir(e.path)
-            ]
-            removed = before - len(self._history)
+            orphan_db_ids = [entry.db_id for entry in loaded_orphans if entry.db_id]
+            removed = len(orphan_db_ids)
             if orphan_db_ids:
                 _db.delete_history_entries(orphan_db_ids)
             self._refresh_history_table()
@@ -1023,10 +993,9 @@ class HistoryTabMixin:
 
     def _on_history_double_click(self, index):
         row = index.row()
-        view = getattr(self, "_history_view", list(reversed(self._history)))
-        if row >= len(view):
+        h = self._history_entry_at(row)
+        if h is None:
             return
-        h = view[row]
         # If the folder exists, try to play with embedded player (F52)
         if h.path and os.path.isdir(h.path):
             media = self._find_media_in_dir(h.path)

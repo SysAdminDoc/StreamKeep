@@ -8,6 +8,7 @@ from PyQt6.QtGui import QDesktopServices
 
 from ... import VERSION
 from ... import db as _db
+from ...models import HistoryEntry
 from ...local_server import (
     LocalCompanionServer,
     generate_bearer_token,
@@ -283,7 +284,11 @@ class SettingsCompanionMixin:
         policy = self._config.get("lifecycle", {})
         if not policy.get("enabled"):
             policy = dict(policy, enabled=True)  # preview even if disabled
-        removals = evaluate_cleanup(self._history, policy)
+        history = (
+            HistoryEntry.from_dict(row)
+            for row in _db.iter_history(page_size=500)
+        )
+        removals = evaluate_cleanup(history, policy)
         if not removals:
             show_premium_message(
                 self,
@@ -352,7 +357,11 @@ class SettingsCompanionMixin:
         policy = self._config.get("lifecycle", {})
         if not policy or not policy.get("enabled"):
             return
-        removals = evaluate_cleanup(self._history, policy)
+        history = (
+            HistoryEntry.from_dict(row)
+            for row in _db.iter_history(page_size=500)
+        )
+        removals = evaluate_cleanup(history, policy)
         if removals:
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:
@@ -466,7 +475,8 @@ class SettingsCompanionMixin:
             pass
         history = []
         try:
-            for h in list(self._history)[-50:]:
+            for row in reversed(_db.query_history_page(limit=50)):
+                h = HistoryEntry.from_dict(row)
                 history.append({
                     "title": h.title or "",
                     "platform": h.platform or "",

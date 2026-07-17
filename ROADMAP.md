@@ -91,13 +91,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P1 — Next
 
-- [ ] P1 — Page large archives through Qt model/view and database queries
-  Why: Loading all history rows, cell widgets, and thumbnail work cannot scale to the large archives the product targets.
-  Evidence: `streamkeep/db.py::load_history`, `streamkeep/ui/tabs/history.py`; Qt model/view `canFetchMore`/`fetchMore`; refines the existing “Deeper library views for very large archives” item.
-  Touches: history/queue/monitor/storage repositories, `QAbstractTableModel` implementations, proxy filters/sorts, thumbnail loader, database indexes and query tests.
-  Acceptance: A seeded 100,000-row library opens and filters without material UI stalls or unbounded widget/thumbnail creation; queries use indexed sort/filter plus stable pagination; only visible/near-visible thumbnails are scheduled and stale work is cancelled; selection/actions survive page changes.
-  Complexity: L
-
 - [ ] P1 — Complete Qt internationalization instead of loading inert catalogs
   Why: The translator is installed, but hundreds of UI strings bypass translation and the 23-message catalogs cannot produce a translated workflow.
   Evidence: `streamkeep/i18n.py`, translation catalogs, UI/player scan with zero `tr()`/`translate()` calls; Qt localization guidance.

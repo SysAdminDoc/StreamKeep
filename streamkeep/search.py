@@ -283,12 +283,26 @@ def search_transcripts(query, limit=100):
 def index_all_async(history, log_fn=None):
     """Index all recordings in history in a background thread."""
     def _run():
+        if history is None:
+            from . import db as library_db
+            from .models import HistoryEntry
+            entries = (
+                HistoryEntry.from_dict(row)
+                for row in library_db.iter_history(page_size=250)
+            )
+            history_count = library_db.history_count()
+        else:
+            entries = history
+            history_count = len(history)
         total = 0
-        for h in history:
+        for h in entries:
             path = getattr(h, "path", "") or ""
             if path and os.path.isdir(path):
                 n = index_recording(path)
                 total += n
         if log_fn:
-            log_fn(f"[SEARCH] Indexed {total} transcript segments across {len(history)} recordings.")
+            log_fn(
+                f"[SEARCH] Indexed {total} transcript segments across "
+                f"{history_count} recordings."
+            )
     threading.Thread(target=_run, daemon=True).start()

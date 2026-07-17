@@ -98,7 +98,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             mock.patch("streamkeep.ui.tabs.settings.ytdlp_runtime_status", _ready_ytdlp_status), \
             mock.patch("streamkeep.ui.onboarding.ytdlp_runtime_status", _ready_ytdlp_status):
         main_window._db.init_db()
-        main_window._db.save_history_entry(
+        history_id = main_window._db.save_history_entry(
             HistoryEntry(
                 date="2026-07-15 19:00",
                 platform="yt-dlp",
@@ -112,8 +112,9 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
 
         window = main_window.StreamKeep()
         try:
+            window._schedule_visible_history_thumbnails()
             thumb_request.assert_any_call(
-                (str(recording_dir), "Existing YouTube download"),
+                history_id,
                 str(recording_media),
             )
             assert window._stack.count() == len(window._tab_names) == 6

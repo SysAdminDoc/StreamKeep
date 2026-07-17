@@ -23,11 +23,12 @@ from ..widgets import (
     style_table,
 )
 from ...theme import CAT
+from ... import db as _db
 from ...extractors import Extractor
 from ...workers import SeedArchiveWorker, AutoRecordResolveWorker, DownloadWorker
 from ...chat import ChatWorker
 from ...monitor import entry_in_schedule_window
-from ...models import default_media_tracks
+from ...models import HistoryEntry, default_media_tracks
 from ...utils import default_output_dir as _default_output_dir
 from ...resume import clear_resume_state
 
@@ -1399,11 +1400,8 @@ class MonitorTabMixin:
         if not entry or not entry.auto_upgrade:
             return False
         # Find existing recording in history for this channel
-        existing = None
-        for h in reversed(self._history):
-            if (h.channel or "").lower() == channel_id.lower():
-                existing = h
-                break
+        row = _db.find_latest_history(channel=channel_id)
+        existing = HistoryEntry.from_dict(row) if row else None
         if not existing or not existing.quality:
             return False
         # Compare quality rank

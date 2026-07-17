@@ -5,7 +5,6 @@ top channels (horizontal bar). Metric cards at top. Date range filtering.
 """
 
 import re
-from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from PyQt6.QtWidgets import (
@@ -15,6 +14,7 @@ from PyQt6.QtCore import Qt, QRect
 from PyQt6.QtGui import QColor, QPainter
 
 from ...theme import CAT
+from ... import db as _db
 from ..widgets import make_metric_card
 
 
@@ -306,8 +306,7 @@ def build_analytics_tab(win):
 
 
 def _refresh_analytics(win):
-    """Recalculate analytics from history entries."""
-    history = getattr(win, "_history", [])
+    """Recalculate analytics with bounded SQLite aggregate queries."""
     range_idx = win.analytics_range.currentIndex() if hasattr(win, "analytics_range") else 0
 
     # Date filter
@@ -322,49 +321,33 @@ def _refresh_analytics(win):
     elif range_idx == 4:
         cutoff = datetime(now.year, 1, 1)
 
-    filtered = []
-    for h in history:
-        if cutoff:
-            try:
-                d = datetime.strptime(h.date[:10], "%Y-%m-%d")
-                if d < cutoff:
-                    continue
-            except (ValueError, TypeError):
-                continue
-        filtered.append(h)
+    cutoff_text = cutoff.strftime("%Y-%m-%d") if cutoff else ""
+    stats = _db.history_analytics(cutoff_text)
 
     # Metric cards
-    total = len(filtered)
+    total = stats["total"]
     win.analytics_total_val.setText(str(total))
 
-    total_gb = 0
-    for h in filtered:
-        size_str = getattr(h, "size", "") or ""
-        total_gb += _parse_size_gb(size_str)
+    total_gb = stats["size_gb"]
     win.analytics_size_val.setText(f"{total_gb:.1f} GB")
 
-    plat_counts = Counter(h.platform for h in filtered if h.platform)
-    chan_counts = Counter(h.channel for h in filtered if h.channel)
+    plat_counts = stats["platforms"]
+    chan_counts = stats["channels"]
 
     if plat_counts:
-        top_plat = plat_counts.most_common(1)[0]
+        top_plat = plat_counts[0]
         win.analytics_plat_val.setText(f"{top_plat[0]} ({top_plat[1]})")
     else:
         win.analytics_plat_val.setText("-")
 
     if chan_counts:
-        top_chan = chan_counts.most_common(1)[0]
+        top_chan = chan_counts[0]
         win.analytics_top_val.setText(f"{top_chan[0][:16]} ({top_chan[1]})")
     else:
         win.analytics_top_val.setText("-")
 
     # Daily bar chart
-    daily = defaultdict(int)
-    for h in filtered:
-        day = (h.date or "")[:10]
-        if day:
-            daily[day] += 1
-    sorted_days = sorted(daily.items())[-30:]  # last 30 days with data
+    sorted_days = stats["daily"]
     win.analytics_daily_chart.set_data(
         [(d[5:], c) for d, c in sorted_days],
         title="Downloads per Day"
@@ -372,14 +355,14 @@ def _refresh_analytics(win):
 
     # Platform donut
     plat_data = []
-    for plat, count in plat_counts.most_common(8):
+    for plat, count in plat_counts:
         color = PLATFORM_COLORS.get(plat.lower(), CAT["overlay0"])
         plat_data.append((plat, count, color))
     win.analytics_platform_chart.set_data(plat_data, title="By Platform")
 
     # Top channels bar
     win.analytics_channels_chart.set_data(
-        chan_counts.most_common(8),
+        chan_counts,
         title="Top Channels"
     )
 

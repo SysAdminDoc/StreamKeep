@@ -134,6 +134,9 @@ class ThumbWorker(QThread):
         self._cancel = True
 
     def _run_single(self):
+        if self._cancel:
+            self.done.emit(False)
+            return
         dst = single_thumb_path(self.src_path)
         if dst is None:
             self.done.emit(False)
@@ -152,9 +155,9 @@ class ThumbWorker(QThread):
         else:
             at = 5.0
         ok = _run_ffmpeg_thumb(self.src_path, at, dst, width=self.width)
-        if ok:
+        if ok and not self._cancel:
             self.thumb_ready.emit(0, dst)
-        self.done.emit(ok)
+        self.done.emit(ok and not self._cancel)
 
     def _run_strip(self):
         paths = strip_thumb_paths(self.src_path, self.count)

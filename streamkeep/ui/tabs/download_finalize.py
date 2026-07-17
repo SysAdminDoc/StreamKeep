@@ -6,6 +6,7 @@ import urllib.parse
 
 from ... import db as _db
 from ...extractors import Extractor, TwitchExtractor
+from ...models import HistoryEntry
 from ...utils import safe_filename as _safe_filename
 from ...workers import FinalizeWorker
 
@@ -199,19 +200,16 @@ class DownloadFinalizeMixin:
         if not self._check_duplicates:
             return None
         if url:
-            for h in self._history:
-                if h.url == url and h.path:
-                    return h
+            row = _db.find_history_by_url(url)
+            if row and row.get("path"):
+                return HistoryEntry.from_dict(row)
         if title:
-            norm = title.strip().lower()
-            for h in self._history:
-                if (platform and h.platform
-                        and h.platform.strip().lower() != platform.strip().lower()):
-                    continue
-                if h.title and h.title.strip().lower() == norm and h.path:
-                    return h
+            row = _db.find_latest_history(title=title, platform=platform)
+            if row and row.get("path"):
+                return HistoryEntry.from_dict(row)
             # Fuzzy title-token overlap (F40)
-            for h in self._history:
+            for candidate in _db.search_history(title, limit=250):
+                h = HistoryEntry.from_dict(candidate)
                 if not h.title or not h.path:
                     continue
                 if (platform and h.platform

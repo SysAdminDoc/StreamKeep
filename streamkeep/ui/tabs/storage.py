@@ -6,11 +6,11 @@ send2trash so nothing is ever permanently removed from inside the app.
 
 import os
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import QPoint, QThread, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
+    QLabel, QMenu, QPushButton, QTableView,
     QVBoxLayout, QWidget,
 )
 
@@ -18,6 +18,27 @@ from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
 from ..widgets import ask_premium_confirmation, make_metric_card, style_table
+from ..storage_model import StorageFilterProxyModel, StorageTableModel
+
+
+class _StorageScanWorker(QThread):
+    scanned = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, root, parent=None):
+        super().__init__(parent)
+        self.root = root
+
+    def run(self):
+        try:
+            result = scan_storage(
+                self.root,
+                cancel_fn=self.isInterruptionRequested,
+            )
+            if not self.isInterruptionRequested():
+                self.scanned.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class _SparklineWidget(QWidget):
@@ -64,20 +85,11 @@ class _SparklineWidget(QWidget):
 
 
 def _apply_storage_filter(win):
-    """Filter storage table rows by selected platform/channel combos."""
+    """Filter storage rows through the proxy model."""
     plat = win.storage_platform_filter.currentText()
     chan = win.storage_channel_filter.currentText()
-    groups = getattr(win, "_storage_groups", [])
-    visible = 0
-    for i, g in enumerate(groups):
-        show = True
-        if plat != "All" and g.platform != plat:
-            show = False
-        if chan != "All" and g.channel != chan:
-            show = False
-        win.storage_table.setRowHidden(i, not show)
-        if show:
-            visible += 1
+    win.storage_proxy_model.set_filters(plat, chan)
+    visible = win.storage_proxy_model.rowCount()
     if hasattr(win, "storage_filter_summary"):
         summary = f"{visible} folder group(s) shown"
         if plat != "All" or chan != "All":
@@ -225,11 +237,11 @@ def build_storage_tab(win):
     hdr.setObjectName("sectionTitle")
     card_lay.addWidget(hdr)
 
-    win.storage_table = QTableWidget()
-    win.storage_table.setColumnCount(7)
-    win.storage_table.setHorizontalHeaderLabels(
-        ["", "Platform", "Channel", "Title", "Files", "Size", "Path"]
-    )
+    win.storage_table = QTableView()
+    win.storage_model = StorageTableModel(win)
+    win.storage_proxy_model = StorageFilterProxyModel(win)
+    win.storage_proxy_model.setSourceModel(win.storage_model)
+    win.storage_table.setModel(win.storage_proxy_model)
     hh = win.storage_table.horizontalHeader()
     hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
     hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
@@ -247,7 +259,12 @@ def build_storage_tab(win):
     win.storage_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     win.storage_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.storage_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    win.storage_table.itemSelectionChanged.connect(win._on_storage_selection_changed)
+    win.storage_table.selectionModel().selectionChanged.connect(
+        lambda *_args: win._on_storage_selection_changed()
+    )
+    win.storage_table.verticalScrollBar().valueChanged.connect(
+        lambda _value: QTimer.singleShot(0, win._schedule_visible_storage_thumbnails)
+    )
     style_table(
         win.storage_table,
         72,
@@ -279,7 +296,7 @@ def _update_storage_filters(win, scan):
     chan_combo.clear()
     chan_combo.addItem("All")
     platforms = sorted(scan.by_platform.keys())
-    channels = sorted(scan.by_channel.keys())
+    channels = sorted({group.channel for group in scan.groups if group.channel})
     for p in platforms:
         plat_combo.addItem(p)
     for c in channels:
@@ -322,45 +339,11 @@ def populate_storage_table(win, scan):
     )
     win.storage_channels_value.setText(str(len(scan.by_channel)))
 
-    table = win.storage_table
-    table.setRowCount(len(scan.groups))
-    # Stash each group on the table widget so delete can find the target
-    # directory from the selected row index.
-    win._storage_groups = list(scan.groups)
-    for i, g in enumerate(scan.groups):
-        # Column 0 = thumbnail cell (lazy-filled by ThumbLoader).
-        thumb_label = QLabel()
-        thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        thumb_label.setStyleSheet(
-            f"background-color: {CAT['mantle']}; border-radius: 6px; color: {CAT['overlay0']};"
-        )
-        thumb_label.setText("…")
-        table.setCellWidget(i, 0, thumb_label)
-        items = [
-            g.platform,
-            g.channel,
-            g.title,
-            str(len(g.files)),
-            fmt_size(g.total_size),
-            g.dir_path,
-        ]
-        for col, val in enumerate(items, start=1):
-            item = QTableWidgetItem(val)
-            if col in (1, 4, 5):
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            table.setItem(i, col, item)
-        # Pick the biggest video file in the folder for the thumbnail.
-        media = None
-        for f in g.files:
-            ext = os.path.splitext(f.path)[1].lower()
-            if ext in {".mp4", ".mkv", ".webm", ".mov", ".ts"}:
-                if media is None or f.size > getattr(media, "size", 0):
-                    media = f
-        if media is not None and hasattr(win, "_storage_thumb_loader"):
-            win._storage_thumb_loader.request(g.dir_path, media.path)
+    win.storage_model.set_groups(scan.groups)
     win.storage_empty_label.setVisible(len(scan.groups) == 0)
     win.storage_delete_btn.setEnabled(False)
     _apply_storage_filter(win)
+    QTimer.singleShot(0, win._schedule_visible_storage_thumbnails)
 
 
 def prompt_confirm_delete(parent, group_count, total_size, sample_paths):
@@ -399,18 +382,24 @@ class StorageTabMixin:
         return self.output_input.text().strip() or str(_default_output_dir())
 
     def _on_storage_rescan(self):
+        existing = getattr(self, "_storage_scan_worker", None)
+        if existing is not None and existing.isRunning():
+            existing.requestInterruption()
+            existing.wait(500)
         root = self._storage_scan_root()
         self.storage_root_label.setText(f"Scanning: {root}")
         self.storage_rescan_btn.setEnabled(False)
-        try:
-            scan = scan_storage(root)
-        except Exception as e:
-            self._log(f"[STORAGE] Scan failed: {e}")
-            scan = None
-        finally:
-            self.storage_rescan_btn.setEnabled(True)
-        if scan is None:
-            return
+        self._set_status("Scanning archive storage in the background.", "working")
+        worker = _StorageScanWorker(root, self)
+        worker.scanned.connect(self._on_storage_scan_done)
+        worker.failed.connect(self._on_storage_scan_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._storage_scan_worker = worker
+        worker.start()
+
+    def _on_storage_scan_done(self, scan):
+        self._storage_scan_worker = None
+        self.storage_rescan_btn.setEnabled(True)
         populate_storage_table(self, scan)
         self._set_status(
             f"Storage scan complete — {scan.total_files} file(s), "
@@ -418,17 +407,21 @@ class StorageTabMixin:
             "success" if scan.total_files else "idle",
         )
 
+    def _on_storage_scan_failed(self, message):
+        self._storage_scan_worker = None
+        self.storage_rescan_btn.setEnabled(True)
+        self._log(f"[STORAGE] Scan failed: {message}")
+        self._set_status("Storage scan failed. See the log for details.", "error")
+
     def _on_storage_context_menu(self, pos):
         if not hasattr(self, "storage_table"):
             return
         idx = self.storage_table.indexAt(pos)
         if not idx.isValid():
             return
-        row = idx.row()
-        groups = getattr(self, "_storage_groups", None) or []
-        if not (0 <= row < len(groups)):
+        g = self.storage_proxy_model.group_at(idx.row())
+        if g is None:
             return
-        g = groups[row]
         menu = QMenu(self)
         bundle_act = menu.addAction("Export share bundle (.zip)...")
         trim_act = menu.addAction("Trim / Clip...")
@@ -449,11 +442,10 @@ class StorageTabMixin:
         self.storage_delete_btn.setText(
             f"Recycle {count} Selected" if count else "Recycle Selected"
         )
-        groups = getattr(self, "_storage_groups", None) or []
         total_size = sum(
-            groups[idx.row()].total_size
+            group.total_size
             for idx in rows
-            if 0 <= idx.row() < len(groups)
+            if (group := self.storage_proxy_model.group_at(idx.row())) is not None
         )
         if count:
             self.storage_delete_btn.setToolTip(
@@ -469,8 +461,10 @@ class StorageTabMixin:
             {idx.row() for idx in self.storage_table.selectionModel().selectedRows()},
             reverse=True,
         )
-        groups_attr = getattr(self, "_storage_groups", None) or []
-        targets = [groups_attr[r] for r in rows if 0 <= r < len(groups_attr)]
+        targets = [
+            group for row in rows
+            if (group := self.storage_proxy_model.group_at(row)) is not None
+        ]
         if not targets:
             return
         total_size = sum(g.total_size for g in targets)
@@ -509,14 +503,40 @@ class StorageTabMixin:
         self._on_storage_rescan()
 
     def _on_storage_thumb_ready(self, row_key, pix):
-        groups = getattr(self, "_storage_groups", None) or []
-        for i, g in enumerate(groups):
-            if g.dir_path == row_key:
-                label = self.storage_table.cellWidget(i, 0)
-                if label is not None:
-                    label.setPixmap(pix.scaled(
-                        100, 56,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    ))
-                return
+        self.storage_model.set_thumbnail(row_key, pix.scaled(
+            100, 56,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+
+    def _schedule_visible_storage_thumbnails(self):
+        if not hasattr(self, "_storage_thumb_loader") or not hasattr(self, "storage_model"):
+            return
+        count = self.storage_proxy_model.rowCount()
+        if not count:
+            self._storage_thumb_loader.clear()
+            return
+        top = self.storage_table.indexAt(QPoint(0, 0)).row()
+        bottom = self.storage_table.indexAt(
+            QPoint(0, max(0, self.storage_table.viewport().height() - 1))
+        ).row()
+        if top < 0:
+            top = 0
+        if bottom < top:
+            bottom = min(count - 1, top + 12)
+        requests = []
+        for row in range(max(0, top - 2), min(count, bottom + 3)):
+            group = self.storage_proxy_model.group_at(row)
+            if group is None:
+                continue
+            media = None
+            for candidate in group.files:
+                extension = os.path.splitext(candidate.path)[1].lower()
+                if extension in {".mp4", ".mkv", ".webm", ".mov", ".ts"}:
+                    if media is None or candidate.size > media.size:
+                        media = candidate
+            if media is not None:
+                requests.append((group.dir_path, media.path))
+        self._storage_thumb_loader.retain(key for key, _path in requests)
+        for key, path in requests:
+            self._storage_thumb_loader.request(key, path)
