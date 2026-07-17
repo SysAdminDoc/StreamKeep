@@ -169,7 +169,7 @@ class DownloadSingleMixin:
             self.platform_badge.setText(f" {badge['text']} ")
             self.platform_badge.setStyleSheet(
                 f"background-color: {badge['color']}; color: {CAT['crust']}; "
-                f"border-radius: 999px; font-weight: bold; font-size: 11px; padding: 4px 12px;"
+                f"border-radius: 4px; font-weight: 600; font-size: 12px; padding: 3px 8px;"
             )
             self.platform_badge.setVisible(True)
         else:

@@ -117,6 +117,20 @@ SPANISH_CORE = {
         "Ninguna descarga coincide. Pruebe un título, plataforma, canal o carpeta más general.",
     # Settings workflow.
     ("StreamKeep", "Appearance"): "Apariencia",
+    ("StreamKeep", "Channel monitoring"): "Monitoreo de canales",
+    ("StreamKeep", "Track channels and automate capture."):
+        "Monitoree canales y automatice la captura.",
+    ("StreamKeep", "Download history"): "Historial de descargas",
+    ("StreamKeep", "Search, verify, and reopen completed captures."):
+        "Busque, verifique y vuelva a abrir capturas completadas.",
+    ("StreamKeep", "Archive storage"): "Almacenamiento del archivo",
+    ("StreamKeep", "Disk usage, maintenance, and safe cleanup."):
+        "Uso de disco, mantenimiento y limpieza segura.",
+    ("StreamKeep", "Archive analytics"): "Analíticas del archivo",
+    ("StreamKeep", "Activity, storage, and source trends."):
+        "Actividad, almacenamiento y tendencias de origen.",
+    ("StreamKeep", "Appearance, downloads, privacy, and integrations."):
+        "Apariencia, descargas, privacidad e integraciones.",
     ("StreamKeep", "Language"): "Idioma",
     ("StreamKeep", "English"): "Inglés",
     ("StreamKeep", "Español"): "Español",

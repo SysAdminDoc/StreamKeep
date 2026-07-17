@@ -53,6 +53,9 @@ def test_visual_state_applies_theme_density_accent_and_contrast(qt_application):
         stylesheet = qt_application.styleSheet()
         assert "QTableWidget, QTableView" in stylesheet
         assert "font-size: 16px" in stylesheet
+        assert "border-radius: 999px" not in stylesheet
+        assert "QFrame#card, QFrame#heroCard" in stylesheet
+        assert "background-color: transparent" in stylesheet
     finally:
         apply_visual_system("dark", "cozy", "", qt_application)
 
@@ -89,5 +92,18 @@ def test_offscreen_theme_density_screenshot_matrix(qt_application):
             assert len({hashes[(theme, density)] for density in (
                 "compact", "cozy", "spacious",
             )}) == 3
+    finally:
+        apply_visual_system("dark", "cozy", "", qt_application)
+
+
+def test_cozy_density_uses_readable_type_and_compact_controls(qt_application):
+    try:
+        apply_visual_system("dark", "cozy", "", qt_application)
+        state = get_visual_state()
+        stylesheet = qt_application.styleSheet()
+        assert state["density"] == "cozy"
+        assert "font-size: 15px" in stylesheet
+        assert "border-radius: 6px" in stylesheet
+        assert "QFrame#metricCard" in stylesheet
     finally:
         apply_visual_system("dark", "cozy", "", qt_application)

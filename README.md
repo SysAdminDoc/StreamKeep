@@ -140,7 +140,7 @@ Choose English or Spanish under Settings → Appearance; the open shell, dialogs
 
 ### Desktop Appearance
 
-Settings → Appearance offers System, Dark, Light, and High Contrast themes; Compact, Cozy, and Spacious density modes; and a theme-default or named accent. These choices persist together and update every open StreamKeep surface immediately. The shared visual system derives typography, spacing, control height, radii, focus, interactive states, table rows, and readable accent foregrounds from the active tokens. Fixed-width text controls are released when a larger density would clip them, and offscreen theme/density screenshot matrices plus a separate 200%-scale high-contrast check guard the supported layouts.
+Settings → Appearance offers System, Dark, Light, and High Contrast themes; Compact, Cozy, and Spacious density modes; and a theme-default or named accent. These choices persist together and update every open StreamKeep surface immediately. The shared visual system uses readable 15px default type, compact headers, single-line operational metrics, open table rows, restrained six-pixel control radii, and borders reserved for editable controls, focus, and hairline structure. Page hierarchy comes from alignment and spacing instead of nested dashboard cards or status pills. Fixed-width text controls are released when a larger density would clip them, and offscreen theme/density screenshot matrices plus a separate 200%-scale high-contrast check guard the supported layouts.
 
 ## Browser Companion
 

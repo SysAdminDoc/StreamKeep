@@ -139,25 +139,24 @@ def build_storage_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(14)
+    lay.setSpacing(8)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(18, 18, 18, 18)
-    hero_lay.setSpacing(14)
+    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setSpacing(4)
 
     head = QVBoxLayout()
     head.setSpacing(4)
     kicker = QLabel("Storage")
     kicker.setObjectName("eyebrow")
-    title = QLabel("See what your archive weighs, then trim it safely")
+    kicker.setVisible(False)
+    title = QLabel("Archive storage")
     title.setObjectName("heroTitle")
     title.setWordWrap(True)
     body = QLabel(
-        "Scans your default output folder and groups recordings by "
-        "platform and channel. Deletes always go through the system "
-        "Recycle Bin — nothing is permanently removed from inside StreamKeep."
+        "Disk usage, maintenance, and safe cleanup."
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
@@ -167,7 +166,7 @@ def build_storage_tab(win):
     hero_lay.addLayout(head)
 
     metrics = QHBoxLayout()
-    metrics.setSpacing(12)
+    metrics.setSpacing(18)
     (total_card, win.storage_total_value,
         win.storage_total_sub) = make_metric_card("Total size", "0 B", "No scan yet")
     (files_card, win.storage_files_value,
@@ -187,7 +186,7 @@ def build_storage_tab(win):
     action_card = QFrame()
     action_card.setObjectName("card")
     act_lay = QHBoxLayout(action_card)
-    act_lay.setContentsMargins(18, 14, 18, 14)
+    act_lay.setContentsMargins(4, 6, 4, 6)
     act_lay.setSpacing(10)
     win.storage_root_label = QLabel(
         f"Scanning: {str(_default_output_dir())}"
@@ -209,14 +208,12 @@ def build_storage_tab(win):
     maintenance_card = QFrame()
     maintenance_card.setObjectName("card")
     maintenance_lay = QVBoxLayout(maintenance_card)
-    maintenance_lay.setContentsMargins(18, 16, 18, 16)
-    maintenance_lay.setSpacing(10)
+    maintenance_lay.setContentsMargins(4, 8, 4, 8)
+    maintenance_lay.setSpacing(6)
     maintenance_title = QLabel("Archive Maintenance")
     maintenance_title.setObjectName("sectionTitle")
     maintenance_body = QLabel(
-        "Preview disk-to-library imports, missing or moved recordings, backup "
-        "and integrity health, disk thresholds, and search-index work before "
-        "approving any change. Every applied action is backed up and audited."
+        "Preview imports, missing paths, integrity, backups, and index work before applying."
     )
     maintenance_body.setObjectName("sectionBody")
     maintenance_body.setWordWrap(True)
@@ -270,13 +267,13 @@ def build_storage_tab(win):
     filter_card = QFrame()
     filter_card.setObjectName("card")
     filter_wrap = QVBoxLayout(filter_card)
-    filter_wrap.setContentsMargins(18, 14, 18, 14)
-    filter_wrap.setSpacing(10)
+    filter_wrap.setContentsMargins(4, 6, 4, 6)
+    filter_wrap.setSpacing(6)
     filter_copy = QVBoxLayout()
     filter_copy.setSpacing(4)
     filter_title = QLabel("Refine the Archive")
     filter_title.setObjectName("sectionTitle")
-    filter_body = QLabel("Filter by platform or channel, then clear back to the full archive in one click.")
+    filter_body = QLabel("Platform and channel filters.")
     filter_body.setObjectName("sectionBody")
     filter_body.setWordWrap(True)
     filter_copy.addWidget(filter_title)
@@ -326,8 +323,8 @@ def build_storage_tab(win):
     card = QFrame()
     card.setObjectName("card")
     card_lay = QVBoxLayout(card)
-    card_lay.setContentsMargins(18, 18, 18, 18)
-    card_lay.setSpacing(10)
+    card_lay.setContentsMargins(4, 8, 4, 4)
+    card_lay.setSpacing(6)
     hdr = QLabel("Recordings by folder (newest first)")
     hdr.setObjectName("sectionTitle")
     card_lay.addWidget(hdr)

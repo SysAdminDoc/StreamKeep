@@ -233,23 +233,22 @@ def path_label(path_text, fallback="Choose folder"):
 
 
 def make_metric_card(label_text, value_text="--", sub_text=""):
-    """Build a compact inline metric. Returns (container, value, detail)."""
+    """Build a single-line metric for quiet operational context."""
     card = QFrame()
     card.setObjectName("metricCard")
-    density = get_density()
-    card.setMinimumHeight(round(68 * density["scale"]))
-    lay = QVBoxLayout(card)
-    lay.setContentsMargins(10, 8, 10, 8)
-    lay.setSpacing(2)
+    card.setMinimumHeight(30)
+    lay = QHBoxLayout(card)
+    lay.setContentsMargins(0, 3, 12, 3)
+    lay.setSpacing(6)
 
     label = QLabel(label_text)
     label.setObjectName("metricLabel")
     value = QLabel(value_text)
     value.setObjectName("metricValue")
-    value.setWordWrap(True)
+    value.setWordWrap(False)
     sub = QLabel(sub_text)
     sub.setObjectName("metricSubvalue")
-    sub.setWordWrap(True)
+    sub.setWordWrap(False)
     sub.setVisible(bool(sub_text))
 
     lay.addWidget(label)
@@ -263,10 +262,10 @@ def make_field_block(title, hint=""):
     """Build a dense field group; longer guidance is available as a tooltip."""
     card = QFrame()
     card.setObjectName("fieldBlock")
-    card.setMinimumHeight(70)
+    card.setMinimumHeight(0)
     lay = QVBoxLayout(card)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(4)
 
     label = QLabel(title)
     label.setObjectName("fieldLabel")

@@ -38,24 +38,24 @@ def build_monitor_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(14)
+    lay.setSpacing(8)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(18, 18, 18, 18)
-    hero_lay.setSpacing(14)
+    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setSpacing(4)
 
     hero_copy = QVBoxLayout()
     hero_copy.setSpacing(4)
     kicker = QLabel("Monitor")
     kicker.setObjectName("eyebrow")
-    title = QLabel("Keep an eye on channels without babysitting them")
+    kicker.setVisible(False)
+    title = QLabel("Channel monitoring")
     title.setObjectName("heroTitle")
     title.setWordWrap(True)
     body = QLabel(
-        "Track supported channels, watch live state changes, and "
-        "automatically start recording when they go live."
+        "Track channels and automate capture."
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
@@ -65,7 +65,7 @@ def build_monitor_tab(win):
     hero_lay.addLayout(hero_copy)
 
     monitor_metrics = QHBoxLayout()
-    monitor_metrics.setSpacing(12)
+    monitor_metrics.setSpacing(18)
     count_card, win.monitor_count_value, win.monitor_count_sub = make_metric_card(
         "Channels", "0", "active entries"
     )
@@ -100,8 +100,8 @@ def build_monitor_tab(win):
     manage_card = QFrame()
     manage_card.setObjectName("card")
     manage_lay = QVBoxLayout(manage_card)
-    manage_lay.setContentsMargins(18, 18, 18, 18)
-    manage_lay.setSpacing(12)
+    manage_lay.setContentsMargins(4, 8, 4, 8)
+    manage_lay.setSpacing(8)
 
     manage_header = QVBoxLayout()
     manage_header.setSpacing(4)
@@ -160,15 +160,13 @@ def build_monitor_tab(win):
     tools_bar = QFrame()
     tools_bar.setObjectName("toolbar")
     tools_lay = QHBoxLayout(tools_bar)
-    tools_lay.setContentsMargins(14, 12, 14, 12)
+    tools_lay.setContentsMargins(0, 6, 0, 6)
     tools_lay.setSpacing(10)
     tools_copy = QVBoxLayout()
     tools_copy.setSpacing(3)
     tools_title = QLabel("Watch List Tools")
     tools_title.setObjectName("fieldLabel")
-    tools_hint = QLabel(
-        "Import or export a saved list, or switch into calendar mode when you want schedule context."
-    )
+    tools_hint = QLabel("Import, export, or switch to the schedule.")
     tools_hint.setObjectName("subtleText")
     tools_hint.setWordWrap(True)
     tools_copy.addWidget(tools_title)
@@ -196,16 +194,15 @@ def build_monitor_tab(win):
     table_card = QFrame()
     table_card.setObjectName("card")
     table_lay = QVBoxLayout(table_card)
-    table_lay.setContentsMargins(18, 18, 18, 18)
-    table_lay.setSpacing(10)
+    table_lay.setContentsMargins(4, 8, 4, 4)
+    table_lay.setSpacing(6)
 
     table_header = QVBoxLayout()
     table_header.setSpacing(4)
     table_title = QLabel("Watch List")
     table_title.setObjectName("sectionTitle")
     win.monitor_table_hint = QLabel(
-        "Entries refresh automatically and can trigger auto-recording "
-        "when a stream goes live."
+        "Live state and recording automation."
     )
     win.monitor_table_hint.setObjectName("sectionBody")
     win.monitor_table_hint.setWordWrap(True)

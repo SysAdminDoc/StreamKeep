@@ -35,24 +35,24 @@ def build_history_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(14)
+    lay.setSpacing(8)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(18, 18, 18, 18)
-    hero_lay.setSpacing(14)
+    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setSpacing(4)
 
     hero_copy = QVBoxLayout()
     hero_copy.setSpacing(4)
     kicker = QLabel("History")
     kicker.setObjectName("eyebrow")
-    title = QLabel("Keep a clean record of what you captured")
+    kicker.setVisible(False)
+    title = QLabel("Download history")
     title.setObjectName("heroTitle")
     title.setWordWrap(True)
     body = QLabel(
-        "Completed downloads are listed here so you can quickly revisit "
-        "folders, compare qualities, and confirm recent jobs."
+        "Search, verify, and reopen completed captures."
     )
     body.setObjectName("heroBody")
     body.setWordWrap(True)
@@ -62,7 +62,7 @@ def build_history_tab(win):
     hero_lay.addLayout(hero_copy)
 
     history_metrics = QHBoxLayout()
-    history_metrics.setSpacing(12)
+    history_metrics.setSpacing(18)
     count_card, win.history_count_value, win.history_count_sub = make_metric_card(
         "Downloads", "0", "saved downloads"
     )
@@ -85,17 +85,15 @@ def build_history_tab(win):
     card = QFrame()
     card.setObjectName("card")
     card_lay = QVBoxLayout(card)
-    card_lay.setContentsMargins(18, 18, 18, 18)
-    card_lay.setSpacing(10)
+    card_lay.setContentsMargins(4, 8, 4, 4)
+    card_lay.setSpacing(7)
 
     header = QHBoxLayout()
     header_copy = QVBoxLayout()
     header_copy.setSpacing(4)
     sec = QLabel("Download History")
     sec.setObjectName("sectionTitle")
-    win.history_summary_label = QLabel(
-        "Download history builds automatically after each completed job."
-    )
+    win.history_summary_label = QLabel("Completed captures, newest first.")
     win.history_summary_label.setObjectName("sectionBody")
     win.history_summary_label.setWordWrap(True)
     header_copy.addWidget(sec)
@@ -110,8 +108,8 @@ def build_history_tab(win):
     search_card = QFrame()
     search_card.setObjectName("toolbar")
     search_wrap = QVBoxLayout(search_card)
-    search_wrap.setContentsMargins(14, 14, 14, 14)
-    search_wrap.setSpacing(10)
+    search_wrap.setContentsMargins(0, 4, 0, 4)
+    search_wrap.setSpacing(6)
 
     search_head = QHBoxLayout()
     search_head.setSpacing(12)
@@ -119,9 +117,7 @@ def build_history_tab(win):
     search_copy.setSpacing(4)
     search_title = QLabel("Find a Download")
     search_title.setObjectName("fieldLabel")
-    search_hint = QLabel(
-        "Search metadata instantly or switch to transcript text when you need quoted moments."
-    )
+    search_hint = QLabel("Search metadata or transcript text.")
     search_hint.setObjectName("subtleText")
     search_hint.setWordWrap(True)
     search_copy.addWidget(search_title)

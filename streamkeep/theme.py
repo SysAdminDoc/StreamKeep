@@ -9,17 +9,17 @@ dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
 CAT_MOCHA = {
-    "base": "#081723", "mantle": "#09131f", "crust": "#06101a",
-    "surface0": "#132a3a", "surface1": "#1a3547", "surface2": "#244559",
-    "overlay0": "#597184", "overlay1": "#73899a",
-    "text": "#eef3f6", "subtext0": "#9fb0be", "subtext1": "#c2ced6",
+    "base": "#07131e", "mantle": "#091722", "crust": "#050e16",
+    "surface0": "#102635", "surface1": "#173142", "surface2": "#203d50",
+    "overlay0": "#587080", "overlay1": "#718795",
+    "text": "#f2f5f7", "subtext0": "#a6b5c0", "subtext1": "#c8d1d7",
     "lavender": "#b4befe", "blue": "#89b4fa", "sapphire": "#74c7ec",
     "sky": "#89dceb", "teal": "#94e2d5", "green": "#a6e3a1",
     "yellow": "#f9e2af", "peach": "#fab387", "maroon": "#eba0ac",
     "red": "#f38ba8", "mauve": "#cba6f7", "pink": "#f5c2e7",
     "flamingo": "#f2cdcd", "rosewater": "#f5e0dc",
-    "panel": "#0b1d2b", "panelHi": "#102536", "panelSoft": "#0a1825",
-    "stroke": "#294354", "muted": "#8fa4b4", "accent": "#35c5ef",
+    "panel": "#0a1b28", "panelHi": "#0d2231", "panelSoft": "#081722",
+    "stroke": "#213746", "muted": "#91a4b1", "accent": "#24bfe9",
     "accentSoft": "#70d7b2", "gold": "#f0c77a",
 }
 
@@ -61,16 +61,16 @@ THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE, "high_contrast": CAT_HIGH_CONTR
 
 # Layout density presets (F75)
 DENSITY_COMPACT = {
-    "font_size": 12, "row_height": 48, "padding": 6, "control_h": 32,
-    "radius": 7, "scale": 0.82, "thumb_w": 80, "name": "compact",
+    "font_size": 14, "row_height": 40, "padding": 5, "control_h": 30,
+    "radius": 5, "scale": 0.78, "thumb_w": 80, "name": "compact",
 }
 DENSITY_COZY = {
-    "font_size": 14, "row_height": 72, "padding": 8, "control_h": 38,
-    "radius": 8, "scale": 1.0, "thumb_w": 112, "name": "cozy",
+    "font_size": 15, "row_height": 52, "padding": 7, "control_h": 36,
+    "radius": 6, "scale": 0.9, "thumb_w": 104, "name": "cozy",
 }
 DENSITY_SPACIOUS = {
-    "font_size": 16, "row_height": 96, "padding": 11, "control_h": 46,
-    "radius": 10, "scale": 1.25, "thumb_w": 160, "name": "spacious",
+    "font_size": 16, "row_height": 72, "padding": 10, "control_h": 44,
+    "radius": 7, "scale": 1.25, "thumb_w": 144, "name": "spacious",
 }
 DENSITIES = {"compact": DENSITY_COMPACT, "cozy": DENSITY_COZY, "spacious": DENSITY_SPACIOUS}
 _active_density = dict(DENSITY_COZY)
@@ -177,7 +177,7 @@ QFrame#appNav {{
 QFrame#composerCard {{
     background-color: {p['panel']};
     border: none;
-    border-radius: {radius + 2}px;
+    border-radius: {radius}px;
 }}
 QFrame#optionsRow, QFrame#workSection, QFrame#fieldBlock,
 QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
@@ -185,11 +185,15 @@ QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
     border: none;
     border-radius: 0;
 }}
-QFrame#card, QFrame#panel, QFrame#heroCard, QFrame#shellCard,
-QFrame#shellMetaCard, QFrame#footerBar {{
+QFrame#card, QFrame#heroCard {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}}
+QFrame#panel, QFrame#shellCard, QFrame#shellMetaCard, QFrame#footerBar {{
     background-color: {p['panelSoft']};
     border: none;
-    border-radius: {radius + 2}px;
+    border-radius: {radius}px;
 }}
 QFrame#statusBar {{
     background-color: transparent;
@@ -232,7 +236,7 @@ QLabel {{
 }}
 QLabel#appBrand {{
     color: {p['text']};
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 750;
 }}
 QLabel#title {{
@@ -242,16 +246,16 @@ QLabel#title {{
 }}
 QLabel#heroTitle {{
     color: {p['text']};
-    font-size: 28px;
+    font-size: 23px;
     font-weight: 750;
 }}
 QLabel#heroBody, QLabel#dialogBody {{
     color: {p['subtext0']};
-    font-size: 15px;
+    font-size: 13px;
 }}
 QLabel#sectionTitle {{
     color: {p['text']};
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 700;
 }}
 QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint,
@@ -261,12 +265,12 @@ QLabel#subtleText, QLabel#statusBody {{
 }}
 QLabel#fieldLabel, QLabel#metricLabel {{
     color: {p['subtext0']};
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 650;
 }}
 QLabel#metricValue, QLabel#shellStatValue {{
     color: {p['text']};
-    font-size: 17px;
+    font-size: 14px;
     font-weight: 700;
 }}
 QLabel#metricSubvalue, QLabel#shellStatBody, QLabel#shellStatMeta,
@@ -276,7 +280,7 @@ QLabel#footerMeta, QLabel#statusLabel {{
 }}
 QLabel#dialogEyebrow, QLabel#eyebrow {{
     color: {p['accent']};
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
 }}
 QLabel#dialogTitle {{
@@ -296,7 +300,7 @@ QLabel#pillBadge, QLabel#playerBadgeMuted {{
     border: none;
     padding: 0;
     font-size: 12px;
-    font-weight: 650;
+    font-weight: 600;
 }}
 QLabel#streamInfo {{
     color: {p['subtext1']};
@@ -352,7 +356,7 @@ QPushButton:disabled {{ background-color: {p['panelSoft']}; color: {p['overlay0'
 QPushButton#primary {{
     background-color: {p['accent']};
     color: {on_accent};
-    font-weight: 750;
+    font-weight: 700;
 }}
 QPushButton#primary:hover {{ background-color: {p['sky']}; }}
 QPushButton#primary:disabled {{
@@ -373,7 +377,7 @@ QComboBox QAbstractItemView {{
     border: 1px solid {p['stroke']};
     padding: 4px;
 }}
-QTableWidget, QTableView {{
+QTableWidget, QTableView, QTreeWidget {{
     background-color: transparent;
     alternate-background-color: {p['panelSoft']};
     color: {p['text']};
@@ -386,7 +390,7 @@ QTableWidget, QTableView {{
 QTableWidget:focus, QTableView:focus, QListWidget:focus, QTreeWidget:focus {{
     border: 2px solid {p['accent']};
 }}
-QTableWidget::item, QTableView::item {{
+QTableWidget::item, QTableView::item, QTreeWidget::item {{
     padding: {padding}px {padding + 1}px;
     border: none;
     border-bottom: 1px solid {p['stroke']};
