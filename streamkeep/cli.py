@@ -388,7 +388,11 @@ def _run_download(args):
             f"  segment {si} done"
         ))
         dw.all_done.connect(lambda: _on_download_done(state, app, output_dir))
-        dw.finished.connect(lambda: app.quit() if state.get("exit_code") else None)
+        # Always quit when the worker thread ends. `all_done` (success) and
+        # `error` are delivered before `finished`, so their slots run first;
+        # this is a backstop so the process can never hang if a worker path
+        # ends without emitting a terminal signal.
+        dw.finished.connect(app.quit)
         dw.start()
 
     def on_fetch_error(msg):

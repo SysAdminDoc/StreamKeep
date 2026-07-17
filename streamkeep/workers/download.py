@@ -1221,14 +1221,40 @@ class DownloadWorker(QThread):
                     self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
 
             if not segment_done_flag and not self._cancel:
-                all_succeeded = False
-                if not is_live_capture:
-                    logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
-                    self.error.emit(
-                        seg_idx,
-                        f"Failed after {attempts} attempt(s): {last_error[:120]}",
+                if (is_live_capture and os.path.exists(outfile)
+                        and os.path.getsize(outfile) > 0):
+                    # A live capture that ended on an ffmpeg error but left a
+                    # usable recording is a completed partial, not a failure —
+                    # finalize it (mirrors the exit-0 path above). Without this
+                    # the worker emitted neither `all_done` nor `error`, hanging
+                    # the CLI/headless callers indefinitely and leaving GUI/queue
+                    # jobs stuck in the "downloading" state forever.
+                    size = os.path.getsize(outfile)
+                    self.progress.emit(seg_idx, 100, "Complete")
+                    self.segment_done.emit(seg_idx, fmt_size(size))
+                    self._mark_segment_done(seg_idx)
+                    self.log.emit(
+                        f"[LIVE END] {label} — capture ended, kept recording "
+                        f"({fmt_size(size)})"
                     )
-                    self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
+                else:
+                    all_succeeded = False
+                    if not is_live_capture:
+                        logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
+                        self.error.emit(
+                            seg_idx,
+                            f"Failed after {attempts} attempt(s): {last_error[:120]}",
+                        )
+                        self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
+                    else:
+                        # Live capture produced nothing — still emit a terminal
+                        # error so callers don't hang waiting on a signal.
+                        logger.error("Live capture failed for segment %d (%s): %s", seg_idx, label, last_error[:120])
+                        self.error.emit(
+                            seg_idx,
+                            f"Live capture failed: {last_error[:120] or 'no output produced'}",
+                        )
+                        self.log.emit(f"[GIVE UP] {label} — live capture produced no output")
 
         if not self._cancel:
             # Only clear the resume sidecar and signal completion if every

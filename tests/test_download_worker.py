@@ -628,6 +628,70 @@ def test_ffmpeg_path_blocks_before_process_start(tmp_path):
     assert any("Install FFmpeg 8.1.2" in line for line in logs)
 
 
+def _run_live_ffmpeg_worker(tmp_path, returncode, make_output):
+    """Drive a live-capture (duration 0) ffmpeg segment to completion with a
+    fake Popen that exits with *returncode* and optionally leaves an output
+    file. Returns (all_done_count, errors)."""
+    worker = DownloadWorker(
+        playlist_url="https://example.com/live.m3u8",
+        segments=[(0, "video", 0, 0)],  # duration 0 -> live capture
+        output_dir=str(tmp_path),
+        format_type="hls",
+    )
+    worker.max_retries = 0
+    done = []
+    errors = []
+    worker.all_done.connect(lambda: done.append(True))
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+
+    outfile = os.path.join(str(tmp_path), "video.mp4")
+
+    class _FakeStderr:
+        def __iter__(self):
+            return iter(("frame= 10 time=00:00:05.00\n",))
+
+        def close(self):
+            pass
+
+    class _FakeProc:
+        def __init__(self, *a, **k):
+            self.returncode = returncode
+            self.stderr = _FakeStderr()
+            if make_output:
+                with open(outfile, "wb") as fh:
+                    fh.write(b"x" * 4096)
+
+        def wait(self):
+            return self.returncode
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True
+    ), mock.patch(
+        "streamkeep.workers.download.resolve_tool_command", return_value="ffmpeg"
+    ), mock.patch(
+        "streamkeep.workers.download.subprocess.Popen", _FakeProc
+    ):
+        worker.run()
+
+    return len(done), errors
+
+
+def test_failed_live_capture_with_output_emits_all_done(tmp_path):
+    # A live capture that ends on a non-zero ffmpeg exit but left a usable
+    # recording must finalize (all_done), not hang callers with no signal.
+    done, errors = _run_live_ffmpeg_worker(tmp_path, returncode=1, make_output=True)
+    assert done == 1
+    assert errors == []
+
+
+def test_failed_live_capture_without_output_emits_error(tmp_path):
+    # A live capture that produced nothing must surface a terminal error so
+    # the CLI/headless callers don't block forever on app.exec().
+    done, errors = _run_live_ffmpeg_worker(tmp_path, returncode=1, make_output=False)
+    assert done == 0
+    assert errors and errors[0][0] == 0
+
+
 def test_hls_playlist_identity_persists_into_resume_sidecar(tmp_path):
     from streamkeep.hls import parse_hls_media_playlist
     from streamkeep import resume as resume_mod

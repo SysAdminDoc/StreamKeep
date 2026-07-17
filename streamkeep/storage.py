@@ -185,9 +185,10 @@ def import_folders(groups, *, db_module=None):
         try:
             from datetime import datetime, timezone
             entry = {
-                "date": meta.get("downloaded_at", "")
-                    or datetime.fromtimestamp(group.newest_mtime, tz=timezone.utc).isoformat(timespec="seconds")
-                    if group.newest_mtime else "",
+                "date": meta.get("downloaded_at", "") or (
+                    datetime.fromtimestamp(group.newest_mtime, tz=timezone.utc).isoformat(timespec="seconds")
+                    if group.newest_mtime else ""
+                ),
                 "platform": group.platform,
                 "title": group.title,
                 "channel": group.channel,

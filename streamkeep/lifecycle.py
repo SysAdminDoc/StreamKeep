@@ -142,7 +142,13 @@ def evaluate_cleanup(history, policy, output_dirs=None):
         max_bytes = max_gb * 1024 ** 3
         if total_bytes > max_bytes:
             excess = total_bytes - max_bytes
-            # Sort candidates by oldest mtime first
+            # Bytes already slated by Rules 1/2 reduce usage too — credit them
+            # so Rule 3 doesn't over-delete by ignoring earlier removals.
+            already_freed = sum(
+                c["size"] for c in candidates
+                if c["real_path"] in scheduled_paths
+            )
+            # Sort remaining candidates by oldest mtime first
             sized = []
             for candidate in candidates:
                 h = candidate["entry"]
@@ -158,13 +164,19 @@ def evaluate_cleanup(history, policy, output_dirs=None):
                 watched_rank = 0 if candidate["watched"] else 1
                 sized.append((watched_rank, mtime, h, sz, real_path))
             sized.sort()  # watched first, then oldest first
-            freed = 0
-            for _watched_rank, _mt, h, sz, real_path in sized:
-                if freed >= excess:
-                    break
-                to_remove.append((h, f"storage exceeds {max_gb:.0f} GB"))
-                scheduled_paths.add(real_path)
-                freed += sz
+            reclaimable = already_freed + sum(row[3] for row in sized)
+            # `total_bytes` includes exempt favorites, which can never be
+            # reclaimed here. If the exempt footprint alone keeps the library
+            # over the cap, pruning the rest cannot honor it — so skip Rule 3
+            # rather than recycling every non-favorite recording for nothing.
+            if reclaimable >= excess:
+                freed = already_freed
+                for _watched_rank, _mt, h, sz, real_path in sized:
+                    if freed >= excess:
+                        break
+                    to_remove.append((h, f"storage exceeds {max_gb:.0f} GB"))
+                    scheduled_paths.add(real_path)
+                    freed += sz
 
     return to_remove
 
