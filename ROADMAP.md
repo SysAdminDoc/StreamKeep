@@ -235,9 +235,3 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
   Complexity: S-M
 
-- [ ] P3 — Surface bilingual-subtitle and LRC options in the Settings post-processing UI
-  Why: The bilingual-merge and LRC-export transforms, config keys, and PostProcessor step are implemented and persist via `pp_bilingual_*`/`pp_lrc_*`, but there are no Settings checkboxes/inputs to toggle them from the GUI yet.
-  Evidence: `streamkeep/subtitles.py` (merge/LRC), `streamkeep/postprocess/processor.py::_run_subtitle_processing`, `streamkeep/ui/main_window.py` PostProcessor snapshot.
-  Touches: Settings post-processing panel (checkboxes + language inputs + format combo), config save wiring, offscreen GUI smoke.
-  Acceptance: Settings exposes enable toggles, primary/secondary language fields, SRT/ASS format choice, and LRC language; values persist and drive the existing PostProcessor step.
-  Complexity: S

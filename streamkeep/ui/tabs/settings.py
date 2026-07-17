@@ -1146,6 +1146,19 @@ class SettingsTabMixin:
         PostProcessor.convert_audio_bitrate = self.pp_convert_audio_bitrate.currentText()
         PostProcessor.convert_audio_samplerate = self.pp_convert_audio_samplerate.currentText()
         PostProcessor.convert_delete_source = self.pp_convert_delete_check.isChecked()
+        if hasattr(self, "pp_bilingual_check"):
+            PostProcessor.bilingual_subs = self.pp_bilingual_check.isChecked()
+            PostProcessor.bilingual_primary_lang = (
+                self.pp_bilingual_primary.text().strip() or "en"
+            )
+            PostProcessor.bilingual_secondary_lang = (
+                self.pp_bilingual_secondary.text().strip()
+            )
+            PostProcessor.bilingual_format = (
+                self.pp_bilingual_format.currentText() or "srt"
+            )
+            PostProcessor.lrc_export = self.pp_lrc_check.isChecked()
+            PostProcessor.lrc_lang = self.pp_lrc_lang.text().strip() or "en"
         if not self._persist_config():
             from ...config import get_last_config_error
             detail = get_last_config_error() or "secure credential storage unavailable"
@@ -3507,6 +3520,59 @@ def build_settings_tab(win):
     )
     win.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
     pp_lay.addWidget(win.pp_convert_delete_check)
+
+    # Subtitle post-processing: bilingual merge + LRC export (P3)
+    win.pp_bilingual_check = QCheckBox(
+        "Merge bilingual subtitles from downloaded sidecars"
+    )
+    win.pp_bilingual_check.setChecked(bool(PostProcessor.bilingual_subs))
+    win.pp_bilingual_check.setToolTip(
+        "After download, stack a primary and secondary subtitle language into "
+        "one file (SRT or two-style ASS). Requires both language sidecars."
+    )
+    pp_lay.addWidget(win.pp_bilingual_check)
+
+    bilingual_row = QHBoxLayout()
+    bilingual_row.setSpacing(8)
+    bilingual_row.addWidget(QLabel("Primary"))
+    win.pp_bilingual_primary = QLineEdit(PostProcessor.bilingual_primary_lang or "en")
+    win.pp_bilingual_primary.setPlaceholderText("en")
+    win.pp_bilingual_primary.setFixedWidth(70)
+    bilingual_row.addWidget(win.pp_bilingual_primary)
+    bilingual_row.addWidget(QLabel("Secondary"))
+    win.pp_bilingual_secondary = QLineEdit(PostProcessor.bilingual_secondary_lang or "")
+    win.pp_bilingual_secondary.setPlaceholderText("es")
+    win.pp_bilingual_secondary.setFixedWidth(70)
+    bilingual_row.addWidget(win.pp_bilingual_secondary)
+    bilingual_row.addWidget(QLabel("Format"))
+    win.pp_bilingual_format = QComboBox()
+    win.pp_bilingual_format.addItems(["srt", "ass"])
+    _bfmt_idx = win.pp_bilingual_format.findText(
+        (PostProcessor.bilingual_format or "srt").lower()
+    )
+    win.pp_bilingual_format.setCurrentIndex(max(0, _bfmt_idx))
+    win.pp_bilingual_format.setFixedWidth(70)
+    bilingual_row.addWidget(win.pp_bilingual_format)
+    bilingual_row.addStretch(1)
+    pp_lay.addLayout(bilingual_row)
+
+    win.pp_lrc_check = QCheckBox("Export an LRC lyrics file from a subtitle track")
+    win.pp_lrc_check.setChecked(bool(PostProcessor.lrc_export))
+    win.pp_lrc_check.setToolTip(
+        "Convert a subtitle sidecar of the chosen language into a synchronized "
+        "[mm:ss.xx] .lrc file for music players."
+    )
+    pp_lay.addWidget(win.pp_lrc_check)
+
+    lrc_row = QHBoxLayout()
+    lrc_row.setSpacing(8)
+    lrc_row.addWidget(QLabel("LRC language"))
+    win.pp_lrc_lang = QLineEdit(PostProcessor.lrc_lang or "en")
+    win.pp_lrc_lang.setPlaceholderText("en")
+    win.pp_lrc_lang.setFixedWidth(70)
+    lrc_row.addWidget(win.pp_lrc_lang)
+    lrc_row.addStretch(1)
+    pp_lay.addLayout(lrc_row)
 
     # Standalone manual converter
     manual_row = QHBoxLayout()

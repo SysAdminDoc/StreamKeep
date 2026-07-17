@@ -246,6 +246,24 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             window._on_save_settings()
             assert window._config["queue_complete_action"] == "lock"
 
+            # Bilingual-subtitle + LRC post-processing controls (P3): the
+            # controls exist, drive the PostProcessor, and round-trip config.
+            from streamkeep.postprocess import PostProcessor
+            window.pp_bilingual_check.setChecked(True)
+            window.pp_bilingual_primary.setText("en")
+            window.pp_bilingual_secondary.setText("es")
+            _ass_idx = window.pp_bilingual_format.findText("ass")
+            window.pp_bilingual_format.setCurrentIndex(_ass_idx)
+            window.pp_lrc_check.setChecked(True)
+            window.pp_lrc_lang.setText("ja")
+            window._on_save_settings()
+            assert window._config["pp_bilingual_subs"] is True
+            assert window._config["pp_bilingual_secondary_lang"] == "es"
+            assert window._config["pp_bilingual_format"] == "ass"
+            assert window._config["pp_lrc_export"] is True
+            assert window._config["pp_lrc_lang"] == "ja"
+            assert PostProcessor.bilingual_secondary_lang == "es"
+
             monitor_dialog = MonitorEntryDialog(
                 window,
                 MonitorEntry(

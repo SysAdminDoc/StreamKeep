@@ -722,6 +722,15 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
                 self.pp_convert_audio_samplerate.setCurrentIndex(
                     sr_items.index(PostProcessor.convert_audio_samplerate))
             self.pp_convert_delete_check.setChecked(PostProcessor.convert_delete_source)
+        if hasattr(self, "pp_bilingual_check"):
+            self.pp_bilingual_check.setChecked(bool(PostProcessor.bilingual_subs))
+            self.pp_bilingual_primary.setText(PostProcessor.bilingual_primary_lang or "en")
+            self.pp_bilingual_secondary.setText(PostProcessor.bilingual_secondary_lang or "")
+            _bfmt = (PostProcessor.bilingual_format or "srt").lower()
+            _bfmt_idx = self.pp_bilingual_format.findText(_bfmt)
+            self.pp_bilingual_format.setCurrentIndex(max(0, _bfmt_idx))
+            self.pp_lrc_check.setChecked(bool(PostProcessor.lrc_export))
+            self.pp_lrc_lang.setText(PostProcessor.lrc_lang or "en")
         # ── SQLite library init + migration (F41) ──
         _db.init_db()
         migrated = _db.migrate_from_config(cfg)
@@ -808,6 +817,12 @@ class StreamKeep(HistoryTabMixin, MonitorTabMixin, SettingsTabMixin, DownloadTab
         cfg["pp_convert_audio_bitrate"] = PostProcessor.convert_audio_bitrate
         cfg["pp_convert_audio_samplerate"] = PostProcessor.convert_audio_samplerate
         cfg["pp_convert_delete_source"] = PostProcessor.convert_delete_source
+        cfg["pp_bilingual_subs"] = PostProcessor.bilingual_subs
+        cfg["pp_bilingual_primary_lang"] = PostProcessor.bilingual_primary_lang
+        cfg["pp_bilingual_secondary_lang"] = PostProcessor.bilingual_secondary_lang
+        cfg["pp_bilingual_format"] = PostProcessor.bilingual_format
+        cfg["pp_lrc_export"] = PostProcessor.lrc_export
+        cfg["pp_lrc_lang"] = PostProcessor.lrc_lang
         cfg["recent_urls"] = list(self._recent_urls)
         cfg["bandwidth_rule"] = dict(self._bandwidth_rule)
         self.monitor.save_to_config(cfg)
