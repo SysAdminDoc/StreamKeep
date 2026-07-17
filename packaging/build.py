@@ -30,6 +30,8 @@ def main(argv=None):
     parser.add_argument("--clean", action="store_true")
     parser.add_argument("--noconfirm", action="store_true")
     parser.add_argument("--sqlite-dll", type=Path)
+    parser.add_argument("--dist-path", type=Path)
+    parser.add_argument("--work-path", type=Path)
     args = parser.parse_args(argv)
 
     stamp_versions(ROOT)
@@ -46,6 +48,10 @@ def main(argv=None):
         command.append("--clean")
     if args.noconfirm:
         command.append("--noconfirm")
+    if args.dist_path:
+        command.extend(["--distpath", str(args.dist_path.resolve())])
+    if args.work_path:
+        command.extend(["--workpath", str(args.work_path.resolve())])
     command.append("StreamKeep.spec")
     return subprocess.call(command, cwd=ROOT, env=environment)
 

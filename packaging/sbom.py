@@ -9,10 +9,14 @@ Usage:
 
 import argparse
 import json
+import importlib.metadata
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from locked_requirements import canonical_name, locked_packages
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,9 +35,38 @@ def _installed_packages():
         return []
 
 
-def generate_sbom(output_path=None):
+def _timestamp():
+    epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if epoch:
+        return datetime.fromtimestamp(int(epoch), timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _distribution_metadata():
+    result = {}
+    for distribution in importlib.metadata.distributions():
+        metadata = distribution.metadata
+        name = canonical_name(metadata.get("Name", ""))
+        if name:
+            result[name] = metadata
+    return result
+
+
+def _license_value(metadata):
+    expression = str(metadata.get("License-Expression", "")).strip()
+    if expression:
+        return expression
+    value = str(metadata.get("License", "")).strip()
+    if value and len(value) <= 200 and "\n" not in value:
+        return value
+    classifiers = metadata.get_all("Classifier", [])
+    licenses = [row.rsplit("::", 1)[-1].strip() for row in classifiers if "License ::" in row]
+    return "; ".join(sorted(set(licenses))) or "UNKNOWN"
+
+
+def generate_sbom(output_path=None, *, lock_path=None, license_output=None):
     """Generate a CycloneDX 1.5 SBOM JSON. Returns (ok, path_or_error)."""
-    packages = _installed_packages()
+    packages = locked_packages(lock_path) if lock_path else _installed_packages()
     if not packages:
         return False, "Could not list installed packages"
 
@@ -51,7 +84,7 @@ def generate_sbom(output_path=None):
         "specVersion": "1.5",
         "version": 1,
         "metadata": {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": _timestamp(),
             "tools": [{"name": "streamkeep-sbom", "version": "1.0.0"}],
             "component": {
                 "type": "application",
@@ -67,7 +100,30 @@ def generate_sbom(output_path=None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(sbom, f, indent=2, ensure_ascii=False)
+        json.dump(sbom, f, indent=2, ensure_ascii=False, sort_keys=True)
+        f.write("\n")
+
+    if license_output:
+        metadata_by_name = _distribution_metadata()
+        inventory = {
+            "schema_version": 1,
+            "generated_from": str(Path(lock_path).name) if lock_path else "installed-environment",
+            "packages": [],
+        }
+        for name, version in sorted(packages):
+            metadata = metadata_by_name.get(canonical_name(name), {})
+            inventory["packages"].append({
+                "name": name,
+                "version": version,
+                "license": _license_value(metadata),
+                "project_url": str(metadata.get("Home-page", "")).strip(),
+            })
+        license_output = Path(license_output)
+        license_output.parent.mkdir(parents=True, exist_ok=True)
+        license_output.write_text(
+            json.dumps(inventory, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     return True, str(output_path)
 
@@ -111,10 +167,16 @@ def run_advisory_audit():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SBOM and advisory check")
     parser.add_argument("-o", "--output", default="", help="SBOM output path")
+    parser.add_argument("--lock", default="", help="Exact runtime lock to inventory")
+    parser.add_argument("--licenses", default="", help="Write deterministic license inventory")
     parser.add_argument("--audit", action="store_true", help="Run pip-audit advisory scan")
     args = parser.parse_args()
 
-    ok, result = generate_sbom(args.output or None)
+    ok, result = generate_sbom(
+        args.output or None,
+        lock_path=args.lock or None,
+        license_output=args.licenses or None,
+    )
     if ok:
         print(f"SBOM: {result}")
     else:

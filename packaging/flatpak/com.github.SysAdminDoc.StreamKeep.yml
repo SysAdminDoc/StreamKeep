@@ -1,9 +1,9 @@
 app-id: com.github.SysAdminDoc.StreamKeep
 runtime: org.kde.Platform
-runtime-version: '6.8'
+runtime-version: '6.10'
 sdk: org.kde.Sdk
 base: com.riverbankcomputing.PyQt.BaseApp
-base-version: '6.8'
+base-version: '6.10'
 command: streamkeep
 finish-args:
   - --share=ipc
@@ -19,6 +19,30 @@ cleanup-commands:
   - /app/cleanup-BaseApp.sh
 
 modules:
+  - name: x264
+    buildsystem: autotools
+    config-opts:
+      - --enable-shared
+      - --disable-cli
+    sources:
+      - type: git
+        url: https://code.videolan.org/videolan/x264.git
+        commit: 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
+
+  - name: x265
+    buildsystem: cmake-ninja
+    subdir: source
+    config-opts:
+      - -DENABLE_SHARED=ON
+      - -DENABLE_CLI=OFF
+      - -DENABLE_HDR10_PLUS=OFF
+    sources:
+      - type: git
+        url: https://bitbucket.org/multicoreware/x265_git.git
+        commit: f21b135c3414ade4e22305d008bf07d23d0595fb
+      - type: patch
+        path: x265-cmake-policy.patch
+
   - name: ffmpeg
     buildsystem: autotools
     config-opts:
@@ -35,13 +59,17 @@ modules:
         url: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
         sha256: 464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
 
+  - python3-requirements.json
+
   - name: streamkeep
     buildsystem: simple
     build-commands:
-      - pip3 install --no-index --find-links=. --prefix=/app 'yt-dlp[default]>=2026.07.04' send2trash websocket-client keyring 'Pillow>=12.3.0'
-      - pip3 install --no-index --prefix=/app .
+      - mkdir -p /app/lib/python3.13/site-packages
+      - cp -a streamkeep /app/lib/python3.13/site-packages/
+      - install -Dm755 StreamKeep.py /app/bin/streamkeep
+      - install -Dm644 icon.png /app/bin/icon.png
       - install -Dm644 packaging/flatpak/com.github.SysAdminDoc.StreamKeep.desktop /app/share/applications/com.github.SysAdminDoc.StreamKeep.desktop
-      - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.github.SysAdminDoc.StreamKeep.png
+      - install -Dm644 packaging/flatpak/icon-512.png /app/share/icons/hicolor/512x512/apps/com.github.SysAdminDoc.StreamKeep.png
       - install -Dm644 packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml /app/share/metainfo/com.github.SysAdminDoc.StreamKeep.metainfo.xml
     sources:
       - type: dir

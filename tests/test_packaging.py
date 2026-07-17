@@ -61,13 +61,32 @@ def test_pyinstaller_spec_includes_release_assets():
         assert required in spec
 
 
-def test_flatpak_manifest_uses_real_ffmpeg_hash_and_png_icon():
+def test_flatpak_manifest_uses_locked_linux_modules_and_current_base():
     manifest = (
         ROOT / "packaging" / "flatpak" / "com.github.SysAdminDoc.StreamKeep.yml"
     ).read_text(encoding="utf-8")
     assert "PLACEHOLDER" not in manifest
     assert re.search(r"sha256:\s+[0-9a-f]{64}", manifest)
-    assert "install -Dm644 icon.png" in manifest
+    assert "install -Dm644 icon.png /app/bin/icon.png" in manifest
+    assert "hicolor/512x512/apps/com.github.SysAdminDoc.StreamKeep.png" in manifest
+    assert "runtime-version: '6.10'" in manifest
+    assert "base-version: '6.10'" in manifest
+    assert "python3-requirements.json" in manifest
+    assert "pip3 install --no-index --find-links=." not in manifest
+    assert "commit: 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee" in manifest
+    assert "commit: f21b135c3414ade4e22305d008bf07d23d0595fb" in manifest
+
+    from locked_requirements import locked_packages, validate_hashed_lock
+    linux_lock = ROOT / "packaging" / "flatpak" / "requirements.lock"
+    packages = dict(locked_packages(linux_lock))
+    assert validate_hashed_lock(linux_lock) == []
+    assert "secretstorage" in packages
+    assert "pywin32-ctypes" not in packages
+    sources = json.loads((
+        ROOT / "packaging" / "flatpak" / "python3-requirements.json"
+    ).read_text(encoding="utf-8"))
+    assert sources["name"] == "python3-requirements"
+    assert len(sources["modules"]) == len(packages)
 
 
 def test_msix_builder_supports_configured_signing():
@@ -178,3 +197,67 @@ def test_sbom_generates_cyclonedx_with_components():
         assert len(data["components"]) > 0
         purls = [c["purl"] for c in data["components"]]
         assert any("pyqt6" in p for p in purls)
+
+
+def test_release_locks_are_exact_hashed_and_build_lock_is_runtime_superset():
+    from locked_requirements import locked_packages, validate_hashed_lock
+
+    runtime_lock = ROOT / "requirements.lock"
+    build_lock = ROOT / "requirements-build.lock"
+    assert validate_hashed_lock(runtime_lock) == []
+    assert validate_hashed_lock(build_lock) == []
+    runtime = dict(locked_packages(runtime_lock))
+    build = dict(locked_packages(build_lock))
+    assert len(runtime) >= 20
+    assert all(build.get(name) == version for name, version in runtime.items())
+    assert build["pyinstaller"] == "6.21.0"
+
+
+def test_lock_driven_sbom_and_license_inventory_are_deterministic(
+        tmp_path, monkeypatch):
+    from sbom import generate_sbom
+
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1704067200")
+    lock = tmp_path / "runtime.lock"
+    lock.write_text(
+        "Pillow==12.3.0 \\\n+    --hash=sha256:" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    sbom = tmp_path / "sbom.json"
+    licenses = tmp_path / "licenses.json"
+    ok, _ = generate_sbom(sbom, lock_path=lock, license_output=licenses)
+    assert ok
+    first_sbom = sbom.read_bytes()
+    first_licenses = licenses.read_bytes()
+    ok, _ = generate_sbom(sbom, lock_path=lock, license_output=licenses)
+    assert ok
+    assert sbom.read_bytes() == first_sbom
+    assert licenses.read_bytes() == first_licenses
+    data = json.loads(first_sbom)
+    assert data["metadata"]["timestamp"] == "2024-01-01T00:00:00+00:00"
+    assert data["components"] == [{
+        "name": "pillow",
+        "purl": "pkg:pypi/pillow@12.3.0",
+        "type": "library",
+        "version": "12.3.0",
+    }]
+    inventory = json.loads(first_licenses)
+    assert inventory["generated_from"] == "runtime.lock"
+    assert inventory["packages"][0]["version"] == "12.3.0"
+
+
+def test_reproducible_builder_gates_double_build_inventory_and_smoke():
+    source = (ROOT / "packaging" / "reproducible_build.py").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "--require-hashes",
+        "--verify-reproducible",
+        "digest_a != digest_b",
+        "sbom.cdx.json",
+        "third-party-licenses.json",
+        "artifact_smoke.py",
+        "release-manifest.json",
+        "SOURCE_DATE_EPOCH",
+    ):
+        assert required in source

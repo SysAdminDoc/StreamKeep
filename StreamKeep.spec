@@ -59,7 +59,10 @@ hiddenimports += collect_submodules('yt_dlp')
 hiddenimports += collect_submodules('yt_dlp_ejs')
 
 datas = []
-for top_level in ('LICENSE', 'README.md', 'requirements.txt', 'icon.ico', 'icon.png'):
+for top_level in (
+    'LICENSE', 'README.md', 'requirements.txt', 'requirements.lock',
+    'icon.ico', 'icon.png',
+):
     path = ROOT / top_level
     if path.is_file():
         datas.append((str(path), '.'))

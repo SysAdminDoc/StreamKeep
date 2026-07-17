@@ -1,0 +1,8 @@
+# PyQt6 is supplied by com.riverbankcomputing.PyQt.BaseApp.
+Pillow>=12.3.0
+yt-dlp[default]>=2026.07.04
+send2trash>=1.8
+websocket-client>=1.7
+keyring>=25.0
+argon2-cffi>=25.1.0
+cryptography>=48.0.1

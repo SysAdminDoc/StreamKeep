@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Frozen Windows release builder. Keep the build tool out of the runtime SBOM.
+pyinstaller==6.21.0

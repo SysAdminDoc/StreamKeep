@@ -232,12 +232,16 @@ class ReleaseFloorTests(unittest.TestCase):
             root / "packaging" / "flatpak" /
             "com.github.SysAdminDoc.StreamKeep.yml"
         ).read_text(encoding="utf-8")
+        flatpak_lock = (
+            root / "packaging" / "flatpak" / "requirements.lock"
+        ).read_text(encoding="utf-8")
         spec = (root / "StreamKeep.spec").read_text(encoding="utf-8")
 
         self.assertIn("Pillow>=12.3.0", requirements)
         self.assertIn("yt-dlp[default]>=2026.07.04", requirements)
-        self.assertIn("'yt-dlp[default]>=2026.07.04'", flatpak)
-        self.assertIn("'Pillow>=12.3.0'", flatpak)
+        self.assertRegex(flatpak_lock, r"(?m)^yt-dlp==2026\.7\.4 \\")
+        self.assertRegex(flatpak_lock, r"(?m)^pillow==12\.3\.0 \\")
+        self.assertIn("python3-requirements.json", flatpak)
         self.assertIn("copy_metadata('yt-dlp-ejs')", spec)
         self.assertIn("Frozen builds require fixed SQLite", spec)
         self.assertIn("ffmpeg-8.1.2.tar.xz", flatpak)

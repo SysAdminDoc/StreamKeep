@@ -91,13 +91,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P1 — Next
 
-- [ ] P1 — Build the intentionally large bundle reproducibly from an isolated manifest
-  Why: Ambient-environment collection makes the 406 MiB artifact, licenses, and SBOM nondeterministic; size is acceptable, untraceable contents are not.
-  Evidence: `StreamKeep.spec`, `requirements.txt`, `packaging/sbom.py`, Flatpak manifest, MSIX/Flatpak 4.31.4 versus app 4.31.5; PyInstaller reproducible-build guidance (https://pyinstaller.org/en/v6.5.0/advanced-topics.html) and pip repeatable installs (https://pip.pypa.io/en/latest/topics/repeatable-installs/).
-  Touches: package metadata, locked/hash-checked full-bundle inputs, isolated build script, `StreamKeep.spec`, SBOM/license generation, MSIX/Flatpak metadata.
-  Acceptance: A clean local environment builds the same declared capability set twice; dependency/browser/tool revisions are locked and hash-verified; SBOM and license inventory describe the frozen artifact; one version source stamps app/README/MSIX/Flatpak; Flatpak installs from valid package metadata; artifact smoke runs before release.
-  Complexity: L
-
 - [ ] P1 — Restore full keyboard and assistive-technology operation
   Why: All tables explicitly reject focus and no controls expose explicit accessible names/descriptions, buddy labels, tab order, or async status announcements.
   Evidence: `streamkeep/ui/widgets.py:530-535`; zero accessibility API calls across UI/player; WCAG 2.2 and Qt accessibility guidance.

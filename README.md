@@ -176,9 +176,9 @@ Credential values are stored outside `config.json` in the operating-system crede
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- PyInstaller single-file builds for Windows with `python packaging/build.py --clean --noconfirm`. `streamkeep/__init__.py::VERSION` is the release version source; the portable and MSIX builders stamp the README, MSIX manifest, Flatpak metainfo, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
+- Reproducible PyInstaller single-file builds for Windows with `py -3.12 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep.exe`. `streamkeep/__init__.py::VERSION` is the release version source; the portable and MSIX builders stamp the README, MSIX manifest, Flatpak metainfo, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
 - MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
-- Flatpak packaging under `packaging/flatpak/`.
+- Flatpak packaging under `packaging/flatpak/`, using the KDE/PyQt 6.10 base and a separate hash-checked Linux dependency lock plus generated offline source manifest.
 - Browser companion extension packaging from `browser-extension/`.
 
 MSIX signing is automatic when `signtool.exe` is available and one of `STREAMKEEP_SIGN=1`, `STREAMKEEP_SIGN_PFX`, or `STREAMKEEP_SIGN_CERT_SUBJECT` is set.
@@ -222,8 +222,7 @@ python -m pyflakes StreamKeep.py streamkeep tests
 For a Windows one-file release, build and run the hidden artifact-boundary smoke suite:
 
 ```powershell
-python packaging/build.py --clean --noconfirm
-python packaging\artifact_smoke.py --executable .\dist\StreamKeep.exe
+py -3.12 packaging/reproducible_build.py --verify-reproducible
 ```
 
 The artifact suite exercises empty, legacy-migrated, and populated libraries offscreen, writes machine-readable readiness records, checks embedded yt-dlp and thumbnail initialization, rejects process re-entry fanout, and enforces a bounded clean exit. For UI-facing changes, exercise the affected tab only when a non-disruptive test desktop is available.
