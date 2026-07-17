@@ -725,6 +725,10 @@ class ClipDialog(TranslatableDialog):
         ]:
             b = QPushButton(symbol)
             b.setToolTip(tip)
+            # The visible label is a bare glyph (+, −, ▲, ▼); without an
+            # accessible name a screen reader announces the raw symbol. Use
+            # the tooltip text as the spoken label.
+            b.setAccessibleName(tip)
             b.setFixedWidth(32)
             b.setObjectName("secondary")
             b.clicked.connect(slot)
