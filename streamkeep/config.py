@@ -77,6 +77,7 @@ _IMPORT_CAPABILITY_INFO = {
 _STRING_CONFIG_KEYS = frozenset({
     "output_dir", "folder_template", "file_template", "webhook_url",
     "rate_limit", "proxy", "cookies_browser", "cookies_file", "theme",
+    "visual_density", "visual_accent",
     "language", "whisper_model", "hf_token", "dismissed_update_tag",
     "companion_proxy_origin", "subtitle_languages", "subtitle_convert",
     "sponsorblock_mark", "sponsorblock_remove", "sponsorblock_api",

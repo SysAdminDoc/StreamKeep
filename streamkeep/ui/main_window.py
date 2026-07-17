@@ -533,6 +533,14 @@ class StreamKeep(
 
     def _apply_config(self):
         cfg = self._config
+        from streamkeep.theme import apply_visual_system
+        from PyQt6.QtWidgets import QApplication
+        apply_visual_system(
+            cfg.get("theme", "dark"),
+            cfg.get("visual_density", "cozy"),
+            cfg.get("visual_accent", ""),
+            app=QApplication.instance(),
+        )
         if cfg.get("output_dir"):
             self.output_input.setText(cfg["output_dir"])
             self.settings_output.setText(cfg["output_dir"])

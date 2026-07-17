@@ -523,18 +523,34 @@ class SettingsPreferencesMixin:
     # ── Theme ────────────────────────────────────────────────────────
 
     def _on_theme_changed(self, _idx):
-        """Apply theme switch instantly (F20)."""
-        from ..theme import apply_theme
+        """Apply the complete visual preference set instantly."""
+        self._apply_visual_preferences()
+
+    def _on_visual_settings_changed(self, _idx):
+        self._apply_visual_preferences()
+
+    def _apply_visual_preferences(self):
+        from ...theme import apply_visual_system
         from PyQt6.QtWidgets import QApplication
         name = self.theme_combo.currentData() or "dark"
+        density = self.density_combo.currentData() or "cozy"
+        accent = self.accent_combo.currentData() or ""
         self._config["theme"] = name
-        apply_theme(name, app=QApplication.instance())
+        self._config["visual_density"] = density
+        self._config["visual_accent"] = accent
+        apply_visual_system(
+            name, density, accent, app=QApplication.instance()
+        )
         if hasattr(self, "settings_theme_value"):
-            theme_display = {"dark": "Dark", "light": "Light", "system": "System"}.get(
-                name, "Dark"
-            )
+            theme_display = {
+                "dark": "Dark", "light": "Light", "system": "System",
+                "high_contrast": "High Contrast",
+            }.get(name, "Dark")
             self.settings_theme_value.setText(theme_display)
-            self.settings_theme_sub.setText("Catppuccin-based desktop theme")
+            accent_name = self.accent_combo.currentText()
+            self.settings_theme_sub.setText(
+                f"{density.title()} density • {accent_name} accent"
+            )
         if hasattr(self, "_stack"):
             self._switch_tab(self._stack.currentIndex())
         if hasattr(self, "status_label"):

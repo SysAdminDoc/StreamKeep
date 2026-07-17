@@ -169,7 +169,7 @@ def main():
     from PyQt6.QtGui import QIcon
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
-    from streamkeep.theme import apply_theme
+    from streamkeep.theme import apply_visual_system
     from streamkeep.ui.main_window import StreamKeep
 
     app = QApplication(sys.argv)
@@ -183,12 +183,21 @@ def main():
         cfg_file = CONFIG_DIR / "config.json"
         if cfg_file.exists():
             with open(cfg_file, "r", encoding="utf-8") as _f:
-                saved_theme = json.load(_f).get("theme", "dark")
+                visual_config = json.load(_f)
+            saved_theme = visual_config.get("theme", "dark")
+            saved_density = visual_config.get("visual_density", "cozy")
+            saved_accent = visual_config.get("visual_accent", "")
         else:
             saved_theme = "dark"
+            saved_density = "cozy"
+            saved_accent = ""
     except Exception:
         saved_theme = "dark"
-    apply_theme(saved_theme, app=app)
+        saved_density = "cozy"
+        saved_accent = ""
+    apply_visual_system(
+        saved_theme, saved_density, saved_accent, app=app
+    )
 
     win = StreamKeep()
     win.show()

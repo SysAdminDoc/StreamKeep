@@ -137,6 +137,10 @@ All primary controls and tables participate in keyboard focus and expose explici
 
 Choose English or Spanish under Settings → Appearance; the open shell, dialogs, table headings, status messages, and embedded player surfaces update immediately without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`, and `python -m streamkeep.i18n.compile_translations` refreshes the catalogs before compiling the matching QM assets included in frozen builds.
 
+### Desktop Appearance
+
+Settings → Appearance offers System, Dark, Light, and High Contrast themes; Compact, Cozy, and Spacious density modes; and a theme-default or named accent. These choices persist together and update every open StreamKeep surface immediately. The shared visual system derives typography, spacing, control height, radii, focus, interactive states, table rows, and readable accent foregrounds from the active tokens. Fixed-width text controls are released when a larger density would clip them, and offscreen theme/density screenshot matrices plus a separate 200%-scale high-contrast check guard the supported layouts.
+
 ## Browser Companion
 
 The Chrome/Edge/Firefox companion extension lives in `browser-extension/`.

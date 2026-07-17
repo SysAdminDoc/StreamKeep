@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from ..theme import CAT
+from ..theme import CAT, get_density
 from ..i18n import TranslatableDialog
 
 
@@ -184,15 +184,17 @@ def update_accessible_status(widget, text, *, tone="info", label="Status"):
 
 def TAB_STYLE():
     """Build the compact, text-led navigation style from the live theme."""
+    density = get_density()
+    vertical = density["padding"] + 2
     return f"""
 QPushButton#tab {{
     background-color: transparent;
     color: {CAT['subtext1']};
     border: none;
     border-bottom: 2px solid transparent;
-    padding: 10px 0 9px 0;
+    padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
     font-weight: 600;
-    font-size: 14px;
+    font-size: {density['font_size']}px;
     border-radius: 0;
 }}
 QPushButton#tab:hover {{
@@ -208,9 +210,9 @@ QPushButton#tabActive {{
     color: {CAT['accent']};
     border: none;
     border-bottom: 2px solid {CAT['accent']};
-    padding: 10px 0 9px 0;
+    padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
     font-weight: 700;
-    font-size: 14px;
+    font-size: {density['font_size']}px;
     border-radius: 0;
 }}
 """
@@ -234,7 +236,8 @@ def make_metric_card(label_text, value_text="--", sub_text=""):
     """Build a compact inline metric. Returns (container, value, detail)."""
     card = QFrame()
     card.setObjectName("metricCard")
-    card.setMinimumHeight(68)
+    density = get_density()
+    card.setMinimumHeight(round(68 * density["scale"]))
     lay = QVBoxLayout(card)
     lay.setContentsMargins(10, 8, 10, 8)
     lay.setSpacing(2)
@@ -678,7 +681,7 @@ def wrap_scroll_page(page):
 
 
 def style_table(table, row_height=46, *, accessible_name="", accessible_description=""):
-    """Apply the premium midnight theme to a QTableWidget."""
+    """Apply shared model/view behavior and density-scaled row metrics."""
     table.setAlternatingRowColors(True)
     table.setShowGrid(False)
     table.setWordWrap(False)
@@ -686,7 +689,9 @@ def style_table(table, row_height=46, *, accessible_name="", accessible_descript
     table.setTabKeyNavigation(True)
     table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-    table.verticalHeader().setDefaultSectionSize(row_height)
+    table.setProperty("visualBaseRowHeight", int(row_height))
+    scaled_height = round(int(row_height) * float(get_density()["scale"]))
+    table.verticalHeader().setDefaultSectionSize(max(24, scaled_height))
     table.horizontalHeader().setHighlightSections(False)
     if accessible_name:
         set_accessible(table, accessible_name, accessible_description)

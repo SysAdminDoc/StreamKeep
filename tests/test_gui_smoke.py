@@ -277,6 +277,21 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
 
             assert install_translator("en", qt_application) is True
             assert "es" in available_languages()
+            hc_idx = window.theme_combo.findData("high_contrast")
+            compact_idx = window.density_combo.findData("compact")
+            blue_idx = window.accent_combo.findText("Blue")
+            assert min(hc_idx, compact_idx, blue_idx) >= 0
+            window.theme_combo.setCurrentIndex(hc_idx)
+            window.density_combo.setCurrentIndex(compact_idx)
+            window.accent_combo.setCurrentIndex(blue_idx)
+            qt_application.processEvents()
+            assert window._config["theme"] == "high_contrast"
+            assert window._config["visual_density"] == "compact"
+            assert window._config["visual_accent"] == "#89b4fa"
+            assert "#000000" in qt_application.styleSheet().lower()
+            window.theme_combo.setCurrentIndex(window.theme_combo.findData("dark"))
+            window.density_combo.setCurrentIndex(window.density_combo.findData("cozy"))
+            window.accent_combo.setCurrentIndex(window.accent_combo.findData(""))
             es_idx = window.language_combo.findData("es")
             assert es_idx >= 0
             window.language_combo.setCurrentIndex(es_idx)

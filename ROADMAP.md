@@ -91,13 +91,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P1 — Next
 
-- [ ] P1 — Consolidate and activate the visual-system controls
-  Why: High-contrast, density, and accent APIs are dead code while duplicate legacy/active styles and per-tab dimensions keep visual behavior inconsistent.
-  Evidence: `streamkeep/theme.py:45-79,1049`, `streamkeep/ui/widgets.py`, fixed-size/fixed-width usage across UI modules; offscreen dark/light/high-contrast render audit on 2026-07-15.
-  Touches: `streamkeep/theme.py`, shared widgets/layout metrics, Settings appearance controls, major tabs/dialogs, screenshot tests.
-  Acceptance: One token/component stylesheet owns type, spacing, borders, density, focus, and states; System/Dark/Light/High Contrast plus density/accent settings are reachable and persistent; no fixed dimensions clip at the supported minimum or 200% scale; screenshot matrices detect theme/layout regressions.
-  Complexity: M
-
 ### P2 — Later
 
 - [ ] P2 — Expose archive maintenance as one dry-run-first workflow

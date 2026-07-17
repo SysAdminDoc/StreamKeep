@@ -26,7 +26,7 @@ from ...postprocess import (
     VIDEO_CONTAINERS,
     available_video_codec_keys,
 )
-from ...theme import CAT
+from ...theme import ACCENT_PRESETS
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
     default_output_dir as _default_output_dir,
@@ -276,9 +276,12 @@ def build_settings_tab(win):
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(14)
     current_theme = str(win._config.get("theme", "dark") or "dark")
-    theme_display = {"dark": "Dark", "light": "Light", "system": "System"}.get(
-        current_theme, "Dark"
-    )
+    current_density = str(win._config.get("visual_density", "cozy") or "cozy")
+    current_accent = str(win._config.get("visual_accent", "") or "")
+    theme_display = {
+        "dark": "Dark", "light": "Light", "system": "System",
+        "high_contrast": "High Contrast",
+    }.get(current_theme, "Dark")
 
     # ── Hero ────────────────────────────────────────────────────────
     hero = QFrame()
@@ -345,8 +348,11 @@ def build_settings_tab(win):
     # Theme selector (F20)
     theme_bar = QFrame()
     theme_bar.setObjectName("toolbar")
-    theme_row = QHBoxLayout(theme_bar)
-    theme_row.setContentsMargins(14, 12, 14, 12)
+    theme_lay = QVBoxLayout(theme_bar)
+    theme_lay.setContentsMargins(14, 12, 14, 12)
+    theme_lay.setSpacing(10)
+    theme_row = QHBoxLayout()
+    theme_row.setContentsMargins(0, 0, 0, 0)
     theme_row.setSpacing(10)
     theme_copy = QVBoxLayout()
     theme_copy.setSpacing(2)
@@ -358,19 +364,48 @@ def build_settings_tab(win):
     theme_copy.addWidget(theme_title)
     theme_copy.addWidget(theme_hint)
     theme_row.addLayout(theme_copy, 1)
+    theme_lay.addLayout(theme_row)
+    controls_row = QHBoxLayout()
+    controls_row.setSpacing(10)
     win.theme_combo = QComboBox()
     win.theme_combo.setProperty("i18nTranslateItems", True)
     win.theme_combo.addItem("Dark (Catppuccin Mocha)", "dark")
     win.theme_combo.addItem("Light (Catppuccin Latte)", "light")
     win.theme_combo.addItem("System", "system")
+    win.theme_combo.addItem("High Contrast", "high_contrast")
     idx = max(0, win.theme_combo.findData(current_theme))
     win.theme_combo.setCurrentIndex(idx)
     win.theme_combo.currentIndexChanged.connect(win._on_theme_changed)
-    win.theme_combo.setMinimumWidth(210)
-    theme_row.addWidget(win.theme_combo)
+    win.theme_combo.setMinimumWidth(190)
+    controls_row.addWidget(win.theme_combo)
+    density_label = QLabel("Density")
+    density_label.setObjectName("fieldLabel")
+    controls_row.addWidget(density_label)
+    win.density_combo = QComboBox()
+    win.density_combo.setProperty("i18nTranslateItems", True)
+    for label, value in (
+        ("Compact", "compact"), ("Cozy", "cozy"), ("Spacious", "spacious"),
+    ):
+        win.density_combo.addItem(label, value)
+    density_idx = max(0, win.density_combo.findData(current_density))
+    win.density_combo.setCurrentIndex(density_idx)
+    win.density_combo.currentIndexChanged.connect(win._on_visual_settings_changed)
+    controls_row.addWidget(win.density_combo)
+    accent_label = QLabel("Accent")
+    accent_label.setObjectName("fieldLabel")
+    controls_row.addWidget(accent_label)
+    win.accent_combo = QComboBox()
+    win.accent_combo.setProperty("i18nTranslateItems", True)
+    win.accent_combo.addItem("Theme default", "")
+    for label, value in ACCENT_PRESETS.items():
+        win.accent_combo.addItem(label, value.lower())
+    accent_idx = max(0, win.accent_combo.findData(current_accent.lower()))
+    win.accent_combo.setCurrentIndex(accent_idx)
+    win.accent_combo.currentIndexChanged.connect(win._on_visual_settings_changed)
+    controls_row.addWidget(win.accent_combo)
     language_label = QLabel("Language")
     language_label.setObjectName("fieldLabel")
-    theme_row.addWidget(language_label)
+    controls_row.addWidget(language_label)
     win.language_combo = QComboBox()
     win.language_combo.setProperty("i18nTranslateItems", True)
     language_labels = {
@@ -384,7 +419,9 @@ def build_settings_tab(win):
     win.language_combo.setCurrentIndex(lang_idx)
     win.language_combo.currentIndexChanged.connect(win._on_language_changed)
     win.language_combo.setMinimumWidth(150)
-    theme_row.addWidget(win.language_combo)
+    controls_row.addWidget(win.language_combo)
+    controls_row.addStretch(1)
+    theme_lay.addLayout(controls_row)
     card_lay.addWidget(theme_bar)
 
     # Default Output + Toolchain (side by side)
@@ -868,7 +905,7 @@ def build_settings_tab(win):
     )
     par_row.addWidget(win.parallel_spin)
     par_hint = QLabel("per direct MP4 (1 = off, default 4)")
-    par_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    par_hint.setObjectName("subtleText")
     par_row.addWidget(par_hint)
     par_row.addStretch(1)
     network_lay.addLayout(par_row)
@@ -889,7 +926,7 @@ def build_settings_tab(win):
     )
     par_ar_row.addWidget(win.parallel_autorecords_spin)
     par_ar_hint = QLabel("channels captured at once (default 2)")
-    par_ar_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    par_ar_hint.setObjectName("subtleText")
     par_ar_row.addWidget(par_ar_hint)
     par_ar_row.addStretch(1)
     network_lay.addLayout(par_ar_row)
@@ -910,7 +947,7 @@ def build_settings_tab(win):
     )
     cq_row.addWidget(win.concurrent_queue_spin)
     cq_hint = QLabel("simultaneous queue downloads (default 3)")
-    cq_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    cq_hint.setObjectName("subtleText")
     cq_row.addWidget(cq_hint)
     cq_row.addStretch(1)
     network_lay.addLayout(cq_row)
@@ -935,7 +972,7 @@ def build_settings_tab(win):
     win.chunk_check.toggled.connect(win.chunk_length_spin.setEnabled)
     chunk_row.addWidget(win.chunk_length_spin)
     chunk_hint = QLabel("per chunk (default 2 hours)")
-    chunk_hint.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+    chunk_hint.setObjectName("subtleText")
     chunk_row.addWidget(chunk_hint)
     chunk_row.addStretch(1)
     network_lay.addLayout(chunk_row)
@@ -1476,12 +1513,11 @@ def build_settings_tab(win):
     preview_row.setSpacing(8)
     plabel = QLabel("Preview:")
     plabel.setFixedWidth(100)
-    plabel.setStyleSheet(f"color: {CAT['subtext0']};")
+    plabel.setObjectName("subtleText")
     preview_row.addWidget(plabel)
     win._template_preview = QLabel()
-    win._template_preview.setStyleSheet(
-        f"color: {CAT['green']}; font-family: monospace; font-size: 12px;"
-    )
+    win._template_preview.setObjectName("templatePreview")
+    win._template_preview.setProperty("tone", "success")
     win._template_preview.setWordWrap(True)
     preview_row.addWidget(win._template_preview, 1)
     tpl_lay.addLayout(preview_row)
@@ -1494,14 +1530,12 @@ def build_settings_tab(win):
             file_parts = _render_template(file_tpl, _sample_ctx)
             path = "/".join(folder_parts + file_parts) + ".mp4"
             win._template_preview.setText(path)
-            win._template_preview.setStyleSheet(
-                f"color: {CAT['green']}; font-family: monospace; font-size: 12px;"
-            )
+            win._template_preview.setProperty("tone", "success")
         except Exception:
             win._template_preview.setText("Invalid template")
-            win._template_preview.setStyleSheet(
-                f"color: {CAT['red']}; font-family: monospace; font-size: 12px;"
-            )
+            win._template_preview.setProperty("tone", "error")
+        win._template_preview.style().unpolish(win._template_preview)
+        win._template_preview.style().polish(win._template_preview)
 
     win.folder_template_input.textChanged.connect(lambda: _update_template_preview())
     win.file_template_input.textChanged.connect(lambda: _update_template_preview())
@@ -1521,7 +1555,7 @@ def build_settings_tab(win):
     )
     hook_lay.addWidget(win.webhook_input)
     win._webhook_type_label = QLabel("")
-    win._webhook_type_label.setStyleSheet(f"color: {CAT['subtext0']};")
+    win._webhook_type_label.setObjectName("subtleText")
     hook_lay.addWidget(win._webhook_type_label)
     win.webhook_input.textChanged.connect(
         lambda text: _update_webhook_indicator(win, text))
