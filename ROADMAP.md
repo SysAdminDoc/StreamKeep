@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.36.4.
+- Current package version: v4.36.5.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -178,3 +178,24 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Touches: carry the feed URL from the podcast VOD listing through `_queue_add` → queue item → finalize task; a finalize hook calling `sync_podcast_sidecars`; queue-state serialization tolerance for the new key.
   Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
   Complexity: S-M
+
+- [ ] P3 — Make config-directory restore crash-consistent
+  Why: `backup.restore_backup` validates all staged files first, but activates them with a per-file `os.replace` loop. Each replace is atomic individually, but the set is not — a crash/power-loss after `library.db` is swapped and before `config.json` is swapped leaves a restored DB beside a stale config (plus scattered `.pre-restore` copies), which the app then loads as if consistent. The docstring overclaims "swapped into place atomically."
+  Evidence: `streamkeep/backup.py` (`restore_backup` activation loop over `prepared`, `SQLITE_BACKUP_FILES` sidecar removal).
+  Touches: restore activation order/journaling, startup recovery from `.pre-restore` markers, docstring correction, backup/restore tests.
+  Acceptance: An interrupted restore either fully completes or rolls back to the prior self-consistent config dir on next launch; restore `config.json` last so a partial restore biases to the old config; docstring reflects the real guarantee.
+  Complexity: M
+
+- [ ] P3 — Normalize button/label capitalization to one house style
+  Why: Primary buttons and section labels mix Title Case (e.g. "Clear History", "Add Channel", "Load More VODs", "Download Selected") with Sentence case (e.g. "Recycle selected", "Rename selected", "Save profile", "Export Clip"). The Monitor and Download-VOD surfaces are almost entirely Title Case while dialogs are Sentence case, so the product reads as several design systems.
+  Evidence: `streamkeep/ui/tabs/monitor.py`, `download.py`, `history.py`, `storage.py`, `settings*.py`, and the dialog modules; every literal is i18n-extracted, so a sweep must regenerate `streamkeep_en.ts`/`_es.ts` and recompile the `.qm`.
+  Touches: UI string literals across all tabs/dialogs, `SPANISH_CORE` entries, translation catalog regeneration, GUI/i18n tests that assert specific labels.
+  Acceptance: One documented convention (Sentence case, matching the newer dialogs) is applied consistently across every button/label; catalogs regenerated; i18n and GUI-smoke assertions updated.
+  Complexity: M
+
+- [ ] P3 — Deterministic first speed sample in the parallel HTTP downloader
+  Why: `parallel_http_download` snapshots `last_bytes = sum(bytes_done)` after the worker threads start. Resumed/pre-complete parts credit their bytes synchronously inside the worker, so depending on scheduling the first ~0.4s speed/ETA sample can spike or read zero. Cosmetic (display only), but nondeterministic.
+  Evidence: `streamkeep/http.py` `parallel_http_download` (thread start loop, then `last_bytes` snapshot and the progress-window speed calc).
+  Touches: baseline accounting for pre-completed parts before threads start.
+  Acceptance: The displayed speed/ETA is stable from the first tick regardless of how many parts resumed; unit coverage over a mixed resumed/fresh part set.
+  Complexity: S
