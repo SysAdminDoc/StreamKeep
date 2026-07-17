@@ -13,7 +13,7 @@ from ...utils import (
     DEFAULT_FOLDER_TEMPLATE,
     scan_browser_cookies as _scan_browser_cookies,
 )
-from ..widgets import show_premium_message
+from ..widgets import ask_premium_confirmation, show_premium_message
 
 
 class SettingsPreferencesMixin:
@@ -110,7 +110,22 @@ class SettingsPreferencesMixin:
 
     def _on_clear_cookies(self):
         """Delete the cookies.txt file (F47)."""
-        from ...cookies import clear_cookies
+        from ...cookies import clear_cookies, cookies_file_path
+        if cookies_file_path() and not ask_premium_confirmation(
+            self,
+            title="Delete imported cookies?",
+            body=(
+                "Remove the imported cookies.txt. Authenticated or age-restricted "
+                "content may fail until you import cookies again."
+            ),
+            eyebrow="COOKIES",
+            badge_text="Cannot be undone",
+            tone="warning",
+            primary_label="Delete cookies",
+            secondary_label="Cancel",
+            default_action="secondary",
+        ):
+            return
         ok, msg = clear_cookies()
         self._update_cookies_status()
         self._set_status(msg, "success" if ok else "error")
@@ -184,6 +199,21 @@ class SettingsPreferencesMixin:
     def _on_clear_account_tokens(self):
         """Delete all stored platform tokens (F48)."""
         from ...accounts import delete_credential, PLATFORMS, credential_status
+        if not ask_premium_confirmation(
+            self,
+            title="Delete all saved platform tokens?",
+            body=(
+                "Remove every stored platform credential. You will need to "
+                "re-enter them to download authenticated content again."
+            ),
+            eyebrow="ACCOUNTS",
+            badge_text="Cannot be undone",
+            tone="warning",
+            primary_label="Delete tokens",
+            secondary_label="Cancel",
+            default_action="secondary",
+        ):
+            return
         inputs = getattr(self, "_account_inputs", {})
         for plat_key in PLATFORMS:
             delete_credential(plat_key)

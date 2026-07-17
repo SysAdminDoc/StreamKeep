@@ -27,7 +27,7 @@ from streamkeep.verify import (
     verify_archive_manifest,
 )
 from ..history_model import HistoryTableModel
-from ..widgets import make_metric_card, style_table
+from ..widgets import ask_premium_confirmation, make_metric_card, style_table
 
 
 def build_history_tab(win):
@@ -484,6 +484,27 @@ class HistoryTabMixin:
         self._refresh_history_table()
 
     def _on_clear_history(self):
+        count = len(self._history)
+        if count == 0:
+            self._set_status("History is already empty.", "info")
+            return
+        if not ask_premium_confirmation(
+            self,
+            title="Clear all download history?",
+            body=(
+                f"Remove all {count} entr{'y' if count == 1 else 'ies'} from the "
+                "library. Recordings already saved to disk are not affected."
+            ),
+            eyebrow="HISTORY",
+            badge_text="Cannot be undone",
+            tone="warning",
+            summary_title="Your recorded files stay on disk.",
+            summary_body="This only clears the in-app history list, not the media.",
+            primary_label="Clear history",
+            secondary_label="Cancel",
+            default_action="secondary",
+        ):
+            return
         self._history.clear()
         _db.clear_history()
         self._refresh_history_table()

@@ -266,6 +266,25 @@ class DownloadQueueMixin:
 
     def _on_clear_queue(self):
         active = self._queue_active_item
+        removable = [q for q in self._download_queue if q is not active]
+        if not removable:
+            self._set_status("Queue is already empty.", "info")
+            return
+        if len(removable) > 1 and not ask_premium_confirmation(
+            self,
+            title="Clear the download queue?",
+            body=(
+                f"Remove {len(removable)} queued job(s). Any download in progress "
+                "keeps running."
+            ),
+            eyebrow="QUEUE",
+            badge_text="Cannot be undone",
+            tone="warning",
+            primary_label="Clear queue",
+            secondary_label="Cancel",
+            default_action="secondary",
+        ):
+            return
         self._download_queue = [q for q in self._download_queue if q is active]
         self._persist_config()
         self._refresh_queue_table()
