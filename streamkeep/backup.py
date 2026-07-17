@@ -35,6 +35,12 @@ BACKUP_FILES = [
 ]
 SQLITE_BACKUP_FILES = {"library.db", "search.db", "tags.db"}
 
+# Marker written while the destructive activation phase of a restore is in
+# flight. If the process dies between the first and last atomic file swap the
+# config directory is left in a mixed state; the next startup rolls every file
+# back to its ``.pre-restore`` copy (see ``finalize_interrupted_restore``).
+RESTORE_MARKER = ".restore-in-progress.json"
+
 
 def create_backup(output_path, *, include_logs=False):
     """Create a .skbackup file at *output_path*.
@@ -116,7 +122,15 @@ def restore_backup(backup_path):
     ``foreign_key_check``, and FTS rebuild) before any current file is touched.
     If any staged file fails validation the current config directory is left
     byte-for-byte intact and a redacted report is returned. Only after every
-    staged file validates are the files swapped into place atomically.
+    staged file validates are the files swapped into place.
+
+    Each swap is individually atomic (``os.replace``); the *set* is made
+    crash-consistent by a restore marker. ``config.json`` is swapped last, and
+    if the process dies mid-activation the next startup
+    (``finalize_interrupted_restore``) rolls every file back to its
+    ``.pre-restore`` copy, returning the directory to its prior self-consistent
+    state. On clean completion the marker and ``.pre-restore`` copies are
+    removed.
 
     Returns ``(ok, message)``.
     """
@@ -159,8 +173,10 @@ def restore_backup(backup_path):
         _cleanup_staging(staging_dir)
         return False, f"Restore failed: {redact_text(str(e))}"
 
-    # Every staged file validated — activate them atomically.
+    # Every staged file validated — activate them. Each swap is atomic; a
+    # marker makes the whole set crash-consistent (rolled back on next start).
     prepared = []
+    marker = None
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         for fname, src in staged.items():
@@ -168,11 +184,18 @@ def restore_backup(backup_path):
             tmp = current.with_suffix(current.suffix + ".restore-tmp")
             _write_atomic_tmp(tmp, src.read_bytes())
             prepared.append((current, tmp, fname))
+        # config.json last: an interrupted restore then biases toward the old
+        # config rather than a new config paired with a partially-swapped DB.
+        prepared.sort(key=lambda item: item[2] == "config.json")
+        marker = _write_restore_marker([fname for _c, _t, fname in prepared])
         for current, tmp, fname in prepared:
             _backup_existing_file(current)
             if fname in SQLITE_BACKUP_FILES:
                 _remove_sqlite_sidecars(current)
             os.replace(tmp, current)
+        _clear_restore_marker()
+        marker = None
+        _remove_pre_restore_copies(current for current, _t, _f in prepared)
         return True, f"Restored {len(prepared)} files from backup"
     except OSError as e:
         for _current, tmp, _fname in prepared:
@@ -180,6 +203,9 @@ def restore_backup(backup_path):
                 Path(tmp).unlink(missing_ok=True)
             except OSError:
                 pass
+        # Roll back any files already swapped so we don't leave a mixed dir.
+        if marker is not None:
+            finalize_interrupted_restore()
         return False, f"Restore failed during activation: {redact_text(str(e))}"
     finally:
         _cleanup_staging(staging_dir)
@@ -290,6 +316,69 @@ def _backup_existing_file(path):
         shutil.copy2(str(path), str(bak))
     except OSError:
         pass
+
+
+def _write_restore_marker(fnames):
+    """Durably record that a destructive restore activation is in progress."""
+    marker = CONFIG_DIR / RESTORE_MARKER
+    tmp = marker.with_suffix(".json.tmp")
+    _write_atomic_tmp(tmp, json.dumps({"files": list(fnames)}).encode("utf-8"))
+    os.replace(tmp, marker)
+    return marker
+
+
+def _clear_restore_marker():
+    try:
+        (CONFIG_DIR / RESTORE_MARKER).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _remove_pre_restore_copies(paths):
+    """Delete the ``.pre-restore`` copies left by a completed restore."""
+    for path in paths:
+        path = Path(path)
+        bak = path.with_suffix(path.suffix + ".pre-restore")
+        try:
+            bak.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def finalize_interrupted_restore():
+    """Roll back a restore that died mid-activation. Idempotent.
+
+    Called once at startup before the database is opened. If the restore
+    marker is present the previous restore was interrupted between the first
+    and last atomic swap, leaving a mixed config directory. Every file named
+    in the marker that still has a ``.pre-restore`` copy is reverted so the
+    directory returns to its prior self-consistent state; leftover
+    ``.restore-tmp`` files are removed. Returns ``True`` if a rollback ran.
+    """
+    marker = CONFIG_DIR / RESTORE_MARKER
+    if not marker.is_file():
+        return False
+    try:
+        fnames = json.loads(marker.read_text(encoding="utf-8")).get("files") or []
+    except (OSError, ValueError):
+        fnames = list(BACKUP_FILES)
+    for fname in fnames:
+        current = CONFIG_DIR / fname
+        tmp = current.with_suffix(current.suffix + ".restore-tmp")
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        bak = current.with_suffix(current.suffix + ".pre-restore")
+        if bak.is_file():
+            if fname in SQLITE_BACKUP_FILES:
+                _remove_sqlite_sidecars(current)
+            try:
+                os.replace(str(bak), str(current))
+            except OSError:
+                pass
+    _clear_restore_marker()
+    return True
 
 
 def _remove_sqlite_sidecars(path):

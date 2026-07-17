@@ -48,6 +48,13 @@ def _connect(readonly=False):
 
 def init_db() -> None:
     """Create tables if they don't exist.  Idempotent."""
+    # Repair a config directory left mixed by a restore that died mid-swap
+    # before opening the database. Lazy import avoids a backup<->db cycle.
+    try:
+        from .backup import finalize_interrupted_restore
+        finalize_interrupted_restore()
+    except Exception:
+        pass
     db = _connect()
     try:
         v = db.execute("PRAGMA user_version").fetchone()[0]

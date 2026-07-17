@@ -165,13 +165,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: A podcast episode downloaded from a browsed feed gets its transcript/chapter sidecars written next to the recording via the existing bounded/hashed module; absent feed context is non-fatal; verified against a live or fixture feed download.
   Complexity: S-M
 
-- [ ] P3 — Make config-directory restore crash-consistent
-  Why: `backup.restore_backup` validates all staged files first, but activates them with a per-file `os.replace` loop. Each replace is atomic individually, but the set is not — a crash/power-loss after `library.db` is swapped and before `config.json` is swapped leaves a restored DB beside a stale config (plus scattered `.pre-restore` copies), which the app then loads as if consistent. The docstring overclaims "swapped into place atomically."
-  Evidence: `streamkeep/backup.py` (`restore_backup` activation loop over `prepared`, `SQLITE_BACKUP_FILES` sidecar removal).
-  Touches: restore activation order/journaling, startup recovery from `.pre-restore` markers, docstring correction, backup/restore tests.
-  Acceptance: An interrupted restore either fully completes or rolls back to the prior self-consistent config dir on next launch; restore `config.json` last so a partial restore biases to the old config; docstring reflects the real guarantee.
-  Complexity: M
-
 - [ ] P3 — Normalize button/label capitalization to one house style
   Why: Primary buttons and section labels mix Title Case (e.g. "Clear History", "Add Channel", "Load More VODs", "Download Selected") with Sentence case (e.g. "Recycle selected", "Rename selected", "Save profile", "Export Clip"). The Monitor and Download-VOD surfaces are almost entirely Title Case while dialogs are Sentence case, so the product reads as several design systems.
   Evidence: `streamkeep/ui/tabs/monitor.py`, `download.py`, `history.py`, `storage.py`, `settings*.py`, and the dialog modules; every literal is i18n-extracted, so a sweep must regenerate `streamkeep_en.ts`/`_es.ts` and recompile the `.qm`.

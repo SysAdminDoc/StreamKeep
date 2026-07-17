@@ -378,5 +378,91 @@ class BackupTests(unittest.TestCase):
             self.assertTrue(any("clip.mp4" in str(h) for h in hits))
 
 
+    def test_successful_restore_clears_marker_and_pre_restore_copies(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            self._make_valid_db(config_dir / "library.db")
+            (config_dir / "config.json").write_text('{"theme":"old"}', encoding="utf-8")
+
+            replacement = config_dir / "good.db"
+            self._make_valid_db(replacement)
+            backup_path = config_dir / "r.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("library.db", replacement.read_bytes())
+                zf.writestr("config.json", b'{"theme":"new"}')
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, msg = backup.restore_backup(backup_path)
+
+            self.assertTrue(ok, msg)
+            self.assertFalse((config_dir / backup.RESTORE_MARKER).exists())
+            self.assertFalse((config_dir / "library.db.pre-restore").exists())
+            self.assertFalse((config_dir / "config.json.pre-restore").exists())
+            self.assertIn("new", (config_dir / "config.json").read_text(encoding="utf-8"))
+
+    def test_interrupted_restore_rolls_back_to_prior_state(self):
+        # Simulate a crash mid-activation: os.replace fails on the 2nd swap.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            self._make_valid_db(config_dir / "library.db")
+            (config_dir / "config.json").write_text('{"theme":"old"}', encoding="utf-8")
+            old_db_bytes = (config_dir / "library.db").read_bytes()
+
+            replacement = config_dir / "good.db"
+            self._make_valid_db(replacement)
+            backup_path = config_dir / "r.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("library.db", replacement.read_bytes())
+                zf.writestr("config.json", b'{"theme":"new"}')
+
+            real_replace = backup.os.replace
+            calls = {"n": 0}
+
+            def flaky_replace(src, dst):
+                # Let marker + first activation swap through, fail the next one.
+                if str(dst).endswith((".db", "config.json")):
+                    calls["n"] += 1
+                    if calls["n"] == 2:
+                        raise OSError("simulated power loss")
+                return real_replace(src, dst)
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir), \
+                 mock.patch.object(backup.os, "replace", side_effect=flaky_replace):
+                ok, message = backup.restore_backup(backup_path)
+
+            self.assertFalse(ok)
+            self.assertIn("activation", message)
+            # Rolled back: marker gone, config self-consistent (old DB + old config),
+            # no leftover tmp/pre-restore litter.
+            self.assertFalse((config_dir / backup.RESTORE_MARKER).exists())
+            self.assertEqual((config_dir / "library.db").read_bytes(), old_db_bytes)
+            self.assertIn("old", (config_dir / "config.json").read_text(encoding="utf-8"))
+            self.assertFalse((config_dir / "library.db.pre-restore").exists())
+            self.assertFalse((config_dir / "library.db.restore-tmp").exists())
+
+    def test_finalize_interrupted_restore_is_noop_without_marker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                self.assertFalse(backup.finalize_interrupted_restore())
+
+    def test_finalize_reverts_files_named_in_marker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            # New content in place, old content preserved as .pre-restore, marker set.
+            (config_dir / "config.json").write_text("NEW", encoding="utf-8")
+            (config_dir / "config.json.pre-restore").write_text("OLD", encoding="utf-8")
+            (config_dir / backup.RESTORE_MARKER).write_text(
+                json.dumps({"files": ["config.json"]}), encoding="utf-8"
+            )
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                self.assertTrue(backup.finalize_interrupted_restore())
+            self.assertEqual((config_dir / "config.json").read_text(encoding="utf-8"), "OLD")
+            self.assertFalse((config_dir / backup.RESTORE_MARKER).exists())
+            self.assertFalse((config_dir / "config.json.pre-restore").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
