@@ -6,6 +6,7 @@ import pytest
 
 from streamkeep import config
 from streamkeep.ui.tabs import settings as settings_module
+from streamkeep.ui.tabs import settings_tools
 
 
 def _envelope(payload, *, version=config.CONFIG_EXPORT_SCHEMA_VERSION):
@@ -181,8 +182,8 @@ def test_ui_validation_failure_never_saves_or_mutates_config(tmp_path):
     original = copy.deepcopy(window._config)
 
     with mock.patch.object(
-        settings_module.QFileDialog, "getOpenFileName", return_value=(str(path), "")
-    ), mock.patch.object(settings_module, "_save_config") as save:
+        settings_tools.QFileDialog, "getOpenFileName", return_value=(str(path), "")
+    ), mock.patch.object(settings_tools, "_save_config") as save:
         settings_module.SettingsTabMixin._on_import_config(window)
 
     save.assert_not_called()
@@ -198,10 +199,10 @@ def test_ui_shows_diff_before_save_and_cancel_keeps_config(tmp_path):
     window = _FakeSettingsWindow()
 
     with mock.patch.object(
-        settings_module.QFileDialog, "getOpenFileName", return_value=(str(path), "")
+        settings_tools.QFileDialog, "getOpenFileName", return_value=(str(path), "")
     ), mock.patch.object(
-        settings_module, "ask_premium_confirmation", return_value=False
-    ) as confirm, mock.patch.object(settings_module, "_save_config") as save:
+        settings_tools, "ask_premium_confirmation", return_value=False
+    ) as confirm, mock.patch.object(settings_tools, "_save_config") as save:
         settings_module.SettingsTabMixin._on_import_config(window)
 
     save.assert_not_called()
