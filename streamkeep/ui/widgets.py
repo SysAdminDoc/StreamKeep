@@ -236,10 +236,10 @@ def make_metric_card(label_text, value_text="--", sub_text=""):
     """Build a single-line metric for quiet operational context."""
     card = QFrame()
     card.setObjectName("metricCard")
-    card.setMinimumHeight(30)
+    card.setMinimumHeight(34)
     lay = QHBoxLayout(card)
-    lay.setContentsMargins(0, 3, 12, 3)
-    lay.setSpacing(6)
+    lay.setContentsMargins(0, 4, 16, 4)
+    lay.setSpacing(7)
 
     label = QLabel(label_text)
     label.setObjectName("metricLabel")

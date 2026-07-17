@@ -39,6 +39,10 @@ class BarChartWidget(QWidget):
 
     def paintEvent(self, event):
         if not self._data:
+            p = QPainter(self)
+            p.setPen(QColor(CAT["muted"]))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No capture activity in this range")
+            p.end()
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -88,6 +92,10 @@ class DonutChartWidget(QWidget):
 
     def paintEvent(self, event):
         if not self._data:
+            p = QPainter(self)
+            p.setPen(QColor(CAT["muted"]))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No platform data yet")
+            p.end()
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -138,6 +146,10 @@ class HBarChartWidget(QWidget):
 
     def paintEvent(self, event):
         if not self._data:
+            p = QPainter(self)
+            p.setPen(QColor(CAT["muted"]))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No channel history yet")
+            p.end()
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -182,12 +194,12 @@ def build_analytics_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(8)
+    lay.setSpacing(6)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setContentsMargins(2, 2, 2, 4)
     hero_lay.setSpacing(4)
 
     hero_copy = QVBoxLayout()
@@ -253,7 +265,7 @@ def build_analytics_tab(win):
     charts_row = QHBoxLayout()
     charts_row.setSpacing(12)
     daily_card = QFrame()
-    daily_card.setObjectName("card")
+    daily_card.setObjectName("analyticsPanel")
     daily_lay = QVBoxLayout(daily_card)
     daily_lay.setContentsMargins(8, 10, 8, 8)
     daily_lay.setSpacing(6)
@@ -261,6 +273,7 @@ def build_analytics_tab(win):
     daily_title.setObjectName("sectionTitle")
     daily_hint = QLabel("Downloads per day within the selected range.")
     daily_hint.setObjectName("sectionBody")
+    daily_hint.setVisible(False)
     daily_lay.addWidget(daily_title)
     daily_lay.addWidget(daily_hint)
     win.analytics_daily_chart = BarChartWidget()
@@ -268,7 +281,7 @@ def build_analytics_tab(win):
     charts_row.addWidget(daily_card, 2)
 
     platform_card = QFrame()
-    platform_card.setObjectName("card")
+    platform_card.setObjectName("analyticsPanel")
     platform_lay = QVBoxLayout(platform_card)
     platform_lay.setContentsMargins(8, 10, 8, 8)
     platform_lay.setSpacing(6)
@@ -277,6 +290,7 @@ def build_analytics_tab(win):
     platform_hint = QLabel("Share of downloads by source platform.")
     platform_hint.setObjectName("sectionBody")
     platform_hint.setWordWrap(True)
+    platform_hint.setVisible(False)
     platform_lay.addWidget(platform_title)
     platform_lay.addWidget(platform_hint)
     win.analytics_platform_chart = DonutChartWidget()
@@ -286,7 +300,7 @@ def build_analytics_tab(win):
 
     # Top channels
     channels_card = QFrame()
-    channels_card.setObjectName("card")
+    channels_card.setObjectName("analyticsPanel")
     channels_lay = QVBoxLayout(channels_card)
     channels_lay.setContentsMargins(8, 10, 8, 8)
     channels_lay.setSpacing(6)
@@ -295,6 +309,7 @@ def build_analytics_tab(win):
     channels_hint = QLabel("Who appears most often in the active date range.")
     channels_hint.setObjectName("sectionBody")
     channels_hint.setWordWrap(True)
+    channels_hint.setVisible(False)
     channels_lay.addWidget(channels_title)
     channels_lay.addWidget(channels_hint)
     win.analytics_channels_chart = HBarChartWidget()

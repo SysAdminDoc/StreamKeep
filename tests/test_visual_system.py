@@ -102,8 +102,12 @@ def test_cozy_density_uses_readable_type_and_compact_controls(qt_application):
         state = get_visual_state()
         stylesheet = qt_application.styleSheet()
         assert state["density"] == "cozy"
-        assert "font-size: 15px" in stylesheet
+        assert "font-size: 16px" in stylesheet
+        assert "font-size: 28px" in stylesheet
         assert "border-radius: 6px" in stylesheet
         assert "QFrame#metricCard" in stylesheet
+        assert "QFrame#queuePane, QFrame#activityPane, QFrame#dataPane," in stylesheet
+        assert "QFrame#settingsNav" in stylesheet
+        assert "QPushButton#commandGhost" in stylesheet
     finally:
         apply_visual_system("dark", "cozy", "", qt_application)

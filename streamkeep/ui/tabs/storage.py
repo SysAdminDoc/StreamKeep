@@ -139,12 +139,12 @@ def build_storage_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(8)
+    lay.setSpacing(6)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setContentsMargins(2, 2, 2, 4)
     hero_lay.setSpacing(4)
 
     head = QVBoxLayout()
@@ -217,6 +217,7 @@ def build_storage_tab(win):
     )
     maintenance_body.setObjectName("sectionBody")
     maintenance_body.setWordWrap(True)
+    maintenance_body.setVisible(False)
     maintenance_lay.addWidget(maintenance_title)
     maintenance_lay.addWidget(maintenance_body)
     maintenance_actions = QHBoxLayout()
@@ -239,12 +240,14 @@ def build_storage_tab(win):
     win.maintenance_summary = QLabel("No maintenance preview yet.")
     win.maintenance_summary.setObjectName("subtleText")
     win.maintenance_summary.setWordWrap(True)
+    win.maintenance_summary.setVisible(False)
     maintenance_lay.addWidget(win.maintenance_summary)
     win.maintenance_tree = QTreeWidget()
     win.maintenance_tree.setHeaderLabels(["Apply", "Action", "Details"])
     win.maintenance_tree.setRootIsDecorated(False)
     win.maintenance_tree.setAlternatingRowColors(True)
-    win.maintenance_tree.setMinimumHeight(150)
+    win.maintenance_tree.setMinimumHeight(128)
+    win.maintenance_tree.setVisible(False)
     win.maintenance_tree.setAccessibleName("Archive maintenance preview")
     win.maintenance_tree.setAccessibleDescription(
         "Check only maintenance actions that should be applied"
@@ -265,7 +268,7 @@ def build_storage_tab(win):
 
     # ── Filter row (F13) ────────────────────────────────────────────
     filter_card = QFrame()
-    filter_card.setObjectName("card")
+    filter_card.setObjectName("toolbar")
     filter_wrap = QVBoxLayout(filter_card)
     filter_wrap.setContentsMargins(4, 6, 4, 6)
     filter_wrap.setSpacing(6)
@@ -273,9 +276,11 @@ def build_storage_tab(win):
     filter_copy.setSpacing(4)
     filter_title = QLabel("Refine the Archive")
     filter_title.setObjectName("sectionTitle")
+    filter_title.setVisible(False)
     filter_body = QLabel("Platform and channel filters.")
     filter_body.setObjectName("sectionBody")
     filter_body.setWordWrap(True)
+    filter_body.setVisible(False)
     filter_copy.addWidget(filter_title)
     filter_copy.addWidget(filter_body)
     filter_wrap.addLayout(filter_copy)
@@ -321,9 +326,9 @@ def build_storage_tab(win):
 
     # Table
     card = QFrame()
-    card.setObjectName("card")
+    card.setObjectName("dataPane")
     card_lay = QVBoxLayout(card)
-    card_lay.setContentsMargins(4, 8, 4, 4)
+    card_lay.setContentsMargins(14, 14, 14, 10)
     card_lay.setSpacing(6)
     hdr = QLabel("Recordings by folder (newest first)")
     hdr.setObjectName("sectionTitle")
@@ -518,6 +523,8 @@ class StorageTabMixin:
             return
         self._maintenance_plan = None
         self.maintenance_tree.clear()
+        self.maintenance_tree.setVisible(True)
+        self.maintenance_summary.setVisible(True)
         self.maintenance_summary.setText("Building a read-only archive preview…")
         self._set_maintenance_running(True)
         self._set_status("Previewing archive maintenance in the background.", "working")
@@ -533,6 +540,8 @@ class StorageTabMixin:
     def _on_maintenance_preview_done(self, plan):
         self._maintenance_worker = None
         if plan is None:
+            self.maintenance_tree.setVisible(False)
+            self.maintenance_summary.setVisible(True)
             self.maintenance_summary.setText("Maintenance preview cancelled. No changes were made.")
             self._set_maintenance_running(False)
             self._set_status("Maintenance preview cancelled.", "idle")
@@ -549,6 +558,8 @@ class StorageTabMixin:
             if action.kind == "remove_missing":
                 item.setToolTip(0, "Destructive library cleanup is never preselected.")
             self.maintenance_tree.addTopLevelItem(item)
+        self.maintenance_tree.setVisible(bool(plan.actions))
+        self.maintenance_summary.setVisible(True)
         diag = plan.diagnostics
         library = diag["library"]
         disk = diag["disk"]
@@ -609,11 +620,13 @@ class StorageTabMixin:
         self._set_maintenance_running(False)
         self.maintenance_apply_btn.setEnabled(False)
         if result is None or result.status == "cancelled":
+            self.maintenance_summary.setVisible(True)
             self.maintenance_summary.setText(
                 "Maintenance stopped between actions; completed actions remain audited. Preview again."
             )
             self._set_status("Maintenance cancelled safely between actions.", "warning")
             return
+        self.maintenance_summary.setVisible(True)
         self.maintenance_summary.setText(
             f"Maintenance {result.status}: {result.applied} applied, "
             f"{result.failed} failed, {result.skipped} skipped. "
@@ -632,6 +645,7 @@ class StorageTabMixin:
         if worker is not None and worker.isRunning():
             worker.requestInterruption()
             self.maintenance_cancel_btn.setEnabled(False)
+            self.maintenance_summary.setVisible(True)
             self.maintenance_summary.setText("Stopping safely between maintenance actions…")
 
     def _on_maintenance_failed(self, message):
@@ -639,6 +653,7 @@ class StorageTabMixin:
         self._maintenance_plan = None
         self._set_maintenance_running(False)
         self.maintenance_apply_btn.setEnabled(False)
+        self.maintenance_summary.setVisible(True)
         self.maintenance_summary.setText("Maintenance failed before completion. No unreported action ran.")
         self._log(f"[MAINTENANCE] {message}")
         self._set_status("Archive maintenance failed. See the log for details.", "error")

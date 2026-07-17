@@ -61,15 +61,15 @@ THEMES = {"dark": CAT_MOCHA, "light": CAT_LATTE, "high_contrast": CAT_HIGH_CONTR
 
 # Layout density presets (F75)
 DENSITY_COMPACT = {
-    "font_size": 14, "row_height": 40, "padding": 5, "control_h": 30,
-    "radius": 5, "scale": 0.78, "thumb_w": 80, "name": "compact",
+    "font_size": 15, "row_height": 40, "padding": 5, "control_h": 34,
+    "radius": 5, "scale": 0.82, "thumb_w": 80, "name": "compact",
 }
 DENSITY_COZY = {
-    "font_size": 15, "row_height": 52, "padding": 7, "control_h": 36,
-    "radius": 6, "scale": 0.9, "thumb_w": 104, "name": "cozy",
+    "font_size": 16, "row_height": 52, "padding": 7, "control_h": 40,
+    "radius": 6, "scale": 0.92, "thumb_w": 104, "name": "cozy",
 }
 DENSITY_SPACIOUS = {
-    "font_size": 16, "row_height": 72, "padding": 10, "control_h": 44,
+    "font_size": 17, "row_height": 72, "padding": 10, "control_h": 46,
     "radius": 7, "scale": 1.25, "thumb_w": 144, "name": "spacious",
 }
 DENSITIES = {"compact": DENSITY_COMPACT, "cozy": DENSITY_COZY, "spacious": DENSITY_SPACIOUS}
@@ -179,11 +179,23 @@ QFrame#composerCard {{
     border: none;
     border-radius: 0;
 }}
-QFrame#optionsRow, QFrame#workSection, QFrame#fieldBlock,
+QFrame#optionsRow, QFrame#fieldBlock,
 QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
     background-color: transparent;
     border: none;
     border-radius: 0;
+}}
+QFrame#queuePane, QFrame#activityPane, QFrame#dataPane,
+QFrame#analyticsPanel {{
+    background-color: {p['panelSoft']};
+    border: none;
+    border-radius: 4px;
+}}
+QFrame#activityPane {{ background-color: {p['panel']}; }}
+QFrame#settingsNav {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
 }}
 QFrame#card, QFrame#heroCard {{
     background-color: transparent;
@@ -236,47 +248,47 @@ QLabel {{
 }}
 QLabel#appBrand {{
     color: {p['text']};
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 750;
 }}
 QLabel#title {{
     color: {p['text']};
-    font-size: 25px;
+    font-size: 28px;
     font-weight: 750;
 }}
 QLabel#heroTitle {{
     color: {p['text']};
-    font-size: 23px;
+    font-size: 28px;
     font-weight: 750;
 }}
 QLabel#heroBody, QLabel#dialogBody {{
     color: {p['subtext0']};
-    font-size: 13px;
+    font-size: 14px;
 }}
 QLabel#sectionTitle {{
     color: {p['text']};
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 700;
 }}
 QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint,
 QLabel#subtleText, QLabel#statusBody {{
     color: {p['muted']};
-    font-size: 13px;
+    font-size: 14px;
 }}
 QLabel#fieldLabel, QLabel#metricLabel {{
     color: {p['subtext0']};
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 650;
 }}
 QLabel#metricValue, QLabel#shellStatValue {{
     color: {p['text']};
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
 }}
 QLabel#metricSubvalue, QLabel#shellStatBody, QLabel#shellStatMeta,
 QLabel#footerMeta, QLabel#statusLabel {{
     color: {p['muted']};
-    font-size: 13px;
+    font-size: 14px;
 }}
 QLabel#dialogEyebrow, QLabel#eyebrow {{
     color: {p['accent']};
@@ -334,6 +346,10 @@ QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
     selection-color: {on_accent};
 }}
 QLineEdit#globalSearch {{ background-color: {p['panel']}; }}
+QLineEdit#sourceComposer {{
+    background-color: {p['panel']};
+    min-height: 28px;
+}}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover,
 QTimeEdit:hover, QDateEdit:hover {{ border-color: {p['overlay0']}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
@@ -366,6 +382,15 @@ QPushButton#primary:disabled {{
 QPushButton#secondary {{ background-color: {p['surface0']}; }}
 QPushButton#ghost {{ background-color: transparent; color: {p['subtext1']}; }}
 QPushButton#ghost:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#commandGhost {{
+    background-color: transparent;
+    color: {p['subtext1']};
+    border: none;
+    border-radius: 0;
+    padding-left: 2px;
+    padding-right: 12px;
+}}
+QPushButton#commandGhost:hover {{ color: {p['text']}; background-color: transparent; }}
 QPushButton#toggleAccent {{ background-color: transparent; color: {p['subtext1']}; }}
 QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {p['accent']}; }}
 QPushButton#danger {{ background-color: {p['red']}; color: {_accent_text(p['red'])}; }}

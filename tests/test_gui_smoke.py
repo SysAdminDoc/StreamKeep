@@ -153,6 +153,10 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.findChild(QFrame, "appHeader") is not None
             assert window.findChild(QFrame, "appNav") is not None
             assert window.findChild(QFrame, "composerCard") is not None
+            assert window.findChild(QFrame, "queuePane") is not None
+            assert window.findChild(QFrame, "activityPane") is not None
+            assert len(window.findChildren(QFrame, "dataPane")) == 4
+            assert len(window.findChildren(QFrame, "analyticsPanel")) == 3
             work_surface = window.findChild(QSplitter, "workSurface")
             assert work_surface is not None
             assert work_surface.orientation() == Qt.Orientation.Horizontal
@@ -160,6 +164,16 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.scan_lan_check.text() == "Allow LAN for this scan"
             assert not window.scan_lan_check.isChecked()
             assert window.download_settings_action.isCheckable()
+            assert window.batch_import_btn.objectName() == "commandGhost"
+            assert window.download_advanced_btn.objectName() == "commandGhost"
+            assert [button.text() for button in window.settings_nav_buttons] == [
+                "General", "Access", "Downloads", "Companion",
+                "Automation", "Library", "Processing",
+            ]
+            assert all(
+                button.objectName() == "commandGhost"
+                for button in window.settings_nav_buttons
+            )
             assert window.time_range_action.isCheckable()
             assert window.adv_overrides_action.isCheckable()
             assert window.download_settings_panel.isHidden()
@@ -229,6 +243,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert not window._download_metric_state.isVisible()
 
             # Archive maintenance exposes an explicit dry-run/approval surface.
+            assert window.maintenance_summary.isHidden()
             from streamkeep.maintenance import plan_maintenance
             orphan_dir = tmp_path / "orphan-recording"
             orphan_dir.mkdir()
@@ -239,6 +254,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 db_module=main_window._db,
             )
             window._on_maintenance_preview_done(maintenance_plan)
+            assert not window.maintenance_summary.isHidden()
             assert window.maintenance_tree.accessibleName() == (
                 "Archive maintenance preview"
             )

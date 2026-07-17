@@ -7,9 +7,10 @@ webhook, dedup, media library, post-processing + converter, manual
 converter buttons, import/export/save row.
 """
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
+    QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -274,7 +275,7 @@ def build_settings_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(8)
+    lay.setSpacing(6)
     current_theme = str(win._config.get("theme", "dark") or "dark")
     current_density = str(win._config.get("visual_density", "cozy") or "cozy")
     current_accent = str(win._config.get("visual_accent", "") or "")
@@ -287,7 +288,7 @@ def build_settings_tab(win):
     hero = QFrame()
     hero.setObjectName("heroCard")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setContentsMargins(2, 2, 2, 4)
     hero_lay.setSpacing(4)
 
     hero_copy = QVBoxLayout()
@@ -321,7 +322,7 @@ def build_settings_tab(win):
     settings_metrics = QHBoxLayout()
     settings_metrics.setSpacing(18)
     theme_card, win.settings_theme_value, win.settings_theme_sub = make_metric_card(
-        "Appearance", theme_display, "Catppuccin-based desktop theme"
+        "Appearance", theme_display, current_density.title()
     )
     config_card, _, _ = make_metric_card(
         "Config",
@@ -331,13 +332,32 @@ def build_settings_tab(win):
     secrets_card, _, _ = make_metric_card(
         "Secrets",
         "Protected",
-        "Tokens stay local with Windows DPAPI",
+        "OS credential store",
     )
     settings_metrics.addWidget(theme_card)
     settings_metrics.addWidget(config_card, 1)
     settings_metrics.addWidget(secrets_card)
     hero_lay.addLayout(settings_metrics)
     lay.addWidget(hero)
+
+    settings_nav = QFrame()
+    settings_nav.setObjectName("settingsNav")
+    settings_nav_lay = QHBoxLayout(settings_nav)
+    settings_nav_lay.setContentsMargins(0, 0, 0, 5)
+    settings_nav_lay.setSpacing(3)
+    settings_nav_buttons = []
+    for label in (
+        "General", "Access", "Downloads", "Companion",
+        "Automation", "Library", "Processing",
+    ):
+        button = QPushButton(label)
+        button.setObjectName("commandGhost")
+        settings_nav_lay.addWidget(button)
+        settings_nav_buttons.append(button)
+    settings_nav_lay.addStretch(1)
+    win.settings_nav = settings_nav
+    win.settings_nav_buttons = settings_nav_buttons
+    lay.addWidget(settings_nav)
 
     # ── Card body ───────────────────────────────────────────────────
     card = QFrame()
@@ -2090,6 +2110,29 @@ def build_settings_tab(win):
     save_btn.clicked.connect(win._on_save_settings)
     save_row.addWidget(save_btn)
     card_lay.addLayout(save_row)
+
+    def _ensure_visible(target):
+        parent = page.parentWidget()
+        while parent is not None and not isinstance(parent, QScrollArea):
+            parent = parent.parentWidget()
+        if isinstance(parent, QScrollArea):
+            parent.ensureWidgetVisible(target, 12, 12)
+
+    settings_nav_targets = (
+        general_block,
+        cookies_block,
+        network_block,
+        companion_panel,
+        hook_block,
+        lib_block,
+        pp_block,
+    )
+    for button, target in zip(settings_nav_buttons, settings_nav_targets):
+        button.clicked.connect(
+            lambda _checked=False, target=target: QTimer.singleShot(
+                0, lambda target=target: _ensure_visible(target)
+            )
+        )
 
     lay.addWidget(card, 1)
     return page

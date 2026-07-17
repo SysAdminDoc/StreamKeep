@@ -1423,7 +1423,9 @@ class StreamKeep(
 
         self.shell_snapshot_value.setText(headline)
         self.shell_snapshot_detail.setText(detail)
-        self.shell_snapshot_meta.setText(f"{active_jobs} active  •  {queued} queued")
+        self.shell_snapshot_meta.setText(
+            f"{active_jobs} active  •  {queued} queued  •  {archived} archived"
+        )
 
 
     # Download-tab handlers moved to DownloadTabMixin in
@@ -1435,8 +1437,8 @@ class StreamKeep(
         central.setObjectName("chrome")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(20, 8, 20, 6)
-        root.setSpacing(8)
+        root.setContentsMargins(24, 10, 24, 6)
+        root.setSpacing(7)
 
         header_card = QFrame()
         header_card.setObjectName("appHeader")
@@ -1445,8 +1447,8 @@ class StreamKeep(
         header_lay.setSpacing(0)
 
         header_top = QHBoxLayout()
-        header_top.setContentsMargins(0, 0, 0, 6)
-        header_top.setSpacing(14)
+        header_top.setContentsMargins(0, 0, 0, 8)
+        header_top.setSpacing(18)
         title = QLabel("StreamKeep")
         title.setObjectName("appBrand")
         title.setMinimumWidth(180)
@@ -1461,8 +1463,8 @@ class StreamKeep(
             "Search StreamKeep",
             "Search downloads, URLs, monitored channels, and podcasts",
         )
-        self._global_search.setMinimumHeight(36)
-        self._global_search.setMaximumWidth(760)
+        self._global_search.setMinimumHeight(40)
+        self._global_search.setMaximumWidth(820)
         self._global_search_timer = QTimer(self)
         self._global_search_timer.setSingleShot(True)
         self._global_search_timer.setInterval(300)
@@ -1499,7 +1501,7 @@ class StreamKeep(
         tab_shell.setObjectName("appNav")
         tab_lay = QHBoxLayout(tab_shell)
         tab_lay.setContentsMargins(0, 0, 0, 0)
-        tab_lay.setSpacing(26)
+        tab_lay.setSpacing(34)
 
         self._tab_btns = []
         self._tab_names = ["Download", "Monitor", "History", "Storage", "Analytics", "Settings"]

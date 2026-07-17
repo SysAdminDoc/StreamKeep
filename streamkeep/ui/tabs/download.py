@@ -42,12 +42,12 @@ def build_download_tab(win):
     page = QWidget()
     root = QVBoxLayout(page)
     root.setContentsMargins(0, 0, 0, 0)
-    root.setSpacing(8)
+    root.setSpacing(6)
 
     hero = QFrame()
     hero.setObjectName("pageHeader")
     hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(4, 6, 4, 2)
+    hero_lay.setContentsMargins(2, 2, 2, 4)
     hero_lay.setSpacing(2)
 
     win.download_hero_title = QLabel("New download")
@@ -161,6 +161,7 @@ def build_download_tab(win):
     url_row = QHBoxLayout()
     url_row.setSpacing(10)
     win.url_input = QLineEdit()
+    win.url_input.setObjectName("sourceComposer")
     win.url_input.setPlaceholderText(
         "Paste a stream, channel, VOD, or direct media URL…"
     )
@@ -198,10 +199,9 @@ def build_download_tab(win):
     url_row.addWidget(win.fetch_btn)
 
     win.batch_import_btn = QPushButton("Import")
-    win.batch_import_btn.setObjectName("secondary")
+    win.batch_import_btn.setObjectName("commandGhost")
     win.batch_import_btn.setToolTip("Import URLs from a text file (one per line) and queue them all (F44)")
     win.batch_import_btn.clicked.connect(win._on_batch_url_import)
-    url_row.addWidget(win.batch_import_btn)
 
     # Keep secondary intake paths reachable without making every action
     # compete with the URL field. Hidden proxy widgets preserve the worker
@@ -227,7 +227,8 @@ def build_download_tab(win):
     win.queue_btn.setVisible(False)
 
     more_btn = QPushButton("Advanced")
-    more_btn.setObjectName("secondary")
+    more_btn.setObjectName("commandGhost")
+    win.download_advanced_btn = more_btn
     more_menu = QMenu(more_btn)
     queue_action = more_menu.addAction("Add URL to queue")
     queue_action.triggered.connect(win.queue_btn.click)
@@ -255,8 +256,15 @@ def build_download_tab(win):
     win.adv_overrides_action = more_menu.addAction("Per-download overrides")
     win.adv_overrides_action.setCheckable(True)
     more_btn.setMenu(more_menu)
-    url_row.addWidget(more_btn)
     url_lay.addLayout(url_row)
+
+    command_row = QHBoxLayout()
+    command_row.setContentsMargins(2, 0, 0, 0)
+    command_row.setSpacing(4)
+    command_row.addWidget(win.batch_import_btn)
+    command_row.addWidget(more_btn)
+    command_row.addStretch(1)
+    url_lay.addLayout(command_row)
 
     win.info_label = QLabel("")
     win.info_label.setObjectName("streamInfo")
@@ -914,7 +922,7 @@ def build_download_tab(win):
     splitter.setChildrenCollapsible(False)
 
     table_frame = QFrame()
-    table_frame.setObjectName("workSection")
+    table_frame.setObjectName("dataPane")
     table_lay = QVBoxLayout(table_frame)
     table_lay.setContentsMargins(4, 10, 4, 4)
     table_lay.setSpacing(8)
@@ -970,9 +978,9 @@ def build_download_tab(win):
     splitter.addWidget(table_frame)
 
     log_frame = QFrame()
-    log_frame.setObjectName("workSection")
+    log_frame.setObjectName("activityPane")
     log_lay = QVBoxLayout(log_frame)
-    log_lay.setContentsMargins(18, 10, 4, 4)
+    log_lay.setContentsMargins(18, 14, 14, 10)
     log_lay.setSpacing(8)
 
     log_header = QHBoxLayout()
@@ -1022,9 +1030,9 @@ def build_download_tab(win):
 
     # Queue panel — shows pending items
     queue_card = QFrame()
-    queue_card.setObjectName("workSection")
+    queue_card.setObjectName("queuePane")
     qcard_lay = QVBoxLayout(queue_card)
-    qcard_lay.setContentsMargins(4, 10, 18, 4)
+    qcard_lay.setContentsMargins(14, 14, 14, 10)
     qcard_lay.setSpacing(8)
     queue_header = QHBoxLayout()
     qt = QLabel("Queue")

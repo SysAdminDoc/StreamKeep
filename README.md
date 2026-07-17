@@ -1,6 +1,6 @@
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.36.2-blue)
+![Version](https://img.shields.io/badge/version-4.36.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -140,7 +140,7 @@ Choose English or Spanish under Settings → Appearance; the open shell, dialogs
 
 ### Desktop Appearance
 
-Settings → Appearance offers System, Dark, Light, and High Contrast themes; Compact, Cozy, and Spacious density modes; and a theme-default or named accent. These choices persist together and update every open StreamKeep surface immediately. The shared visual system uses readable 15px default type, compact headers, single-line operational metrics, open table rows, restrained six-pixel control radii, and borders reserved for editable controls, focus, and hairline structure. Page hierarchy comes from alignment and spacing instead of nested dashboard cards or status pills. On Download, the URL, paste, fetch, import, and advanced actions share one compact command row; secondary intake paths and per-job settings remain grouped in the Advanced menu instead of occupying a permanent toolbar. Fixed-width text controls are released when a larger density would clip them, and offscreen theme/density screenshot matrices plus a separate 200%-scale high-contrast check guard the supported layouts.
+Settings → Appearance offers System, Dark, Light, and High Contrast themes; Compact, Cozy, and Spacious density modes; and a theme-default or named accent. These choices persist together and update every open StreamKeep surface immediately. The shared visual system uses readable 16px default type, compact headers, single-line operational metrics, open table rows, restrained six-pixel control radii, and borders reserved for editable controls, focus, and hairline structure. Page hierarchy comes from alignment, spacing, and quiet tonal work panes instead of nested dashboard cards or status pills. Download keeps URL, Paste, and Fetch in the primary composer while Import and Advanced sit in a subordinate borderless command row; secondary intake paths and per-job settings remain grouped in Advanced. Monitor, History, and Storage elevate their data surfaces, Analytics supplies deliberate empty states, and Settings offers category shortcuts above its long-form controls. Fixed-width text controls are released when a larger density would clip them, and offscreen theme/density screenshot matrices plus a separate 200%-scale high-contrast check guard the supported layouts.
 
 ## Browser Companion
 
