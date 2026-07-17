@@ -211,6 +211,8 @@ python StreamKeep.py download --help
 python StreamKeep.py server --help
 ```
 
+Install test tooling with `python -m pip install -r requirements-dev.txt`. The default pytest run measures `streamkeep/`, prints uncovered lines, and enforces the current 47.5% project floor; raise the floor as the GUI and integration seams gain coverage.
+
 When pyflakes is installed, also run:
 
 ```powershell
