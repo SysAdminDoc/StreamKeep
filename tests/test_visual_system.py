@@ -60,6 +60,18 @@ def test_visual_state_applies_theme_density_accent_and_contrast(qt_application):
         apply_visual_system("dark", "cozy", "", qt_application)
 
 
+def test_secondary_text_meets_wcag_aa_in_every_palette():
+    from streamkeep.theme import THEMES
+
+    for name, palette in THEMES.items():
+        for surface in ("panel", "base"):
+            for token in ("text", "subtext0", "subtext1", "muted"):
+                ratio = contrast_ratio(palette[token], palette[surface])
+                assert ratio >= 4.5, (
+                    f"{name}: {token} on {surface} = {ratio:.2f} (< 4.5:1 WCAG AA)"
+                )
+
+
 def test_density_releases_clipped_fixed_text_and_scales_table_rows(qt_application):
     root = QWidget()
     layout = QVBoxLayout(root)

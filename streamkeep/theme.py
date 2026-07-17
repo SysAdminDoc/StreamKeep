@@ -27,14 +27,17 @@ STREAMKEEP_LIGHT = {
     "base": "#eff1f5", "mantle": "#e6e9ef", "crust": "#dce0e8",
     "surface0": "#ccd0da", "surface1": "#bcc0cc", "surface2": "#acb0be",
     "overlay0": "#9ca0b0", "overlay1": "#8c8fa1",
-    "text": "#4c4f69", "subtext0": "#6c6f85", "subtext1": "#5c5f77",
+    # subtext0/muted darkened from Latte's #6c6f85 (4.06:1 on panel) to clear
+    # WCAG AA 4.5:1 for secondary/hint text while keeping the text hierarchy
+    # (subtext0 < subtext1 < text).
+    "text": "#4c4f69", "subtext0": "#606374", "subtext1": "#5c5f77",
     "lavender": "#7287fd", "blue": "#1e66f5", "sapphire": "#209fb5",
     "sky": "#04a5e5", "teal": "#179299", "green": "#40a02b",
     "yellow": "#df8e1d", "peach": "#fe640b", "maroon": "#e64553",
     "red": "#d20f39", "mauve": "#8839ef", "pink": "#ea76cb",
     "flamingo": "#dd7878", "rosewater": "#dc8a78",
     "panel": "#e6e9ef", "panelHi": "#dce0e8", "panelSoft": "#eff1f5",
-    "stroke": "#bcc0cc", "muted": "#6c6f85", "accent": "#1e66f5",
+    "stroke": "#bcc0cc", "muted": "#606374", "accent": "#1e66f5",
     "accentSoft": "#40a02b", "gold": "#df8e1d",
 }
 
