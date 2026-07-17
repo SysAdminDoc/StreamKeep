@@ -182,7 +182,7 @@ Credential values are stored outside `config.json` in the operating-system crede
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- PyInstaller single-file builds for Windows with `python packaging/build.py --clean --noconfirm`. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
+- PyInstaller single-file builds for Windows with `python packaging/build.py --clean --noconfirm`. `streamkeep/__init__.py::VERSION` is the release version source; the portable and MSIX builders stamp the README, MSIX manifest, Flatpak metainfo, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
 - MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
 - Flatpak packaging under `packaging/flatpak/`.
 - Browser companion extension packaging from `browser-extension/`.
@@ -209,6 +209,7 @@ Run the lightweight validation bundle before release:
 ```powershell
 python -m compileall StreamKeep.py streamkeep tests
 python -m streamkeep.i18n.compile_translations
+python packaging/versioning.py
 python -m pytest -q
 python StreamKeep.py --version
 python StreamKeep.py --list-extractors

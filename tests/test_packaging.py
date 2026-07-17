@@ -10,6 +10,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packaging"))
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_release_version_is_consistent_across_claimed_metadata():
+    from versioning import read_version, version_drift
+
+    assert re.fullmatch(r"\d+\.\d+\.\d+", read_version(ROOT))
+    assert version_drift(ROOT) == []
+
+
+def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
+    from versioning import stamp_versions, version_drift
+
+    files = {
+        "streamkeep/__init__.py": 'VERSION = "5.2.1"\n',
+        "README.md": "![Version](https://img.shields.io/badge/version-0.0.0-blue)\n",
+        "packaging/msix/AppxManifest.xml": '<Identity Name="StreamKeep" Version="0.0.0.0" />\n',
+        "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml": (
+            '<releases><release version="0.0.0" date="2026-01-01" /></releases>\n'
+        ),
+        "ROADMAP.md": "- Current package version: v0.0.0.\n",
+    }
+    for relative, source in files.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    assert len(stamp_versions(tmp_path)) == 4
+    assert version_drift(tmp_path) == []
+    assert "version-5.2.1-blue" in (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert 'Version="5.2.1.0"' in (
+        tmp_path / "packaging/msix/AppxManifest.xml"
+    ).read_text(encoding="utf-8")
+    assert '<release version="5.2.1"' in (
+        tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
+    ).read_text(encoding="utf-8")
+    assert "v5.2.1." in (tmp_path / "ROADMAP.md").read_text(encoding="utf-8")
+    assert stamp_versions(tmp_path) == []
+
+
 def test_pyinstaller_spec_includes_release_assets():
     spec = (ROOT / "StreamKeep.spec").read_text(encoding="utf-8")
     compact = spec.replace(" ", "")

@@ -23,6 +23,9 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 MANIFEST = SCRIPT_DIR / "AppxManifest.xml"
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+from versioning import stamp_versions  # noqa: E402
+
 ICON_SIZES = {
     "icon-44.png": 44,
     "icon-71.png": 71,
@@ -139,6 +142,8 @@ def main():
     if not dist_dir.is_dir():
         print(f"ERROR: {dist_dir} is not a directory")
         sys.exit(1)
+
+    stamp_versions(SCRIPT_DIR.parents[1])
 
     makeappx = _find_makeappx()
     if not makeappx:

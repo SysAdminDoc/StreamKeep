@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from sqlite_runtime import acquire
+from versioning import stamp_versions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,8 @@ def main(argv=None):
     parser.add_argument("--noconfirm", action="store_true")
     parser.add_argument("--sqlite-dll", type=Path)
     args = parser.parse_args(argv)
+
+    stamp_versions(ROOT)
 
     environment = os.environ.copy()
     sqlite_dll = args.sqlite_dll
