@@ -169,17 +169,23 @@ def main():
     from PyQt6.QtGui import QIcon
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
+    from streamkeep.paths import CONFIG_DIR
+    from streamkeep.single_instance import acquire_gui_instance_lock
     from streamkeep.theme import apply_visual_system
     from streamkeep.ui.main_window import StreamKeep
 
     app = QApplication(sys.argv)
+    instance_lock = acquire_gui_instance_lock(CONFIG_DIR)
+    if instance_lock is None:
+        return
+    # Keep the QLockFile alive for the full QApplication lifetime.
+    app._streamkeep_instance_lock = instance_lock
     branding_icon = QIcon(str(_branding_icon_path()))
     app.setWindowIcon(branding_icon)
     app.setStyle("Fusion")
     # Apply saved theme (F20) — defaults to dark/Mocha
     try:
         import json
-        from streamkeep.paths import CONFIG_DIR
         cfg_file = CONFIG_DIR / "config.json"
         if cfg_file.exists():
             with open(cfg_file, "r", encoding="utf-8") as _f:

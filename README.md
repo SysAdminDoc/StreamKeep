@@ -1,6 +1,6 @@
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.36.1-blue)
+![Version](https://img.shields.io/badge/version-4.36.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
