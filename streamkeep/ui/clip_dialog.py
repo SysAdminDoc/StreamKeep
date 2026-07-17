@@ -820,7 +820,7 @@ class ClipDialog(TranslatableDialog):
         self.cancel_btn.setObjectName("secondary")
         self.cancel_btn.clicked.connect(self._on_close_or_cancel)
         btn_row.addWidget(self.cancel_btn)
-        self.trim_btn = QPushButton("Export clip")
+        self.trim_btn = QPushButton("Export Clip")
         self.trim_btn.setObjectName("primary")
         self.trim_btn.clicked.connect(self._on_trim)
         btn_row.addWidget(self.trim_btn)

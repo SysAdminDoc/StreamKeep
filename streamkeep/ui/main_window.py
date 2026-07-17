@@ -342,7 +342,7 @@ class StreamKeep(
             existing = btn.toolTip() or btn.text()
             btn.setToolTip(f"{existing}  (Ctrl+{i + 1})")
         if hasattr(self, "fetch_btn"):
-            self.fetch_btn.setToolTip("Fetch stream info  (Enter)")
+            self.fetch_btn.setToolTip("Resolve stream info  (Enter)")
         if hasattr(self, "download_btn"):
             self.download_btn.setToolTip("Start download  (Enter)")
         if hasattr(self, "stop_btn"):
