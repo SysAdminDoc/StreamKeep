@@ -1511,6 +1511,34 @@ def build_settings_tab(win):
     win.sponsorblock_check.toggled.connect(_toggle_sponsorblock_defaults)
     _toggle_sponsorblock_defaults(saved_sponsor_enabled)
 
+    # YouTube player_client strategy (V19) — the single most effective knob
+    # when YouTube caps quality, demands sign-in, or a download breaks.
+    from ...extractors.ytdlp import YOUTUBE_PLAYER_CLIENT_PRESETS
+    pc_row = QHBoxLayout()
+    pc_row.setSpacing(8)
+    pc_label = QLabel("YouTube client:")
+    pc_label.setFixedWidth(100)
+    pc_row.addWidget(pc_label)
+    win.youtube_client_combo = QComboBox()
+    win.youtube_client_combo.setToolTip(
+        "Which player client yt-dlp impersonates for YouTube. Change this if "
+        "YouTube caps quality, demands sign-in, or a working download breaks. "
+        "Run 'StreamKeep.py youtube-health' for a full capability report."
+    )
+    _seen_pc_labels = set()
+    for pc_key, (pc_label_text, _pc_value) in YOUTUBE_PLAYER_CLIENT_PRESETS.items():
+        if pc_key == "default" or pc_label_text in _seen_pc_labels:
+            continue  # "" already supplies the Automatic entry
+        _seen_pc_labels.add(pc_label_text)
+        win.youtube_client_combo.addItem(pc_label_text, userData=pc_key)
+    saved_pc = str(win._config.get("youtube_player_client", "") or "")
+    saved_pc_idx = win.youtube_client_combo.findData(saved_pc)
+    if saved_pc_idx >= 0:
+        win.youtube_client_combo.setCurrentIndex(saved_pc_idx)
+    YtDlpExtractor.youtube_player_client = saved_pc
+    pc_row.addWidget(win.youtube_client_combo, 1)
+    yt_lay.addLayout(pc_row)
+
     card_lay.addWidget(yt_block)
 
     # ── Filename templates ─────────────────────────────────────────

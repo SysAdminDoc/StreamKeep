@@ -169,6 +169,115 @@ def format_ytdlp_runtime_warning(status):
     return "yt-dlp runtime support is not ready: " + status.get("detail", "")
 
 
+# ── YouTube player_client strategy presets (V19) ────────────────────
+#
+# YouTube's SABR-only enforcement and PO-token requirements vary by the
+# "player client" yt-dlp impersonates. Pinning a client set is the single
+# most effective knob when YouTube suddenly caps quality, demands sign-in,
+# or breaks a working download after a server-side change. Empty string ==
+# let yt-dlp choose its own defaults (recommended unless there's a problem).
+#
+# key -> (human label, comma-joined yt-dlp player_client value)
+YOUTUBE_PLAYER_CLIENT_PRESETS = {
+    "": ("Automatic (yt-dlp default)", ""),
+    "default": ("Automatic (yt-dlp default)", ""),
+    "web_safari": ("Web Safari — full formats", "web_safari"),
+    "android_vr": ("Android VR — dodges SABR-only", "android_vr"),
+    "tv": ("TV — embed/age tolerant", "tv"),
+    "ios": ("iOS", "ios"),
+    "mweb": ("Mobile web", "mweb"),
+    "resilient": (
+        "Resilient (web_safari, android_vr, tv)",
+        "web_safari,android_vr,tv",
+    ),
+}
+
+
+def youtube_player_client_value(preset):
+    """Return the yt-dlp player_client value for *preset*, or '' if none."""
+    entry = YOUTUBE_PLAYER_CLIENT_PRESETS.get(str(preset or "").strip())
+    return entry[1] if entry else ""
+
+
+def youtube_player_client_args(preset, url=None):
+    """Return ``['--extractor-args', 'youtube:player_client=...']`` for
+    *preset*, or ``[]`` when the preset is empty/unknown or *url* (when
+    given) is not a YouTube URL."""
+    if url is not None and not _is_youtube_url(url):
+        return []
+    value = youtube_player_client_value(preset)
+    if not value:
+        return []
+    return ["--extractor-args", f"youtube:player_client={value}"]
+
+
+# Known yt-dlp PO-token provider plugin packages. A provider supplies the
+# proof-of-origin tokens some YouTube formats now require; without one,
+# certain qualities and age-gated videos fail even with a JS runtime.
+_POT_PROVIDER_MODULES = (
+    "bgutil_ytdlp_pot_provider",
+    "yt_dlp_get_pot",
+)
+
+
+def youtube_pot_provider_status():
+    """Best-effort local detection of a yt-dlp PO-token provider plugin.
+
+    Network-free: checks whether a known provider module is importable.
+    Returns ``{"available": bool, "provider": str, "detail": str}``.
+    """
+    for module in _POT_PROVIDER_MODULES:
+        try:
+            found = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            found = False
+        if found:
+            return {
+                "available": True,
+                "provider": module,
+                "detail": f"PO-token provider '{module}' detected.",
+            }
+    return {
+        "available": False,
+        "provider": "",
+        "detail": (
+            "No PO-token provider plugin detected. Some YouTube formats and "
+            "age-restricted videos may be unavailable. Install "
+            "bgutil-ytdlp-pot-provider to enable them."
+        ),
+    }
+
+
+def youtube_health_report(player_client=""):
+    """Aggregate the YouTube capability picture into one report.
+
+    Combines the yt-dlp/EJS/JS-runtime readiness, the active player_client
+    strategy, and PO-token provider presence, plus a list of plain-language
+    warnings. Purely local — safe to run headless and offline.
+    """
+    runtime = ytdlp_runtime_status()
+    pot = youtube_pot_provider_status()
+    client_value = youtube_player_client_value(player_client)
+    warnings = list(runtime.get("problems") or [])
+    runtime_warning = format_ytdlp_runtime_warning(runtime)
+    if runtime_warning and runtime_warning not in warnings:
+        warnings.append(runtime_warning)
+    if not pot["available"]:
+        warnings.append(pot["detail"])
+    healthy = runtime.get("state") == "ready"
+    return {
+        "healthy": healthy,
+        "state": runtime.get("state", ""),
+        "summary": runtime.get("summary", ""),
+        "yt_dlp_version": runtime.get("yt_dlp_version", ""),
+        "js_runtime": runtime.get("js_runtime", {}),
+        "ejs_available": runtime.get("ejs_available", False),
+        "player_client": client_value or "default",
+        "pot_provider": pot,
+        "warnings": warnings,
+    }
+
+
 class YtDlpExtractor(Extractor):
     NAME = "yt-dlp"
     ICON = "Y"
@@ -187,6 +296,8 @@ class YtDlpExtractor(Extractor):
     subtitle_auto = True
     subtitle_convert = ""
     subtitle_embed = True
+    # YouTube player_client strategy preset (see YOUTUBE_PLAYER_CLIENT_PRESETS).
+    youtube_player_client = ""
     sponsorblock = False
     sponsorblock_mark = ""
     sponsorblock_remove = "sponsor,selfpromo,interaction"
@@ -230,6 +341,7 @@ class YtDlpExtractor(Extractor):
         cmd = ytdlp_command() + ["--dump-json", "--no-download"]
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
+        cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         if self.cookies_file and os.path.isfile(self.cookies_file):
             cmd.extend(["--cookies", self.cookies_file])
         elif self.cookies_browser:
@@ -274,6 +386,7 @@ class YtDlpExtractor(Extractor):
         cmd = ytdlp_command() + ["--dump-json", "--no-download"]
         if log_fn and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
+        cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
         try:
             result = run_capture_interruptible(cmd, timeout=60)

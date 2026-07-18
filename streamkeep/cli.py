@@ -494,6 +494,20 @@ def _run_server(args):
         cfg["output_dir"] = output_dir
         save_config(cfg)
 
+    # Apply the YouTube player_client strategy (config default, --youtube-client
+    # override) so the CLI/headless download honors it like the GUI does.
+    from .extractors.ytdlp import YOUTUBE_PLAYER_CLIENT_PRESETS, YtDlpExtractor
+    yt_client = getattr(args, "youtube_client", "") or str(
+        cfg.get("youtube_player_client", "") or ""
+    )
+    if yt_client and yt_client not in YOUTUBE_PLAYER_CLIENT_PRESETS:
+        _print_line(
+            f"Unknown --youtube-client '{yt_client}'. Valid: "
+            + ", ".join(k for k in YOUTUBE_PLAYER_CLIENT_PRESETS if k)
+        )
+        sys.exit(2)
+    YtDlpExtractor.youtube_player_client = yt_client
+
     from . import db
     app = QCoreApplication(sys.argv)
     db.init_db()
@@ -790,6 +804,38 @@ def _run_credentials_check(args):
         sys.exit(1)
 
 
+def _run_youtube_health(args):
+    """Report the local YouTube capability picture (runtime, PO-token, client).
+
+    Exit code 1 when the runtime is not ready (yt-dlp/JS runtime missing or
+    blocked); a missing PO-token provider is advisory and keeps exit code 0.
+    """
+    from .config import load_config
+    from .extractors.ytdlp import youtube_health_report
+
+    preset = str(load_config().get("youtube_player_client", "") or "")
+    report = youtube_health_report(player_client=preset)
+
+    if getattr(args, "json", False):
+        _print_line(json.dumps(report, indent=2))
+    else:
+        _print_line(f"YouTube capability: {report['summary'] or report['state']}")
+        _print_line(f"  yt-dlp version : {report['yt_dlp_version'] or 'unknown'}")
+        runtime = report.get("js_runtime") or {}
+        _print_line(f"  JS runtime     : {runtime.get('name') or 'none'}")
+        _print_line(f"  EJS available  : {'yes' if report['ejs_available'] else 'no'}")
+        _print_line(f"  player_client  : {report['player_client']}")
+        _print_line(
+            f"  PO-token       : "
+            f"{'detected' if report['pot_provider']['available'] else 'not detected'}"
+        )
+        for warning in report["warnings"]:
+            _print_line(f"  ! {warning}")
+
+    if not report["healthy"]:
+        sys.exit(1)
+
+
 def _run_protocol_register(args):
     """Register the per-user streamkeep:// handler (Windows)."""
     from .protocol import register_windows_protocol
@@ -836,6 +882,11 @@ def build_parser():
                     help="Output directory (default: config or ~/Videos/StreamKeep)")
     dl.add_argument("--rate-limit", default="",
                     help="Bandwidth limit (e.g. 5M, 500K)")
+    dl.add_argument(
+        "--youtube-client", dest="youtube_client", default="",
+        choices=["", "web_safari", "android_vr", "tv", "ios", "mweb", "resilient"],
+        help="YouTube player_client strategy (overrides the saved default)",
+    )
     dl.add_argument(
         "-f", "--format", "--format-spec", dest="format_spec", default="",
         help="Raw yt-dlp format specification (passed verbatim to -f)",
@@ -1070,6 +1121,15 @@ def build_parser():
     ).add_argument("--config-dir", default=argparse.SUPPRESS,
                    help="Override the config/database directory")
 
+    yth_p = sub.add_parser(
+        "youtube-health",
+        help="Report YouTube capability: yt-dlp/JS runtime, PO-token, player_client",
+    )
+    yth_p.add_argument("--json", action="store_true",
+                       help="Emit the redacted report as JSON")
+    yth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
+
     cred_p = sub.add_parser(
         "credentials",
         help="Validate stored platform credentials and the cookie profile",
@@ -1206,6 +1266,8 @@ def run_cli(argv=None):
         _run_podcast_sidecars(args)
     elif args.command == "credentials":
         _run_credentials_check(args)
+    elif args.command == "youtube-health":
+        _run_youtube_health(args)
     elif args.command == "register-protocol":
         _run_protocol_register(args)
     elif args.command == "unregister-protocol":
@@ -1226,7 +1288,7 @@ def has_cli_args():
     cli_triggers = {
         "download", "dl", "server", "extractors", "db", "snapshot", "backup",
         "startup-check", "import-har", "podcast-sidecars", "credentials",
-        "register-protocol", "unregister-protocol", "bookmarklet",
+        "youtube-health", "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
     if any(arg in cli_triggers for arg in sys.argv[1:]):

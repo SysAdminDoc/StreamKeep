@@ -531,6 +531,10 @@ class SettingsPreferencesMixin:
             self._config["capture_youtube_chat"] = (
                 self.capture_youtube_chat_check.isChecked()
             )
+        if hasattr(self, "youtube_client_combo"):
+            preset = str(self.youtube_client_combo.currentData() or "")
+            YtDlpExtractor.youtube_player_client = preset
+            self._config["youtube_player_client"] = preset
         self._config["download_subs"] = subtitle_options["enabled"]
         self._config["subtitle_languages"] = subtitle_options["languages"]
         self._config["subtitle_auto"] = subtitle_options["automatic"]

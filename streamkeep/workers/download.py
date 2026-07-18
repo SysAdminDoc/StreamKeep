@@ -419,8 +419,10 @@ class DownloadWorker(QThread):
             cmd.extend(ytdlp_impersonate_args())
         try:
             from ..extractors.ytdlp import (
+                YtDlpExtractor,
                 _is_youtube_url,
                 format_ytdlp_runtime_warning,
+                youtube_player_client_args,
                 ytdlp_runtime_args,
                 ytdlp_runtime_status,
             )
@@ -430,6 +432,10 @@ class DownloadWorker(QThread):
                 if warning:
                     self.log.emit(f"[WARN] {warning}")
                 cmd.extend(ytdlp_runtime_args(runtime_status))
+                cmd.extend(youtube_player_client_args(
+                    YtDlpExtractor.youtube_player_client,
+                    self._effective_ytdlp_source(),
+                ))
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         source = self._effective_ytdlp_source()

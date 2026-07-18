@@ -59,6 +59,21 @@ def test_credentials_command_reports_no_stored_credentials(tmp_path):
     assert "token" not in result.stdout.lower() or "no_credential" in result.stdout
 
 
+def test_youtube_health_command_emits_report(tmp_path):
+    config_dir = tmp_path / "isolated"
+    result = _run_launcher(
+        "youtube-health", "--json", "--config-dir", config_dir,
+        appdata=tmp_path / "ambient-appdata",
+    )
+    # Exit 0 or 1 depending on whether a JS runtime is present on this box;
+    # either way the report must be well-formed JSON with the expected keys.
+    assert result.returncode in (0, 1), result.stderr
+    payload = json.loads(result.stdout)
+    for key in ("healthy", "state", "player_client", "pot_provider", "warnings"):
+        assert key in payload
+    assert isinstance(payload["warnings"], list)
+
+
 def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     config_dir = tmp_path / "isolated"
     result = _run_launcher(

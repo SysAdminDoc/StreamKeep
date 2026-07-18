@@ -58,7 +58,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 - [ ] V16 — URL-pattern → profile auto-selection + zero-dialog Smart Mode toggle. Effort: M
 - [ ] V17 — Quality-upgrade redownload pass + retention policies (delete after N days / after watched / keep-last). Effort: M
 - [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
-- [ ] V19 — YouTube health doctor: Deno/EJS runtime detect, PO-token provider status, player_client strategy presets, degraded-capability warnings. Effort: M
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
 - [ ] V25 — lux fallback routing for CN platforms (bilibili/douyin/youku). Effort: M
 

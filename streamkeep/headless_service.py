@@ -662,6 +662,9 @@ class HeadlessJobService(QObject):
         YtDlpExtractor.cookies_browser = str(
             self.config.get("cookies_browser", "") or ""
         )
+        YtDlpExtractor.youtube_player_client = str(
+            self.config.get("youtube_player_client", "") or ""
+        )
         YtDlpExtractor.rate_limit = str(self.config.get("rate_limit", "") or "")
         YtDlpExtractor.proxy = str(self.config.get("proxy", "") or "")
         YtDlpExtractor.download_subs = bool(
