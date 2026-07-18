@@ -63,6 +63,13 @@ class _FakeDownloadWorker(QObject):
         self.parallel_connections = 1
         self._running = False
 
+    @classmethod
+    def from_spec(cls, spec):
+        w = cls(spec.playlist_url, [list(s) for s in spec.segments],
+                spec.output_dir, spec.format_type)
+        spec.apply_to_worker(w)
+        return w
+
     def start(self):
         self._running = True
         path = Path(self.output_dir) / f"{self.segments[0][1]}.mp4"

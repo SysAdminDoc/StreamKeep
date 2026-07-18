@@ -290,43 +290,13 @@ class HeadlessJobService(QObject):
             0, safe_filename(title), 0,
             0 if is_live else int(getattr(info, "total_secs", 0) or 0),
         )]
-        worker = DownloadWorker(playlist_url or "", segments, output_dir, format_type)
-        if quality:
-            worker.audio_url = quality.audio_url
-            worker.selected_tracks = default_media_tracks(quality)
-            worker.ytdlp_source = quality.ytdlp_source
-            worker.ytdlp_format = quality.ytdlp_format
-        worker.parallel_connections = self.parallel_connections
-        worker.cookies_browser = str(self.config.get("cookies_browser", "") or "")
-        worker.rate_limit = str(self.config.get("rate_limit", "") or "")
-        worker.proxy = str(self.config.get("proxy", "") or "")
-        worker.download_subs = bool(self.config.get("download_subs", False))
-        worker.capture_youtube_chat = bool(self.config.get("capture_youtube_chat", False))
-        worker.subtitle_languages = str(
-            self.config.get("subtitle_languages", "en.*,en") or ""
-        )
-        worker.subtitle_auto = bool(self.config.get("subtitle_auto", True))
-        worker.subtitle_convert = str(
-            self.config.get("subtitle_convert", "") or ""
-        )
-        worker.subtitle_embed = bool(self.config.get("subtitle_embed", True))
-        worker.sponsorblock = bool(self.config.get("sponsorblock", False))
-        worker.sponsorblock_mark = str(
-            self.config.get("sponsorblock_mark", "") or ""
-        )
-        worker.sponsorblock_remove = str(
-            self.config.get(
-                "sponsorblock_remove", "sponsor,selfpromo,interaction"
-            ) or ""
-        )
-        worker.sponsorblock_api = str(
-            self.config.get("sponsorblock_api", "") or ""
-        )
         from .download_options import (
             apply_external_downloader_options, apply_ytdlp_transfer_options,
+            resolve_external_downloader_options,
+            resolve_ytdlp_arg_template, resolve_ytdlp_transfer_options,
         )
-        apply_ytdlp_transfer_options(worker, self.config)
-        apply_external_downloader_options(worker, self.config)
+        from .job_spec import DownloadJobSpec
+
         template_name = str(job.get("arg_template", "") or "")
         if template_name and format_type != "ytdlp_direct":
             self._fail_job(
@@ -336,31 +306,81 @@ class HeadlessJobService(QObject):
             )
             return
         try:
-            from .download_options import resolve_ytdlp_arg_template
-            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+            ytdlp_template_args = resolve_ytdlp_arg_template(
                 self.config.get("ytdlp_arg_templates", {}), template_name,
             )
-            worker.ytdlp_template_name = template_name
         except ValueError as error:
             self._fail_job(
                 job_id, "download", str(error), info=info,
                 output_dir=output_dir,
             )
             return
+
+        transfer = resolve_ytdlp_transfer_options(self.config)
+        ext_dl = resolve_external_downloader_options(self.config)
+        chunk_secs = 0
         if bool(self.config.get("chunk_long_captures", False)):
             try:
-                worker.chunk_length_secs = max(
+                chunk_secs = max(
                     60, int(self.config.get("chunk_length_secs", 7200) or 7200)
                 )
             except (TypeError, ValueError):
-                worker.chunk_length_secs = 7200
+                chunk_secs = 7200
+
+        final_segments = list(segments)
+        download_sections = ""
         clip_start = self._float_or_none(job.get("clip_start"))
         clip_end = self._float_or_none(job.get("clip_end"))
         if clip_start is not None and clip_end is not None and clip_end > clip_start:
-            worker.segments = [(
+            final_segments = [(
                 0, safe_filename(title), clip_start, clip_end - clip_start,
             )]
-            worker.download_sections = f"*{clip_start}-{clip_end}"
+            download_sections = f"*{clip_start}-{clip_end}"
+
+        spec = DownloadJobSpec(
+            playlist_url=playlist_url or "",
+            segments=tuple(tuple(s) for s in final_segments),
+            output_dir=output_dir,
+            format_type=format_type,
+            audio_url=quality.audio_url if quality else "",
+            selected_tracks=tuple(default_media_tracks(quality) if quality else []),
+            ytdlp_source=quality.ytdlp_source if quality else "",
+            ytdlp_format=quality.ytdlp_format if quality else "",
+            parallel_connections=self.parallel_connections,
+            cookies_browser=str(self.config.get("cookies_browser", "") or ""),
+            rate_limit=str(self.config.get("rate_limit", "") or ""),
+            proxy=str(self.config.get("proxy", "") or ""),
+            download_subs=bool(self.config.get("download_subs", False)),
+            capture_youtube_chat=bool(self.config.get("capture_youtube_chat", False)),
+            subtitle_languages=str(self.config.get("subtitle_languages", "en.*,en") or ""),
+            subtitle_auto=bool(self.config.get("subtitle_auto", True)),
+            subtitle_convert=str(self.config.get("subtitle_convert", "") or ""),
+            subtitle_embed=bool(self.config.get("subtitle_embed", True)),
+            sponsorblock=bool(self.config.get("sponsorblock", False)),
+            sponsorblock_mark=str(self.config.get("sponsorblock_mark", "") or ""),
+            sponsorblock_remove=str(self.config.get("sponsorblock_remove", "sponsor,selfpromo,interaction") or ""),
+            sponsorblock_api=str(self.config.get("sponsorblock_api", "") or ""),
+            ytdlp_concurrent_fragments=transfer.get("concurrent_fragments", 0),
+            ytdlp_retries=transfer.get("retries", ""),
+            ytdlp_fragment_retries=transfer.get("fragment_retries", ""),
+            ytdlp_retry_sleep=transfer.get("retry_sleep", ""),
+            ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
+            ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
+            ytdlp_live_from_start=transfer.get("live_from_start", False),
+            ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
+            ytdlp_embed_chapters=transfer.get("embed_chapters"),
+            ytdlp_embed_metadata=transfer.get("embed_metadata"),
+            ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
+            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
+            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
+            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
+            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
+            ytdlp_template_name=template_name,
+            ytdlp_template_args=tuple(ytdlp_template_args),
+            chunk_length_secs=chunk_secs,
+            download_sections=download_sections,
+        )
+        worker = DownloadWorker.from_spec(spec)
         worker.log.connect(write_log_line)
         worker.progress.connect(
             lambda _idx, percent, text, jid=job_id:
