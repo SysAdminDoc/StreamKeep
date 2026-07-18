@@ -67,12 +67,11 @@ class FTPDestination(UploadDestination):
         except ImportError:
             return False, "paramiko not installed for SFTP. Run: pip install paramiko"
 
-        transport = None
+        client = None
         sftp = None
         try:
-            transport = paramiko.Transport((settings["host"], settings["port"]))
-            transport.connect(username=settings["username"], password=settings["password"])
-            sftp = paramiko.SFTPClient.from_transport(transport)
+            client = self._connect_sftp_client(settings)
+            sftp = client.open_sftp()
 
             self._ensure_sftp_dir(sftp, settings["remote_dir"])
 
@@ -95,9 +94,9 @@ class FTPDestination(UploadDestination):
                     sftp.close()
                 except Exception:
                     pass
-            if transport is not None:
+            if client is not None:
                 try:
-                    transport.close()
+                    client.close()
                 except Exception:
                     pass
 
@@ -107,23 +106,19 @@ class FTPDestination(UploadDestination):
             settings, err = self._resolve_settings(default_port=22, label="SFTP")
             if err:
                 return False, err
-            transport = None
+            client = None
             try:
-                import paramiko
-                transport = paramiko.Transport((settings["host"], settings["port"]))
-                transport.connect(
-                    username=settings["username"],
-                    password=settings["password"],
-                )
+                import paramiko  # noqa: F811
+                client = self._connect_sftp_client(settings)
                 return True, "SFTP connection OK"
             except ImportError:
                 return False, "paramiko not installed"
             except Exception as e:
                 return False, f"SFTP failed: {e}"
             finally:
-                if transport is not None:
+                if client is not None:
                     try:
-                        transport.close()
+                        client.close()
                     except Exception:
                         pass
         settings, err = self._resolve_settings(default_port=21, label="FTP")
@@ -146,6 +141,33 @@ class FTPDestination(UploadDestination):
                         ftp.close()
                     except Exception:
                         pass
+
+    def _connect_sftp_client(self, settings):
+        """Open an SSHClient with host-key verification.
+
+        Uses system known-hosts by default (RejectPolicy).  When the
+        config contains ``"sftp_trust_on_first_use": true`` the client
+        uses AutoAddPolicy, which accepts the first key it sees.
+        """
+        import paramiko
+
+        client = paramiko.SSHClient()
+        client.load_system_host_keys()
+        known_hosts = str((self.config or {}).get("sftp_known_hosts", "") or "").strip()
+        if known_hosts and os.path.isfile(known_hosts):
+            client.load_host_keys(known_hosts)
+        if (self.config or {}).get("sftp_trust_on_first_use"):
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        client.connect(
+            settings["host"],
+            port=settings["port"],
+            username=settings["username"],
+            password=settings["password"],
+            timeout=15,
+        )
+        return client
 
     def _resolve_settings(self, default_port, label, file_path=None):
         cfg = self.config or {}

@@ -153,5 +153,41 @@ class UploadAdapterTests(unittest.TestCase):
         self.assertEqual(msg, "S3 bucket not configured")
 
 
+class TestSFTPHostKeyVerification(unittest.TestCase):
+    """Verify SFTP uses SSHClient with host-key verification (not raw Transport)."""
+
+    @mock.patch.dict("sys.modules", {"paramiko": mock.MagicMock()})
+    def test_sftp_default_uses_reject_policy(self):
+        import sys
+        paramiko = sys.modules["paramiko"]
+        paramiko.SSHClient.return_value = mock.MagicMock()
+        paramiko.RejectPolicy.return_value = "reject"
+        paramiko.AutoAddPolicy.return_value = "auto"
+
+        dest = FTPDestination({"use_sftp": True, "host": "h", "username": "u", "password": "p"})
+        client = dest._connect_sftp_client({
+            "host": "h", "port": 22, "username": "u", "password": "p",
+        })
+        client.set_missing_host_key_policy.assert_called_once_with("reject")
+        client.connect.assert_called_once()
+
+    @mock.patch.dict("sys.modules", {"paramiko": mock.MagicMock()})
+    def test_sftp_tofu_uses_auto_add_policy(self):
+        import sys
+        paramiko = sys.modules["paramiko"]
+        paramiko.SSHClient.return_value = mock.MagicMock()
+        paramiko.RejectPolicy.return_value = "reject"
+        paramiko.AutoAddPolicy.return_value = "auto"
+
+        dest = FTPDestination({
+            "use_sftp": True, "host": "h", "username": "u", "password": "p",
+            "sftp_trust_on_first_use": True,
+        })
+        client = dest._connect_sftp_client({
+            "host": "h", "port": 22, "username": "u", "password": "p",
+        })
+        client.set_missing_host_key_policy.assert_called_once_with("auto")
+
+
 if __name__ == "__main__":
     unittest.main()
