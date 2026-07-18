@@ -118,6 +118,18 @@ class DownloadWorker(QThread):
         # metadata.
         self._resume_state = None
 
+    @classmethod
+    def from_spec(cls, spec):
+        """Create a worker from an immutable DownloadJobSpec."""
+        worker = cls(
+            spec.playlist_url,
+            [list(s) for s in spec.segments],
+            spec.output_dir,
+            spec.format_type,
+        )
+        spec.apply_to_worker(worker)
+        return worker
+
     def attach_resume_state(self, state):
         """Attach a ResumeState. The worker will write it on start, refresh
         it on each segment_done, and clear it on clean all_done.

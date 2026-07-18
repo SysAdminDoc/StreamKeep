@@ -336,43 +336,53 @@ def _run_download(args):
         label = safe_filename(info.title or info.channel or "stream")
         segments = [(0, label, 0, info.total_secs)]
 
-        # Start download
-        dw = DownloadWorker(qi.url, segments, output_dir, qi.format_type)
-        dw.audio_url = qi.audio_url
-        dw.selected_tracks = default_media_tracks(qi)
-        dw.ytdlp_source = qi.ytdlp_source
-        dw.ytdlp_format = (
-            output_options["format_spec"]
-            or ("bestaudio/best" if output_options["audio_format"] else qi.ytdlp_format)
+        from .job_spec import DownloadJobSpec
+        spec = DownloadJobSpec(
+            playlist_url=qi.url,
+            segments=tuple(tuple(s) for s in [segments[0]]),
+            output_dir=output_dir,
+            format_type=qi.format_type,
+            audio_url=qi.audio_url,
+            selected_tracks=tuple(default_media_tracks(qi)),
+            ytdlp_source=qi.ytdlp_source,
+            ytdlp_format=(
+                output_options["format_spec"]
+                or ("bestaudio/best" if output_options["audio_format"] else qi.ytdlp_format)
+            ),
+            ytdlp_format_sort=output_options["format_sort"],
+            ytdlp_container=output_options["container"],
+            ytdlp_audio_format=output_options["audio_format"],
+            ytdlp_audio_quality=output_options["audio_quality"],
+            download_subs=subtitle_options["enabled"],
+            capture_youtube_chat=bool(getattr(args, "youtube_chat", False)),
+            subtitle_languages=subtitle_options["languages"],
+            subtitle_auto=subtitle_options["automatic"],
+            subtitle_convert=subtitle_options["convert"],
+            subtitle_embed=subtitle_options["embed"],
+            sponsorblock=sponsorblock_options["enabled"],
+            sponsorblock_mark=sponsorblock_options["mark"],
+            sponsorblock_remove=sponsorblock_options["remove"],
+            sponsorblock_api=sponsorblock_options["api_url"],
+            ytdlp_concurrent_fragments=transfer_options.get("concurrent_fragments", 0),
+            ytdlp_retries=transfer_options.get("retries", ""),
+            ytdlp_fragment_retries=transfer_options.get("fragment_retries", ""),
+            ytdlp_retry_sleep=transfer_options.get("retry_sleep", ""),
+            ytdlp_unavailable_fragments=transfer_options.get("unavailable_fragments", ""),
+            ytdlp_throttled_rate=transfer_options.get("throttled_rate", ""),
+            ytdlp_live_from_start=transfer_options.get("live_from_start", False),
+            ytdlp_wait_for_video=transfer_options.get("wait_for_video", ""),
+            ytdlp_embed_chapters=transfer_options.get("embed_chapters"),
+            ytdlp_embed_metadata=transfer_options.get("embed_metadata"),
+            ytdlp_embed_thumbnail=transfer_options.get("embed_thumbnail"),
+            ytdlp_external_downloader=external_downloader_options["downloader"],
+            ytdlp_aria2c_connections=int(getattr(args, "aria2c_connections", 0) or 0),
+            ytdlp_aria2c_splits=int(getattr(args, "aria2c_splits", 0) or 0),
+            ytdlp_aria2c_min_split_size=getattr(args, "aria2c_min_split_size", "") or "",
+            ytdlp_template_name=getattr(args, "arg_template", "") or "",
+            ytdlp_template_args=tuple(ytdlp_template_args),
+            rate_limit=args.rate_limit or "",
         )
-        dw.ytdlp_format_sort = output_options["format_sort"]
-        dw.ytdlp_container = output_options["container"]
-        dw.ytdlp_audio_format = output_options["audio_format"]
-        dw.ytdlp_audio_quality = output_options["audio_quality"]
-        dw.download_subs = subtitle_options["enabled"]
-        dw.capture_youtube_chat = bool(getattr(args, "youtube_chat", False))
-        dw.subtitle_languages = subtitle_options["languages"]
-        dw.subtitle_auto = subtitle_options["automatic"]
-        dw.subtitle_convert = subtitle_options["convert"]
-        dw.subtitle_embed = subtitle_options["embed"]
-        dw.sponsorblock = sponsorblock_options["enabled"]
-        dw.sponsorblock_mark = sponsorblock_options["mark"]
-        dw.sponsorblock_remove = sponsorblock_options["remove"]
-        dw.sponsorblock_api = sponsorblock_options["api_url"]
-        for name, value in transfer_options.items():
-            setattr(dw, f"ytdlp_{name}", value)
-        dw.ytdlp_external_downloader = external_downloader_options["downloader"]
-        dw.ytdlp_aria2c_connections = int(
-            getattr(args, "aria2c_connections", 0) or 0
-        )
-        dw.ytdlp_aria2c_splits = int(getattr(args, "aria2c_splits", 0) or 0)
-        dw.ytdlp_aria2c_min_split_size = (
-            getattr(args, "aria2c_min_split_size", "") or ""
-        )
-        dw.ytdlp_template_name = getattr(args, "arg_template", "") or ""
-        dw.ytdlp_template_args = ytdlp_template_args
-        if args.rate_limit:
-            dw.rate_limit = args.rate_limit
+        dw = DownloadWorker.from_spec(spec)
         state["dw"] = dw  # prevent GC while event loop runs
 
         dw.progress.connect(lambda si, pct, txt: _print_progress(
