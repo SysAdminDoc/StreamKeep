@@ -4687,12 +4687,12 @@ Saves your settings first.</translation>
             <translation>Resume</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window_jobs.py" line="241" />
+            <location filename="streamkeep/ui/main_window_jobs.py" line="259" />
             <source>Resume failed — see log for details.</source>
             <translation>Resume failed — see log for details.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window_jobs.py" line="234" />
+            <location filename="streamkeep/ui/main_window_jobs.py" line="252" />
             <source>Resuming {(state.title or 'download')[:60]}...</source>
             <translation>Resuming {(state.title or 'download')[:60]}...</translation>
         </message>

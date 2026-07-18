@@ -183,47 +183,65 @@ class MainWindowJobsMixin:
                 history_url=state.source_url,
                 info=None,
             )
-            worker = DownloadWorker(
-                refreshed_url or state.playlist_url,
-                remaining,
-                state.output_dir,
-                format_type=state.format_type or "hls",
-            )
-            worker.audio_url = refreshed_audio or ""
-            worker.selected_tracks = refreshed_tracks
-            worker.ytdlp_source = state.ytdlp_source or ""
-            worker.ytdlp_format = state.ytdlp_format or ""
-            worker.ytdlp_format_sort = state.ytdlp_format_sort or ""
-            worker.ytdlp_container = state.ytdlp_container or "mp4"
-            worker.ytdlp_audio_format = state.ytdlp_audio_format or ""
-            worker.ytdlp_audio_quality = state.ytdlp_audio_quality or ""
-            worker.download_subs = bool(state.download_subs)
-            worker.capture_youtube_chat = bool(state.capture_youtube_chat)
-            worker.subtitle_languages = state.subtitle_languages or ""
-            worker.subtitle_auto = bool(state.subtitle_auto)
-            worker.subtitle_convert = state.subtitle_convert or ""
-            worker.subtitle_embed = bool(state.subtitle_embed)
-            worker.sponsorblock = bool(state.sponsorblock)
-            worker.sponsorblock_mark = state.sponsorblock_mark or ""
-            worker.sponsorblock_remove = state.sponsorblock_remove or ""
-            worker.sponsorblock_api = state.sponsorblock_api or ""
-            worker.download_archive = state.download_archive or ""
-            worker.break_on_existing = bool(state.break_on_existing)
             from streamkeep.download_options import (
-                apply_external_downloader_options, apply_ytdlp_transfer_options,
+                resolve_external_downloader_options,
+                resolve_ytdlp_arg_template,
+                resolve_ytdlp_transfer_options,
             )
-            apply_ytdlp_transfer_options(worker, state)
-            apply_external_downloader_options(worker, state)
-            worker.ytdlp_template_name = state.ytdlp_template_name or ""
-            from streamkeep.download_options import resolve_ytdlp_arg_template
-            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
-                self._config.get("ytdlp_arg_templates", {}),
-                worker.ytdlp_template_name,
+            from streamkeep.job_spec import DownloadJobSpec
+            transfer = resolve_ytdlp_transfer_options(state)
+            ext_dl = resolve_external_downloader_options(state)
+            template_name = state.ytdlp_template_name or ""
+            spec = DownloadJobSpec(
+                playlist_url=refreshed_url or state.playlist_url,
+                segments=tuple(tuple(s) for s in remaining),
+                output_dir=state.output_dir,
+                format_type=state.format_type or "hls",
+                audio_url=refreshed_audio or "",
+                selected_tracks=tuple(refreshed_tracks),
+                ytdlp_source=state.ytdlp_source or "",
+                ytdlp_format=state.ytdlp_format or "",
+                ytdlp_format_sort=state.ytdlp_format_sort or "",
+                ytdlp_container=state.ytdlp_container or "mp4",
+                ytdlp_audio_format=state.ytdlp_audio_format or "",
+                ytdlp_audio_quality=state.ytdlp_audio_quality or "",
+                download_subs=bool(state.download_subs),
+                capture_youtube_chat=bool(state.capture_youtube_chat),
+                subtitle_languages=state.subtitle_languages or "",
+                subtitle_auto=bool(state.subtitle_auto),
+                subtitle_convert=state.subtitle_convert or "",
+                subtitle_embed=bool(state.subtitle_embed),
+                sponsorblock=bool(state.sponsorblock),
+                sponsorblock_mark=state.sponsorblock_mark or "",
+                sponsorblock_remove=state.sponsorblock_remove or "",
+                sponsorblock_api=state.sponsorblock_api or "",
+                download_archive=state.download_archive or "",
+                break_on_existing=bool(state.break_on_existing),
+                ytdlp_concurrent_fragments=transfer.get("concurrent_fragments", 0),
+                ytdlp_retries=transfer.get("retries", ""),
+                ytdlp_fragment_retries=transfer.get("fragment_retries", ""),
+                ytdlp_retry_sleep=transfer.get("retry_sleep", ""),
+                ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
+                ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
+                ytdlp_live_from_start=transfer.get("live_from_start", False),
+                ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
+                ytdlp_embed_chapters=transfer.get("embed_chapters"),
+                ytdlp_embed_metadata=transfer.get("embed_metadata"),
+                ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
+                ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
+                ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
+                ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
+                ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
+                ytdlp_template_name=template_name,
+                ytdlp_template_args=tuple(resolve_ytdlp_arg_template(
+                    self._config.get("ytdlp_arg_templates", {}), template_name,
+                )),
+                cookies_browser=YtDlpExtractor.cookies_browser,
+                rate_limit=YtDlpExtractor.rate_limit,
+                proxy=YtDlpExtractor.proxy,
+                parallel_connections=self._parallel_connections,
             )
-            worker.cookies_browser = YtDlpExtractor.cookies_browser
-            worker.rate_limit = YtDlpExtractor.rate_limit
-            worker.proxy = YtDlpExtractor.proxy
-            worker.parallel_connections = self._parallel_connections
+            worker = DownloadWorker.from_spec(spec)
             worker.progress.connect(self._on_dl_progress)
             worker.segment_done.connect(self._on_segment_done)
             worker.error.connect(self._on_dl_error)
