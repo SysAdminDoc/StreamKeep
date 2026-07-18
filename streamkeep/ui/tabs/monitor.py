@@ -106,7 +106,7 @@ def build_monitor_tab(win):
 
     manage_header = QVBoxLayout()
     manage_header.setSpacing(4)
-    sec = QLabel("Add Channel")
+    sec = QLabel("Add channel")
     sec.setObjectName("sectionTitle")
     sec.setVisible(False)
     sec_body = QLabel("Supported examples: kick.com/user or twitch.tv/user")
@@ -149,7 +149,7 @@ def build_monitor_tab(win):
     auto_block_lay.addStretch(1)
     controls_row.addWidget(auto_block)
 
-    add_btn = QPushButton("Add Channel")
+    add_btn = QPushButton("Add channel")
     add_btn.setObjectName("primary")
     add_btn.clicked.connect(win._on_monitor_add)
     controls_row.addWidget(add_btn, 0, Qt.AlignmentFlag.AlignBottom)
@@ -168,7 +168,7 @@ def build_monitor_tab(win):
     tools_lay.setSpacing(10)
     tools_copy = QVBoxLayout()
     tools_copy.setSpacing(3)
-    tools_title = QLabel("Watch List Tools")
+    tools_title = QLabel("Watch list tools")
     tools_title.setObjectName("fieldLabel")
     tools_hint = QLabel("Import, export, or switch to the schedule.")
     tools_hint.setObjectName("subtleText")
@@ -187,7 +187,7 @@ def build_monitor_tab(win):
     export_btn.setFixedWidth(156)
     export_btn.clicked.connect(win._on_monitor_export)
     tools_lay.addWidget(export_btn)
-    win.monitor_view_toggle = QPushButton("Show Calendar")
+    win.monitor_view_toggle = QPushButton("Show calendar")
     win.monitor_view_toggle.setObjectName("toggleAccent")
     win.monitor_view_toggle.setFixedWidth(148)
     win.monitor_view_toggle.setCheckable(True)
@@ -204,7 +204,7 @@ def build_monitor_tab(win):
 
     table_header = QVBoxLayout()
     table_header.setSpacing(4)
-    table_title = QLabel("Watch List")
+    table_title = QLabel("Watch list")
     table_title.setObjectName("sectionTitle")
     win.monitor_table_hint = QLabel(
         "Live state and recording automation."
@@ -255,7 +255,7 @@ def build_monitor_tab(win):
     cal_lay.setSpacing(8)
     cal_header = QVBoxLayout()
     cal_header.setSpacing(4)
-    cal_hdr = QLabel("Stream Schedule")
+    cal_hdr = QLabel("Stream schedule")
     cal_hdr.setObjectName("sectionTitle")
     cal_header.addWidget(cal_hdr)
     cal_hint = QLabel(
@@ -276,7 +276,7 @@ def build_monitor_tab(win):
         table_card.setVisible(not checked)
         cal_card.setVisible(checked)
         win.monitor_view_toggle.setText(
-            "Show Watch List" if checked else "Show Calendar"
+            "Show watch list" if checked else "Show calendar"
         )
         if checked:
             cache = win._config.get("schedules", {})

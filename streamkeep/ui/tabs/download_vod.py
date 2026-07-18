@@ -122,7 +122,7 @@ class DownloadVodMixin:
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setVisible(bool(next_cursor))
             self.vod_load_more_btn.setEnabled(bool(next_cursor))
-            self.vod_load_more_btn.setText("Load More VODs")
+            self.vod_load_more_btn.setText("Load more VODs")
         self._set_status(f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.", "success")
 
     def _on_vod_cb_toggled(self, row):
@@ -262,7 +262,7 @@ class DownloadVodMixin:
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setVisible(bool(next_cursor))
             self.vod_load_more_btn.setEnabled(bool(next_cursor))
-            self.vod_load_more_btn.setText("Load More VODs")
+            self.vod_load_more_btn.setText("Load more VODs")
         total = len(self._vod_list)
         self._log(f"[VOD] Loaded {len(new_vods)} more — {total} total")
         self._set_status(f"{total} VOD(s) loaded. {len(new_vods)} new from this page.", "success")
@@ -272,7 +272,7 @@ class DownloadVodMixin:
         self._set_status(f"Failed to load more VODs: {err}", "error")
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setEnabled(True)
-            self.vod_load_more_btn.setText("Load More VODs")
+            self.vod_load_more_btn.setText("Load more VODs")
 
     def _on_vod_download_all(self):
         checked = [self._vod_list[i] for i, cb in enumerate(self._vod_checks) if cb.isChecked()]

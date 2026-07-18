@@ -527,7 +527,7 @@ def build_settings_tab(win):
     win.cookies_combo = QComboBox()
     win.cookies_combo.addItem("None")
     row_cookies.addWidget(win.cookies_combo, 1)
-    scan_btn = QPushButton("Scan for Browsers")
+    scan_btn = QPushButton("Scan for browsers")
     scan_btn.setObjectName("secondary")
     scan_btn.clicked.connect(win._on_scan_browsers)
     row_cookies.addWidget(scan_btn)
@@ -548,7 +548,7 @@ def build_settings_tab(win):
     # Import cookies to cookies.txt (F47)
     row_import = QHBoxLayout()
     row_import.setSpacing(8)
-    win.cookies_import_btn = QPushButton("Import Cookies from Browser")
+    win.cookies_import_btn = QPushButton("Import cookies from browser")
     win.cookies_import_btn.setObjectName("secondary")
     win.cookies_import_btn.setToolTip(
         "Extract cookies from the selected browser and save as cookies.txt "
@@ -624,7 +624,7 @@ def build_settings_tab(win):
 
     acct_btn_row = QHBoxLayout()
     acct_btn_row.setSpacing(8)
-    win.acct_save_btn = QPushButton("Save Tokens")
+    win.acct_save_btn = QPushButton("Save tokens")
     win.acct_save_btn.setObjectName("secondary")
     win.acct_save_btn.clicked.connect(win._on_save_account_tokens)
     acct_btn_row.addWidget(win.acct_save_btn)
@@ -636,7 +636,7 @@ def build_settings_tab(win):
     )
     win.acct_check_btn.clicked.connect(win._on_check_account_tokens)
     acct_btn_row.addWidget(win.acct_check_btn)
-    win.acct_clear_btn = QPushButton("Clear All")
+    win.acct_clear_btn = QPushButton("Clear all")
     win.acct_clear_btn.setObjectName("secondary")
     win.acct_clear_btn.setFixedWidth(80)
     win.acct_clear_btn.clicked.connect(win._on_clear_account_tokens)
@@ -833,7 +833,7 @@ def build_settings_tab(win):
         from streamkeep.proxy import set_pool
         set_pool(_saved_pool)
 
-    proxy_test_btn = QPushButton("Test Proxies")
+    proxy_test_btn = QPushButton("Test proxies")
     proxy_test_btn.setObjectName("secondary")
     proxy_test_btn.setFixedWidth(110)
     proxy_test_btn.clicked.connect(win._on_test_proxies)
@@ -2143,18 +2143,18 @@ def build_settings_tab(win):
 
     # Save / Import / Export row
     save_row = QHBoxLayout()
-    import_btn = QPushButton("Import Config")
+    import_btn = QPushButton("Import config")
     import_btn.setObjectName("secondary")
     import_btn.setToolTip("Replace current settings with a backup file")
     import_btn.clicked.connect(win._on_import_config)
     save_row.addWidget(import_btn)
-    export_btn = QPushButton("Export Config")
+    export_btn = QPushButton("Export config")
     export_btn.setObjectName("secondary")
     export_btn.setToolTip("Write current settings to a backup file")
     export_btn.clicked.connect(win._on_export_config)
     save_row.addWidget(export_btn)
     save_row.addStretch()
-    save_btn = QPushButton("Save Settings")
+    save_btn = QPushButton("Save settings")
     save_btn.setObjectName("primary")
     save_btn.clicked.connect(win._on_save_settings)
     save_row.addWidget(save_btn)

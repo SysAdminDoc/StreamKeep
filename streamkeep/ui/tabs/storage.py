@@ -211,7 +211,7 @@ def build_storage_tab(win):
     maintenance_lay = QVBoxLayout(maintenance_card)
     maintenance_lay.setContentsMargins(4, 8, 4, 8)
     maintenance_lay.setSpacing(6)
-    maintenance_title = QLabel("Archive Maintenance")
+    maintenance_title = QLabel("Archive maintenance")
     maintenance_title.setObjectName("sectionTitle")
     maintenance_body = QLabel(
         "Preview imports, missing paths, integrity, backups, and index work before applying."
@@ -223,11 +223,11 @@ def build_storage_tab(win):
     maintenance_lay.addWidget(maintenance_body)
     maintenance_actions = QHBoxLayout()
     maintenance_actions.setSpacing(8)
-    win.maintenance_preview_btn = QPushButton("Preview Maintenance")
+    win.maintenance_preview_btn = QPushButton("Preview maintenance")
     win.maintenance_preview_btn.setObjectName("secondary")
     win.maintenance_preview_btn.clicked.connect(win._on_maintenance_preview)
     maintenance_actions.addWidget(win.maintenance_preview_btn)
-    win.maintenance_apply_btn = QPushButton("Apply Approved")
+    win.maintenance_apply_btn = QPushButton("Apply approved")
     win.maintenance_apply_btn.setEnabled(False)
     win.maintenance_apply_btn.clicked.connect(win._on_maintenance_apply)
     maintenance_actions.addWidget(win.maintenance_apply_btn)
@@ -305,7 +305,7 @@ def build_storage_tab(win):
     win.storage_channel_filter.currentIndexChanged.connect(
         lambda _: _apply_storage_filter(win))
     filt_lay.addWidget(win.storage_channel_filter)
-    clear_filters_btn = QPushButton("Clear Filters")
+    clear_filters_btn = QPushButton("Clear filters")
     clear_filters_btn.setObjectName("ghost")
     clear_filters_btn.clicked.connect(
         lambda: (
