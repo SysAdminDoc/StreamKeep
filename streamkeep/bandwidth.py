@@ -153,12 +153,14 @@ class BandwidthTracker:
         """Return list of (day_str, bytes) for the last N days."""
         try:
             db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-            rows = db.execute(
-                "SELECT day, bytes FROM bandwidth_daily ORDER BY day DESC LIMIT ?",
-                (days,),
-            ).fetchall()
-            db.close()
-            return [(r[0], r[1]) for r in reversed(rows)]
+            try:
+                rows = db.execute(
+                    "SELECT day, bytes FROM bandwidth_daily ORDER BY day DESC LIMIT ?",
+                    (days,),
+                ).fetchall()
+                return [(r[0], r[1]) for r in reversed(rows)]
+            finally:
+                db.close()
         except Exception:
             return []
 
@@ -173,5 +175,24 @@ def _fmt(n):
     return f"{n} B"
 
 
-# Module-level singleton
-tracker = BandwidthTracker()
+_tracker = None
+_tracker_init_lock = threading.Lock()
+
+
+def _get_tracker():
+    global _tracker
+    if _tracker is None:
+        with _tracker_init_lock:
+            if _tracker is None:
+                _tracker = BandwidthTracker()
+    return _tracker
+
+
+class _LazyTracker:
+    """Attribute proxy that defers BandwidthTracker creation until first use."""
+
+    def __getattr__(self, name):
+        return getattr(_get_tracker(), name)
+
+
+tracker = _LazyTracker()

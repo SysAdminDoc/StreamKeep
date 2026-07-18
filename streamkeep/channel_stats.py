@@ -24,22 +24,24 @@ def _ensure_table():
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        db.executescript("""
-            CREATE TABLE IF NOT EXISTS channel_polls (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel_id TEXT NOT NULL,
-                platform   TEXT NOT NULL DEFAULT '',
-                timestamp  REAL NOT NULL,
-                status     TEXT NOT NULL DEFAULT 'unknown',
-                viewers    INTEGER NOT NULL DEFAULT 0,
-                title      TEXT NOT NULL DEFAULT '',
-                game       TEXT NOT NULL DEFAULT ''
-            );
-            CREATE INDEX IF NOT EXISTS idx_cp_channel ON channel_polls(channel_id);
-            CREATE INDEX IF NOT EXISTS idx_cp_ts ON channel_polls(timestamp);
-        """)
-        db.commit()
-        db.close()
+        try:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS channel_polls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT NOT NULL,
+                    platform   TEXT NOT NULL DEFAULT '',
+                    timestamp  REAL NOT NULL,
+                    status     TEXT NOT NULL DEFAULT 'unknown',
+                    viewers    INTEGER NOT NULL DEFAULT 0,
+                    title      TEXT NOT NULL DEFAULT '',
+                    game       TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_cp_channel ON channel_polls(channel_id);
+                CREATE INDEX IF NOT EXISTS idx_cp_ts ON channel_polls(timestamp);
+            """)
+            db.commit()
+        finally:
+            db.close()
     except Exception:
         pass
 
@@ -52,13 +54,15 @@ def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""
     _ensure_table()
     try:
         db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        db.execute(
-            "INSERT INTO channel_polls (channel_id, platform, timestamp, status, viewers, title, game) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (channel_id, platform, time.time(), status, viewers, title[:200], game[:100]),
-        )
-        db.commit()
-        db.close()
+        try:
+            db.execute(
+                "INSERT INTO channel_polls (channel_id, platform, timestamp, status, viewers, title, game) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (channel_id, platform, time.time(), status, viewers, title[:200], game[:100]),
+            )
+            db.commit()
+        finally:
+            db.close()
     except Exception:
         pass
 
@@ -81,12 +85,14 @@ def get_channel_stats(channel_id, weeks=8):
     cutoff = time.time() - weeks * 7 * 86400
     try:
         db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        rows = db.execute(
-            "SELECT timestamp, status, viewers, title, game FROM channel_polls "
-            "WHERE channel_id=? AND timestamp>=? ORDER BY timestamp ASC",
-            (channel_id, cutoff),
-        ).fetchall()
-        db.close()
+        try:
+            rows = db.execute(
+                "SELECT timestamp, status, viewers, title, game FROM channel_polls "
+                "WHERE channel_id=? AND timestamp>=? ORDER BY timestamp ASC",
+                (channel_id, cutoff),
+            ).fetchall()
+        finally:
+            db.close()
     except Exception:
         rows = []
 
@@ -167,10 +173,12 @@ def get_all_channel_summaries(weeks=4):
     _ensure_table()
     try:
         db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        channels = db.execute(
-            "SELECT DISTINCT channel_id FROM channel_polls"
-        ).fetchall()
-        db.close()
+        try:
+            channels = db.execute(
+                "SELECT DISTINCT channel_id FROM channel_polls"
+            ).fetchall()
+        finally:
+            db.close()
     except Exception:
         return {}
     return {ch[0]: get_channel_stats(ch[0], weeks) for ch in channels}
