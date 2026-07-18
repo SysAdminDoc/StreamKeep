@@ -6,8 +6,8 @@ import time
 from collections import deque
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -47,6 +47,26 @@ from .download_controls import (
     get_adv_overrides,
     get_selected_media_tracks,
 )
+
+
+class _ThumbnailFetchWorker(QThread):
+    """Fetch a remote thumbnail in the background."""
+
+    fetched = pyqtSignal(bytes)
+
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
+        self._url = url
+
+    def run(self):
+        try:
+            from ...image_fetch import fetch_image_bytes
+            data, _fmt = fetch_image_bytes(
+                self._url, max_bytes=2 * 1024 * 1024, timeout=8,
+            )
+            self.fetched.emit(data)
+        except Exception:
+            pass
 
 
 class DownloadSingleMixin:
@@ -281,6 +301,9 @@ class DownloadSingleMixin:
         self._segment_checks = []
         self._segment_progress = []
         self.info_label.setVisible(False)
+        thumb = getattr(self, "download_thumb_label", None)
+        if thumb is not None:
+            thumb.setVisible(False)
         self.stream_info = None
         if not vod_source:
             self.vod_widget.setVisible(False)
@@ -327,6 +350,7 @@ class DownloadSingleMixin:
             if feed_url:
                 info.feed_url = feed_url
         self.stream_info = info
+        self._fetch_thumbnail(info)
         _populate_adv_subtitles(self, info)
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Resolve")
@@ -435,6 +459,30 @@ class DownloadSingleMixin:
             if not self._on_download():
                 self._release_queue_item("failed", "Could not start the queued download")
                 self._start_next_background_job()
+
+    def _fetch_thumbnail(self, info):
+        thumb = getattr(self, "download_thumb_label", None)
+        if thumb is None:
+            return
+        url = getattr(info, "thumbnail_url", "") or ""
+        if not url:
+            thumb.setVisible(False)
+            return
+        worker = _ThumbnailFetchWorker(url, parent=self)
+        worker.fetched.connect(self._on_thumbnail_ready)
+        worker.finished.connect(worker.deleteLater)
+        self._thumb_worker = worker
+        worker.start()
+
+    def _on_thumbnail_ready(self, data):
+        thumb = getattr(self, "download_thumb_label", None)
+        if thumb is None or not data:
+            return
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            thumb.setPixmap(pixmap)
+            thumb.setVisible(True)
+        self._thumb_worker = None
 
     def _on_fetch_error(self, err):
         self.fetch_btn.setEnabled(True)

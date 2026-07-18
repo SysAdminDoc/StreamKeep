@@ -106,9 +106,21 @@ def build_download_tab(win):
 
     hero = QFrame()
     hero.setObjectName("pageHeader")
-    hero_lay = QVBoxLayout(hero)
-    hero_lay.setContentsMargins(16, 14, 16, 2)
+    hero_outer = QHBoxLayout(hero)
+    hero_outer.setContentsMargins(16, 14, 16, 2)
+    hero_outer.setSpacing(12)
+
+    win.download_thumb_label = QLabel()
+    win.download_thumb_label.setFixedSize(80, 60)
+    win.download_thumb_label.setScaledContents(True)
+    win.download_thumb_label.setVisible(False)
+    win.download_thumb_label.setStyleSheet("border-radius: 4px;")
+    hero_outer.addWidget(win.download_thumb_label)
+
+    hero_lay = QVBoxLayout()
+    hero_lay.setContentsMargins(0, 0, 0, 0)
     hero_lay.setSpacing(2)
+    hero_outer.addLayout(hero_lay, 1)
 
     win.download_hero_title = QLabel("New download")
     win.download_hero_title.setObjectName("composerTitle")
