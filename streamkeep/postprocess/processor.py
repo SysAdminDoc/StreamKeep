@@ -60,13 +60,14 @@ class PostProcessor:
 
     @classmethod
     def has_any_preset(cls):
-        return (
-            cls.extract_audio or cls.normalize_loudness
-            or cls.reencode_h265 or cls.contact_sheet
-            or cls.split_by_chapter or cls.remove_silence
-            or cls.convert_video or cls.convert_audio
-            or cls.bilingual_subs or cls.lrc_export
-        )
+        with PP_LOCK:
+            return (
+                cls.extract_audio or cls.normalize_loudness
+                or cls.reencode_h265 or cls.contact_sheet
+                or cls.split_by_chapter or cls.remove_silence
+                or cls.convert_video or cls.convert_audio
+                or cls.bilingual_subs or cls.lrc_export
+            )
 
     @classmethod
     def process_directory(cls, out_dir, log_fn=None, chapters=None):
