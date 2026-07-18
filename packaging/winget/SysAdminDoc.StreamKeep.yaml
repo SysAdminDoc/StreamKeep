@@ -1,0 +1,34 @@
+# WinGet community manifest for StreamKeep.
+#
+# Submit to microsoft/winget-pkgs by copying this directory into
+# manifests/s/SysAdminDoc/StreamKeep/<version>/ and opening a PR.
+# Update the version, URLs, and SHA-256 hash on each release.
+
+PackageIdentifier: SysAdminDoc.StreamKeep
+PackageVersion: 4.38.0
+PackageName: StreamKeep
+Publisher: SysAdminDoc
+License: MIT
+LicenseUrl: https://github.com/SysAdminDoc/StreamKeep/blob/main/LICENSE
+ShortDescription: Desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs.
+PackageUrl: https://github.com/SysAdminDoc/StreamKeep
+Tags:
+  - video-downloader
+  - stream-recorder
+  - yt-dlp
+  - vod
+  - podcast
+  - media
+  - archive
+MinimumOSVersion: 10.0.17763.0
+Installers:
+  - Architecture: x64
+    InstallerType: portable
+    InstallerUrl: https://github.com/SysAdminDoc/StreamKeep/releases/download/v4.38.0/StreamKeep.exe
+    # Replace with the actual SHA-256 of the release artifact:
+    InstallerSha256: PLACEHOLDER_SHA256_HASH
+    Commands:
+      - StreamKeep
+PackageLocale: en-US
+ManifestType: singleton
+ManifestVersion: 1.6.0
