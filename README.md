@@ -7,7 +7,7 @@
 ![Version](https://img.shields.io/badge/version-4.38.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
 StreamKeep is a local-first desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs. It combines native extractors, yt-dlp fallback, channel monitoring, queue management, post-processing, an embedded player, and a CLI/server mode in one PyQt6 application.
 
@@ -165,7 +165,7 @@ Extension icons are shipped under `browser-extension/icons/`. The 256-bit master
 
 ## Requirements
 
-- Python 3.10 or newer.
+- Python 3.11 or newer.
 - FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
 - curl 8.21.0 or newer in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
