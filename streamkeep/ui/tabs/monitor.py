@@ -1170,36 +1170,57 @@ class MonitorTabMixin:
                 self._log(f"[AUTO-RECORD] Using channel profile quality: {chosen.name}")
                 q = chosen
 
-        segments = [(0, "live_recording", 0, 0)]
-        worker = DownloadWorker(q.url, segments, out_dir, q.format_type)
-        worker.audio_url = q.audio_url
-        worker.selected_tracks = default_media_tracks(q)
-        worker.ytdlp_source = q.ytdlp_source
-        worker.ytdlp_format = q.ytdlp_format
-        worker.parallel_connections = self._parallel_connections
         from ...download_options import (
-            apply_external_downloader_options,
-            apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
+            resolve_external_downloader_options,
+            resolve_ytdlp_arg_template,
+            resolve_ytdlp_transfer_options,
         )
         from ...extractors.ytdlp import YtDlpExtractor
-        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
-        apply_external_downloader_options(worker, YtDlpExtractor)
-        worker.cookies_browser = YtDlpExtractor.cookies_browser
-        worker.rate_limit = YtDlpExtractor.rate_limit
-        worker.proxy = YtDlpExtractor.proxy
+        from ...job_spec import DownloadJobSpec
+        transfer = resolve_ytdlp_transfer_options(YtDlpExtractor)
+        ext_dl = resolve_external_downloader_options(YtDlpExtractor)
         template_name = target.ytdlp_template_name or ""
         try:
-            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
+            ytdlp_template_args = resolve_ytdlp_arg_template(
                 self._config.get("ytdlp_arg_templates", {}), template_name,
             )
-            worker.ytdlp_template_name = template_name
         except ValueError as error:
-            worker.ytdlp_template_args = ()
-            worker.ytdlp_template_name = ""
+            ytdlp_template_args = ()
+            template_name = ""
             self._log(f"[AUTO-RECORD] Ignoring argument template: {error}")
-        # Live auto-split: when enabled, long live captures are chunked.
-        if self._chunk_long_captures:
-            worker.chunk_length_secs = int(self._chunk_length_secs or 0)
+        spec = DownloadJobSpec(
+            playlist_url=q.url,
+            segments=((0, "live_recording", 0, 0),),
+            output_dir=out_dir,
+            format_type=q.format_type,
+            audio_url=q.audio_url,
+            selected_tracks=tuple(default_media_tracks(q)),
+            ytdlp_source=q.ytdlp_source,
+            ytdlp_format=q.ytdlp_format,
+            parallel_connections=self._parallel_connections,
+            cookies_browser=YtDlpExtractor.cookies_browser,
+            rate_limit=YtDlpExtractor.rate_limit,
+            proxy=YtDlpExtractor.proxy,
+            ytdlp_concurrent_fragments=transfer.get("concurrent_fragments", 0),
+            ytdlp_retries=transfer.get("retries", ""),
+            ytdlp_fragment_retries=transfer.get("fragment_retries", ""),
+            ytdlp_retry_sleep=transfer.get("retry_sleep", ""),
+            ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
+            ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
+            ytdlp_live_from_start=transfer.get("live_from_start", False),
+            ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
+            ytdlp_embed_chapters=transfer.get("embed_chapters"),
+            ytdlp_embed_metadata=transfer.get("embed_metadata"),
+            ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
+            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
+            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
+            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
+            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
+            ytdlp_template_name=template_name,
+            ytdlp_template_args=tuple(ytdlp_template_args),
+            chunk_length_secs=int(self._chunk_length_secs or 0) if self._chunk_long_captures else 0,
+        )
+        worker = DownloadWorker.from_spec(spec)
         worker.log.connect(self._log)
         worker.error.connect(lambda _idx, err, ch=channel_id: self._auto_record_error(ch, err))
         worker.progress.connect(

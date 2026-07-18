@@ -605,14 +605,34 @@ class DownloadQueueMixin:
         )
         item["thumbnail_url"] = str(getattr(info, "thumbnail_url", "") or "")
         self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
-        worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
-        worker.audio_url = audio_url
-        if q_data:
-            from ...models import default_media_tracks
-            worker.selected_tracks = default_media_tracks(q_data)
-        worker.ytdlp_source = ytdlp_source
-        worker.ytdlp_format = ytdlp_format
-        worker.cookies_browser = YtDlpExtractor.cookies_browser
+        # --- Resolve config-driven options before building the spec ---
+        from ...download_options import (
+            resolve_external_downloader_options,
+            resolve_ytdlp_arg_template,
+            resolve_ytdlp_transfer_options,
+        )
+        from ...job_spec import DownloadJobSpec
+
+        transfer = resolve_ytdlp_transfer_options(YtDlpExtractor)
+        ext_dl = resolve_external_downloader_options(YtDlpExtractor)
+        template_name = str(item.get("ytdlp_template_name", "") or "")
+        try:
+            template_args = resolve_ytdlp_arg_template(
+                self._config.get("ytdlp_arg_templates", {}),
+                template_name,
+            )
+        except ValueError as error:
+            failure_id = self._record_failed_job(
+                stage="download", error=str(error), item=item,
+                info=info, out_dir=out_dir,
+            )
+            if failure_id:
+                item["failure_id"] = failure_id
+            self._set_queue_item_status(item, "failed", str(error))
+            self._log(f"[QUEUE] {error}")
+            self._advance_queue()
+            return
+
         # Share bandwidth across concurrent workers
         rl = YtDlpExtractor.rate_limit
         active_count = self._active_queue_download_count() + 1
@@ -630,46 +650,56 @@ class DownloadQueueMixin:
                     rl = str(shared)
             except (ValueError, AttributeError):
                 pass
-        worker.rate_limit = rl
-        worker.proxy = YtDlpExtractor.proxy
-        worker.download_subs = YtDlpExtractor.download_subs
-        worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
-        worker.subtitle_languages = YtDlpExtractor.subtitle_languages
-        worker.subtitle_auto = YtDlpExtractor.subtitle_auto
-        worker.subtitle_convert = YtDlpExtractor.subtitle_convert
-        worker.subtitle_embed = YtDlpExtractor.subtitle_embed
-        worker.sponsorblock = YtDlpExtractor.sponsorblock
-        worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
-        worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
-        worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
-        from ...download_options import (
-            apply_external_downloader_options,
-            apply_ytdlp_transfer_options, resolve_ytdlp_arg_template,
+
+        selected_tracks = ()
+        if q_data:
+            from ...models import default_media_tracks
+            selected_tracks = tuple(default_media_tracks(q_data))
+
+        spec = DownloadJobSpec(
+            playlist_url=playlist_url or "",
+            segments=tuple(tuple(s) for s in segments),
+            output_dir=out_dir,
+            format_type=fmt_type,
+            audio_url=audio_url,
+            selected_tracks=selected_tracks,
+            ytdlp_source=ytdlp_source,
+            ytdlp_format=ytdlp_format,
+            cookies_browser=YtDlpExtractor.cookies_browser,
+            rate_limit=rl,
+            proxy=YtDlpExtractor.proxy,
+            download_subs=YtDlpExtractor.download_subs,
+            capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            subtitle_languages=YtDlpExtractor.subtitle_languages,
+            subtitle_auto=YtDlpExtractor.subtitle_auto,
+            subtitle_convert=YtDlpExtractor.subtitle_convert,
+            subtitle_embed=YtDlpExtractor.subtitle_embed,
+            sponsorblock=YtDlpExtractor.sponsorblock,
+            sponsorblock_mark=YtDlpExtractor.sponsorblock_mark,
+            sponsorblock_remove=YtDlpExtractor.sponsorblock_remove,
+            sponsorblock_api=YtDlpExtractor.sponsorblock_api,
+            ytdlp_concurrent_fragments=transfer["concurrent_fragments"],
+            ytdlp_retries=transfer["retries"],
+            ytdlp_fragment_retries=transfer["fragment_retries"],
+            ytdlp_retry_sleep=transfer["retry_sleep"],
+            ytdlp_unavailable_fragments=transfer["unavailable_fragments"],
+            ytdlp_throttled_rate=transfer["throttled_rate"],
+            ytdlp_live_from_start=transfer["live_from_start"],
+            ytdlp_wait_for_video=transfer["wait_for_video"],
+            ytdlp_embed_chapters=transfer["embed_chapters"],
+            ytdlp_embed_metadata=transfer["embed_metadata"],
+            ytdlp_embed_thumbnail=transfer["embed_thumbnail"],
+            ytdlp_template_name=template_name,
+            ytdlp_template_args=tuple(template_args),
+            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or "").strip().lower(),
+            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
+            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
+            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or "").strip(),
+            download_archive=str(item.get("download_archive", "") or ""),
+            break_on_existing=bool(item.get("break_on_existing", False)),
+            parallel_connections=self._parallel_connections,
         )
-        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
-        apply_external_downloader_options(worker, YtDlpExtractor)
-        worker.ytdlp_template_name = str(
-            item.get("ytdlp_template_name", "") or ""
-        )
-        try:
-            worker.ytdlp_template_args = resolve_ytdlp_arg_template(
-                self._config.get("ytdlp_arg_templates", {}),
-                worker.ytdlp_template_name,
-            )
-        except ValueError as error:
-            failure_id = self._record_failed_job(
-                stage="download", error=str(error), item=item,
-                info=info, out_dir=out_dir,
-            )
-            if failure_id:
-                item["failure_id"] = failure_id
-            self._set_queue_item_status(item, "failed", str(error))
-            self._log(f"[QUEUE] {error}")
-            self._advance_queue()
-            return
-        worker.download_archive = str(item.get("download_archive", "") or "")
-        worker.break_on_existing = bool(item.get("break_on_existing", False))
-        worker.parallel_connections = self._parallel_connections
+        worker = DownloadWorker.from_spec(spec)
         worker.log.connect(self._log)
         worker.progress.connect(
             lambda _segment, pct, status, it=item:

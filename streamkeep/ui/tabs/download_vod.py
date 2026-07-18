@@ -412,32 +412,56 @@ class DownloadVodMixin:
             info=info,
         )
 
-        worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
-        worker.audio_url = audio_url
+        from ...job_spec import DownloadJobSpec
+        from ...download_options import (
+            resolve_external_downloader_options, resolve_ytdlp_transfer_options,
+        )
+        tracks = []
         if selected_q:
             from ...models import default_media_tracks
-            worker.selected_tracks = default_media_tracks(selected_q)
-        worker.ytdlp_source = ytdlp_source
-        worker.ytdlp_format = ytdlp_format
-        worker.cookies_browser = YtDlpExtractor.cookies_browser
-        worker.rate_limit = YtDlpExtractor.rate_limit
-        worker.proxy = YtDlpExtractor.proxy
-        worker.download_subs = YtDlpExtractor.download_subs
-        worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
-        worker.subtitle_languages = YtDlpExtractor.subtitle_languages
-        worker.subtitle_auto = YtDlpExtractor.subtitle_auto
-        worker.subtitle_convert = YtDlpExtractor.subtitle_convert
-        worker.subtitle_embed = YtDlpExtractor.subtitle_embed
-        worker.sponsorblock = YtDlpExtractor.sponsorblock
-        worker.sponsorblock_mark = YtDlpExtractor.sponsorblock_mark
-        worker.sponsorblock_remove = YtDlpExtractor.sponsorblock_remove
-        worker.sponsorblock_api = YtDlpExtractor.sponsorblock_api
-        from ...download_options import (
-            apply_external_downloader_options, apply_ytdlp_transfer_options,
+            tracks = default_media_tracks(selected_q)
+        transfer = resolve_ytdlp_transfer_options(YtDlpExtractor)
+        ext_dl = resolve_external_downloader_options(YtDlpExtractor)
+        spec = DownloadJobSpec(
+            playlist_url=playlist_url or "",
+            segments=tuple(tuple(s) for s in segments),
+            output_dir=out_dir,
+            format_type=fmt_type,
+            audio_url=audio_url,
+            selected_tracks=tuple(tracks),
+            ytdlp_source=ytdlp_source,
+            ytdlp_format=ytdlp_format,
+            cookies_browser=YtDlpExtractor.cookies_browser,
+            rate_limit=YtDlpExtractor.rate_limit,
+            proxy=YtDlpExtractor.proxy,
+            download_subs=YtDlpExtractor.download_subs,
+            capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            subtitle_languages=YtDlpExtractor.subtitle_languages,
+            subtitle_auto=YtDlpExtractor.subtitle_auto,
+            subtitle_convert=YtDlpExtractor.subtitle_convert,
+            subtitle_embed=YtDlpExtractor.subtitle_embed,
+            sponsorblock=YtDlpExtractor.sponsorblock,
+            sponsorblock_mark=YtDlpExtractor.sponsorblock_mark,
+            sponsorblock_remove=YtDlpExtractor.sponsorblock_remove,
+            sponsorblock_api=YtDlpExtractor.sponsorblock_api,
+            ytdlp_concurrent_fragments=transfer.get("concurrent_fragments", 0),
+            ytdlp_retries=transfer.get("retries", ""),
+            ytdlp_fragment_retries=transfer.get("fragment_retries", ""),
+            ytdlp_retry_sleep=transfer.get("retry_sleep", ""),
+            ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
+            ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
+            ytdlp_live_from_start=transfer.get("live_from_start", False),
+            ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
+            ytdlp_embed_chapters=transfer.get("embed_chapters"),
+            ytdlp_embed_metadata=transfer.get("embed_metadata"),
+            ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
+            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
+            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
+            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
+            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
+            parallel_connections=self._parallel_connections,
         )
-        apply_ytdlp_transfer_options(worker, YtDlpExtractor)
-        apply_external_downloader_options(worker, YtDlpExtractor)
-        worker.parallel_connections = self._parallel_connections
+        worker = DownloadWorker.from_spec(spec)
         worker.progress.connect(self._on_dl_progress)
         worker.segment_done.connect(self._on_segment_done)
         worker.error.connect(self._on_dl_error)

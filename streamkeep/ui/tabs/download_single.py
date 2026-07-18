@@ -1003,47 +1003,84 @@ class DownloadSingleMixin:
             history_url=self._resolve_history_url(),
             info=self.stream_info,
         )
-        self.download_worker = DownloadWorker(playlist_url or "", segments, out_dir, format_type=fmt_type)
-        self.download_worker.audio_url = audio_url
-        self.download_worker.selected_tracks = selected_tracks
-        self.download_worker.ytdlp_source = ytdlp_source
-        self.download_worker.ytdlp_format = ytdlp_format
-        self.download_worker.ytdlp_format_sort = ytdlp_options["format_sort"]
-        self.download_worker.ytdlp_container = ytdlp_options["container"]
-        self.download_worker.ytdlp_audio_format = ytdlp_options["audio_format"]
-        self.download_worker.ytdlp_audio_quality = ytdlp_options["audio_quality"]
-        self.download_worker.cookies_browser = YtDlpExtractor.cookies_browser
-        self.download_worker.rate_limit = _dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit
-        self.download_worker.proxy = YtDlpExtractor.proxy
-        self.download_worker.download_subs = subtitle_options["enabled"]
-        self.download_worker.capture_youtube_chat = YtDlpExtractor.capture_youtube_chat
-        self.download_worker.subtitle_languages = subtitle_options["languages"]
-        self.download_worker.subtitle_auto = subtitle_options["automatic"]
-        self.download_worker.subtitle_convert = subtitle_options["convert"]
-        self.download_worker.subtitle_embed = subtitle_options["embed"]
-        self.download_worker.sponsorblock = sponsorblock_options["enabled"]
-        self.download_worker.sponsorblock_mark = sponsorblock_options["mark"]
-        self.download_worker.sponsorblock_remove = sponsorblock_options["remove"]
-        self.download_worker.sponsorblock_api = sponsorblock_options["api_url"]
+        # Resolve external downloader options (silently disables on error)
         from ...download_options import (
-            apply_external_downloader_options, apply_ytdlp_transfer_options,
+            resolve_external_downloader_options,
+            validate_external_downloader_options,
         )
-        apply_ytdlp_transfer_options(
-            self.download_worker,
-            transfer_options,
-        )
-        apply_external_downloader_options(self.download_worker, YtDlpExtractor)
-        self.download_worker.ytdlp_template_name = ytdlp_template_name
-        self.download_worker.ytdlp_template_args = ytdlp_template_args
-        self.download_worker.hls_key_override = hls_key_options["value"]
-        self.download_worker.hls_key_iv = hls_key_options["iv"]
-        self.download_worker.parallel_connections = _dl_overrides.get("parallel_connections") or self._parallel_connections
-        # Pass time-range crop to yt-dlp via --download-sections (F21)
+        try:
+            _ext_dl = resolve_external_downloader_options(YtDlpExtractor)
+            validate_external_downloader_options(
+                downloader=_ext_dl["external_downloader"],
+                connections=_ext_dl["aria2c_connections"],
+                splits=_ext_dl["aria2c_splits"],
+                min_split_size=_ext_dl["aria2c_min_split_size"],
+            )
+            _ext_dl_name = str(_ext_dl["external_downloader"] or "").strip().lower()
+            _ext_dl_connections = int(_ext_dl["aria2c_connections"] or 0)
+            _ext_dl_splits = int(_ext_dl["aria2c_splits"] or 0)
+            _ext_dl_min_split = str(_ext_dl["aria2c_min_split_size"] or "").strip()
+        except (ValueError, TypeError):
+            _ext_dl_name, _ext_dl_connections, _ext_dl_splits, _ext_dl_min_split = "", 0, 0, ""
+
+        # Compute download_sections for time-range crop (F21)
+        _download_sections = ""
         if ((fmt_type == "ytdlp_direct" or hls_key_options["value"])
                 and (crop_start or crop_end)):
             cs = self._fmt_crop_time(crop_start) if crop_start else "0:00:00"
             ce = self._fmt_crop_time(crop_end) if crop_end else ""
-            self.download_worker.download_sections = f"*{cs}-{ce}" if ce else f"*{cs}-"
+            _download_sections = f"*{cs}-{ce}" if ce else f"*{cs}-"
+
+        from ...job_spec import DownloadJobSpec
+        spec = DownloadJobSpec(
+            playlist_url=playlist_url or "",
+            segments=tuple(tuple(s) for s in segments),
+            output_dir=out_dir,
+            format_type=fmt_type,
+            audio_url=audio_url,
+            selected_tracks=tuple(selected_tracks),
+            ytdlp_source=ytdlp_source,
+            ytdlp_format=ytdlp_format,
+            ytdlp_format_sort=ytdlp_options["format_sort"],
+            ytdlp_container=ytdlp_options["container"],
+            ytdlp_audio_format=ytdlp_options["audio_format"],
+            ytdlp_audio_quality=ytdlp_options["audio_quality"],
+            cookies_browser=YtDlpExtractor.cookies_browser,
+            rate_limit=_dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit,
+            proxy=YtDlpExtractor.proxy,
+            download_subs=subtitle_options["enabled"],
+            capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            subtitle_languages=subtitle_options["languages"],
+            subtitle_auto=subtitle_options["automatic"],
+            subtitle_convert=subtitle_options["convert"],
+            subtitle_embed=subtitle_options["embed"],
+            sponsorblock=sponsorblock_options["enabled"],
+            sponsorblock_mark=sponsorblock_options["mark"],
+            sponsorblock_remove=sponsorblock_options["remove"],
+            sponsorblock_api=sponsorblock_options["api_url"],
+            ytdlp_concurrent_fragments=transfer_options["concurrent_fragments"],
+            ytdlp_retries=transfer_options["retries"],
+            ytdlp_fragment_retries=transfer_options["fragment_retries"],
+            ytdlp_retry_sleep=transfer_options["retry_sleep"],
+            ytdlp_unavailable_fragments=transfer_options["unavailable_fragments"],
+            ytdlp_throttled_rate=transfer_options["throttled_rate"],
+            ytdlp_live_from_start=transfer_options["live_from_start"],
+            ytdlp_wait_for_video=transfer_options["wait_for_video"],
+            ytdlp_embed_chapters=transfer_options["embed_chapters"],
+            ytdlp_embed_metadata=transfer_options["embed_metadata"],
+            ytdlp_embed_thumbnail=transfer_options["embed_thumbnail"],
+            ytdlp_template_name=ytdlp_template_name,
+            ytdlp_template_args=ytdlp_template_args,
+            ytdlp_external_downloader=_ext_dl_name,
+            ytdlp_aria2c_connections=_ext_dl_connections,
+            ytdlp_aria2c_splits=_ext_dl_splits,
+            ytdlp_aria2c_min_split_size=_ext_dl_min_split,
+            hls_key_override=hls_key_options["value"],
+            hls_key_iv=hls_key_options["iv"],
+            download_sections=_download_sections,
+            parallel_connections=_dl_overrides.get("parallel_connections") or self._parallel_connections,
+        )
+        self.download_worker = DownloadWorker.from_spec(spec)
         if hls_key_options["value"]:
             self._log(
                 "[HLS] Authorized clear-key override enabled for this job; "
