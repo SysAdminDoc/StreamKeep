@@ -12,12 +12,16 @@ Share IDs are UUID-based for unguessable URLs.
 import mimetypes
 import os
 import secrets
+import threading
 
 from .theme import CAT
 
 # In-memory registry of shared recordings.
 # Populated from HistoryEntry objects that have shared=True + share_id.
 _shared = {}   # share_id -> {"path": str, "title": str, "channel": str, "media": str}
+_shared_lock = threading.Lock()
+
+_MAX_RANGE_CHUNK = 8 * 1024 * 1024  # 8 MB per Range-request read
 
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".ts", ".mov", ".avi", ".flv", ".m4v")
 _AUDIO_EXTS = (".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac")
@@ -37,41 +41,45 @@ def _media_type(path, fallback="video/mp4"):
 
 def register_shared(share_id, path, title="", channel="", media=""):
     """Register a recording for sharing."""
-    _shared[share_id] = {
-        "path": path,
-        "title": title,
-        "channel": channel,
-        "media": media,
-    }
+    with _shared_lock:
+        _shared[share_id] = {
+            "path": path,
+            "title": title,
+            "channel": channel,
+            "media": media,
+        }
 
 
 def unregister_shared(share_id):
-    _shared.pop(share_id, None)
+    with _shared_lock:
+        _shared.pop(share_id, None)
 
 
 def generate_share_id():
-    # 128 bits of entropy (32 hex chars) so a LAN-bound share URL cannot be
-    # brute-forced, unlike the previous 48-bit truncated UUID.
     return secrets.token_hex(16)
 
 
 def get_shared(share_id):
-    return _shared.get(share_id)
+    with _shared_lock:
+        entry = _shared.get(share_id)
+        return dict(entry) if entry else None
 
 
 def all_shared():
-    return dict(_shared)
+    with _shared_lock:
+        return dict(_shared)
 
 
 # ── HTML rendering ──────────────────────────────────────────────────
 
 def render_gallery_html(base_url=""):
     """Render the gallery page HTML."""
+    snapshot = all_shared()
     items_html = ""
-    if not _shared:
+    if not snapshot:
         items_html = '<p style="color:#aaa;text-align:center;">No shared recordings.</p>'
     else:
-        for sid, info in _shared.items():
+        for sid, info in snapshot.items():
             title = info.get("title", "Untitled")[:50]
             channel = info.get("channel", "")
             items_html += (
@@ -102,7 +110,7 @@ h1 {{ color: {CAT['blue']}; }}
 
 def render_share_html(share_id, base_url=""):
     """Render the player page for a shared recording."""
-    info = _shared.get(share_id)
+    info = get_shared(share_id)
     if not info:
         return "<h1>Not Found</h1>"
     title = info.get("title", "Untitled")
@@ -158,7 +166,10 @@ def serve_media_range(media_path, range_header=None):
 
     if range_header and range_header.startswith("bytes="):
         try:
-            ranges = range_header[6:].split("-", 1)
+            range_spec = range_header[6:]
+            if "," in range_spec:
+                raise ValueError("multi-range not supported")
+            ranges = range_spec.split("-", 1)
             if not ranges or len(ranges) != 2:
                 raise ValueError("invalid range")
             if not ranges[0]:
@@ -180,15 +191,17 @@ def serve_media_range(media_path, range_header=None):
 
         end = min(end, file_size - 1)
         length = end - start + 1
+        read_size = min(length, _MAX_RANGE_CHUNK)
+        actual_end = start + read_size - 1
 
         with open(media_path, "rb") as f:
             f.seek(start)
-            data = f.read(length)
+            data = f.read(read_size)
 
         headers = {
             "Content-Type": content_type,
-            "Content-Length": str(length),
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(read_size),
+            "Content-Range": f"bytes {start}-{actual_end}/{file_size}",
             "Accept-Ranges": "bytes",
         }
         return data, 206, headers
