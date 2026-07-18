@@ -189,6 +189,22 @@ def format_command_argv(argv, *, windows=None):
 
 EXTERNAL_DOWNLOADERS = ("", "aria2c")
 
+_HLS_DASH_INDICATORS = (
+    ".m3u8", ".m3u", ".mpd", "/manifest", "/playlist",
+)
+
+
+def is_aria2c_compatible_source(url):
+    """Return whether a source URL is safe to route through aria2c.
+
+    yt-dlp 2026.07.04 removed aria2c support for HLS and DASH downloads
+    (CVE-2026-50574).  Only direct HTTP file downloads may use aria2c.
+    """
+    if not url:
+        return False
+    lower = url.split("?", 1)[0].split("#", 1)[0].lower()
+    return not any(lower.endswith(ext) for ext in _HLS_DASH_INDICATORS)
+
 
 def sanitize_download_target_url(url):
     """Validate a target URL before an aria2c-routed download (CVE-2026-50574).
@@ -234,6 +250,11 @@ def validate_external_downloader_options(
     text, so no aria2c control/RPC/exec option can be injected through this
     surface. ``--downloader``/``--downloader-args`` are otherwise reserved
     (see ``YTDLP_TEMPLATE_DENIED_OPTIONS``); this typed control owns them.
+
+    yt-dlp 2026.07.04 removed aria2c support for HLS/DASH downloads
+    (CVE-2026-50574).  Callers must gate the result through
+    ``is_aria2c_compatible_source`` before applying it to a job whose
+    source may be a streaming manifest.
     """
     name = str(downloader or "").strip().lower()
     if name and name not in EXTERNAL_DOWNLOADERS:

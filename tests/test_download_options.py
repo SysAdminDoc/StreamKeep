@@ -3,7 +3,8 @@ import pytest
 from streamkeep.download_options import (
     apply_external_downloader_options,
     apply_ytdlp_transfer_options,
-    format_command_argv, normalize_ytdlp_arg_templates,
+    format_command_argv, is_aria2c_compatible_source,
+    normalize_ytdlp_arg_templates,
     parse_ytdlp_template_text, resolve_ytdlp_arg_template,
     sanitize_download_target_url,
     validate_download_options, validate_external_downloader_options,
@@ -365,3 +366,32 @@ def test_apply_external_downloader_options_disables_on_bad_config():
     assert worker.ytdlp_aria2c_connections == 0
     assert worker.ytdlp_aria2c_splits == 0
     assert worker.ytdlp_aria2c_min_split_size == ""
+
+
+# --- aria2c HLS/DASH compatibility gate (yt-dlp 2026.07.04) ---
+
+
+@pytest.mark.parametrize("url", [
+    "https://cdn.example.com/video.mp4",
+    "https://cdn.example.com/audio.m4a",
+    "https://cdn.example.com/file.webm?token=abc",
+    "https://cdn.example.com/download/12345",
+])
+def test_aria2c_compatible_with_direct_urls(url):
+    assert is_aria2c_compatible_source(url) is True
+
+
+@pytest.mark.parametrize("url", [
+    "https://cdn.example.com/master.m3u8",
+    "https://cdn.example.com/stream.m3u8?token=abc",
+    "https://cdn.example.com/index.m3u",
+    "https://cdn.example.com/manifest.mpd",
+    "https://cdn.example.com/dash/manifest.mpd?t=123",
+])
+def test_aria2c_incompatible_with_hls_dash_urls(url):
+    assert is_aria2c_compatible_source(url) is False
+
+
+def test_aria2c_compatible_rejects_empty():
+    assert is_aria2c_compatible_source("") is False
+    assert is_aria2c_compatible_source(None) is False

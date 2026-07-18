@@ -981,8 +981,9 @@ def build_parser():
     )
     dl.add_argument(
         "--external-downloader", default="", choices=["", "aria2c"],
-        help="Route yt-dlp segment downloads through aria2c (source URL is "
-             "sanitized before hand-off; CVE-2026-50574)",
+        help="Route direct HTTP downloads through aria2c; HLS/DASH sources "
+             "use native -N instead since yt-dlp 2026.07.04 removed aria2c "
+             "HLS/DASH support (source URL sanitized; CVE-2026-50574)",
     )
     dl.add_argument(
         "--aria2c-connections", type=int, default=0,

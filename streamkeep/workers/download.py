@@ -245,6 +245,7 @@ class DownloadWorker(QThread):
             validate_hls_key_override,
             validate_sponsorblock_options, validate_subtitle_options,
             validate_external_downloader_options,
+            is_aria2c_compatible_source,
             validate_ytdlp_template_args, validate_ytdlp_transfer_options,
             sanitize_download_target_url,
         )
@@ -408,7 +409,17 @@ class DownloadWorker(QThread):
                 cmd.append("--break-on-existing")
         if self.download_sections:
             cmd.extend(["--download-sections", self.download_sections])
-        if external_downloader["downloader"]:
+        use_aria2c = bool(external_downloader["downloader"])
+        if use_aria2c and not is_aria2c_compatible_source(
+            self._effective_ytdlp_source()
+        ):
+            use_aria2c = False
+            if not export:
+                self.log.emit(
+                    "[INFO] aria2c skipped for this source (yt-dlp removed "
+                    "HLS/DASH aria2c support in 2026.07.04); using native -N"
+                )
+        if use_aria2c:
             cmd.extend(external_downloader["argv"])
         cmd.extend(validate_ytdlp_template_args(self.ytdlp_template_args or ()))
         if hls_key_options["extractor_arg"]:
@@ -439,9 +450,7 @@ class DownloadWorker(QThread):
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         source = self._effective_ytdlp_source()
-        if external_downloader["downloader"]:
-            # Gate the source at the input boundary before it enters an
-            # aria2c-routed pipeline (CVE-2026-50574 defense in depth).
+        if use_aria2c:
             source = sanitize_download_target_url(source)
         cmd.append(source)
         return cmd
