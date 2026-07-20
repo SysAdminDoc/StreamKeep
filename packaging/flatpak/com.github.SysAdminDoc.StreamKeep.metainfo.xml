@@ -27,7 +27,10 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="4.38.0" date="2026-07-17">
+    <release version="4.41.0" date="2026-07-19">
+      <description><p>Adds a Packagizer-class ordered rules engine, keep-last-N per-source retention, and a published OpenAPI 3.1 spec for the REST server, plus dedicated test coverage for the monitor, chat readers, and finalize pipeline.</p></description>
+    </release>
+    <release version="4.40.0" date="2026-07-17">
       <description><p>Aligns the responsive desktop with the production mockup, fixes cross-thread startup logging, and introduces a unified StreamKeep icon across Windows, Flatpak, the README, and the browser companion.</p></description>
     </release>
     <release version="4.36.3" date="2026-07-17">
