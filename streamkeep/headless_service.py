@@ -103,6 +103,11 @@ class HeadlessJobService(QObject):
         url = str(item.get("url", "")).strip()
         if not url.startswith(("http://", "https://")):
             raise ValueError("invalid url")
+        # Ordered rules engine (V15): fold matching folder/template/preset/
+        # proxy/priority/auto-start actions into the job before defaults are
+        # applied, so a rule-set output_dir wins over the service default.
+        from .rules import apply_rules_to_job
+        item = apply_rules_to_job(item, self.config)
         item.update({
             "url": url,
             "title": str(item.get("title", "") or url),
@@ -349,7 +354,7 @@ class HeadlessJobService(QObject):
             parallel_connections=self.parallel_connections,
             cookies_browser=str(self.config.get("cookies_browser", "") or ""),
             rate_limit=str(self.config.get("rate_limit", "") or ""),
-            proxy=str(self.config.get("proxy", "") or ""),
+            proxy=str(job.get("proxy", "") or self.config.get("proxy", "") or ""),
             download_subs=bool(self.config.get("download_subs", False)),
             capture_youtube_chat=bool(self.config.get("capture_youtube_chat", False)),
             subtitle_languages=str(self.config.get("subtitle_languages", "en.*,en") or ""),

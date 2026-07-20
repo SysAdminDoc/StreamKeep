@@ -39,6 +39,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Persist fetch, download, and finalize failures to a retryable recovery ledger that survives restart and is exposed in the queue and web remote.
 - Use parallel HTTP range downloads for direct files when the server supports ranges.
 - Apply bandwidth windows, day/night/weekend speed scheduling, per-download rate limits, and lifecycle cleanup rules.
+- Define ordered automation rules (Packagizer-class) that match on site, uploader, title regex, duration bounds, or media type and then set the output folder, filename/argv template, post-processing preset, quality, per-job proxy, priority, or auto-start. Rules evaluate top-to-bottom with `all`/`any` matching and an optional stop-on-match; they fill in job settings without overriding values you set explicitly.
 
 ### Channel Monitor
 
