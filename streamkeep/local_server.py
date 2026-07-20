@@ -19,6 +19,7 @@ REST API endpoints (F37):
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
   POST /api/failures/discard  — discard a persisted failed job  [recovery]
+  GET  /api/spec       — OpenAPI 3.1 specification (unauthenticated)
   GET  /               — serves the single-page web remote UI
 
 The server runs on its own thread (stdlib http.server is threaded), and
@@ -754,7 +755,9 @@ def _build_handler(
                 self._serve_web_ui()
                 return
 
-            if path == "/ping":
+            if path == "/api/spec":
+                self._handle_api_spec()
+            elif path == "/ping":
                 if self._require_auth():
                     self._json_response(200, {"ok": True, "app": "StreamKeep"})
             elif path == "/api/status":
@@ -909,6 +912,10 @@ def _build_handler(
                 except Exception:
                     pass
             return {}
+
+        def _handle_api_spec(self):
+            from . import openapi
+            self._json_response(200, openapi.build_openapi_spec())
 
         def _handle_api_status(self):
             state = self._get_state()
