@@ -481,7 +481,10 @@ def _validate_media_server_schema(value):
 def _validate_lifecycle_schema(value):
     if not value:
         return
-    allowed = {"enabled", "max_days", "max_total_gb", "delete_watched", "favorites_exempt"}
+    allowed = {
+        "enabled", "max_days", "max_total_gb", "delete_watched",
+        "favorites_exempt", "keep_last_per_source",
+    }
     unknown = set(value) - allowed
     if unknown:
         raise ConfigImportError(
@@ -490,7 +493,7 @@ def _validate_lifecycle_schema(value):
     for key in ("enabled", "delete_watched", "favorites_exempt"):
         if key in value and not isinstance(value[key], bool):
             raise ConfigImportError(f"lifecycle.{key} must be boolean")
-    for key in ("max_days", "max_total_gb"):
+    for key in ("max_days", "max_total_gb", "keep_last_per_source"):
         if key in value and (
             isinstance(value[key], bool) or not isinstance(value[key], (int, float))
         ):

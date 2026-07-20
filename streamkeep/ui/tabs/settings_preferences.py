@@ -584,6 +584,7 @@ class SettingsPreferencesMixin:
                 "max_total_gb": self.lc_max_gb_spin.value(),
                 "delete_watched": self.lc_watched_check.isChecked(),
                 "favorites_exempt": self.lc_fav_exempt_check.isChecked(),
+                "keep_last_per_source": self.lc_keep_last_spin.value(),
             }
         # Apply library/NFO + chat
         from ...extractors.twitch import TwitchExtractor

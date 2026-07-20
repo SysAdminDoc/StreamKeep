@@ -286,7 +286,10 @@ class SettingsCompanionMixin:
 
     def _on_lifecycle_preview(self):
         """Show a preview of what the lifecycle cleanup would remove."""
-        from ...lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
+        from ...lifecycle import (
+            evaluate_cleanup, execute_cleanup, keep_last_map_from_monitor,
+            removal_real_paths,
+        )
         policy = self._config.get("lifecycle", {})
         if not policy.get("enabled"):
             policy = dict(policy, enabled=True)  # preview even if disabled
@@ -294,7 +297,9 @@ class SettingsCompanionMixin:
             HistoryEntry.from_dict(row)
             for row in _db.iter_history(page_size=500)
         )
-        removals = evaluate_cleanup(history, policy)
+        keep_map = keep_last_map_from_monitor(
+            getattr(getattr(self, "monitor", None), "entries", []))
+        removals = evaluate_cleanup(history, policy, keep_last_map=keep_map)
         if not removals:
             show_premium_message(
                 self,
@@ -359,7 +364,10 @@ class SettingsCompanionMixin:
 
     def _run_lifecycle_cleanup(self):
         """Run lifecycle cleanup silently after a download completes."""
-        from ...lifecycle import evaluate_cleanup, execute_cleanup, removal_real_paths
+        from ...lifecycle import (
+            evaluate_cleanup, execute_cleanup, keep_last_map_from_monitor,
+            removal_real_paths,
+        )
         policy = self._config.get("lifecycle", {})
         if not policy or not policy.get("enabled"):
             return
@@ -367,7 +375,9 @@ class SettingsCompanionMixin:
             HistoryEntry.from_dict(row)
             for row in _db.iter_history(page_size=500)
         )
-        removals = evaluate_cleanup(history, policy)
+        keep_map = keep_last_map_from_monitor(
+            getattr(getattr(self, "monitor", None), "entries", []))
+        removals = evaluate_cleanup(history, policy, keep_last_map=keep_map)
         if removals:
             removed = execute_cleanup(removals, log_fn=self._log)
             if removed:

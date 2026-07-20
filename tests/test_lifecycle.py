@@ -3,8 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from streamkeep.lifecycle import evaluate_cleanup, removal_real_paths
-from streamkeep.models import HistoryEntry
+from streamkeep.lifecycle import (
+    evaluate_cleanup,
+    keep_last_map_from_monitor,
+    removal_real_paths,
+)
+from streamkeep.models import HistoryEntry, MonitorEntry
 
 
 class LifecycleTests(unittest.TestCase):
@@ -102,6 +106,83 @@ class LifecycleTests(unittest.TestCase):
                 lc._dir_size_bytes = orig
             self.assertEqual(len(removals), 1)
             self.assertEqual(os.path.realpath(removals[0][0].path), os.path.realpath(old))
+
+
+    def _dated_recording(self, tmpdir, name, channel, mtime):
+        rec = Path(tmpdir) / name
+        rec.mkdir()
+        (rec / "clip.mp4").write_bytes(b"x" * 32)
+        os.utime(rec, (mtime, mtime))
+        return HistoryEntry(title=name, channel=channel, path=str(rec))
+
+    def test_keep_last_per_source_prunes_oldest_beyond_n(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a = self._dated_recording(tmpdir, "a", "ChanX", mtime=100)
+            b = self._dated_recording(tmpdir, "b", "ChanX", mtime=200)
+            c = self._dated_recording(tmpdir, "c", "ChanX", mtime=300)
+            removals = evaluate_cleanup(
+                [a, b, c],
+                {"enabled": True, "keep_last_per_source": 2},
+            )
+            # Keeps the two newest (b, c); recycles the oldest (a).
+            self.assertEqual(len(removals), 1)
+            self.assertEqual(os.path.realpath(removals[0][0].path),
+                             os.path.realpath(a.path))
+            self.assertIn("keeping last 2", removals[0][1])
+
+    def test_keep_last_ignores_entries_without_channel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a = self._dated_recording(tmpdir, "a", "", mtime=100)
+            b = self._dated_recording(tmpdir, "b", "", mtime=200)
+            removals = evaluate_cleanup(
+                [a, b], {"enabled": True, "keep_last_per_source": 1})
+            self.assertEqual(removals, [])
+
+    def test_keep_last_is_per_channel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            x1 = self._dated_recording(tmpdir, "x1", "ChanX", mtime=100)
+            x2 = self._dated_recording(tmpdir, "x2", "ChanX", mtime=200)
+            y1 = self._dated_recording(tmpdir, "y1", "ChanY", mtime=100)
+            removals = evaluate_cleanup(
+                [x1, x2, y1], {"enabled": True, "keep_last_per_source": 1})
+            # ChanX prunes its oldest (x1); ChanY has only one, keeps it.
+            paths = {os.path.realpath(h.path) for h, _r in removals}
+            self.assertEqual(paths, {os.path.realpath(x1.path)})
+
+    def test_per_channel_map_overrides_policy_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a = self._dated_recording(tmpdir, "a", "ChanX", mtime=100)
+            b = self._dated_recording(tmpdir, "b", "ChanX", mtime=200)
+            c = self._dated_recording(tmpdir, "c", "ChanX", mtime=300)
+            # Policy default would keep 1, but the channel map says keep 3.
+            removals = evaluate_cleanup(
+                [a, b, c],
+                {"enabled": True, "keep_last_per_source": 1},
+                keep_last_map={"ChanX": 3},
+            )
+            self.assertEqual(removals, [])
+
+    def test_keep_last_respects_favorite_exemption(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a = self._dated_recording(tmpdir, "a", "ChanX", mtime=100)
+            a.favorite = True
+            b = self._dated_recording(tmpdir, "b", "ChanX", mtime=200)
+            c = self._dated_recording(tmpdir, "c", "ChanX", mtime=300)
+            removals = evaluate_cleanup(
+                [a, b, c],
+                {"enabled": True, "keep_last_per_source": 1, "favorites_exempt": True},
+            )
+            # Favorite 'a' is exempt entirely; of the remaining b,c keep newest c.
+            paths = {os.path.realpath(h.path) for h, _r in removals}
+            self.assertEqual(paths, {os.path.realpath(b.path)})
+
+    def test_keep_last_map_from_monitor_builds_channel_map(self):
+        entries = [
+            MonitorEntry(channel_id="ChanX", retention_keep_last=3),
+            MonitorEntry(channel_id="ChanY", retention_keep_last=0),
+            MonitorEntry(channel_id="", retention_keep_last=5),
+        ]
+        self.assertEqual(keep_last_map_from_monitor(entries), {"ChanX": 3})
 
 
 if __name__ == "__main__":

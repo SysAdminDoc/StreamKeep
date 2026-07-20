@@ -6,7 +6,9 @@ permanent delete.  A cleanup preview must be shown before execution.
 
 Config keys (under ``config["lifecycle"]``):
     enabled, max_days (0=disabled), max_total_gb (0=disabled),
-    delete_watched (bool), favorites_exempt (bool)
+    delete_watched (bool), favorites_exempt (bool),
+    keep_last_per_source (0=disabled) — keep only the newest N recordings
+        per source channel; older ones are recycled.
 """
 
 import os
@@ -18,6 +20,7 @@ DEFAULT_POLICY = {
     "max_total_gb": 0,
     "delete_watched": False,
     "favorites_exempt": True,
+    "keep_last_per_source": 0,
 }
 
 
@@ -46,6 +49,22 @@ def _dir_size_bytes(path):
     return total
 
 
+def keep_last_map_from_monitor(entries):
+    """Build a ``{channel: keep_n}`` map from monitor entries.
+
+    Uses each entry's ``retention_keep_last`` (0 = keep everything) keyed by
+    ``channel_id`` so per-channel limits can override the policy-wide default
+    in :func:`evaluate_cleanup`.
+    """
+    out = {}
+    for entry in entries or []:
+        channel = str(getattr(entry, "channel_id", "") or "")
+        keep_n = int(getattr(entry, "retention_keep_last", 0) or 0)
+        if channel and keep_n > 0:
+            out[channel] = keep_n
+    return out
+
+
 def removal_real_paths(removals):
     """Return the normalized real paths represented by a cleanup list."""
     paths = set()
@@ -56,13 +75,16 @@ def removal_real_paths(removals):
     return paths
 
 
-def evaluate_cleanup(history, policy, output_dirs=None):
+def evaluate_cleanup(history, policy, output_dirs=None, keep_last_map=None):
     """Return a list of ``(HistoryEntry, reason)`` tuples that should be
     cleaned up according to *policy*.
 
     Does NOT perform any deletion — call ``execute_cleanup()`` for that.
     ``output_dirs`` is an optional set/list of directories to consider;
-    if None, all history entries are evaluated.
+    if None, all history entries are evaluated. ``keep_last_map`` is an
+    optional ``{channel: keep_n}`` mapping (e.g. per-monitor-channel
+    ``retention_keep_last`` overrides) that takes precedence over the
+    policy-wide ``keep_last_per_source`` default for that channel.
     """
     if not policy or not policy.get("enabled"):
         return []
@@ -72,6 +94,10 @@ def evaluate_cleanup(history, policy, output_dirs=None):
     max_gb = float(policy.get("max_total_gb", 0) or 0)
     delete_watched = bool(policy.get("delete_watched"))
     fav_exempt = bool(policy.get("favorites_exempt", True))
+    keep_last_default = int(policy.get("keep_last_per_source", 0) or 0)
+    keep_last_map = {
+        str(k): int(v or 0) for k, v in (keep_last_map or {}).items()
+    }
     output_dirs = {_normalize_path(p) for p in (output_dirs or []) if p}
 
     candidates_by_path = {}
@@ -96,6 +122,7 @@ def evaluate_cleanup(history, policy, output_dirs=None):
                 "size": entry_bytes,
                 "favorite": False,
                 "watched": False,
+                "channel": str(getattr(h, "channel", "") or ""),
             }
             candidates_by_path[real_path] = candidate
             total_bytes += entry_bytes
@@ -177,6 +204,41 @@ def evaluate_cleanup(history, policy, output_dirs=None):
                     to_remove.append((h, f"storage exceeds {max_gb:.0f} GB"))
                     scheduled_paths.add(real_path)
                     freed += sz
+
+    # Rule 4: keep-last-N per source channel. Group the non-favorite
+    # candidates by channel, keep the newest N (by mtime), and recycle the
+    # rest. A per-channel override in ``keep_last_map`` wins over the
+    # policy-wide default; a limit of 0 disables pruning for that channel.
+    if keep_last_default > 0 or keep_last_map:
+        by_channel = {}
+        for candidate in candidates:
+            channel = candidate["channel"]
+            if not channel:
+                continue
+            keep_n = keep_last_map.get(channel, keep_last_default)
+            if keep_n <= 0:
+                continue
+            by_channel.setdefault(channel, []).append(candidate)
+        for channel, group in by_channel.items():
+            keep_n = keep_last_map.get(channel, keep_last_default)
+            ranked = []
+            for candidate in group:
+                path = candidate["path"]
+                try:
+                    mtime = os.path.getmtime(path) if path else 0
+                except OSError:
+                    mtime = 0
+                ranked.append((mtime, candidate))
+            # Newest first; everything past the keep window is recycled.
+            ranked.sort(key=lambda row: row[0], reverse=True)
+            for _mtime, candidate in ranked[keep_n:]:
+                real_path = candidate["real_path"]
+                if real_path in scheduled_paths:
+                    continue
+                to_remove.append(
+                    (candidate["entry"], f"keeping last {keep_n} from {channel}")
+                )
+                scheduled_paths.add(real_path)
 
     return to_remove
 
