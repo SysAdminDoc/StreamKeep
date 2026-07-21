@@ -351,7 +351,9 @@ class LocalCompanionServer:
         port=0,
         master_token=None,
         external_origin="",
+        allow_private_network=False,
     ):
+        self.allow_private_network = bool(allow_private_network)
         self._token_store = TokenStore()
         self._pairing_store = PairingStore()
         self._replay_store = ReplayStore()
@@ -430,6 +432,7 @@ class LocalCompanionServer:
             pairing_store=self._pairing_store,
             replay_store=self._replay_store,
             external_origin=self.external_origin,
+            allow_private_network=self.allow_private_network,
         )
         self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
         self.port = self._httpd.server_address[1]
@@ -502,7 +505,9 @@ def _build_handler(
     pairing_store=None,
     replay_store=None,
     external_origin="",
+    allow_private_network=False,
 ):
+    allow_private_network = bool(allow_private_network)
     allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts())
     pairing_store = pairing_store or PairingStore()
     replay_store = replay_store or ReplayStore()
@@ -865,6 +870,23 @@ def _build_handler(
                 "expires_at": int(expires_at),
             })
 
+        def _ssrf_reject(self, url):
+            """Return True (and send 400) when *url* targets a blocked address.
+
+            Guards against SSRF via the network-exposed server: a submitted URL
+            resolving to loopback/link-local/cloud-metadata/private-LAN space is
+            refused unless private-network access was explicitly enabled.
+            """
+            from .net_guard import url_target_allowed
+            ok, reason = url_target_allowed(
+                url, allow_private_network=allow_private_network,
+            )
+            if not ok:
+                self._json_response(400, {"ok": False, "err": "url_not_allowed",
+                                          "message": reason})
+                return True
+            return False
+
         def _handle_send_url(self):
             data = self._read_body()
             url = str(data.get("url") or "").strip()
@@ -873,6 +895,8 @@ def _build_handler(
                 action = "fetch"
             if not url.startswith(("http://", "https://")):
                 self._json_response(400, {"ok": False, "err": "invalid url"})
+                return
+            if self._ssrf_reject(url):
                 return
             clip_start = _parse_timestamp(data.get("clip_start"))
             clip_end = _parse_timestamp(data.get("clip_end"))
@@ -964,6 +988,8 @@ def _build_handler(
             url = str(data.get("url") or "").strip()
             if not url.startswith(("http://", "https://")):
                 self._json_response(400, {"ok": False, "err": "invalid url"})
+                return
+            if self._ssrf_reject(url):
                 return
             if not queue_submitter:
                 signals.url_received.emit(url, "queue")

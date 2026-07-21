@@ -96,6 +96,7 @@ _STRING_CONFIG_KEYS = frozenset({
 _BOOL_CONFIG_KEYS = frozenset({
     "check_duplicates", "write_nfo", "download_twitch_chat",
     "chunk_long_captures", "companion_server_enabled", "companion_bind_lan",
+    "companion_allow_private_network",
     "check_for_updates", "capture_live_chat", "render_chat_ass",
     "enable_diarization", "notif_sound", "native_notifications",
     "download_subs", "subtitle_auto",

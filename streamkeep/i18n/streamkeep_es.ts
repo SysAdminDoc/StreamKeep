@@ -1522,7 +1522,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="683" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="687" />
             <source>Could not arm the update step. See log.</source>
             <translation type="unfinished" />
         </message>
@@ -1761,8 +1761,8 @@ Produces a .nosilence copy — the original is preserved.</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="172" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="614" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="649" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="618" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="653" />
             <source>Download &amp; install</source>
             <translation type="unfinished" />
         </message>
@@ -1868,7 +1868,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="623" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="627" />
             <source>Downloading...</source>
             <translation type="unfinished" />
         </message>
@@ -2820,12 +2820,12 @@ https://kick.com/channel
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="592" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="596" />
             <source>Install blocked</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="676" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="680" />
             <source>Install now</source>
             <translation type="unfinished" />
         </message>
@@ -6050,12 +6050,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="620" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="624" />
             <source>Update available but no authenticated Windows asset was attached.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="646" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="650" />
             <source>Update failed: {path_or_err}</source>
             <translation type="unfinished" />
         </message>

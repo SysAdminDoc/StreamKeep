@@ -396,6 +396,7 @@ class SettingsCompanionMixin:
         changes the setting."""
         enabled = bool(self._config.get("companion_server_enabled", False))
         bind_lan = bool(self._config.get("companion_bind_lan", False))
+        allow_private = bool(self._config.get("companion_allow_private_network", False))
         proxy_origin = str(self._config.get("companion_proxy_origin", "") or "").strip()
         desired_bind = "127.0.0.1"
         running = self._companion_server is not None
@@ -403,6 +404,8 @@ class SettingsCompanionMixin:
             getattr(self._companion_server, "_bind_addr", "") != desired_bind
             or getattr(self._companion_server, "external_origin", "")
             != (proxy_origin if bind_lan else "")
+            or bool(getattr(self._companion_server, "allow_private_network", False))
+            != allow_private
         ):
             force_restart = True
         if force_restart and running:
@@ -420,6 +423,7 @@ class SettingsCompanionMixin:
                     bind_lan=bind_lan,
                     external_origin=proxy_origin,
                     master_token=master_token,
+                    allow_private_network=allow_private,
                 )
                 srv.state_provider = self._api_state_snapshot
                 srv.url_received.connect(self._on_companion_url)

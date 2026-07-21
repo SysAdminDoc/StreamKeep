@@ -7,7 +7,6 @@ platform-specific parsers.
 """
 
 import http.client
-import ipaddress
 import os
 import re
 import socket
@@ -19,6 +18,10 @@ import urllib.parse
 from . import CURL_UA
 from .http import http_interrupted, http_probe, run_capture_interruptible
 from .models import QualityInfo, StreamInfo
+from .net_guard import (
+    address_allowed as _address_allowed,
+    resolve_host_addresses as _resolve_headless_addresses,
+)
 
 
 # Module-level flag so we only probe the Playwright browser install once.
@@ -36,17 +39,6 @@ _HEADLESS_MAX_REDIRECTS = 10
 _HEADLESS_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _HEADLESS_MAX_TOTAL_BYTES = 32 * 1024 * 1024
 _HEADLESS_HOST_RESOLVER_RULES = "MAP * ~NOTFOUND"
-_LAN_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "fc00::/7",
-))
-_METADATA_ADDRESSES = frozenset({
-    ipaddress.ip_address("169.254.169.254"),
-    ipaddress.ip_address("100.100.100.200"),
-    ipaddress.ip_address("fd00:ec2::254"),
-})
 
 
 class HeadlessNetworkBlocked(ValueError):
@@ -120,39 +112,6 @@ def _parse_headless_url(url):
         "",
     ))
     return normalized, host, port
-
-
-def _resolve_headless_addresses(host, port):
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        rows = socket.getaddrinfo(
-            host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP,
-        )
-        values = {row[4][0].split("%", 1)[0] for row in rows}
-        return tuple(sorted((ipaddress.ip_address(value) for value in values), key=str))
-    return (literal,)
-
-
-def _address_allowed(address, allow_private_network=False):
-    if getattr(address, "ipv4_mapped", None) is not None:
-        return False
-    if address in _METADATA_ADDRESSES:
-        return False
-    if (
-        address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_unspecified
-        or address.is_reserved
-    ):
-        return False
-    if address.is_global:
-        return True
-    return bool(
-        allow_private_network
-        and any(address in network for network in _LAN_NETWORKS)
-    )
 
 
 def _safe_headless_url(url, *, policy=None, allow_private_network=False):

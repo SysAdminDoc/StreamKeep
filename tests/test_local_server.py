@@ -302,6 +302,35 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertTrue(paired["token"])
 
+    def test_queue_rejects_ssrf_target_urls(self):
+        """A submitted URL resolving to loopback/metadata/private space is
+        refused (V30). IP-literal targets need no DNS, so this is offline."""
+        for path, body in (
+            ("/api/queue", {"url": "http://127.0.0.1/secret"}),
+            ("/api/queue", {"url": "http://169.254.169.254/latest/meta-data/"}),
+            ("/send_url", {"url": "http://192.168.1.20:8080/x", "action": "queue"}),
+        ):
+            with self.subTest(url=body["url"]):
+                error = self._expect_error(
+                    path, 400, token=self.server.token, method="POST", data=body,
+                )
+                self.assertEqual(error["err"], "url_not_allowed")
+
+    def test_queue_allows_private_target_when_opted_in(self):
+        server = LocalCompanionServer(allow_private_network=True)
+        server.start()
+        try:
+            payload, status = self._open_json(
+                "/api/queue", token=server.token, method="POST", server=server,
+                data={"url": "http://192.168.1.20:8080/x"},
+            )
+            # No queue_submitter is wired, so the handler emits the signal and
+            # returns 200 rather than 400 — proving the SSRF gate let it pass.
+            self.assertTrue(payload["ok"])
+            self.assertEqual(status, 200)
+        finally:
+            server.stop()
+
     def test_every_mutating_endpoint_requires_freshness_proof(self):
         cases = (
             ("/send_url", {"url": "https://example.com/a", "action": "queue"}),
