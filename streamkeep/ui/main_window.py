@@ -1879,12 +1879,33 @@ class StreamKeep(
         when the user has enabled audio cues in Settings."""
         self._notifications.push(text, level=level)
         self._refresh_notif_badge()
-        if level in ("success", "warning", "error") and bool(self._config.get("notif_sound", False)):
-            try:
-                from PyQt6.QtWidgets import QApplication
-                QApplication.beep()
-            except Exception:
-                pass
+        if level in ("success", "warning", "error"):
+            if bool(self._config.get("notif_sound", False)):
+                try:
+                    from PyQt6.QtWidgets import QApplication
+                    QApplication.beep()
+                except Exception:
+                    pass
+            if bool(self._config.get("native_notifications", False)):
+                self._fire_native_toast(text, level)
+
+    def _fire_native_toast(self, text, level="info"):
+        """Raise a native OS notification (Windows Toast / macOS / Linux) for a
+        notable event, falling back to the Qt tray icon when no native backend
+        is installed. Suppressed while the window is focused so it does not
+        interrupt a user already watching the in-app notifications bell."""
+        try:
+            if self.isActiveWindow():
+                return
+            from ..native_notify import notify
+            notify(
+                "StreamKeep",
+                str(text or ""),
+                level=level,
+                tray_icon=self._tray_icon,
+            )
+        except Exception:
+            pass
 
     def _refresh_notif_badge(self):
         if not hasattr(self, "notif_button"):

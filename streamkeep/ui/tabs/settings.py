@@ -1302,6 +1302,20 @@ def build_settings_tab(win):
     notif_row.addStretch(1)
     network_lay.addLayout(notif_row)
 
+    # Native OS notifications (F80)
+    native_notif_row = QHBoxLayout()
+    native_notif_row.setSpacing(8)
+    win.native_notif_check = QCheckBox("Native OS notifications on completion, live, and failure")
+    win.native_notif_check.setChecked(bool(win._config.get("native_notifications", False)))
+    win.native_notif_check.setToolTip(
+        "Raise a desktop notification (Windows Toast / macOS / Linux) for "
+        "notable events. Falls back to the tray icon when no native backend "
+        "is installed. Suppressed while the StreamKeep window is focused."
+    )
+    native_notif_row.addWidget(win.native_notif_check)
+    native_notif_row.addStretch(1)
+    network_lay.addLayout(native_notif_row)
+
     # Queue-complete power action (V24)
     from ...power import POWER_ACTIONS
     _POWER_ACTION_LABELS = {

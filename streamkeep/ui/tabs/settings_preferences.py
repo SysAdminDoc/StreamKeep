@@ -493,6 +493,8 @@ class SettingsPreferencesMixin:
             self._config["chat_render_bg_opacity"] = self.chat_render_opacity_spin.value()
         if hasattr(self, "notif_sound_check"):
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
+        if hasattr(self, "native_notif_check"):
+            self._config["native_notifications"] = bool(self.native_notif_check.isChecked())
         if hasattr(self, "queue_complete_action_combo"):
             from ...power import normalize_power_action
             self._config["queue_complete_action"] = normalize_power_action(
