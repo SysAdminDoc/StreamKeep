@@ -556,6 +556,68 @@ def _run_gallery(args):
     sys.exit(result.returncode)
 
 
+# ── lux fallback engine for CN platforms (V25) ──────────────────────
+
+def _run_lux(args):
+    """Download from a Chinese platform via lux (Bilibili/Douyin/Youku/...).
+
+    Shares StreamKeep's output folder and cookies. lux honours HTTP(S)_PROXY
+    from the environment, so a configured proxy is injected there. Degrades
+    with a clear install hint when lux is absent.
+    """
+    import subprocess
+
+    from .config import load_config
+    from .integrations.lux import (
+        LuxUnavailable,
+        build_lux_command,
+        lux_available,
+        lux_install_hint,
+    )
+
+    if not lux_available():
+        _print_line(f"Error: {lux_install_hint()}")
+        sys.exit(1)
+
+    cfg = load_config()
+    output_dir = getattr(args, "output", "") or cfg.get("output_dir", "")
+    if not output_dir:
+        from .utils import default_output_dir
+        output_dir = default_output_dir()
+
+    cookie = str(cfg.get("cookies_file", "") or "")
+
+    try:
+        cmd = build_lux_command(
+            args.url,
+            output_dir,
+            cookie=cookie,
+            info=getattr(args, "info", False),
+            stream_format=getattr(args, "stream_format", "") or "",
+        )
+    except (ValueError, LuxUnavailable) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+    env = dict(os.environ)
+    proxy = str(cfg.get("proxy", "") or "")
+    if proxy:
+        env["HTTP_PROXY"] = proxy
+        env["HTTPS_PROXY"] = proxy
+
+    _print_line("Engine:  lux")
+    _print_line(f"Output:  {output_dir}")
+    _print_line(f"Source:  {args.url}")
+    try:
+        result = subprocess.run(cmd, check=False, env=env)
+    except OSError as error:
+        _print_line(f"Error: could not start lux: {error}")
+        sys.exit(1)
+    if result.returncode == 0 and not getattr(args, "info", False):
+        _print_line(f"\nDownload complete -> {output_dir}")
+    sys.exit(result.returncode)
+
+
 # ── --server handler ────────────────────────────────────────────────
 
 def _run_server(args):
@@ -1136,6 +1198,21 @@ def build_parser():
     gal_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- lux CN-platform fallback engine (V25) --
+    lux_p = sub.add_parser(
+        "lux",
+        help="Download from a CN platform (Bilibili/Douyin/Youku) via lux",
+    )
+    lux_p.add_argument("url", help="Bilibili / Douyin / Youku / iQIYI / ... URL")
+    lux_p.add_argument("-o", "--output", default="",
+                       help="Output directory (default: configured output dir)")
+    lux_p.add_argument("-f", "--stream-format", default="",
+                       help="Select a specific lux stream format id")
+    lux_p.add_argument("-i", "--info", action="store_true",
+                       help="Show available streams without downloading")
+    lux_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
+
     # -- db maintenance --
     db_p = sub.add_parser("db", help="Database maintenance and diagnostics")
     db_p.add_argument("action", nargs="?", default="info",
@@ -1357,6 +1434,8 @@ def run_cli(argv=None):
         _list_extractors()
     elif args.command == "gallery":
         _run_gallery(args)
+    elif args.command == "lux":
+        _run_lux(args)
     elif args.command == "db":
         _run_db_maintenance(args)
     elif args.command == "snapshot":
@@ -1389,9 +1468,10 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "gallery", "db", "snapshot",
-        "backup", "startup-check", "import-har", "podcast-sidecars", "credentials",
-        "youtube-health", "register-protocol", "unregister-protocol", "bookmarklet",
+        "download", "dl", "server", "extractors", "gallery", "lux", "db",
+        "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
+        "credentials", "youtube-health", "register-protocol",
+        "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
     if any(arg in cli_triggers for arg in sys.argv[1:]):

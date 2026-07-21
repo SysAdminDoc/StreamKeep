@@ -96,6 +96,7 @@ python StreamKeep.py --help
 python StreamKeep.py --version
 python StreamKeep.py extractors
 python StreamKeep.py gallery "https://x.com/user" --output C:\Galleries
+python StreamKeep.py lux "https://www.bilibili.com/video/BV1xx" --info
 python StreamKeep.py db info
 python StreamKeep.py snapshot --output C:\Support\streamkeep-diagnostic.zip
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
@@ -175,7 +176,7 @@ Extension icons are shipped under `browser-extension/icons/`. The 256-bit master
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
 - The pinned Python security floors are yt-dlp 2026.07.04 and Pillow 12.3.0. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; the installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
 - StreamKeep records the exact path, version, provenance, and enabled capabilities for each runtime dependency. Settings, onboarding, and diagnostic snapshots expose that registry; missing or below-floor tools block only the dependent operation and include repair guidance. Startup never installs packages implicitly.
-- Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and `gallery-dl` (`pip install -U gallery-dl`) to enable the `gallery` subcommand for image galleries and social-media posts (Twitter/X, Instagram, Pixiv, boorus, and more). gallery-dl is invoked as a separate process and shares the configured output folder, download-archive, cookies, and proxy; it is never bundled.
+- Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, `gallery-dl` (`pip install -U gallery-dl`) for the `gallery` subcommand (image galleries and social-media posts — Twitter/X, Instagram, Pixiv, boorus, and more), and `lux` (`go install github.com/iawia002/lux@latest`) for the `lux` subcommand (Chinese platforms — Bilibili, Douyin, Youku, and more). Both are invoked as separate processes sharing the configured output folder, cookies, and proxy; neither is bundled.
 
 Install Python dependencies:
 
