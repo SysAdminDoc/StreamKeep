@@ -27,6 +27,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.43.0" date="2026-07-21">
+      <description><p>Adds two optional external download engines: gallery-dl for image galleries and social-media posts (Twitter/X, Instagram, Pixiv, boorus), and lux for Chinese platforms (Bilibili, Douyin, Youku), each exposed as a CLI subcommand that shares the configured output folder, cookies, and proxy.</p></description>
+    </release>
     <release version="4.42.0" date="2026-07-20">
       <description><p>Wires the storage-health disk monitor with auto-pause and native OS notifications into notable events, adds guided YouTube PO-token/SABR remediation, enforces an SSRF address policy on the REST server, and defers subscribed YouTube downloads so SponsorBlock segments can aggregate.</p></description>
     </release>
