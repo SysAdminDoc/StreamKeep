@@ -813,3 +813,26 @@ def test_youtube_chat_replay_off_by_default(tmp_path):
         os.path.join(str(tmp_path), "video.%(ext)s")
     )
     assert "live_chat" not in " ".join(cmd)
+
+
+def test_sabr_hint_emitted_for_gated_youtube_failure(tmp_path):
+    """A YouTube SABR/PO-token failure surfaces remediation HINT lines (V26)."""
+    worker = _make_worker(tmp_path)
+    emitted = []
+    worker.log.connect(emitted.append)
+    worker._maybe_warn_sabr_pot(["ERROR: Requested format is not available"])
+    assert any(m.startswith("[HINT]") for m in emitted)
+
+
+def test_no_sabr_hint_for_non_youtube_or_transient(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video.mp4"
+    emitted = []
+    worker.log.connect(emitted.append)
+    worker._maybe_warn_sabr_pot(["ERROR: Requested format is not available"])
+    assert not any(m.startswith("[HINT]") for m in emitted)
+
+    worker.ytdlp_source = "https://www.youtube.com/watch?v=x"
+    emitted.clear()
+    worker._maybe_warn_sabr_pot(["ERROR: HTTP Error 503: Service Unavailable"])
+    assert not any(m.startswith("[HINT]") for m in emitted)

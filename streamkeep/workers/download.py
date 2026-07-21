@@ -687,7 +687,30 @@ class DownloadWorker(QThread):
                 continue
             err_tail = "\n".join(output_lines[-5:])
             self.log.emit(f"[FAIL] {label}\n{err_tail}")
+            self._maybe_warn_sabr_pot(output_lines)
             return False
+
+    def _maybe_warn_sabr_pot(self, output_lines):
+        """Turn a YouTube SABR/PO-token gated failure into remediation advice."""
+        try:
+            from ..extractors.ytdlp import (
+                _is_youtube_url,
+                looks_like_sabr_or_pot_failure,
+                youtube_pot_setup_guidance,
+            )
+            if not _is_youtube_url(self._effective_ytdlp_source()):
+                return
+            if not looks_like_sabr_or_pot_failure("\n".join(output_lines)):
+                return
+            guidance = youtube_pot_setup_guidance()
+            self.log.emit(
+                "[HINT] YouTube returned SABR/PO-token-gated formats "
+                "(often storyboard images only). Remediation:"
+            )
+            for step in guidance["steps"]:
+                self.log.emit(f"[HINT] {step}")
+        except Exception:
+            pass
 
     def _stream_ytdlp_download(
         self, cmd, seg_idx, label, outfile, expected_outfile=None

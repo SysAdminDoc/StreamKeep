@@ -841,6 +841,11 @@ def _run_youtube_health(args):
         )
         for warning in report["warnings"]:
             _print_line(f"  ! {warning}")
+        pot_setup = report.get("pot_setup") or {}
+        if not pot_setup.get("provider_present", True):
+            _print_line("  Fix YouTube SABR/PO-token gating:")
+            for step in pot_setup.get("steps", []):
+                _print_line(f"    {step}")
 
     if not report["healthy"]:
         sys.exit(1)

@@ -87,3 +87,49 @@ def test_health_report_surfaces_runtime_problems():
     assert report["healthy"] is False
     assert any("JavaScript runtime" in w for w in report["warnings"])
     assert report["pot_provider"]["available"] is True
+
+
+# ── V26: SABR / PO-token remediation ────────────────────────────────
+
+
+def test_sabr_pot_failure_detection():
+    assert ytdlp.looks_like_sabr_or_pot_failure(
+        "ERROR: [youtube] abc: Requested format is not available"
+    )
+    assert ytdlp.looks_like_sabr_or_pot_failure(
+        "WARNING: Some web client https formats have been skipped (SABR)"
+    )
+    assert ytdlp.looks_like_sabr_or_pot_failure("needs a valid PO_TOKEN")
+    # Transient network failures must NOT trip the heuristic.
+    assert not ytdlp.looks_like_sabr_or_pot_failure(
+        "ERROR: Unable to download webpage: HTTP Error 503"
+    )
+    assert not ytdlp.looks_like_sabr_or_pot_failure("")
+
+
+def test_pot_setup_guidance_when_absent():
+    with mock.patch("streamkeep.extractors.ytdlp.importlib.util.find_spec", return_value=None):
+        guidance = ytdlp.youtube_pot_setup_guidance()
+    assert guidance["provider_present"] is False
+    assert "bgutil-ytdlp-pot-provider" in guidance["install_command"]
+    assert any("bgutil" in step for step in guidance["steps"])
+
+
+def test_pot_setup_guidance_when_present():
+    with mock.patch("streamkeep.extractors.ytdlp.importlib.util.find_spec", return_value=object()):
+        guidance = ytdlp.youtube_pot_setup_guidance()
+    assert guidance["provider_present"] is True
+    assert guidance["install_command"] == ""
+    assert any("player_client" in step for step in guidance["steps"])
+
+
+def test_health_report_includes_pot_setup():
+    fake_runtime = {
+        "state": "ready", "summary": "Ready", "yt_dlp_version": "2026.07.14",
+        "js_runtime": {"name": "deno"}, "ejs_available": True, "problems": [],
+    }
+    with mock.patch("streamkeep.extractors.ytdlp.ytdlp_runtime_status", return_value=fake_runtime), \
+         mock.patch("streamkeep.extractors.ytdlp.importlib.util.find_spec", return_value=None):
+        report = ytdlp.youtube_health_report()
+    assert report["pot_setup"]["provider_present"] is False
+    assert "bgutil-ytdlp-pot-provider" in report["pot_setup"]["install_command"]

@@ -248,6 +248,70 @@ def youtube_pot_provider_status():
     }
 
 
+# Signals in yt-dlp output that indicate YouTube SABR-only / PO-token gating
+# rather than a transient network failure. When these appear the download may
+# "succeed" with only storyboard images, or be quality-capped/blocked, until a
+# PO-token provider is installed and/or a different player_client is chosen.
+_SABR_POT_MARKERS = (
+    "sabr",
+    "po_token",
+    "po token",
+    "proof of origin",
+    "only images are available",
+    "requested format is not available",
+    "sign in to confirm you're not a bot",
+    "nsig extraction failed",
+    "some web client https formats have been skipped",
+    "missing a url",
+)
+
+# The recommended, actively-maintained PO-token provider plugin.
+_POT_PROVIDER_INSTALL = "python -m pip install -U bgutil-ytdlp-pot-provider"
+
+
+def looks_like_sabr_or_pot_failure(text):
+    """Heuristic: does yt-dlp output indicate YouTube SABR / PO-token gating?
+
+    Network-free string match used to turn an opaque "format not available" /
+    storyboard-only outcome into an actionable remediation message.
+    """
+    low = (text or "").lower()
+    return any(marker in low for marker in _SABR_POT_MARKERS)
+
+
+def youtube_pot_setup_guidance():
+    """Actionable remediation for YouTube SABR / PO-token failures.
+
+    Returns ``{"provider_present": bool, "install_command": str,
+    "steps": [str, ...]}`` reflecting whether a provider is already importable.
+    Purely local — safe headless and offline.
+    """
+    status = youtube_pot_provider_status()
+    if status["available"]:
+        return {
+            "provider_present": True,
+            "install_command": "",
+            "steps": [
+                f"PO-token provider '{status['provider']}' is installed and is "
+                "loaded automatically by yt-dlp.",
+                "If YouTube still returns capped or image-only results, switch "
+                "the player_client preset in Settings (e.g. 'Resilient' or "
+                "'Android VR — dodges SABR-only').",
+            ],
+        }
+    return {
+        "provider_present": False,
+        "install_command": _POT_PROVIDER_INSTALL,
+        "steps": [
+            "Install a PO-token provider so YouTube returns real media instead "
+            "of storyboard images or capped formats:",
+            f"    {_POT_PROVIDER_INSTALL}",
+            "Restart StreamKeep afterward. If problems persist, set a "
+            "player_client preset in Settings (e.g. 'Resilient').",
+        ],
+    }
+
+
 def youtube_health_report(player_client=""):
     """Aggregate the YouTube capability picture into one report.
 
@@ -274,6 +338,7 @@ def youtube_health_report(player_client=""):
         "ejs_available": runtime.get("ejs_available", False),
         "player_client": client_value or "default",
         "pot_provider": pot,
+        "pot_setup": youtube_pot_setup_guidance(),
         "warnings": warnings,
     }
 

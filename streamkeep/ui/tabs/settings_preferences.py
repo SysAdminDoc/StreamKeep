@@ -63,6 +63,34 @@ class SettingsPreferencesMixin:
         if d:
             line_edit.setText(d)
 
+    def _on_test_youtube_capability(self):
+        """Run the local YouTube capability report (V26) and present the
+        result plus concrete remediation for SABR/PO-token gating."""
+        from ...extractors.ytdlp import youtube_health_report
+        preset = str(self._config.get("youtube_player_client", "") or "")
+        report = youtube_health_report(player_client=preset)
+        lines = [
+            f"Status: {report['summary'] or report['state'] or 'unknown'}",
+            f"yt-dlp: {report['yt_dlp_version'] or 'unknown'}",
+            f"JS runtime: {(report.get('js_runtime') or {}).get('name') or 'none'}",
+            f"player_client: {report['player_client']}",
+            "PO-token provider: "
+            + ("detected" if report['pot_provider']['available'] else "not detected"),
+        ]
+        pot_setup = report.get("pot_setup") or {}
+        if not pot_setup.get("provider_present", True):
+            lines.append("")
+            lines.extend(pot_setup.get("steps", []))
+        for warning in report.get("warnings", []):
+            lines.append(f"⚠ {warning}")
+        show_premium_message(
+            self,
+            title="YouTube capability",
+            body="\n".join(lines),
+            eyebrow="YT-DLP",
+            tone="success" if report.get("healthy") else "warning",
+        )
+
     # ── Browser cookies ──────────────────────────────────────────────
 
     def _scan_browsers(self):

@@ -1585,6 +1585,15 @@ def build_settings_tab(win):
         win.youtube_client_combo.setCurrentIndex(saved_pc_idx)
     YtDlpExtractor.youtube_player_client = saved_pc
     pc_row.addWidget(win.youtube_client_combo, 1)
+    win.youtube_health_btn = QPushButton("Test capability")
+    win.youtube_health_btn.setObjectName("secondary")
+    win.youtube_health_btn.setToolTip(
+        "Check yt-dlp/JS runtime readiness and PO-token provider presence, and "
+        "show remediation steps if YouTube is likely to return capped or "
+        "image-only results."
+    )
+    win.youtube_health_btn.clicked.connect(win._on_test_youtube_capability)
+    pc_row.addWidget(win.youtube_health_btn)
     yt_lay.addLayout(pc_row)
 
     card_lay.addWidget(yt_block)
