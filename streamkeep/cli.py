@@ -488,6 +488,74 @@ def _pick_quality(qualities, pref):
     return qualities[0]
 
 
+# ── gallery-dl second engine (V10) ──────────────────────────────────
+
+def _run_gallery(args):
+    """Download an image gallery / social-media post via gallery-dl.
+
+    Shares StreamKeep's output folder, per-source download-archive, cookies,
+    and proxy. Degrades with a clear install hint when gallery-dl is absent.
+    """
+    import subprocess
+
+    from .config import load_config
+    from .integrations.gallery_dl import (
+        GalleryDlUnavailable,
+        build_gallery_dl_command,
+        gallery_dl_available,
+        gallery_dl_install_hint,
+    )
+
+    if not gallery_dl_available():
+        _print_line(f"Error: {gallery_dl_install_hint()}")
+        sys.exit(1)
+
+    cfg = load_config()
+    output_dir = getattr(args, "output", "") or cfg.get("output_dir", "")
+    if not output_dir:
+        from .utils import default_output_dir
+        output_dir = default_output_dir()
+
+    archive_path = ""
+    if not getattr(args, "no_archive", False):
+        from .paths import source_archive_path
+        archive_path = source_archive_path(args.url)
+
+    cookies_file = ""
+    if cfg.get("cookies_file"):
+        cookies_file = str(cfg.get("cookies_file"))
+
+    proxy = ""
+    if cfg.get("proxy"):
+        proxy = str(cfg.get("proxy"))
+
+    try:
+        cmd = build_gallery_dl_command(
+            args.url,
+            output_dir,
+            archive_path=archive_path,
+            cookies_file=cookies_file,
+            proxy=proxy,
+            simulate=getattr(args, "simulate", False),
+            rate_limit=getattr(args, "rate_limit", "") or "",
+        )
+    except (ValueError, GalleryDlUnavailable) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+    _print_line("Engine:  gallery-dl")
+    _print_line(f"Output:  {output_dir}")
+    _print_line(f"Source:  {args.url}")
+    try:
+        result = subprocess.run(cmd, check=False)
+    except OSError as error:
+        _print_line(f"Error: could not start gallery-dl: {error}")
+        sys.exit(1)
+    if result.returncode == 0 and not getattr(args, "simulate", False):
+        _print_line(f"\nGallery download complete -> {output_dir}")
+    sys.exit(result.returncode)
+
+
 # ── --server handler ────────────────────────────────────────────────
 
 def _run_server(args):
@@ -1051,6 +1119,23 @@ def build_parser():
     ext_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- gallery-dl second engine (V10) --
+    gal_p = sub.add_parser(
+        "gallery",
+        help="Download an image gallery / social post via gallery-dl",
+    )
+    gal_p.add_argument("url", help="Gallery / social-media post URL")
+    gal_p.add_argument("-o", "--output", default="",
+                       help="Output directory (default: configured output dir)")
+    gal_p.add_argument("--rate-limit", default="",
+                       help="Maximum download rate (e.g. 500k, 2.5M)")
+    gal_p.add_argument("-s", "--simulate", action="store_true",
+                       help="List what would be downloaded without downloading")
+    gal_p.add_argument("--no-archive", action="store_true",
+                       help="Do not use the per-source download-archive (re-fetch all)")
+    gal_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
+
     # -- db maintenance --
     db_p = sub.add_parser("db", help="Database maintenance and diagnostics")
     db_p.add_argument("action", nargs="?", default="info",
@@ -1270,6 +1355,8 @@ def run_cli(argv=None):
         _run_server(args)
     elif args.command == "extractors":
         _list_extractors()
+    elif args.command == "gallery":
+        _run_gallery(args)
     elif args.command == "db":
         _run_db_maintenance(args)
     elif args.command == "snapshot":
@@ -1302,8 +1389,8 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "db", "snapshot", "backup",
-        "startup-check", "import-har", "podcast-sidecars", "credentials",
+        "download", "dl", "server", "extractors", "gallery", "db", "snapshot",
+        "backup", "startup-check", "import-har", "podcast-sidecars", "credentials",
         "youtube-health", "register-protocol", "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

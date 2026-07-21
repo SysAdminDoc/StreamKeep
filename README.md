@@ -95,6 +95,7 @@ The source tree contains early engines and unit-tested helpers that are not yet 
 python StreamKeep.py --help
 python StreamKeep.py --version
 python StreamKeep.py extractors
+python StreamKeep.py gallery "https://x.com/user" --output C:\Galleries
 python StreamKeep.py db info
 python StreamKeep.py snapshot --output C:\Support\streamkeep-diagnostic.zip
 python StreamKeep.py download "https://example.com/video" --quality best --output C:\Videos
@@ -174,7 +175,7 @@ Extension icons are shipped under `browser-extension/icons/`. The 256-bit master
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
 - The pinned Python security floors are yt-dlp 2026.07.04 and Pillow 12.3.0. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; the installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
 - StreamKeep records the exact path, version, provenance, and enabled capabilities for each runtime dependency. Settings, onboarding, and diagnostic snapshots expose that registry; missing or below-floor tools block only the dependent operation and include repair guidance. Startup never installs packages implicitly.
-- Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and platform-specific signing tools for distributable packages.
+- Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, and `gallery-dl` (`pip install -U gallery-dl`) to enable the `gallery` subcommand for image galleries and social-media posts (Twitter/X, Instagram, Pixiv, boorus, and more). gallery-dl is invoked as a separate process and shares the configured output folder, download-archive, cookies, and proxy; it is never bundled.
 
 Install Python dependencies:
 
