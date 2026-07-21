@@ -1473,6 +1473,23 @@ def build_settings_tab(win):
     yt_lay.addWidget(win.capture_youtube_chat_check)
     yt_lay.addWidget(win.sponsorblock_check)
 
+    sb_delay_row = QHBoxLayout()
+    sb_delay_row.setSpacing(8)
+    sb_delay_row.addWidget(QLabel("Delay subscribed downloads by"))
+    win.sponsorblock_delay_spin = QSpinBox()
+    win.sponsorblock_delay_spin.setRange(0, 336)  # up to 14 days
+    win.sponsorblock_delay_spin.setSuffix(" h after publish")
+    win.sponsorblock_delay_spin.setValue(int(win._config.get("sponsorblock_delay_hours", 0) or 0))
+    win.sponsorblock_delay_spin.setToolTip(
+        "Hold auto-discovered (subscribed-channel) YouTube VODs for this many "
+        "hours after they were published before downloading, so SponsorBlock "
+        "crowd-sourced segments have time to accumulate. 0 disables the delay. "
+        "Already-old VODs and quality upgrades download immediately."
+    )
+    sb_delay_row.addWidget(win.sponsorblock_delay_spin)
+    sb_delay_row.addStretch(1)
+    yt_lay.addLayout(sb_delay_row)
+
     from ...download_options import (
         SPONSORBLOCK_CATEGORIES, SPONSORBLOCK_LEGACY_REMOVE,
         SPONSORBLOCK_NON_REMOVABLE,

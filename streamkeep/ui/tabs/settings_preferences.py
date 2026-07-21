@@ -603,6 +603,8 @@ class SettingsPreferencesMixin:
         self._config["sponsorblock_mark"] = sponsorblock_options["mark"]
         self._config["sponsorblock_remove"] = sponsorblock_options["remove"]
         self._config["sponsorblock_api"] = sponsorblock_options["api_url"]
+        if hasattr(self, "sponsorblock_delay_spin"):
+            self._config["sponsorblock_delay_hours"] = int(self.sponsorblock_delay_spin.value())
         # Apply filename templates
         self._folder_template = self.folder_template_input.text().strip() or DEFAULT_FOLDER_TEMPLATE
         self._file_template = self.file_template_input.text().strip() or DEFAULT_FILE_TEMPLATE

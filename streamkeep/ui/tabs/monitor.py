@@ -1448,6 +1448,37 @@ class MonitorTabMixin:
         )
         return True
 
+    def _apply_sponsorblock_delay(self, item, vod):
+        """Defer an auto-discovered YouTube VOD so SponsorBlock segments can
+        accumulate before download (V31). No-op unless SponsorBlock is on and
+        a positive delay is configured; quality upgrades are never delayed."""
+        if item.get("is_upgrade") or item.get("start_at"):
+            return
+        if not bool(self._config.get("sponsorblock", False)):
+            return
+        try:
+            delay_hours = float(self._config.get("sponsorblock_delay_hours", 0) or 0)
+        except (TypeError, ValueError):
+            return
+        if delay_hours <= 0:
+            return
+        from ...integrations.sponsorblock import (
+            is_sponsorblock_eligible,
+            sponsorblock_deferred_start,
+        )
+        if not is_sponsorblock_eligible(
+            getattr(vod, "platform", ""), getattr(vod, "source", ""),
+        ):
+            return
+        start_at = sponsorblock_deferred_start(getattr(vod, "date", ""), delay_hours)
+        if not start_at:
+            return
+        item["start_at"] = start_at
+        self._log(
+            f"[SPONSORBLOCK] Holding '{getattr(vod, 'title', '')[:50]}' until "
+            f"{start_at[:16]} for segment aggregation."
+        )
+
     def _on_new_vods_found(self, channel_id, vods):
         """New VODs from a subscribed channel — queue their source URLs
         so they get downloaded in the background."""
@@ -1485,6 +1516,7 @@ class MonitorTabMixin:
                     self._download_queue[-1]["vod_date"] = v.date
                     if is_upgrade:
                         self._download_queue[-1]["is_upgrade"] = True
+                    self._apply_sponsorblock_delay(self._download_queue[-1], v)
                 added += 1
                 tag = "[UPGRADE]" if is_upgrade else "[SUBSCRIBE]"
                 self._log(f"{tag} Queued: {v.title[:60]}")

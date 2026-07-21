@@ -117,7 +117,7 @@ _INT_CONFIG_KEYS = frozenset({
     "ytdlp_aria2c_connections", "ytdlp_aria2c_splits",
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
-    "disk_warning_gb", "disk_critical_gb",
+    "disk_warning_gb", "disk_critical_gb", "sponsorblock_delay_hours",
 })
 _DICT_CONFIG_KEYS = frozenset({
     "bandwidth_rule", "speed_schedule", "quality_defaults", "pp_presets",
