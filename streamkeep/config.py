@@ -106,6 +106,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "pp_contact_sheet", "pp_split_by_chapter", "pp_remove_silence",
     "pp_convert_video", "pp_convert_audio", "pp_convert_delete_source",
     "pp_bilingual_subs", "pp_lrc_export",
+    "disk_monitor_enabled", "disk_auto_pause",
     "first_run_complete",
 })
 _INT_CONFIG_KEYS = frozenset({
@@ -115,6 +116,7 @@ _INT_CONFIG_KEYS = frozenset({
     "ytdlp_aria2c_connections", "ytdlp_aria2c_splits",
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
+    "disk_warning_gb", "disk_critical_gb",
 })
 _DICT_CONFIG_KEYS = frozenset({
     "bandwidth_rule", "speed_schedule", "quality_defaults", "pp_presets",

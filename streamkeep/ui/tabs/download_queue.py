@@ -438,6 +438,9 @@ class DownloadQueueMixin:
     def _advance_queue(self):
         """Start the next queued item(s) up to the concurrent download limit.
         Scheduled items (start_at in the future) are skipped."""
+        # Hold the queue while the storage monitor has auto-paused for low disk.
+        if getattr(self, "_disk_pause_active", False):
+            return
         # Legacy foreground worker blocks legacy queue path
         worker = getattr(self, "download_worker", None)
         fg_busy = worker is not None and worker.isRunning()

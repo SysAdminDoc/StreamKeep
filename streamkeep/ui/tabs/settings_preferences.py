@@ -495,6 +495,12 @@ class SettingsPreferencesMixin:
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
         if hasattr(self, "native_notif_check"):
             self._config["native_notifications"] = bool(self.native_notif_check.isChecked())
+        if hasattr(self, "disk_monitor_check"):
+            self._config["disk_monitor_enabled"] = bool(self.disk_monitor_check.isChecked())
+            self._config["disk_warning_gb"] = int(self.disk_warning_spin.value())
+            self._config["disk_critical_gb"] = int(self.disk_critical_spin.value())
+            self._config["disk_auto_pause"] = bool(self.disk_auto_pause_check.isChecked())
+            self._apply_disk_monitor_settings()
         if hasattr(self, "queue_complete_action_combo"):
             from ...power import normalize_power_action
             self._config["queue_complete_action"] = normalize_power_action(

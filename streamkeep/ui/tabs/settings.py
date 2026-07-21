@@ -1316,6 +1316,40 @@ def build_settings_tab(win):
     native_notif_row.addStretch(1)
     network_lay.addLayout(native_notif_row)
 
+    # Storage health monitor (F67)
+    win.disk_monitor_check = QCheckBox("Monitor free space on the download drive")
+    win.disk_monitor_check.setChecked(bool(win._config.get("disk_monitor_enabled", True)))
+    win.disk_monitor_check.setToolTip(
+        "Poll the output drive and show remaining free space in the status bar, "
+        "warning before it runs out."
+    )
+    network_lay.addWidget(win.disk_monitor_check)
+
+    disk_thresh_row = QHBoxLayout()
+    disk_thresh_row.setSpacing(8)
+    disk_thresh_row.addWidget(QLabel("Warn under"))
+    win.disk_warning_spin = QSpinBox()
+    win.disk_warning_spin.setRange(1, 10000)
+    win.disk_warning_spin.setSuffix(" GB")
+    win.disk_warning_spin.setValue(int(win._config.get("disk_warning_gb", 20) or 20))
+    disk_thresh_row.addWidget(win.disk_warning_spin)
+    disk_thresh_row.addWidget(QLabel("Critical under"))
+    win.disk_critical_spin = QSpinBox()
+    win.disk_critical_spin.setRange(1, 10000)
+    win.disk_critical_spin.setSuffix(" GB")
+    win.disk_critical_spin.setValue(int(win._config.get("disk_critical_gb", 5) or 5))
+    disk_thresh_row.addWidget(win.disk_critical_spin)
+    disk_thresh_row.addStretch(1)
+    network_lay.addLayout(disk_thresh_row)
+
+    win.disk_auto_pause_check = QCheckBox("Auto-pause new downloads when space is critically low")
+    win.disk_auto_pause_check.setChecked(bool(win._config.get("disk_auto_pause", False)))
+    win.disk_auto_pause_check.setToolTip(
+        "Stop the active download and hold the queue while free space is below "
+        "the critical threshold. The queue resumes automatically once space recovers."
+    )
+    network_lay.addWidget(win.disk_auto_pause_check)
+
     # Queue-complete power action (V24)
     from ...power import POWER_ACTIONS
     _POWER_ACTION_LABELS = {

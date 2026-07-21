@@ -246,6 +246,7 @@ class StreamKeep(
         self._apply_config()
         self._refresh_companion_ui()
         self._init_tray_icon()
+        self._init_disk_monitor()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
@@ -821,6 +822,8 @@ class StreamKeep(
         cfg = self._config
         cfg["output_dir"] = self.output_input.text().strip()
         cfg["segment_idx"] = self.segment_combo.currentIndex()
+        # Keep the storage monitor pointed at the current output drive.
+        self._refresh_disk_monitor_paths()
         # History is persisted to SQLite (F41) — not saved to config.json.
         # Per-entry updates (favorite, watched, bookmarks, path) are written
         # incrementally via _db.update_history_entry(); full list save is only
@@ -1341,6 +1344,11 @@ class StreamKeep(
                 self._tray_icon = None
         except Exception:
             pass
+        try:
+            if getattr(self, "_disk_monitor", None) is not None:
+                self._disk_monitor.stop()
+        except Exception:
+            pass
         self._persist_config()
         super().closeEvent(event)
 
@@ -1605,6 +1613,12 @@ class StreamKeep(
         self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
         footer_lay.addWidget(self.status_label, 1)
+
+        self.disk_status = QLabel("")
+        self.disk_status.setObjectName("diskStatus")
+        self.disk_status.setVisible(False)
+        set_accessible(self.disk_status, "Free disk space on the download drive")
+        footer_lay.addWidget(self.disk_status, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.overall_progress = QProgressBar()
         set_accessible(
@@ -1888,6 +1902,123 @@ class StreamKeep(
                     pass
             if bool(self._config.get("native_notifications", False)):
                 self._fire_native_toast(text, level)
+
+    def _init_disk_monitor(self):
+        """Instantiate and start the storage-health monitor (F67).
+
+        Watches the active download drive; updates the footer free-space
+        readout, warns/alerts through the notifications center, and — when
+        auto-pause is enabled — holds the queue while space is critically low.
+        """
+        self._disk_monitor = None
+        self._disk_pause_active = False
+        self._disk_critical_bytes = 5 * 1024 ** 3
+        if not bool(self._config.get("disk_monitor_enabled", True)):
+            return
+        try:
+            from ..disk_monitor import DiskMonitor
+            self._disk_monitor = DiskMonitor(self)
+            self._disk_monitor.space_changed.connect(self._on_disk_space_changed)
+            self._disk_monitor.space_warning.connect(self._on_disk_space_warning)
+            self._disk_monitor.space_critical.connect(self._on_disk_space_critical)
+            self._configure_disk_monitor()
+        except Exception:
+            self._disk_monitor = None
+
+    def _configure_disk_monitor(self):
+        """Apply thresholds/paths from config and (re)start the monitor."""
+        if self._disk_monitor is None:
+            return
+        try:
+            warning_gb = max(1, int(self._config.get("disk_warning_gb", 20)))
+            critical_gb = max(1, int(self._config.get("disk_critical_gb", 5)))
+        except (TypeError, ValueError):
+            warning_gb, critical_gb = 20, 5
+        if critical_gb >= warning_gb:
+            warning_gb = critical_gb + 1
+        auto_pause = bool(self._config.get("disk_auto_pause", False))
+        self._disk_critical_bytes = int(critical_gb * 1024 ** 3)
+        self._disk_monitor.configure(
+            warning_gb=warning_gb, critical_gb=critical_gb, auto_pause=auto_pause,
+        )
+        self._refresh_disk_monitor_paths()
+        self._disk_monitor.start()
+
+    def _apply_disk_monitor_settings(self):
+        """Reconcile the live monitor with Settings changes (enable/disable/thresholds)."""
+        enabled = bool(self._config.get("disk_monitor_enabled", True))
+        if not enabled:
+            if getattr(self, "_disk_monitor", None) is not None:
+                try:
+                    self._disk_monitor.stop()
+                except Exception:
+                    pass
+            self._disk_monitor = None
+            self._disk_pause_active = False
+            try:
+                self.disk_status.setVisible(False)
+            except Exception:
+                pass
+            return
+        if getattr(self, "_disk_monitor", None) is None:
+            self._init_disk_monitor()
+        else:
+            self._configure_disk_monitor()
+
+    def _refresh_disk_monitor_paths(self):
+        """Point the monitor at the current output drive."""
+        if getattr(self, "_disk_monitor", None) is None:
+            return
+        path = ""
+        try:
+            path = self.output_input.text().strip()
+        except Exception:
+            path = ""
+        if not path:
+            path = str(self._config.get("output_dir", "") or "")
+        if not path:
+            path = str(_default_output_dir())
+        self._disk_monitor.set_paths([path])
+
+    def _on_disk_space_changed(self, path, free_bytes, total_bytes):
+        try:
+            free_gb = free_bytes / 1024 ** 3
+            self.disk_status.setText(f"{free_gb:.0f} GB free")
+            self.disk_status.setToolTip(f"Free space on {path}")
+            self.disk_status.setStyleSheet(
+                f"color: {self._disk_monitor.get_color()};"
+            )
+            self.disk_status.setVisible(True)
+        except Exception:
+            pass
+        # Recovery: release an auto-pause once space climbs back above critical.
+        if self._disk_pause_active and free_bytes >= self._disk_critical_bytes:
+            self._disk_pause_active = False
+            self._notify_center("Disk space recovered — resuming queue", "success")
+            try:
+                self._advance_queue()
+            except Exception:
+                pass
+
+    def _on_disk_space_warning(self, path, free_bytes):
+        free_gb = free_bytes / 1024 ** 3
+        self._notify_center(f"Low disk space: {free_gb:.1f} GB free on {path}", "warning")
+
+    def _on_disk_space_critical(self, path, free_bytes):
+        free_gb = free_bytes / 1024 ** 3
+        self._notify_center(
+            f"Critically low disk space: {free_gb:.1f} GB free on {path}", "error",
+        )
+        if self._disk_monitor is not None and self._disk_monitor.auto_pause:
+            self._disk_pause_active = True
+            self._log(
+                "[DISK] Critically low space — auto-pausing new downloads until "
+                "space recovers."
+            )
+            try:
+                self._on_stop()
+            except Exception:
+                pass
 
     def _fire_native_toast(self, text, level="info"):
         """Raise a native OS notification (Windows Toast / macOS / Linux) for a
