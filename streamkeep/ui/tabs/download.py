@@ -16,6 +16,8 @@ from .download_queue import DownloadQueueMixin
 from .download_vod import DownloadVodMixin
 from .download_finalize import DownloadFinalizeMixin
 from .download_controls import (
+    OVERRIDES_LABEL,
+    OVERRIDES_LABEL_MODIFIED,
     _populate_adv_pp,
     _populate_adv_subtitles,
     _populate_adv_ytdlp_templates,
@@ -916,8 +918,7 @@ def build_download_tab(win):
     def _update_adv_badge():
         active = bool(get_adv_overrides(win))
         win.adv_overrides_action.setText(
-            "Per-download overrides · Modified"
-            if active else "Per-download overrides"
+            OVERRIDES_LABEL_MODIFIED if active else OVERRIDES_LABEL
         )
 
     win.adv_pp_combo.currentIndexChanged.connect(lambda _: _update_adv_badge())

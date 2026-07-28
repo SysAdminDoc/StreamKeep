@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QLabel, QLineEdit, QListWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QLineEdit, QListWidget,
     QSpinBox, QTableWidget,
 )
 
@@ -9,6 +10,9 @@ from streamkeep.models import StreamInfo, SubtitleInfo
 from streamkeep.ui.tabs.download import (
     _populate_adv_subtitles, _refresh_adv_subtitle_controls,
     get_adv_overrides,
+)
+from streamkeep.ui.tabs.download_controls import (
+    OVERRIDES_LABEL, OVERRIDES_LABEL_MODIFIED, _reset_adv_overrides,
 )
 
 
@@ -91,7 +95,9 @@ def _window_with_advanced_controls():
     )
     win.adv_hls_key_input = QLineEdit()
     win.adv_hls_iv_input = QLineEdit()
-    win.adv_override_badge = QLabel()
+    # The overrides section's "· Modified" state lives on this action's label
+    # (there is no separate badge widget in the real window).
+    win.adv_overrides_action = QAction(OVERRIDES_LABEL)
     return win
 
 
@@ -206,3 +212,22 @@ def test_hls_clear_key_fields_build_job_local_override_payload():
 
     assert overrides["hls_key_override"].endswith("ddeeff")
     assert overrides["hls_key_iv"] == "0x01"
+
+
+def test_reset_adv_overrides_clears_fields_and_modified_marker():
+    """Regression: every download called _reset_adv_overrides, which poked a
+    deleted ``adv_override_badge`` attribute and crashed with
+    'StreamKeep object has no attribute adv_override_badge'. Reset must clear
+    the fields and drop the '· Modified' marker without touching that widget."""
+    win = _window_with_advanced_controls()
+    win.adv_rate_input.setText("2M")
+    win.adv_hls_key_input.setText("00112233445566778899aabbccddeeff")
+    win.adv_overrides_action.setText(OVERRIDES_LABEL_MODIFIED)
+    assert get_adv_overrides(win)  # overrides are active
+
+    _reset_adv_overrides(win)  # must not raise
+
+    assert get_adv_overrides(win) == {}
+    assert win.adv_rate_input.text() == ""
+    assert win.adv_hls_key_input.text() == ""
+    assert win.adv_overrides_action.text() == OVERRIDES_LABEL

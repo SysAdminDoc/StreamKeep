@@ -3,6 +3,13 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QCheckBox, QHBoxLayout, QTableWidgetItem, QWidget
 
+# The per-download overrides section shows whether any override is active via
+# the toggle action's own label. (An earlier build used a separate
+# ``adv_override_badge`` QLabel that no longer exists — keep both call sites on
+# these constants so they can't drift back out of sync.)
+OVERRIDES_LABEL = "Per-download overrides"
+OVERRIDES_LABEL_MODIFIED = "Per-download overrides · Modified"
+
 
 def _populate_adv_pp(win):
     """Populate the per-download PP preset combo from settings presets."""
@@ -86,7 +93,10 @@ def _reset_adv_overrides(win):
     win.adv_ytdlp_template_combo.setCurrentIndex(0)
     win.adv_hls_key_input.clear()
     win.adv_hls_iv_input.clear()
-    win.adv_override_badge.setVisible(False)
+    # A full reset clears every override, so drop the "· Modified" marker.
+    action = getattr(win, "adv_overrides_action", None)
+    if action is not None:
+        action.setText(OVERRIDES_LABEL)
 
 
 def get_adv_overrides(win):
