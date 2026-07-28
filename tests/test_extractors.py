@@ -1629,8 +1629,10 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_fast_resolve_rejects_multi_entry_output(self, mock_run):
         """More than one (metadata, formats) line-pair means yt-dlp enumerated
-        a multi-entry container — the fast path must defer to the fallback
-        instead of silently resolving an arbitrary entry."""
+        a multi-entry container. Resolving is the wrong operation for those:
+        no arbitrary entry may be returned, and the --dump-json fallback must
+        NOT run (it would fully extract every entry and still fail), so the
+        user gets the actionable 'use playlist expansion' log instead."""
         meta = {"id": "a", "title": "First", "is_live": False, "duration": 1,
                 "subtitles": {}, "automatic_captions": {}, "chapters": []}
         fmts = [{"format_id": "18", "ext": "mp4", "width": 640, "height": 360,
@@ -1638,14 +1640,14 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         four_lines = "\n".join(
             [json.dumps(meta), json.dumps(fmts)] * 2
         )
-        single = dict(meta, formats=fmts)
-        mock_run.side_effect = [
-            CommandResult(returncode=0, stdout=four_lines),   # fast: rejected
-            CommandResult(returncode=0, stdout=json.dumps(single)),  # fallback
-        ]
-        info = self.ext.resolve("https://youtube.com/playlist?list=PL123")
-        self.assertIsNotNone(info)
-        self.assertEqual(mock_run.call_count, 2)
+        mock_run.return_value = CommandResult(returncode=0, stdout=four_lines)
+        logs = []
+        info = self.ext.resolve(
+            "https://youtube.com/playlist?list=PL123", log_fn=logs.append
+        )
+        self.assertIsNone(info)
+        self.assertEqual(mock_run.call_count, 1)  # no doomed fallback
+        self.assertTrue(any("multiple videos" in line for line in logs))
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_falls_back_to_dump_json(self, mock_run):

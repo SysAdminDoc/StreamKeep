@@ -85,6 +85,17 @@ def _print_line(text):
     try:
         stream.write(text + "\n")
         stream.flush()
+    except UnicodeEncodeError:
+        # Legacy Windows consoles (cp1252) can't encode characters like
+        # em-dashes in titles/URLs — degrade those characters instead of
+        # printing mojibake or dropping the whole line.
+        try:
+            encoding = getattr(stream, "encoding", "") or "ascii"
+            safe = text.encode(encoding, errors="replace").decode(encoding)
+            stream.write(safe + "\n")
+            stream.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
     except (AttributeError, OSError, ValueError):
         pass
 
@@ -710,7 +721,7 @@ def _run_server(args):
     recovered = service.start()
     server.start()
 
-    _print_line(f"StreamKeep v{VERSION} — server mode")
+    _print_line(f"StreamKeep v{VERSION} - server mode")
     _print_line(f"Listening on 127.0.0.1:{server.port}")
     if bind_lan:
         _print_line(f"HTTPS reverse-proxy origin: {server.url}")
@@ -741,7 +752,7 @@ def _list_extractors():
     """Print all registered extractors and exit."""
     # Import all extractors so they auto-register
     __import__("streamkeep.extractors")
-    _print_line(f"StreamKeep v{VERSION} — supported platforms:")
+    _print_line(f"StreamKeep v{VERSION} - supported platforms:")
     _print_line("")
     for cls in _ExtBase._registry:
         patterns = ", ".join(
@@ -757,7 +768,7 @@ def _run_snapshot(args):
     from datetime import datetime
     out = args.output or f"streamkeep_diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     ok, msg = create_diagnostic_snapshot(out)
-    _print_line(f"Snapshot: {'OK' if ok else 'FAILED'} — {msg}")
+    _print_line(f"Snapshot: {'OK' if ok else 'FAILED'} - {msg}")
     if ok:
         _print_line(f"File: {out}")
     else:
@@ -784,12 +795,12 @@ def _run_db_maintenance(args):
         _print_line(f"Optimize: {result}")
     elif action == "checkpoint":
         ok, detail = db.checkpoint_wal()
-        _print_line(f"WAL checkpoint: {'OK' if ok else 'FAILED'} — {detail}")
+        _print_line(f"WAL checkpoint: {'OK' if ok else 'FAILED'} - {detail}")
         if not ok:
             sys.exit(1)
     elif action == "vacuum":
         ok, detail = db.vacuum_after_backup()
-        _print_line(f"Vacuum: {'OK' if ok else 'FAILED'} — {detail}")
+        _print_line(f"Vacuum: {'OK' if ok else 'FAILED'} - {detail}")
         if not ok:
             sys.exit(1)
 
@@ -1010,7 +1021,7 @@ def _run_bookmarklet(args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="StreamKeep",
-        description=f"StreamKeep v{VERSION} — multi-platform stream/VOD downloader",
+        description=f"StreamKeep v{VERSION} - multi-platform stream/VOD downloader",
     )
     p.add_argument("--version", action="version", version=f"StreamKeep v{VERSION}")
     p.add_argument("--config-dir", default="",

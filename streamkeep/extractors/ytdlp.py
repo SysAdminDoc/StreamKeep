@@ -810,9 +810,13 @@ class YtDlpExtractor(Extractor):
     def _fast_resolve_data(self, url, log_fn=None, runtime_status=None):
         """Resolve metadata via ``--print`` field projection.
 
-        Returns a dict shaped like ``--dump-json`` output (with a ``formats``
-        list), or ``None`` to signal the caller to fall back to the full
-        ``--dump-json`` path (auth wall, non-zero exit, or unparseable output).
+        Returns ``(data, multi_entry)``. *data* is a dict shaped like
+        ``--dump-json`` output (with a ``formats`` list) or ``None`` to signal
+        the caller to fall back to the full ``--dump-json`` path (auth wall,
+        non-zero exit, or unparseable output). *multi_entry* is True when the
+        URL enumerated a multi-entry container (e.g. a /playlist?list= URL,
+        where --no-playlist has no effect) — resolving is the wrong operation
+        for those and the fallback would only fail slower.
         """
         try:
             result = run_capture_interruptible(
@@ -821,26 +825,24 @@ class YtDlpExtractor(Extractor):
             )
         except Exception as e:
             logger.debug("fast resolve error for %r: %s", url, e)
-            return None
+            return None, False
         if (result.interrupted or result.timed_out
                 or result.returncode != 0 or not result.stdout.strip()):
-            return None
+            return None, False
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-        # Exactly one (metadata, formats) pair. More lines means yt-dlp
-        # enumerated a multi-entry container (e.g. a /playlist?list= URL,
-        # where --no-playlist has no effect) — picking lines[0:2] would
-        # silently resolve an arbitrary entry, so defer to the fallback.
+        # Exactly one (metadata, formats) pair; more means multi-entry —
+        # picking lines[0:2] would silently resolve an arbitrary entry.
         if len(lines) != 2:
-            return None
+            return None, len(lines) > 2
         try:
             meta = json.loads(lines[0])
             formats = json.loads(lines[1])
         except (json.JSONDecodeError, ValueError):
-            return None
+            return None, False
         if not isinstance(meta, dict) or not isinstance(formats, list) or not formats:
-            return None
+            return None, False
         meta["formats"] = formats
-        return meta
+        return meta, False
 
     def _dump_json_resolve_data(self, url, log_fn=None, runtime_status=None):
         """Full ``--dump-json`` resolve with Cloudflare/auth retries.
@@ -924,12 +926,28 @@ class YtDlpExtractor(Extractor):
         # ~45 MB), which made the fetch appear stuck. Falls back to the full
         # ``--dump-json`` path (with its auth/cloudflare retries) whenever the
         # projection can't produce formats — e.g. an auth wall or an odd site.
-        data = self._fast_resolve_data(url, log_fn, runtime_status)
+        data, multi_entry = self._fast_resolve_data(url, log_fn, runtime_status)
         if data is None:
             # Interruption means "stop", not "try harder" — don't spawn a
             # doomed fallback subprocess during cancel/shutdown.
             if http_interrupted():
                 return None
+            if multi_entry:
+                # A playlist/channel container. The --dump-json fallback would
+                # fully extract every entry and then fail json.loads anyway —
+                # tell the user the right action instead of failing slower.
+                self._log(
+                    log_fn,
+                    "This URL contains multiple videos. Use the playlist "
+                    "expansion action to list and queue its entries.",
+                )
+                return None
+            self._log(
+                log_fn,
+                "Quick metadata probe could not resolve this URL - running the "
+                "full extraction (may take a few minutes for long "
+                "former-livestream VODs)...",
+            )
             data = self._dump_json_resolve_data(url, log_fn, runtime_status)
         if data is None:
             return None
