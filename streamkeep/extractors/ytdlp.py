@@ -765,24 +765,74 @@ class YtDlpExtractor(Extractor):
             })
         return results
 
-    def resolve(self, url, log_fn=None):
-        has_ytdlp = self._has_ytdlp()
-        if http_interrupted():
-            return None
-        if not has_ytdlp:
-            self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
-            return None
+    # Field projection for the fast resolve. Requesting only these keys keeps
+    # yt-dlp from generating per-format ``fragments`` (the slow part for
+    # post-live manifestless VODs). Two ``--print`` args → two JSON lines:
+    # the metadata object, then the formats array.
+    _FAST_META_FIELDS = (
+        "id", "title", "channel", "uploader", "uploader_id", "channel_id",
+        "is_live", "duration", "chapters", "subtitles", "automatic_captions",
+    )
+    _FAST_FORMAT_FIELDS = (
+        "format_id", "vcodec", "acodec", "width", "height", "tbr", "abr",
+        "ext", "format_note", "url",
+    )
 
-        self._log(log_fn, f"Running yt-dlp extraction for: {url}")
-        runtime_status = None
-        if log_fn and _is_youtube_url(url):
-            runtime_status = ytdlp_runtime_status()
-            warning = format_ytdlp_runtime_warning(runtime_status)
-            if warning:
-                self._log(log_fn, warning)
+    def _build_print_cmd(self, url, runtime_status=None, impersonate=False):
+        meta = "%(." + "{" + ",".join(self._FAST_META_FIELDS) + "})j"
+        fmts = "%(formats.:.{" + ",".join(self._FAST_FORMAT_FIELDS) + "})j"
+        cmd = ytdlp_command() + ["--no-warnings", "--print", meta, "--print", fmts]
+        if _is_youtube_url(url):
+            cmd.extend(ytdlp_runtime_args(runtime_status))
+        cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
+        if self.cookies_file and os.path.isfile(self.cookies_file):
+            cmd.extend(["--cookies", self.cookies_file])
+        elif self.cookies_browser:
+            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        if self.proxy:
+            cmd.extend(["--proxy", self.proxy])
+        if impersonate:
+            cmd.extend(ytdlp_impersonate_args())
+        cmd.extend(["--", url])
+        return cmd
 
-        if self.cookies_browser:
-            self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
+    def _fast_resolve_data(self, url, log_fn=None, runtime_status=None):
+        """Resolve metadata via ``--print`` field projection.
+
+        Returns a dict shaped like ``--dump-json`` output (with a ``formats``
+        list), or ``None`` to signal the caller to fall back to the full
+        ``--dump-json`` path (auth wall, non-zero exit, or unparseable output).
+        """
+        try:
+            result = run_capture_interruptible(
+                self._build_print_cmd(url, runtime_status=runtime_status),
+                timeout=self.resolve_timeout,
+            )
+        except Exception as e:
+            logger.debug("fast resolve error for %r: %s", url, e)
+            return None
+        if (result.interrupted or result.timed_out
+                or result.returncode != 0 or not result.stdout.strip()):
+            return None
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return None
+        try:
+            meta = json.loads(lines[0])
+            formats = json.loads(lines[1])
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(meta, dict) or not isinstance(formats, list) or not formats:
+            return None
+        meta["formats"] = formats
+        return meta
+
+    def _dump_json_resolve_data(self, url, log_fn=None, runtime_status=None):
+        """Full ``--dump-json`` resolve with Cloudflare/auth retries.
+
+        Returns the parsed info dict or ``None``. Used as the fallback when the
+        fast ``--print`` projection can't resolve the URL.
+        """
         try:
             result = run_capture_interruptible(
                 self._build_cmd(url, include_runtime=bool(log_fn), runtime_status=runtime_status),
@@ -817,15 +867,12 @@ class YtDlpExtractor(Extractor):
                 if retry.returncode == 0 and retry.stdout.strip():
                     result = retry
             if result.returncode == 0:
-                data = json.loads(result.stdout)
-            elif self._is_auth_error(result.stderr):
-                data = self._auto_retry_with_browsers(url, result.stderr, log_fn, runtime_status)
-                if data is None:
-                    return None
-            else:
-                err = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
-                self._log(log_fn, f"yt-dlp error: {err}")
-                return None
+                return json.loads(result.stdout)
+            if self._is_auth_error(result.stderr):
+                return self._auto_retry_with_browsers(url, result.stderr, log_fn, runtime_status)
+            err = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
+            self._log(log_fn, f"yt-dlp error: {err}")
+            return None
         except json.JSONDecodeError:
             self._log(log_fn, "Failed to parse yt-dlp output")
             return None
@@ -834,6 +881,38 @@ class YtDlpExtractor(Extractor):
                 return None
             logger.debug("yt-dlp resolve error for %r: %s", url, e)
             self._log(log_fn, "yt-dlp timed out")
+            return None
+
+    def resolve(self, url, log_fn=None):
+        has_ytdlp = self._has_ytdlp()
+        if http_interrupted():
+            return None
+        if not has_ytdlp:
+            self._log(log_fn, "yt-dlp not found. Install with: pip install yt-dlp")
+            return None
+
+        self._log(log_fn, f"Running yt-dlp extraction for: {url}")
+        runtime_status = None
+        if log_fn and _is_youtube_url(url):
+            runtime_status = ytdlp_runtime_status()
+            warning = format_ytdlp_runtime_warning(runtime_status)
+            if warning:
+                self._log(log_fn, warning)
+
+        if self.cookies_browser:
+            self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
+
+        # Fast path: a field-projected ``--print`` gets the same metadata as
+        # ``--dump-json`` in ~1s because it never requests per-format
+        # ``fragments``. For post-live manifestless YouTube VODs the full
+        # ``--dump-json`` must generate every format's fragment list (~2 min /
+        # ~45 MB), which made the fetch appear stuck. Falls back to the full
+        # ``--dump-json`` path (with its auth/cloudflare retries) whenever the
+        # projection can't produce formats — e.g. an auth wall or an odd site.
+        data = self._fast_resolve_data(url, log_fn, runtime_status)
+        if data is None:
+            data = self._dump_json_resolve_data(url, log_fn, runtime_status)
+        if data is None:
             return None
 
         info = StreamInfo(

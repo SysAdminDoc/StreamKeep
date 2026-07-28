@@ -1583,6 +1583,60 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         self.assertIsNone(info)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_fast_print_resolve_used_when_two_json_lines(self, mock_run):
+        """The fast --print projection (two JSON lines: metadata, then formats)
+        is used directly, avoiding the slow full --dump-json for post-live
+        manifestless VODs."""
+        meta = {
+            "id": "F_eSJadnEh4", "title": "Post-Live VOD", "channel": "Chan",
+            "is_live": False, "duration": 12633,
+            "subtitles": {}, "automatic_captions": {}, "chapters": [],
+        }
+        formats = [
+            {"format_id": "299", "ext": "mp4", "width": 1920, "height": 1080,
+             "vcodec": "avc1", "acodec": "none", "tbr": 5144,
+             "format_note": "1080p60", "url": "https://v/299"},
+            {"format_id": "140", "ext": "m4a", "vcodec": "none",
+             "acodec": "mp4a.40.2", "abr": 144, "url": "https://a/140"},
+        ]
+        mock_run.return_value = CommandResult(
+            returncode=0,
+            stdout=json.dumps(meta) + "\n" + json.dumps(formats),
+        )
+        info = self.ext.resolve("https://www.youtube.com/watch?v=F_eSJadnEh4")
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Post-Live VOD")
+        self.assertFalse(info.is_live)
+        self.assertGreater(len(info.qualities), 0)
+        # Fast path succeeds in a single subprocess call — no --dump-json fallback.
+        self.assertEqual(mock_run.call_count, 1)
+        # The 1080p video is paired with the best audio (140).
+        video_q = [q for q in info.qualities if q.resolution == "1920x1080"]
+        self.assertTrue(video_q and "140" in video_q[0].ytdlp_format)
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_resolve_falls_back_to_dump_json(self, mock_run):
+        """When the fast --print projection yields nothing usable (single line
+        / no formats), resolve falls back to the full --dump-json path."""
+        single = {
+            "title": "Fallback Video", "channel": "C", "duration": 60,
+            "is_live": False,
+            "formats": [{"format_id": "18", "ext": "mp4", "width": 640,
+                         "height": 360, "vcodec": "avc1", "acodec": "mp4a",
+                         "url": "https://v/18"}],
+        }
+        # First call (fast --print) returns one line → unusable; second call
+        # (--dump-json) returns the full single-object JSON.
+        mock_run.side_effect = [
+            CommandResult(returncode=0, stdout=json.dumps(single)),
+            CommandResult(returncode=0, stdout=json.dumps(single)),
+        ]
+        info = self.ext.resolve("https://youtube.com/watch?v=fallback")
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Fallback Video")
+        self.assertEqual(mock_run.call_count, 2)
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_uses_configurable_timeout(self, mock_run):
         """Resolve must honour the (larger) resolve_timeout so post-live
         manifestless YouTube VODs — whose --dump-json can take ~2 minutes —

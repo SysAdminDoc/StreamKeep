@@ -27,6 +27,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.43.4" date="2026-07-27">
+      <description><p>Fixes the fetch appearing stuck on "fetching stream info" for a former-livestream YouTube VOD: resolving these now takes a second or two instead of about two minutes.</p></description>
+    </release>
     <release version="4.43.3" date="2026-07-27">
       <description><p>Fixes being unable to download a former-livestream YouTube VOD: these take longer to resolve than the old 60-second limit allowed, so the resolve timeout is now larger and configurable.</p></description>
     </release>

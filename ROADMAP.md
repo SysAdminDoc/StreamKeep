@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.43.3.
+- Current package version: v4.43.4.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -219,13 +219,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Complexity: L
 
 #### P2 — Later
-
-- [ ] P2 — V44 — Fast field-filtered resolve for post-live manifestless VODs
-  Why: resolving a former-livestream YouTube VOD via `--dump-json` forces yt-dlp to generate every format's full fragment list (~2 min, ~45 MB JSON for a multi-hour VOD). v4.43.3 raised the timeout so it *works*, but every resolve of such a URL still blocks for minutes. A field-filtered `--print "%(formats.:.{format_id,vcodec,acodec,height,width,tbr,ext,format_note,abr,url})j"` returns the same metadata StreamKeep needs in ~1.3s because it never requests fragments (measured 112s → 1.3s on a 3h30m VOD).
-  Evidence: verified locally 2026-07-27 (`yt-dlp` 2026.07.04, video F_eSJadnEh4 in "Post-Live Manifestless mode"); `streamkeep/extractors/ytdlp.py` `resolve()` currently parses full `--dump-json`. Fragments are regenerated at download time regardless, so deferring them costs nothing.
-  Touches: `ytdlp.py` resolve — replace/augment `--dump-json` with a `--print` field projection (formats + chapters/subtitles via their own `%(...)j` fields), keep the full-json path as a fallback, tests for both paths.
-  Acceptance: resolving a post-live manifestless VOD completes in seconds instead of minutes; quality list, audio pairing, chapters, and subtitles match the current `--dump-json` output; a fixture asserts equivalence between the fast and full paths.
-  Complexity: M
 
 - [ ] P2 — V34 — Optional yt-dlp-ytse SABR fallback engine for YouTube
   Why: YouTube increasingly leaves only SABR formats for many clients, where a normal resolve returns storyboard-only/"requested format not available"; the native SABR downloader `yt-dlp-ytse` recovers real media.
