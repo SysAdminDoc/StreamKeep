@@ -193,6 +193,19 @@ YOUTUBE_PLAYER_CLIENT_PRESETS = {
 }
 
 
+def apply_resolve_timeout_config(cfg):
+    """Apply the ``ytdlp_resolve_timeout`` config override (clamped 30-1800s).
+
+    Shared by the GUI Settings loader and the CLI/server entry points so
+    headless runs honor the same override as the desktop app.
+    """
+    try:
+        value = int((cfg or {}).get("ytdlp_resolve_timeout", 300) or 300)
+    except (TypeError, ValueError):
+        value = 300
+    YtDlpExtractor.resolve_timeout = max(30, min(1800, value))
+
+
 def youtube_player_client_value(preset):
     """Return the yt-dlp player_client value for *preset*, or '' if none."""
     entry = YOUTUBE_PLAYER_CLIENT_PRESETS.get(str(preset or "").strip())

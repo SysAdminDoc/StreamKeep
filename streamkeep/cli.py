@@ -245,6 +245,8 @@ def _run_download(args):
     from .workers import FetchWorker, DownloadWorker
 
     cfg = load_config()
+    from .extractors.ytdlp import apply_resolve_timeout_config
+    apply_resolve_timeout_config(cfg)
     transfer_overrides = {}
     for name in (
         "concurrent_fragments", "retries", "fragment_retries",
@@ -647,7 +649,12 @@ def _run_server(args):
 
     # Apply the YouTube player_client strategy (config default, --youtube-client
     # override) so the CLI/headless download honors it like the GUI does.
-    from .extractors.ytdlp import YOUTUBE_PLAYER_CLIENT_PRESETS, YtDlpExtractor
+    from .extractors.ytdlp import (
+        YOUTUBE_PLAYER_CLIENT_PRESETS,
+        YtDlpExtractor,
+        apply_resolve_timeout_config,
+    )
+    apply_resolve_timeout_config(cfg)
     yt_client = getattr(args, "youtube_client", "") or str(
         cfg.get("youtube_player_client", "") or ""
     )

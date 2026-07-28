@@ -27,6 +27,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.43.5" date="2026-07-27">
+      <description><p>Audit fixes: fetching a video URL that carries a playlist parameter now resolves the requested video instead of failing or picking another entry; playlist URLs get an actionable hint instead of a slow failure; a stopped live recording no longer offers a bogus resume next launch; command-line output no longer garbles or drops lines with special characters.</p></description>
+    </release>
     <release version="4.43.4" date="2026-07-27">
       <description><p>Fixes the fetch appearing stuck on "fetching stream info" for a former-livestream YouTube VOD: resolving these now takes a second or two instead of about two minutes.</p></description>
     </release>

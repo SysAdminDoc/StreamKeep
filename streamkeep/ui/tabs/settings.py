@@ -1549,12 +1549,9 @@ def build_settings_tab(win):
     yt_lay.addLayout(sponsor_api_row)
 
     # Resolve timeout (config-only escape hatch): post-live manifestless YouTube
-    # VODs can take minutes to --dump-json. Clamp to a sane 30s-1800s window.
-    try:
-        _resolve_to = int(win._config.get("ytdlp_resolve_timeout", 300) or 300)
-    except (TypeError, ValueError):
-        _resolve_to = 300
-    YtDlpExtractor.resolve_timeout = max(30, min(1800, _resolve_to))
+    # VODs can take minutes to fully extract. Shared clamp with the CLI paths.
+    from ...extractors.ytdlp import apply_resolve_timeout_config
+    apply_resolve_timeout_config(win._config)
 
     win.subs_check.setChecked(bool(win._config.get("download_subs", False)))
     YtDlpExtractor.download_subs = win.subs_check.isChecked()

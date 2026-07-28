@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.43.4.
+- Current package version: v4.43.5.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -197,12 +197,13 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P1 — Next
 
-- [ ] P1 — V33 — YouTube PO-token: JS-runtime version gate + guided/managed provider
-  Why: `ytdlp.py` only *detects* a PO-token provider and `capabilities.py` only checks JS-runtime *presence*; an out-of-date Deno/Node silently downgrades YouTube to storyboard-only. yt-dlp raised hard floors (Deno ≥2.3.0, Node ≥22) and PO tokens are now video-ID-bound.
-  Evidence: `streamkeep/extractors/ytdlp.py` (`youtube_pot_provider_status`, `youtube_health_report`), `streamkeep/capabilities.py` (presence-only); https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide; https://github.com/Brainicism/bgutil-ytdlp-pot-provider; yt-dlp 2026.06.09 runtime floors. Complements V32 (remote backend) — share the provider/health-config surface.
-  Touches: `capabilities.py` runtime version parsing, `ytdlp.py` health report + extractor-args injection, optional provider process lifecycle, Settings YouTube panel, tests.
-  Acceptance: health doctor reports the actual Deno/Node version and flags it as unsupported below the yt-dlp floor with a one-line fix; when a provider is installed, its base_url extractor-arg is injected into every YouTube job; a "set up PO-token provider" action either installs+launches a local bgutil sidecar (127.0.0.1:4416) or gives copy-paste install steps; absence degrades to current behavior; unit tests cover version-below-floor and provider-injected paths.
-  Complexity: M (version gate is S; managed sidecar is L — stage them)
+- [ ] P1 — V33 — YouTube PO-token: guided/managed provider lifecycle
+  Why: `ytdlp.py` only *detects* a PO-token provider (`youtube_pot_provider_status` import-check) and cannot install, launch, or health-check one; PO tokens are now video-ID-bound and required for most player clients.
+  Evidence: `streamkeep/extractors/ytdlp.py` (`youtube_pot_provider_status`, `youtube_health_report`); https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide; https://github.com/Brainicism/bgutil-ytdlp-pot-provider. Complements V32 (remote backend) — share the provider/health-config surface.
+  2026-07-27 audit correction: the original "JS-runtime version gate" half of this item is ALREADY IMPLEMENTED — `capabilities.py _probe_javascript_runtime()` enforces Deno ≥2.3.0 / Node ≥22 / QuickJS floors and a Bun ceiling, and surfaces unsupported versions through the health report. Remaining scope is the provider lifecycle only.
+  Touches: `ytdlp.py` provider process lifecycle + extractor-args injection, Settings YouTube panel, tests.
+  Acceptance: when a provider is installed, its base_url extractor-arg is injected into every YouTube job; a "set up PO-token provider" action either installs+launches a local bgutil sidecar (127.0.0.1:4416) or gives copy-paste install steps; absence degrades to current behavior; unit tests cover the provider-injected path.
+  Complexity: M
 
 - [ ] P1 — V35 — Windows distribution: PyInstaller onedir + installer (retire 520 MB onefile)
   Why: the onefile exe re-extracts its full ~520 MB payload to a temp dir on every launch (slow cold start), maximizes AV false-positive surface (unsigned), and races the `_MEIxxxx` temp dir on double-launch. Onedir removes all three.
