@@ -411,7 +411,13 @@ class YtDlpExtractor(Extractor):
             return "download"
 
     def _build_cmd(self, url, include_runtime=False, runtime_status=None, impersonate=False):
-        cmd = ytdlp_command() + ["--dump-json", "--no-download"]
+        # --no-playlist: resolve() must return the single requested video.
+        # Without it, a watch?v=X&list=Y URL makes yt-dlp enumerate the whole
+        # playlist and emit one JSON object per entry — json.loads then fails
+        # on the multi-line output ("Extra data"). Playlist expansion has its
+        # own path (list_playlist_entries, --flat-playlist), and the download
+        # command already pins --no-playlist.
+        cmd = ytdlp_command() + ["--dump-json", "--no-download", "--no-playlist"]
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
@@ -456,7 +462,7 @@ class YtDlpExtractor(Extractor):
     def _try_with_browser(self, url, browser_name, log_fn=None, runtime_status=None):
         """Attempt yt-dlp extraction with a specific browser's cookies.
         Returns (data_dict, None) or (None, error_str)."""
-        cmd = ytdlp_command() + ["--dump-json", "--no-download"]
+        cmd = ytdlp_command() + ["--dump-json", "--no-download", "--no-playlist"]
         if log_fn and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
@@ -781,7 +787,12 @@ class YtDlpExtractor(Extractor):
     def _build_print_cmd(self, url, runtime_status=None, impersonate=False):
         meta = "%(." + "{" + ",".join(self._FAST_META_FIELDS) + "})j"
         fmts = "%(formats.:.{" + ",".join(self._FAST_FORMAT_FIELDS) + "})j"
-        cmd = ytdlp_command() + ["--no-warnings", "--print", meta, "--print", fmts]
+        # --no-playlist mirrors _build_cmd: without it a watch?v=X&list=Y URL
+        # prints two lines PER PLAYLIST ENTRY and the first pair may belong to
+        # a different video than the one requested.
+        cmd = ytdlp_command() + [
+            "--no-warnings", "--no-playlist", "--print", meta, "--print", fmts,
+        ]
         if _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
@@ -815,7 +826,11 @@ class YtDlpExtractor(Extractor):
                 or result.returncode != 0 or not result.stdout.strip()):
             return None
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-        if len(lines) < 2:
+        # Exactly one (metadata, formats) pair. More lines means yt-dlp
+        # enumerated a multi-entry container (e.g. a /playlist?list= URL,
+        # where --no-playlist has no effect) — picking lines[0:2] would
+        # silently resolve an arbitrary entry, so defer to the fallback.
+        if len(lines) != 2:
             return None
         try:
             meta = json.loads(lines[0])
@@ -911,6 +926,10 @@ class YtDlpExtractor(Extractor):
         # projection can't produce formats — e.g. an auth wall or an odd site.
         data = self._fast_resolve_data(url, log_fn, runtime_status)
         if data is None:
+            # Interruption means "stop", not "try harder" — don't spawn a
+            # doomed fallback subprocess during cancel/shutdown.
+            if http_interrupted():
+                return None
             data = self._dump_json_resolve_data(url, log_fn, runtime_status)
         if data is None:
             return None

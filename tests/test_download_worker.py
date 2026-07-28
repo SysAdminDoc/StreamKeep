@@ -158,6 +158,34 @@ def test_live_capture_kept_on_nonzero_exit(tmp_path, monkeypatch):
     assert os.path.exists(outfile)
 
 
+def test_live_stop_keep_clears_resume_sidecar(tmp_path, monkeypatch):
+    """A kept-on-stop live capture is terminal: the resume sidecar must be
+    cleared so the next launch doesn't offer to 'resume' a finished
+    recording that is already saved to History."""
+    from streamkeep.resume import _sidecar_path, save_resume_state
+
+    worker = _live_worker(tmp_path)
+    outfile = os.path.join(str(tmp_path), "Live Capture.mp4")
+    _install_fake_ytdlp(
+        monkeypatch, worker, outfile, returncode=143, bytes_written=200_000
+    )
+    worker._cancel = True
+    state = ResumeState(
+        output_dir=str(tmp_path), segments=[[0, "Live Capture", 0, 0]],
+    )
+    save_resume_state(state)
+    worker._resume_state = state
+    sidecar = _sidecar_path(str(tmp_path))
+    assert os.path.exists(sidecar)
+
+    outcome, _ = worker._stream_ytdlp_download(
+        ["yt-dlp"], 0, "Live Capture", outfile, is_live=True
+    )
+    assert outcome == "ok"
+    assert os.path.exists(outfile)
+    assert not os.path.exists(sidecar)     # sidecar dropped — capture is final
+
+
 def test_non_live_cancel_still_discards_partial(tmp_path, monkeypatch):
     """A cancelled VOD (non-live) download still drops its partial file so the
     resume path can restart cleanly."""

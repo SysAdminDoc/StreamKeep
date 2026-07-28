@@ -296,7 +296,6 @@ class HeadlessJobService(QObject):
             0 if is_live else int(getattr(info, "total_secs", 0) or 0),
         )]
         from .download_options import (
-            apply_external_downloader_options, apply_ytdlp_transfer_options,
             resolve_external_downloader_options,
             resolve_ytdlp_arg_template, resolve_ytdlp_transfer_options,
         )

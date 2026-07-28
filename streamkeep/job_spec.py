@@ -8,7 +8,7 @@ manually copy fields and drift over time.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 
 SCHEMA_VERSION = 1

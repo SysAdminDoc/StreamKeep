@@ -1615,6 +1615,39 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         self.assertTrue(video_q and "140" in video_q[0].ytdlp_format)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_resolve_pins_no_playlist_on_both_paths(self, mock_run):
+        """Both resolve commands must pin --no-playlist. Without it a
+        watch?v=X&list=Y URL enumerates the playlist: the fast --print path
+        would silently resolve an arbitrary entry (two lines per video) and
+        the --dump-json path fails json.loads on multi-object output."""
+        mock_run.return_value = CommandResult(returncode=1, stderr="x")
+        self.ext.resolve("https://www.youtube.com/watch?v=abc&list=PL123")
+        for call in mock_run.call_args_list:
+            self.assertIn("--no-playlist", call.args[0])
+        self.assertGreaterEqual(mock_run.call_count, 2)  # fast + fallback ran
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_fast_resolve_rejects_multi_entry_output(self, mock_run):
+        """More than one (metadata, formats) line-pair means yt-dlp enumerated
+        a multi-entry container — the fast path must defer to the fallback
+        instead of silently resolving an arbitrary entry."""
+        meta = {"id": "a", "title": "First", "is_live": False, "duration": 1,
+                "subtitles": {}, "automatic_captions": {}, "chapters": []}
+        fmts = [{"format_id": "18", "ext": "mp4", "width": 640, "height": 360,
+                 "vcodec": "avc1", "acodec": "mp4a", "url": "https://v/18"}]
+        four_lines = "\n".join(
+            [json.dumps(meta), json.dumps(fmts)] * 2
+        )
+        single = dict(meta, formats=fmts)
+        mock_run.side_effect = [
+            CommandResult(returncode=0, stdout=four_lines),   # fast: rejected
+            CommandResult(returncode=0, stdout=json.dumps(single)),  # fallback
+        ]
+        info = self.ext.resolve("https://youtube.com/playlist?list=PL123")
+        self.assertIsNotNone(info)
+        self.assertEqual(mock_run.call_count, 2)
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_falls_back_to_dump_json(self, mock_run):
         """When the fast --print projection yields nothing usable (single line
         / no formats), resolve falls back to the full --dump-json path."""

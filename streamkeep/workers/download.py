@@ -775,13 +775,20 @@ class DownloadWorker(QThread):
             self._proc.wait()
             if self._cancel:
                 # Live captures are ended by stopping — keep whatever was
-                # recorded instead of throwing the whole file away.
+                # recorded instead of throwing the whole file away. The
+                # capture is terminal, so drop the resume sidecar too: the
+                # worker returns before the normal all_done cleanup, and a
+                # leftover sidecar would show a misleading "ready to resume"
+                # banner next launch for a recording already saved to History.
                 if is_live:
                     produced = self._find_ytdlp_output(outfile, expected_outfile)
                     if produced and os.path.getsize(produced) > 65536:
                         self._finalize_ytdlp_success(
                             seg_idx, label, produced, note=" — stopped, kept live capture"
                         )
+                        if self._resume_state is not None:
+                            self._resume_state = None
+                            clear_resume_state(self.output_dir)
                         return "ok", output_lines
                 self._remove_ytdlp_outputs(outfile, expected_outfile)
                 return "cancel", output_lines
@@ -1260,6 +1267,12 @@ class DownloadWorker(QThread):
                                     f"[STOP] Kept partial live capture {label} - "
                                     f"{fmt_size(size)}"
                                 )
+                                # Terminal outcome — a stopped live capture is
+                                # finalized by the UI, so a leftover sidecar
+                                # would only trigger a bogus resume banner.
+                                if self._resume_state is not None:
+                                    self._resume_state = None
+                                    clear_resume_state(self.output_dir)
                         elif os.path.exists(outfile):
                             try:
                                 os.remove(outfile)
