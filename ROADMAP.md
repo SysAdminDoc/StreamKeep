@@ -12,7 +12,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.38.0.
+- Current package version: v4.43.1.
 - The legacy F1-F80 roadmap has been implemented and is summarized in `COMPLETED.md`.
 - Current architecture is modular: extractors, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite; user preferences remain in JSON config.
@@ -32,10 +32,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Verify: real capture of a public RTSP/SRT test feed and an ICY radio stream with track split.
   Effort: L
 
-- [ ] V10 — gallery-dl second engine
-  What: route image/gallery/social-post URLs (Twitter media, Instagram posts, Pixiv, boorus) to optional gallery-dl with shared folder/archive config; graceful absent-dep messaging.
-  Effort: M
-
 - [ ] V11 — User-guided extraction (leapfrog; Downie-class)
   What: visible Playwright window; user navigates/logs in/plays; response sniffer surfaces manifests/media with variant picker; queue with captured request headers/cookies; refuse when EME/DRM session detected.
   Effort: L
@@ -54,12 +50,9 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P2 — Automation, lifecycle, and reach
 
-- [ ] V15 — Rules engine (Packagizer-class): ordered match(site/uploader/title-regex/duration/type) → set folder/template/preset/priority/proxy/auto-start. Effort: L
 - [ ] V16 — URL-pattern → profile auto-selection + zero-dialog Smart Mode toggle. Effort: M
-- [ ] V17 — Quality-upgrade redownload pass + retention policies (delete after N days / after watched / keep-last). Effort: M
 - [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
-- [ ] V25 — lux fallback routing for CN platforms (bilibili/douyin/youku). Effort: M
 
 ### 1. Security and Reliability Hardening
 
@@ -141,12 +134,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### P1 — Next
 
-- [ ] P1 — Make one versioned DownloadJobSpec authoritative across every surface
-  Why: Seven construction sites manually copy a mutable worker property bag, causing GUI/CLI/headless/monitor/queue/resume option drift and making V5/V6 riskier.
-  Evidence: `streamkeep/workers/download.py:39-83`; constructors in `cli.py`, `headless_service.py`, `ui/main_window.py`, `ui/tabs/download.py`, and `ui/tabs/monitor.py`.
-  Touches: shared models/options, command planning, queue DB payloads, resume migration, all job builders, fixtures.
-  Acceptance: An immutable schema-versioned job spec is built and validated once, serializes without secrets, rejects unsupported future versions, migrates existing queue/resume payloads, and produces equivalent sanitized command plans from GUI, CLI, REST/headless, and monitor fixtures; workers receive the spec instead of field-by-field mutation.
-  Complexity: L
 
 #### P2 — Later
 
@@ -157,10 +144,46 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
   Complexity: L
 
-- [ ] P3 — Normalize button/label capitalization to one house style
-  Why: Primary buttons and section labels mix Title Case (e.g. "Clear History", "Add Channel", "Load More VODs", "Download Selected") with Sentence case (e.g. "Recycle selected", "Rename selected", "Save profile", "Export Clip"). The Monitor and Download-VOD surfaces are almost entirely Title Case while dialogs are Sentence case, so the product reads as several design systems.
-  Evidence: `streamkeep/ui/tabs/monitor.py`, `download.py`, `history.py`, `storage.py`, `settings*.py`, and the dialog modules; every literal is i18n-extracted, so a sweep must regenerate `streamkeep_en.ts`/`_es.ts` and recompile the `.qm`.
-  Touches: UI string literals across all tabs/dialogs, `SPANISH_CORE` entries, translation catalog regeneration, GUI/i18n tests that assert specific labels.
-  Acceptance: One documented convention (Sentence case, matching the newer dialogs) is applied consistently across every button/label; catalogs regenerated; i18n and GUI-smoke assertions updated.
+
+### 2026-07-18 Research-Driven Additions
+
+#### P0 — Now
+
+#### P1 — Next
+
+#### P2 — Later
+
+#### P3 — Under Consideration
+
+- [ ] P3 — Add responsive web remote UI for mobile access
+  Why: Community signal shows mobile access is the #1 feature request across Parabolic (#1694), TubeArchivist, and Pinchflat. A native mobile app is rejected (second codebase), but a responsive authenticated web remote served from StreamKeep's existing local server would provide queue management, status monitoring, and basic library browsing from any device on the LAN.
+  Evidence: Parabolic #1694 (Android app request — most-upvoted); TubeArchivist mobile web; yt-dlp-web-ui responsive design; cobalt mobile-first web UI.
+  Touches: `streamkeep/local_server.py`, new static HTML/CSS/JS assets, existing authentication and pairing infrastructure.
+  Acceptance: The web remote is responsive (mobile-first); authenticated via the existing pairing/token system; provides URL submission, queue status, active download monitoring, and basic library browsing; does not require any native mobile app installation; works over HTTPS reverse proxy for LAN access.
+  Complexity: L
+
+### 2026-07-20 Research-Driven Additions
+
+Note: The 2026-07-18 pass's security/dependency items are verified CLOSED in v4.41.0 (SFTP host-key verify, gallery Range caps, `_shared` lock, lazy BandwidthTracker, channel_stats try/finally, aria2c HLS/DASH gating, Python 3.11 floor, cryptography 49.0.0, pillow 12.3.0, `pyqt6-qt6==6.11.1` past CVE-2026-6210). Do not re-open. New IDs continue the V-scheme (highest prior = V25).
+
+#### P1 — Next
+
+#### P2 — Later
+
+- [ ] P2 — V32 — Pluggable remote-cipher / PO-token backend for JS-challenge churn
+  Why: YouTube's rotating nsig/signature challenges break pure in-process solving during multi-day windows; the market answer is offloading challenge-solving to a helper service. StreamKeep's plugin system can host this without a hard dependency.
+  Evidence: TubeSync `yt-dlp-remote-cipher` plugin (0.17.0); yt-dlp #15751 live regressions; existing `streamkeep/plugins.py`; overlaps V26 (share the provider-config surface).
+  Touches: plugin contract for a cipher/token backend, extractor-args wiring, config for backend URL/mode, health surfacing in `youtube_health_report()`, sample backend + contract test.
+  Acceptance: With a remote-cipher/token backend configured, YouTube resolves that fail in-process succeed via the backend; the backend is optional and declared through the plugin manifest; health report shows backend reachability; a sample backend passes a contract test; absence degrades to current behavior.
+  Complexity: L
+
+#### P3 — Under Consideration
+
+- [ ] P3 — Auto-translate embedded metadata & chapters to the app language
+  Why: Parabolic 2026.5.0 ships this as a visible polish differentiator for non-English archives; StreamKeep writes metadata/NFO/chapters but never localizes titles/descriptions/chapter names.
+  Evidence: Parabolic 2026.5.0 release notes; `streamkeep/metadata.py` NFO/chapter writer; existing i18n (en/es) + `whisper_model`/`hf_token` config already present.
+  Touches: metadata/NFO/chapter writer, optional translation backend (local-first, opt-in, consent-gated like summaries), Settings, tests.
+  Acceptance: Users can opt in to translate embedded title/description/chapter text to the configured app language; originals are preserved alongside translations; local-first default; no cloud call without per-run disclosure and consent; off by default.
   Complexity: M
+
 

@@ -649,11 +649,16 @@ class DownloadWorker(QThread):
         )
 
     def _download_with_ytdlp(
-        self, seg_idx, label, outfile, expected_outfile=None
+        self, seg_idx, label, outfile, expected_outfile=None, is_live=False
     ):
         """Download via yt-dlp directly. Handles DASH merge, format
         selection, and a one-shot Cloudflare-impersonation retry. Returns
-        True on success."""
+        True on success.
+
+        *is_live* marks an in-progress live capture. For lives the user Stop
+        (or the stream ending) is the normal way to finish, so the partial
+        file is kept as a completed recording instead of being discarded.
+        """
         from ..extractors.ytdlp import (
             _impersonation_available,
             _looks_like_cloudflare,
@@ -669,7 +674,7 @@ class DownloadWorker(QThread):
                 self.log.emit(f"[ERROR] Invalid yt-dlp output options: {error}")
                 return False
             outcome, output_lines = self._stream_ytdlp_download(
-                cmd, seg_idx, label, outfile, expected_outfile
+                cmd, seg_idx, label, outfile, expected_outfile, is_live=is_live
             )
             if outcome == "ok":
                 return True
@@ -712,8 +717,17 @@ class DownloadWorker(QThread):
         except Exception:
             pass
 
+    def _finalize_ytdlp_success(self, seg_idx, label, produced, note=""):
+        """Emit the completion signals for a produced yt-dlp output."""
+        size = os.path.getsize(produced)
+        self.progress.emit(seg_idx, 100, "Complete")
+        self.segment_done.emit(seg_idx, fmt_size(size))
+        self._mark_segment_done(seg_idx)
+        suffix = Path(produced).suffix.lower().lstrip(".")
+        self.log.emit(f"[DONE] {label} - {fmt_size(size)} ({suffix}){note}")
+
     def _stream_ytdlp_download(
-        self, cmd, seg_idx, label, outfile, expected_outfile=None
+        self, cmd, seg_idx, label, outfile, expected_outfile=None, is_live=False
     ):
         """Run one yt-dlp download attempt, streaming progress.
 
@@ -721,6 +735,10 @@ class DownloadWorker(QThread):
         verified file, ``"cancel"`` when the user aborted, or ``"fail"`` for a
         retryable failure. The caller owns the final ``[FAIL]`` log so it can
         decide whether to retry first.
+
+        When *is_live* is set, a user Stop or a non-zero yt-dlp exit that still
+        left a usable recording is treated as a completed capture — live
+        recordings are ended by stopping, so the bytes on disk are the deliverable.
         """
         try:
             with self._proc_lock:
@@ -756,6 +774,15 @@ class DownloadWorker(QThread):
 
             self._proc.wait()
             if self._cancel:
+                # Live captures are ended by stopping — keep whatever was
+                # recorded instead of throwing the whole file away.
+                if is_live:
+                    produced = self._find_ytdlp_output(outfile, expected_outfile)
+                    if produced and os.path.getsize(produced) > 65536:
+                        self._finalize_ytdlp_success(
+                            seg_idx, label, produced, note=" — stopped, kept live capture"
+                        )
+                        return "ok", output_lines
                 self._remove_ytdlp_outputs(outfile, expected_outfile)
                 return "cancel", output_lines
 
@@ -782,13 +809,17 @@ class DownloadWorker(QThread):
             produced = self._find_ytdlp_output(outfile, expected_outfile)
 
             if self._proc.returncode == 0 and produced:
-                size = os.path.getsize(produced)
-                self.progress.emit(seg_idx, 100, "Complete")
-                self.segment_done.emit(seg_idx, fmt_size(size))
-                self._mark_segment_done(seg_idx)
-                self.log.emit(
-                    f"[DONE] {label} - {fmt_size(size)} "
-                    f"({Path(produced).suffix.lower().lstrip('.')})"
+                self._finalize_ytdlp_success(seg_idx, label, produced)
+                return "ok", output_lines
+
+            # A live capture routes YouTube's muxed HLS through ffmpeg; when the
+            # stream ends (or is stopped), ffmpeg exits non-zero and yt-dlp
+            # propagates that, yet the recording on disk is complete and valid.
+            # Keep it rather than reporting a spurious failure.
+            if (is_live and produced
+                    and os.path.getsize(produced) > 65536):
+                self._finalize_ytdlp_success(
+                    seg_idx, label, produced, note=" — live capture ended"
                 )
                 return "ok", output_lines
 
@@ -990,7 +1021,8 @@ class DownloadWorker(QThread):
                     )
                     return
                 success = self._download_with_ytdlp(
-                    seg_idx, label, outfile, expected_ytdlp_outfile
+                    seg_idx, label, outfile, expected_ytdlp_outfile,
+                    is_live=is_live_capture,
                 )
                 if self._cancel:
                     return

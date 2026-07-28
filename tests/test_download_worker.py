@@ -76,6 +76,106 @@ def test_ytdlp_cmd_forces_mp4_merge(tmp_path, monkeypatch):
     assert cmd[cmd.index("--remux-video") + 1] == "mp4"
 
 
+def _live_worker(tmp_path):
+    """A yt-dlp worker configured like an in-progress live capture."""
+    worker = DownloadWorker(
+        playlist_url="",
+        segments=[(0, "Live Capture", 0, 0)],  # duration 0 == live
+        output_dir=str(tmp_path),
+        format_type="ytdlp_direct",
+    )
+    worker.ytdlp_source = "https://example.com/live"  # hermetic (non-YouTube)
+    worker.ytdlp_format = "301"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    return worker
+
+
+def _install_fake_ytdlp(monkeypatch, worker, outfile, *, returncode, bytes_written):
+    """Patch subprocess so yt-dlp 'produces' outfile then exits returncode."""
+    monkeypatch.setattr(
+        "streamkeep.extractors.ytdlp.ytdlp_command", lambda: ["yt-dlp"]
+    )
+
+    class _FakeStdout:
+        def __iter__(self):
+            return iter(())
+
+        def close(self):
+            pass
+
+    class _FakeProc:
+        def __init__(self):
+            self.returncode = returncode
+            self.stdout = _FakeStdout()
+
+        def wait(self):
+            if bytes_written:
+                with open(outfile, "wb") as fh:
+                    fh.write(b"x" * bytes_written)
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+
+def test_live_capture_kept_when_stopped(tmp_path, monkeypatch):
+    """Stopping an in-progress live yt-dlp capture keeps the recorded file.
+
+    Regression: the cancel path called _remove_ytdlp_outputs(), deleting the
+    entire recording. Since Stop is the normal way to end a live capture, the
+    user always ended up with nothing.
+    """
+    worker = _live_worker(tmp_path)
+    outfile = os.path.join(str(tmp_path), "Live Capture.mp4")
+    # A live download is terminated on Stop -> ffmpeg exit 143, and the worker
+    # sets _cancel before wait() returns.
+    _install_fake_ytdlp(
+        monkeypatch, worker, outfile, returncode=143, bytes_written=200_000
+    )
+    worker._cancel = True
+
+    done_signals = []
+    worker.segment_done.connect(lambda idx, size: done_signals.append((idx, size)))
+
+    outcome, _ = worker._stream_ytdlp_download(
+        ["yt-dlp"], 0, "Live Capture", outfile, is_live=True
+    )
+    assert outcome == "ok"
+    assert os.path.exists(outfile)             # recording survives Stop
+    assert done_signals == [(0, mock.ANY)]     # counted as completed
+
+
+def test_live_capture_kept_on_nonzero_exit(tmp_path, monkeypatch):
+    """A live capture whose ffmpeg exits non-zero (stream ended) is kept."""
+    worker = _live_worker(tmp_path)
+    outfile = os.path.join(str(tmp_path), "Live Capture.mp4")
+    _install_fake_ytdlp(
+        monkeypatch, worker, outfile, returncode=1, bytes_written=200_000
+    )
+
+    outcome, _ = worker._stream_ytdlp_download(
+        ["yt-dlp"], 0, "Live Capture", outfile, is_live=True
+    )
+    assert outcome == "ok"
+    assert os.path.exists(outfile)
+
+
+def test_non_live_cancel_still_discards_partial(tmp_path, monkeypatch):
+    """A cancelled VOD (non-live) download still drops its partial file so the
+    resume path can restart cleanly."""
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    outfile = os.path.join(str(tmp_path), "video.mp4")
+    _install_fake_ytdlp(
+        monkeypatch, worker, outfile, returncode=143, bytes_written=200_000
+    )
+    worker._cancel = True
+
+    outcome, _ = worker._stream_ytdlp_download(
+        ["yt-dlp"], 0, "video", outfile, is_live=False
+    )
+    assert outcome == "cancel"
+    assert not os.path.exists(outfile)         # partial discarded
+
+
 def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"
