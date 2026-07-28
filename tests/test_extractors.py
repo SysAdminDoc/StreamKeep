@@ -1583,6 +1583,22 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         self.assertIsNone(info)
 
     @patch(f"{_YTDLP}.run_capture_interruptible")
+    def test_resolve_uses_configurable_timeout(self, mock_run):
+        """Resolve must honour the (larger) resolve_timeout so post-live
+        manifestless YouTube VODs — whose --dump-json can take ~2 minutes —
+        are not cut off at the old hardcoded 60s."""
+        mock_run.return_value = CommandResult(timed_out=True)
+        original = YtDlpExtractor.resolve_timeout
+        try:
+            YtDlpExtractor.resolve_timeout = 300
+            self.ext.resolve("https://youtube.com/watch?v=postlive")
+        finally:
+            YtDlpExtractor.resolve_timeout = original
+        # Default is well above the old 60s ceiling, and the value flows through.
+        self.assertGreaterEqual(original, 180)
+        self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 300)
+
+    @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_filters_zero_resolution(self, mock_run):
         yt_json = {
             "title": "Test",

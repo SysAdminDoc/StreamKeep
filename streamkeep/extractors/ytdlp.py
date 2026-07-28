@@ -355,6 +355,14 @@ class YtDlpExtractor(Extractor):
     cookies_file = ""
     rate_limit = ""
     proxy = ""
+    # Seconds allowed for a single `--dump-json` resolve. 60s was too short for
+    # "post-live manifestless" YouTube VODs (a former livestream with no DASH
+    # manifest): yt-dlp must generate the full fragment list for every format
+    # during --dump-json, which can take ~2 minutes and produce ~45 MB of JSON
+    # for a multi-hour VOD. Normal videos still resolve in 1-3s, so the larger
+    # ceiling only affects these pathological cases. Overridable via the
+    # `ytdlp_resolve_timeout` config key.
+    resolve_timeout = 300
     download_subs = False
     capture_youtube_chat = False
     subtitle_languages = "en.*,en"
@@ -454,7 +462,7 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
         try:
-            result = run_capture_interruptible(cmd, timeout=60)
+            result = run_capture_interruptible(cmd, timeout=self.resolve_timeout)
             if result.interrupted:
                 return None, "Interrupted"
             if result.timed_out:
@@ -778,12 +786,17 @@ class YtDlpExtractor(Extractor):
         try:
             result = run_capture_interruptible(
                 self._build_cmd(url, include_runtime=bool(log_fn), runtime_status=runtime_status),
-                timeout=60,
+                timeout=self.resolve_timeout,
             )
             if result.interrupted:
                 return None
             if result.timed_out:
-                self._log(log_fn, "yt-dlp timed out")
+                self._log(
+                    log_fn,
+                    f"yt-dlp timed out after {self.resolve_timeout}s. Very long "
+                    "former-livestream VODs can take minutes to resolve; raise "
+                    "'ytdlp_resolve_timeout' in config if this recurs.",
+                )
                 return None
             # Cloudflare / anti-bot wall: repeat once with TLS impersonation
             # before giving up. Only when the first try failed for that reason
@@ -797,7 +810,7 @@ class YtDlpExtractor(Extractor):
                         url, include_runtime=bool(log_fn),
                         runtime_status=runtime_status, impersonate=True,
                     ),
-                    timeout=90,
+                    timeout=self.resolve_timeout,
                 )
                 if retry.interrupted:
                     return None
