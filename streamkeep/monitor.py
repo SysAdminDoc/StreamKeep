@@ -23,6 +23,15 @@ _ESCALATED_INTERVAL = 30
 _IMMINENT_WINDOW_SECS = 600
 
 
+def vod_archive_key(vod):
+    """Return a stable subscription key, falling back to the legacy source."""
+    platform = str(getattr(vod, "platform", "") or "").strip().casefold()
+    source_id = str(getattr(vod, "source_id", "") or "").strip()
+    if platform and source_id:
+        return f"{platform}::{source_id}"
+    return str(getattr(vod, "source", "") or "")
+
+
 def _stream_imminent(entry):
     """Return True if a cached schedule shows a stream starting within 10 min."""
     try:
@@ -125,7 +134,11 @@ class _PollTask(QRunnable):
                         )
                         new_vods = [
                             v for v in vods
-                            if v.source and v.source not in entry.archive_ids
+                            if (
+                                v.source
+                                and vod_archive_key(v) not in entry.archive_ids
+                                and v.source not in entry.archive_ids
+                            )
                         ]
                         if new_vods and not getattr(entry, "_cancel_requested", False):
                             self.signals.log.emit(
@@ -255,8 +268,9 @@ class ChannelMonitor(QObject):
             for e in self.entries:
                 if e.channel_id == channel_id and not e._cancel_requested:
                     for v in new_vods:
-                        if v.source and v.source not in e.archive_ids:
-                            e.archive_ids.append(v.source)
+                        key = vod_archive_key(v)
+                        if key and key not in e.archive_ids:
+                            e.archive_ids.append(key)
                     if len(e.archive_ids) > 500:
                         e.archive_ids = e.archive_ids[-500:]
                     emit = True

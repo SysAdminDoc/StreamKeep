@@ -222,6 +222,15 @@ class TestKickExtractorResolve(unittest.TestCase):
         self.assertEqual(info.platform, "Kick")
         self.assertEqual(info.channel, "blame")
         self.assertEqual(info.title, "Archived stream")
+        self.assertEqual(
+            info.source_id,
+            "vod:36165d38-e240-4a14-8e38-003f0e0e2e86",
+        )
+        self.assertEqual(
+            info.webpage_url,
+            "https://kick.com/blame/videos/"
+            "36165d38-e240-4a14-8e38-003f0e0e2e86",
+        )
         self.assertGreater(len(info.qualities), 0)
 
     @patch(f"{_KICK}.curl_json")
@@ -236,6 +245,7 @@ class TestKickExtractorResolve(unittest.TestCase):
     def test_list_vods_success(self, mock_curl_json):
         mock_curl_json.return_value = [
             {
+                "uuid": "36165d38-e240-4a14-8e38-003f0e0e2e86",
                 "session_title": "Day 1",
                 "created_at": "2024-01-10T12:00:00Z",
                 "source": "https://cdn.kick.com/vod1/master.m3u8",
@@ -257,6 +267,10 @@ class TestKickExtractorResolve(unittest.TestCase):
         self.assertEqual(vods[0].title, "Day 1")
         self.assertEqual(vods[0].platform, "Kick")
         self.assertEqual(vods[0].channel, "streamer")
+        self.assertEqual(
+            vods[0].source_id,
+            "vod:36165d38-e240-4a14-8e38-003f0e0e2e86",
+        )
         self.assertIsNone(cursor)
 
     @patch(f"{_KICK}.curl_json")
@@ -1267,6 +1281,7 @@ class TestPodcastRSSExtractorResolve(unittest.TestCase):
 <title>My Podcast</title>
 <item>
   <title>Episode 1</title>
+  <guid>episode-one</guid>
   <pubDate>Mon, 01 Jan 2024 08:00:00 GMT</pubDate>
   <enclosure url="https://cdn.example.com/ep1.mp3" type="audio/mpeg"/>
   <itunes:duration>01:30:00</itunes:duration>
@@ -1285,6 +1300,8 @@ class TestPodcastRSSExtractorResolve(unittest.TestCase):
         self.assertEqual(vods[1].title, "Episode 2 & More")
         self.assertEqual(vods[1].duration, "45m 30s")
         self.assertEqual(vods[0].platform, "Podcast")
+        self.assertTrue(vods[0].source_id.startswith("episode:"))
+        self.assertEqual(len(vods[0].source_id), len("episode:") + 64)
         # The originating feed is retained so finalize can fetch sidecars.
         self.assertEqual(vods[0].feed_url, "https://example.com/podcast.rss")
         self.assertEqual(vods[1].feed_url, "https://example.com/podcast.rss")

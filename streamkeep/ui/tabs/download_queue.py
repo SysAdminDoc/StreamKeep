@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from ... import db as _db
 from ...extractors import YtDlpExtractor
-from ...models import ResumeState
+from ...models import HistoryEntry, ResumeState, StreamInfo
 from ...postprocess import AUDIO_EXTS, VIDEO_EXTS, PostProcessor
 from ...theme import CAT
 from ...utils import (
@@ -32,6 +32,13 @@ from ...utils import (
     safe_filename as _safe_filename,
 )
 from ...workers import DownloadWorker, FetchWorker
+from ...upgrade import (
+    UpgradeSafetyError,
+    identity_matches,
+    plan_upgrade_paths,
+    prepare_upgrade_staging,
+    quality_rank,
+)
 from ...i18n import TranslatableDialog
 from ..widgets import ask_premium_confirmation, ask_premium_text_input
 
@@ -186,6 +193,14 @@ class DownloadQueueMixin:
             vod_platform=vod_platform,
             vod_title=vod_title or title,
             vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+            source_id=(
+                str(req.get("source_id", "") or "")
+                or str(getattr(self.stream_info, "source_id", "") or "")
+            ),
+            webpage_url=(
+                str(req.get("webpage_url", "") or "")
+                or str(getattr(self.stream_info, "webpage_url", "") or "")
+            ),
             ytdlp_template_name=(
                 self.adv_ytdlp_template_combo.currentData() or ""
             ),
@@ -252,6 +267,14 @@ class DownloadQueueMixin:
             vod_platform=vod_platform,
             vod_title=vod_title or title,
             vod_channel=vod_channel or (self.stream_info.channel if self.stream_info else ""),
+            source_id=(
+                str(req.get("source_id", "") or "")
+                or str(getattr(self.stream_info, "source_id", "") or "")
+            ),
+            webpage_url=(
+                str(req.get("webpage_url", "") or "")
+                or str(getattr(self.stream_info, "webpage_url", "") or "")
+            ),
             ytdlp_template_name=(
                 self.adv_ytdlp_template_combo.currentData() or ""
             ),
@@ -311,6 +334,20 @@ class DownloadQueueMixin:
         vod_title = str(item.get("vod_title", "") or "").strip()
         vod_channel = str(item.get("vod_channel", "") or "").strip()
         feed_url = str(item.get("feed_url", "") or "").strip()
+        source_id = str(item.get("source_id", "") or "").strip()
+        webpage_url = str(item.get("webpage_url", "") or "").strip()
+        from ...metadata import build_archival_provenance
+        provenance = build_archival_provenance(
+            StreamInfo(
+                platform=vod_platform or platform,
+                channel=vod_channel,
+                source_id=source_id,
+                webpage_url=webpage_url,
+            ),
+            source_url=webpage_url,
+        )
+        source_id = provenance.source_id
+        webpage_url = provenance.webpage_url
         if not vod_source and url.isdigit() and platform.lower() == "twitch":
             # Older queue entries stored Twitch VOD IDs as plain URLs, which
             # breaks auto-start because extractor detection expects an actual URL.
@@ -337,6 +374,8 @@ class DownloadQueueMixin:
             "vod_title": vod_title,
             "vod_channel": vod_channel,
             "feed_url": feed_url,
+            "source_id": source_id,
+            "webpage_url": webpage_url,
             "download_archive": str(
                 item.get("download_archive", "") or ""
             ),
@@ -346,7 +385,29 @@ class DownloadQueueMixin:
             ),
             "revision": revision,
             "execution_owner": str(item.get("execution_owner", "") or ""),
+            "is_upgrade": bool(item.get("is_upgrade", False)),
+            "upgrade_existing_path": str(
+                item.get("upgrade_existing_path", "") or ""
+            ),
+            "upgrade_existing_quality": str(
+                item.get("upgrade_existing_quality", "") or ""
+            ),
+            "upgrade_min_quality": str(
+                item.get("upgrade_min_quality", "") or ""
+            ),
+            "upgrade_stage_dir": str(
+                item.get("upgrade_stage_dir", "") or ""
+            ),
+            "upgrade_final_dir": str(
+                item.get("upgrade_final_dir", "") or ""
+            ),
         }
+        try:
+            normalized["upgrade_history_id"] = int(
+                item.get("upgrade_history_id", 0) or 0
+            )
+        except (TypeError, ValueError):
+            normalized["upgrade_history_id"] = 0
         vod_date = str(item.get("vod_date", "") or "")
         if vod_date:
             normalized["vod_date"] = vod_date
@@ -377,9 +438,16 @@ class DownloadQueueMixin:
         vod_title="",
         vod_channel="",
         feed_url="",
+        source_id="",
+        webpage_url="",
         download_archive="",
         break_on_existing=False,
         ytdlp_template_name="",
+        is_upgrade=False,
+        upgrade_history_id=0,
+        upgrade_existing_path="",
+        upgrade_existing_quality="",
+        upgrade_min_quality="",
     ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
@@ -415,9 +483,16 @@ class DownloadQueueMixin:
             "vod_title": vod_title or title,
             "vod_channel": vod_channel,
             "feed_url": feed_url,
+            "source_id": source_id,
+            "webpage_url": webpage_url,
             "download_archive": download_archive,
             "break_on_existing": break_on_existing,
             "ytdlp_template_name": ytdlp_template_name,
+            "is_upgrade": is_upgrade,
+            "upgrade_history_id": upgrade_history_id,
+            "upgrade_existing_path": upgrade_existing_path,
+            "upgrade_existing_quality": upgrade_existing_quality,
+            "upgrade_min_quality": upgrade_min_quality,
         }))
         self._persist_config()
         if hasattr(self, "queue_table"):
@@ -576,7 +651,15 @@ class DownloadQueueMixin:
         self._log(f"[QUEUE] Starting: {item.get('title', '')[:60]}")
         # Use a dedicated FetchWorker that doesn't share the foreground UI state
         url = item.get("vod_source") or item["url"]
-        fetch = FetchWorker(url)
+        fetch = FetchWorker(
+            item.get("url", url),
+            vod_source=item.get("vod_source") or None,
+            vod_platform=item.get("vod_platform") or None,
+            vod_title=item.get("vod_title") or None,
+            vod_channel=item.get("vod_channel") or None,
+            source_id=item.get("source_id") or None,
+            webpage_url=item.get("webpage_url") or None,
+        )
         fetch.finished.connect(
             lambda info, it=item: self._on_queue_fetch_done(it, info)
         )
@@ -627,6 +710,105 @@ class DownloadQueueMixin:
             self._set_queue_item_status(item, "failed", "No playable quality")
             self._advance_queue()
             return
+        resolved_platform = str(getattr(info, "platform", "") or "")
+        resolved_source_id = str(getattr(info, "source_id", "") or "")
+        is_upgrade = bool(item.get("is_upgrade", False))
+        chosen_quality = (
+            (q_data.resolution or q_data.name) if q_data else "Best available"
+        )
+        upgrade_paths = None
+        if is_upgrade:
+            expected_platform = str(
+                item.get("vod_platform") or item.get("platform") or ""
+            )
+            expected_source_id = str(item.get("source_id", "") or "")
+            if not identity_matches(
+                expected_platform,
+                expected_source_id,
+                resolved_platform,
+                resolved_source_id,
+            ):
+                error = (
+                    "Resolved media identity does not match the queued "
+                    "upgrade candidate"
+                )
+                failure_id = self._record_failed_job(
+                    stage="fetch", error=error, item=item, info=info,
+                )
+                if failure_id:
+                    item["failure_id"] = failure_id
+                self._set_queue_item_status(item, "failed", error)
+                self._log(f"[UPGRADE] Refused: {error}")
+                self._advance_queue()
+                return
+            current_row = _db.find_history_by_identity(
+                resolved_platform, resolved_source_id,
+            )
+            current = HistoryEntry.from_dict(current_row) if current_row else None
+            if (
+                current is None
+                or not current.path
+                or not os.path.isdir(current.path)
+            ):
+                error = "Known-good recording for this upgrade is missing"
+                failure_id = self._record_failed_job(
+                    stage="fetch", error=error, item=item, info=info,
+                )
+                if failure_id:
+                    item["failure_id"] = failure_id
+                self._set_queue_item_status(item, "failed", error)
+                self._log(f"[UPGRADE] Refused: {error}")
+                self._advance_queue()
+                return
+            if self._quality_rank(chosen_quality) <= self._quality_rank(
+                current.quality
+            ):
+                note = (
+                    f"No upgrade: resolved {chosen_quality or 'unknown'} "
+                    f"is not higher than {current.quality or 'unknown'}"
+                )
+                self._set_queue_item_status(item, "done", note)
+                self._log(f"[UPGRADE] {note}")
+                self._advance_queue()
+                return
+            minimum = str(item.get("upgrade_min_quality", "") or "")
+            if (
+                minimum
+                and self._quality_rank(chosen_quality)
+                < self._quality_rank(minimum)
+            ):
+                note = (
+                    f"No upgrade: resolved {chosen_quality} is below "
+                    f"the {minimum} threshold"
+                )
+                self._set_queue_item_status(item, "done", note)
+                self._log(f"[UPGRADE] {note}")
+                self._advance_queue()
+                return
+            try:
+                upgrade_paths = plan_upgrade_paths(
+                    current.path,
+                    str(item.get("job_id", "")),
+                    chosen_quality,
+                )
+                prepare_upgrade_staging(upgrade_paths)
+            except (OSError, UpgradeSafetyError) as error:
+                failure_id = self._record_failed_job(
+                    stage="download", error=str(error), item=item, info=info,
+                )
+                if failure_id:
+                    item["failure_id"] = failure_id
+                self._set_queue_item_status(item, "failed", str(error))
+                self._log(f"[UPGRADE] Could not stage: {error}")
+                self._advance_queue()
+                return
+            item.update({
+                "upgrade_history_id": current.db_id,
+                "upgrade_existing_path": str(upgrade_paths.existing),
+                "upgrade_existing_quality": current.quality,
+                "upgrade_stage_dir": str(upgrade_paths.staging),
+                "upgrade_final_dir": str(upgrade_paths.final),
+            })
         # Build segments and output path
         playlist_url = q_data.url if q_data else info.url
         fmt_type = q_data.format_type if q_data else "hls"
@@ -636,10 +818,16 @@ class DownloadQueueMixin:
         is_live = info.is_live or info.total_secs <= 0
         title_safe = _safe_filename(info.title or item.get("title") or "download")
         segments = [(0, title_safe, 0, 0 if is_live else int(info.total_secs))]
-        ctx = _build_template_context(info)
-        folder_parts = _render_template(self._folder_template, ctx)
-        base_out = self.output_input.text().strip() or str(_default_output_dir())
-        out_dir = os.path.join(base_out, *folder_parts) if folder_parts else base_out
+        if upgrade_paths is not None:
+            out_dir = str(upgrade_paths.staging)
+        else:
+            ctx = _build_template_context(info)
+            folder_parts = _render_template(self._folder_template, ctx)
+            base_out = self.output_input.text().strip() or str(_default_output_dir())
+            out_dir = (
+                os.path.join(base_out, *folder_parts)
+                if folder_parts else base_out
+            )
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as e:
@@ -656,16 +844,28 @@ class DownloadQueueMixin:
             self._advance_queue()
             return
         # Create and start the DownloadWorker
-        if not self._set_queue_item_status(item, "downloading"):
+        item["quality"] = chosen_quality
+        if not self._set_queue_item_status(
+            item,
+            "downloading",
+            source_id=resolved_source_id,
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
+            upgrade_history_id=int(item.get("upgrade_history_id", 0) or 0),
+            upgrade_existing_path=str(
+                item.get("upgrade_existing_path", "") or ""
+            ),
+            upgrade_existing_quality=str(
+                item.get("upgrade_existing_quality", "") or ""
+            ),
+            upgrade_stage_dir=str(item.get("upgrade_stage_dir", "") or ""),
+            upgrade_final_dir=str(item.get("upgrade_final_dir", "") or ""),
+        ):
             self._log(
                 f"[QUEUE] Ownership changed before download start: "
                 f"{item.get('title', '')[:60]}"
             )
             self._advance_queue()
             return
-        item["quality"] = (
-            (q_data.resolution or q_data.name) if q_data else "Best available"
-        )
         item["container"] = (
             (q_data.format_type if q_data else fmt_type).replace("ytdlp_direct", "MP4").upper()
         )
@@ -723,6 +923,9 @@ class DownloadQueueMixin:
             selected_tracks = tuple(default_media_tracks(q_data))
 
         spec = DownloadJobSpec(
+            source_platform=str(getattr(info, "platform", "") or ""),
+            source_id=str(getattr(info, "source_id", "") or ""),
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
             playlist_url=playlist_url or "",
             segments=tuple(tuple(s) for s in segments),
             output_dir=out_dir,
@@ -780,7 +983,7 @@ class DownloadQueueMixin:
         self._queue_workers[item_id] = worker
         self._queue_contexts[item_id] = {
             "out_dir": out_dir, "info": info,
-            "q_name": q_data.name if q_data else "",
+            "q_name": chosen_quality,
         }
         worker.start()
         self._update_tray_badge()
@@ -820,12 +1023,33 @@ class DownloadQueueMixin:
             except Exception:
                 pass
         title = info.title if info else item.get("title", "Download")
+        # Save metadata + history entry
+        q_name = ctx.get("q_name", "")
+        if item.get("is_upgrade"):
+            if not self._set_queue_item_status(
+                item,
+                "finalizing",
+                "Verifying staged upgrade before activation",
+            ):
+                self._advance_queue()
+                return
+            self._log(f"[UPGRADE] Download staged: {title[:60]}")
+            self._save_metadata(
+                out_dir,
+                q_name,
+                history_url=item.get("url", ""),
+                info=info,
+                queue_item=item,
+            )
+            self._update_tray_badge()
+            self._advance_queue()
+            return
         self._log(f"[QUEUE] Complete: {title[:60]}")
         self._notify_center(f"Queue download complete: {title[:50]}", "success")
         self._fire_hook("download_complete", title=title)
-        # Save metadata + history entry
-        q_name = ctx.get("q_name", "")
-        self._save_metadata(out_dir, q_name, history_url=item.get("url", ""), info=info)
+        self._save_metadata(
+            out_dir, q_name, history_url=item.get("url", ""), info=info,
+        )
         self._media_server_import(out_dir, info)
         # Handle recurrence or mark done
         rec = (item.get("recurrence") or "").strip()
@@ -1237,18 +1461,7 @@ class DownloadQueueMixin:
     def _quality_rank(quality_str):
         """Parse a quality string like '1080p', 'source', '720p60' into a
         numeric rank for comparison.  Higher is better."""
-        if not quality_str:
-            return 0
-        q = quality_str.lower().strip()
-        if q in ("source", "best", "highest"):
-            return 9999
-        digits = ""
-        for c in q:
-            if c.isdigit():
-                digits += c
-            elif digits:
-                break
-        return int(digits) if digits else 0
+        return quality_rank(quality_str)
 
 
     # ── Queue context menu ──────────────────────────────────────
@@ -1409,6 +1622,8 @@ class DownloadQueueMixin:
                 state = ResumeState(
                     source_url=source_url,
                     platform=platform,
+                    source_id=str(getattr(info, "source_id", "") or ""),
+                    webpage_url=str(getattr(info, "webpage_url", "") or ""),
                     title=title,
                     channel=channel,
                     quality_name=quality_name,
@@ -1588,7 +1803,7 @@ class DownloadQueueMixin:
         if hasattr(self, "queue_table"):
             self._refresh_queue_table()
 
-    def _set_queue_item_status(self, item, status, note=""):
+    def _set_queue_item_status(self, item, status, note="", **changes):
         if item is None:
             return False
         job_id = str(item.get("job_id", "") or "")
@@ -1601,11 +1816,16 @@ class DownloadQueueMixin:
 
         current_status = str(item.get("status", "queued") or "queued")
         owner_id = str(getattr(self, "_executor_owner_id", "") or "")
+        changes = dict(changes)
+        changes.update({
+            "failure_id": int(item.get("failure_id", 0) or 0),
+            "quality": str(item.get("quality", "") or ""),
+        })
         if status == "fetching":
             if not getattr(self, "_queue_execution_enabled", False):
                 return False
             durable = _db.claim_queue_job(
-                job_id, owner_id, status="fetching", note=note,
+                job_id, owner_id, status="fetching", note=note, **changes,
             )
         elif owner_id and str(item.get("execution_owner", "") or "") == owner_id:
             durable = _db.transition_owned_queue_job(
@@ -1613,17 +1833,13 @@ class DownloadQueueMixin:
                 owner_id,
                 expected_statuses=current_status,
                 status=status,
-                note=note,
-                failure_id=int(item.get("failure_id", 0) or 0),
-                quality=str(item.get("quality", "") or ""),
+                note=note, **changes,
             )
         else:
             durable = _db.update_queue_job(
                 job_id,
                 expected_revision=int(item.get("revision", 0) or 0),
-                status=status,
-                note=note,
-                failure_id=int(item.get("failure_id", 0) or 0),
+                status=status, note=note, **changes,
             )
         if durable is None:
             latest = _db.load_queue_job(job_id)

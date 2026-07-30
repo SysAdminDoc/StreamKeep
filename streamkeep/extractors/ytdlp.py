@@ -980,6 +980,10 @@ class YtDlpExtractor(Extractor):
             source_id=str(data.get("id") or ""),
             webpage_url=url,
         )
+        from ..metadata import build_archival_provenance
+        provenance = build_archival_provenance(info, source_url=url)
+        info.source_id = provenance.source_id
+        info.webpage_url = provenance.webpage_url
 
         raw_chapters = data.get("chapters") or []
         if isinstance(raw_chapters, list):

@@ -79,53 +79,114 @@ class DownloadFinalizeMixin:
         self._finalize_active_step = 0
         self._finalize_active_total = 0
         finished_title = result.get("title", "download")
-        if not result.get("cancelled"):
-            history_entry = self._add_history(
-                result.get("platform", "?"),
-                result.get("title", "?"),
-                result.get("quality_name", ""),
-                result.get("size_label", self._output_size_label(result.get("out_dir", ""))),
-                result.get("out_dir", ""),
-                channel=result.get("channel", ""),
-                url=result.get("history_url", ""),
+        finalize_error = str(
+            result.get("finalize_error")
+            or result.get("archive_manifest_error")
+            or ""
+        )
+        is_upgrade = bool(result.get("is_upgrade", False))
+        succeeded = bool(
+            not result.get("cancelled")
+            and not finalize_error
+            and (not is_upgrade or result.get("upgrade_activated"))
+        )
+        history_entry = None
+        if succeeded:
+            try:
+                history_entry = self._add_history(
+                    result.get("platform", "?"),
+                    result.get("title", "?"),
+                    result.get("quality_name", ""),
+                    result.get(
+                        "size_label",
+                        self._output_size_label(result.get("out_dir", "")),
+                    ),
+                    result.get("out_dir", ""),
+                    channel=result.get("channel", ""),
+                    url=result.get("history_url", ""),
+                    source_id=result.get("source_id", ""),
+                    archive_manifest=result.get("archive_manifest"),
+                )
+            except Exception as error:
+                succeeded = False
+                finalize_error = (
+                    f"Could not persist completed recording: {error}"
+                )
+                self._log(f"[FINALIZE] {finalize_error}")
+        queue_job_id = str(result.get("queue_job_id", "") or "")
+        queue_item = next(
+            (
+                item for item in getattr(self, "_download_queue", [])
+                if str(item.get("job_id", "") or "") == queue_job_id
+            ),
+            None,
+        )
+        if succeeded and is_upgrade:
+            self._index_finalized_recording(
+                result.get("out_dir", ""), result.get("info"),
             )
-            manifest = result.get("archive_manifest")
-            if history_entry is not None and manifest:
-                try:
-                    _db.save_archive_manifest(
-                        history_entry.db_id,
-                        history_entry.path,
-                        manifest,
-                        status="created",
-                        details=(
-                            f"Captured {len(manifest.get('files', []) or [])} "
-                            "file(s)"
-                        ),
-                    )
-                except Exception as e:
-                    self._log(f"[VERIFY] Could not save integrity manifest: {e}")
-            elif result.get("archive_manifest_error"):
-                self._log(
-                    "[VERIFY] Integrity manifest was not saved: "
-                    f"{result.get('archive_manifest_error')}"
+            self._media_server_import(
+                result.get("out_dir", ""), result.get("info"),
+            )
+            self._notify_center(
+                f"Quality upgrade activated: {finished_title[:50]}",
+                "success",
+            )
+            self._fire_hook("download_complete", title=finished_title)
+        if queue_item is not None:
+            if succeeded:
+                self._set_queue_item_status(
+                    queue_item, "done", "Verified upgrade version activated",
+                    history_id=int(history_entry.db_id if history_entry else 0),
+                    output_dir=result.get("out_dir", ""),
                 )
-            finalize_error = result.get("finalize_error") or result.get("archive_manifest_error")
-            if finalize_error:
-                self._record_failed_job(
+                failure_id = int(queue_item.get("failure_id", 0) or 0)
+                if failure_id:
+                    _db.mark_failed_job_resolved(failure_id)
+                _db.mark_failed_jobs_resolved_for_url(
+                    queue_item.get("url", "")
+                )
+            elif result.get("cancelled"):
+                self._set_queue_item_status(
+                    queue_item, "cancelled", "Upgrade finalization cancelled",
+                )
+            else:
+                failure_id = self._record_failed_job(
                     stage="finalize",
-                    error=finalize_error,
+                    error=finalize_error or "Upgrade activation did not complete",
+                    item=queue_item,
                     out_dir=result.get("out_dir", ""),
-                    queue_data={
-                        "url": result.get("history_url", ""),
-                        "title": result.get("title", ""),
-                        "platform": result.get("platform", "?"),
-                    },
+                    info=result.get("info"),
                 )
+                if failure_id:
+                    queue_item["failure_id"] = failure_id
+                self._set_queue_item_status(
+                    queue_item,
+                    "failed",
+                    finalize_error or "Upgrade activation did not complete",
+                )
+        elif not succeeded and not result.get("cancelled"):
+            self._record_failed_job(
+                stage="finalize",
+                error=finalize_error or "Finalization did not complete",
+                out_dir=result.get("out_dir", ""),
+                queue_data={
+                    "url": result.get("history_url", ""),
+                    "title": result.get("title", ""),
+                    "platform": result.get("platform", "?"),
+                },
+            )
         remaining = len(self._finalize_tasks)
         self._refresh_download_summary()
         if not self._foreground_busy():
             if result.get("cancelled"):
                 self._set_status("Background finalization was cancelled.", "warning")
+            elif not succeeded:
+                self._set_status(
+                    f"Finalization failed for {finished_title[:60]}: "
+                    f"{finalize_error or 'activation did not complete'}",
+                    "error",
+                )
             elif remaining:
                 self._set_status(
                     f"Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.",
@@ -222,7 +283,10 @@ class DownloadFinalizeMixin:
 
     # ── Metadata / trim ─────────────────────────────────────────
 
-    def _save_metadata(self, out_dir, quality_name="", history_url="", info=None):
+    def _save_metadata(
+        self, out_dir, quality_name="", history_url="", info=None,
+        queue_item=None,
+    ):
         info = info or self.stream_info
         url = history_url or self._resolve_history_url()
         info_copy = copy.deepcopy(info) if info else None
@@ -252,13 +316,40 @@ class DownloadFinalizeMixin:
                 channel=(info_copy.channel if info_copy else ""),
             ),
             "title": display_title,
+            "source_id": (
+                getattr(info_copy, "source_id", "") if info_copy else ""
+            ),
+            "queue_job_id": (
+                str(queue_item.get("job_id", "") or "")
+                if queue_item else ""
+            ),
+            "is_upgrade": bool(
+                queue_item and queue_item.get("is_upgrade", False)
+            ),
+            "upgrade_existing_path": (
+                str(queue_item.get("upgrade_existing_path", "") or "")
+                if queue_item else ""
+            ),
+            "upgrade_final_dir": (
+                str(queue_item.get("upgrade_final_dir", "") or "")
+                if queue_item else ""
+            ),
+            "expected_duration": float(
+                getattr(info_copy, "total_secs", 0) or 0
+            ) if info_copy else 0,
         }
         self._enqueue_finalize_task(task)
+        if queue_item and queue_item.get("is_upgrade"):
+            return
+        self._index_finalized_recording(out_dir, info_copy)
+
+    def _index_finalized_recording(self, out_dir, info=None):
+        """Run local indexes only after a recording path is final."""
         # Auto-tag recording (F35)
         try:
             from ...tags import _connect, auto_tag_recording
             db = _connect()
-            auto_tag_recording(db, out_dir, info=info_copy)
+            auto_tag_recording(db, out_dir, info=info)
             db.close()
         except Exception:
             pass

@@ -2,6 +2,7 @@
 
 import os
 import re
+from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -10,7 +11,14 @@ from ..metadata import MetadataSaver
 from ..postprocess import PostProcessor
 from ..postprocess.processor import PP_LOCK as _PP_LOCK
 from ..utils import fmt_size
-from ..verify import create_archive_manifest
+from ..upgrade import UpgradePaths, activate_upgrade_version
+from ..verify import (
+    STATUS_OK,
+    create_archive_manifest,
+    verify_archive_manifest,
+    verify_recording_dir,
+    write_archive_manifest_sidecar,
+)
 
 
 class FinalizeWorker(QThread):
@@ -90,6 +98,8 @@ class FinalizeWorker(QThread):
             steps.append(("Running post-processing", "postprocess"))
         if task.get("record_manifest", True):
             steps.append(("Capturing integrity manifest", "manifest"))
+        if task.get("is_upgrade") and task.get("record_manifest", True):
+            steps.append(("Activating verified upgrade", "activate"))
         return steps
 
     def _run_podcast_sidecars(self, task, info, out_dir, file_base):
@@ -140,6 +150,13 @@ class FinalizeWorker(QThread):
             "quality_name": task.get("quality_name", ""),
             "out_dir": out_dir,
             "history_url": task.get("history_url", ""),
+            "source_id": task.get(
+                "source_id", getattr(info, "source_id", "") if info else "",
+            ),
+            "queue_job_id": task.get("queue_job_id", ""),
+            "is_upgrade": bool(task.get("is_upgrade", False)),
+            "upgrade_activated": False,
+            "info": info,
             "cancelled": False,
             "finalize_error": "",
             "archive_manifest": None,
@@ -246,14 +263,70 @@ class FinalizeWorker(QThread):
                 setattr(PostProcessor, k, v)
             _PP_LOCK.release()
 
-        if out_dir and not self._interrupted() and task.get("record_manifest", True):
+        if (
+            out_dir
+            and not self._interrupted()
+            and not result["finalize_error"]
+            and task.get("record_manifest", True)
+        ):
             try:
+                step_no += 1
                 self._emit_progress(
                     "Capturing integrity manifest",
-                    max(step_no + 1, total_steps),
-                    max(step_no + 1, total_steps),
+                    step_no,
+                    total_steps,
                 )
-                manifest = create_archive_manifest(out_dir, write_sidecar=True)
+                if task.get("is_upgrade"):
+                    status, details, _media_path = verify_recording_dir(
+                        out_dir,
+                        float(task.get("expected_duration", 0) or 0),
+                    )
+                    if status != STATUS_OK:
+                        raise RuntimeError(
+                            f"Upgrade media verification did not pass: {details}"
+                        )
+                    self.log.emit(f"[UPGRADE] Media verified: {details}")
+                manifest = create_archive_manifest(
+                    out_dir,
+                    write_sidecar=not bool(task.get("is_upgrade")),
+                )
+                if task.get("is_upgrade"):
+                    status, details, _report = verify_archive_manifest(
+                        out_dir, manifest,
+                    )
+                    if status != STATUS_OK:
+                        raise RuntimeError(
+                            "Upgrade integrity verification did not pass: "
+                            f"{details}"
+                        )
+                    if self._interrupted():
+                        result["cancelled"] = True
+                        self.done.emit(result)
+                        return
+                    paths = UpgradePaths(
+                        existing=Path(task.get("upgrade_existing_path", "")).resolve(
+                            strict=False
+                        ),
+                        staging=Path(out_dir).resolve(strict=False),
+                        final=Path(task.get("upgrade_final_dir", "")).resolve(
+                            strict=False
+                        ),
+                    )
+                    manifest["root"] = str(paths.final)
+                    write_archive_manifest_sidecar(out_dir, manifest)
+                    step_no += 1
+                    self._emit_progress(
+                        "Activating verified upgrade",
+                        step_no,
+                        total_steps,
+                    )
+                    final_dir = activate_upgrade_version(paths)
+                    out_dir = str(final_dir)
+                    result["out_dir"] = out_dir
+                    result["upgrade_activated"] = True
+                    self.log.emit(
+                        f"[UPGRADE] Activated verified version: {out_dir}"
+                    )
                 result["archive_manifest"] = manifest
                 self.log.emit(
                     f"[VERIFY] Integrity manifest captured for "

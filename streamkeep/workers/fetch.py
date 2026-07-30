@@ -17,13 +17,18 @@ class FetchWorker(QThread):
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
-    def __init__(self, url, vod_source=None, vod_platform=None, vod_title=None, vod_channel=None):
+    def __init__(
+        self, url, vod_source=None, vod_platform=None, vod_title=None,
+        vod_channel=None, source_id=None, webpage_url=None,
+    ):
         super().__init__()
         self.url = url.strip()
         self.vod_source = vod_source
         self.vod_platform = vod_platform
         self.vod_title = str(vod_title or "")
         self.vod_channel = str(vod_channel or "")
+        self.source_id = str(source_id or "")
+        self.webpage_url = str(webpage_url or "")
 
     def _interrupted(self):
         return self.isInterruptionRequested()
@@ -172,7 +177,10 @@ class FetchWorker(QThread):
             if not self._interrupted():
                 self.error.emit(str(e))
 
-    def _apply_vod_metadata(self, info, platform="", title="", channel=""):
+    def _apply_vod_metadata(
+        self, info, platform="", title="", channel="", source_id="",
+        webpage_url="",
+    ):
         if info is None:
             return None
         if platform and not getattr(info, "platform", ""):
@@ -181,6 +189,17 @@ class FetchWorker(QThread):
             info.title = title
         if channel and not getattr(info, "channel", ""):
             info.channel = channel
+        if source_id and not getattr(info, "source_id", ""):
+            info.source_id = source_id
+        if webpage_url and not getattr(info, "webpage_url", ""):
+            info.webpage_url = webpage_url
+        from ..metadata import build_archival_provenance
+        provenance = build_archival_provenance(
+            info,
+            source_url=getattr(info, "webpage_url", "") or "",
+        )
+        info.source_id = provenance.source_id
+        info.webpage_url = provenance.webpage_url
         return info
 
     def _resolve_direct(self, source):
@@ -193,6 +212,8 @@ class FetchWorker(QThread):
                 platform=self.vod_platform or "Twitch",
                 title=self.vod_title,
                 channel=self.vod_channel,
+                source_id=self.source_id,
+                webpage_url=self.webpage_url,
             )
         # Try as m3u8 URL — use Kick extractor's generic m3u8 resolver
         info = KickExtractor()._resolve_m3u8(source, log_fn=self.log.emit)
@@ -201,6 +222,8 @@ class FetchWorker(QThread):
             platform=self.vod_platform,
             title=self.vod_title,
             channel=self.vod_channel,
+            source_id=self.source_id,
+            webpage_url=self.webpage_url,
         )
 
     def _resolve_source(self, vod, ext):
@@ -216,6 +239,8 @@ class FetchWorker(QThread):
             platform=getattr(vod, "platform", ""),
             title=getattr(vod, "title", ""),
             channel=getattr(vod, "channel", ""),
+            source_id=getattr(vod, "source_id", ""),
+            webpage_url=getattr(vod, "webpage_url", ""),
         )
 
 

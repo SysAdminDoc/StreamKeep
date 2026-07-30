@@ -149,6 +149,8 @@ def _sanitize_resume_payload(data, output_dir):
         "updated_at": _sanitize_timestamp(data.get("updated_at", "")),
         "source_url": _sanitize_text(data.get("source_url", "")),
         "platform": _sanitize_text(data.get("platform", ""), max_len=128),
+        "source_id": _sanitize_text(data.get("source_id", ""), max_len=512),
+        "webpage_url": _sanitize_text(data.get("webpage_url", "")),
         "title": _sanitize_text(data.get("title", ""), max_len=512),
         "channel": _sanitize_text(data.get("channel", ""), max_len=256),
         "playlist_url": _sanitize_text(data.get("playlist_url", "")),

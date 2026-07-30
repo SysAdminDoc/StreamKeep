@@ -183,6 +183,10 @@ class KickExtractor(Extractor):
             source = v.get("source") or ""
             if not source:
                 continue
+            vod_id = str(v.get("uuid") or v.get("id") or "")
+            if not _SAFE_UUID.fullmatch(vod_id):
+                match = re.search(r"([0-9a-fA-F-]{8,64})", str(source))
+                vod_id = match.group(1) if match and _SAFE_UUID.fullmatch(match.group(1)) else ""
             dur_ms = v.get("duration") or 0
             try:
                 dur_str = fmt_duration(dur_ms / 1000) if dur_ms else ""
@@ -199,6 +203,11 @@ class KickExtractor(Extractor):
                 duration_ms=int(dur_ms),
                 platform="Kick",
                 channel=slug,
+                source_id=f"vod:{vod_id}" if vod_id else "",
+                webpage_url=(
+                    f"https://kick.com/{slug}/videos/{vod_id}"
+                    if vod_id else ""
+                ),
             ))
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
         # Page on the raw API count, not the source-filtered list: a full page
@@ -216,7 +225,17 @@ class KickExtractor(Extractor):
         if vod_id:
             source, title = self._v1_video(vod_id)
             if source:
-                return self._resolve_m3u8(source, log_fn, channel=slug, title=title)
+                return self._resolve_m3u8(
+                    source,
+                    log_fn,
+                    channel=slug,
+                    title=title,
+                    source_id=f"vod:{vod_id}",
+                    webpage_url=(
+                        f"https://kick.com/{slug}/videos/{vod_id}"
+                        if slug else f"https://kick.com/video/{vod_id}"
+                    ),
+                )
             self._log(log_fn, f"Kick VOD {vod_id}: no source URL (private/pruned?)")
             return None
         if slug:
@@ -247,13 +266,23 @@ class KickExtractor(Extractor):
             )
         return None  # Multiple VODs handled by UI
 
-    def _resolve_m3u8(self, url, log_fn=None, channel="", title=""):
+    def _resolve_m3u8(
+        self, url, log_fn=None, channel="", title="",
+        source_id="", webpage_url="",
+    ):
         self._log(log_fn, f"Fetching playlist: {url}")
         body = curl(url)
         if not body or not body.startswith("#EXTM3U"):
             return None
 
-        info = StreamInfo(platform="Kick", url=url, channel=channel or "", title=title or "")
+        info = StreamInfo(
+            platform="Kick",
+            url=url,
+            channel=channel or "",
+            title=title or "",
+            source_id=source_id,
+            webpage_url=webpage_url,
+        )
 
         if "#EXT-X-STREAM-INF" in body:
             info.is_master = True

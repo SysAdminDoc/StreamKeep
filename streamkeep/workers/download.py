@@ -90,6 +90,9 @@ class DownloadWorker(QThread):
         self.ytdlp_embed_thumbnail = None
         self.ytdlp_template_name = ""
         self.ytdlp_template_args = ()
+        self.source_platform = ""
+        self.source_id = ""
+        self.webpage_url = ""
         # Optional aria2c external-downloader routing (V21). The source URL is
         # sanitized before hand-off because aria2c treats leading-dash / newline
         # tokens as options or extra URIs (CVE-2026-50574).
@@ -164,6 +167,9 @@ class DownloadWorker(QThread):
         if state is not None:
             # Pull shape from the worker so the sidecar is self-contained.
             state.playlist_url = self.playlist_url
+            state.platform = self.source_platform or state.platform
+            state.source_id = self.source_id or state.source_id
+            state.webpage_url = self.webpage_url or state.webpage_url
             state.format_type = self.format_type
             state.audio_url = self.audio_url or ""
             state.selected_tracks = [

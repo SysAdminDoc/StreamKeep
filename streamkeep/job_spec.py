@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,9 @@ class DownloadJobSpec:
 
     schema_version: int = SCHEMA_VERSION
 
+    source_platform: str = ""
+    source_id: str = ""
+    webpage_url: str = ""
     playlist_url: str = ""
     segments: tuple[tuple[str, str], ...] = ()
     output_dir: str = ""
@@ -88,6 +91,19 @@ class DownloadJobSpec:
     def to_dict(self):
         """Serialize to a dict safe for JSON/SQLite storage (no secrets)."""
         d = asdict(self)
+        from .metadata import build_archival_provenance
+        from .models import StreamInfo
+        provenance = build_archival_provenance(
+            StreamInfo(
+                platform=self.source_platform,
+                source_id=self.source_id,
+                webpage_url=self.webpage_url,
+            ),
+            source_url=self.webpage_url,
+        )
+        d["source_platform"] = provenance.platform
+        d["source_id"] = provenance.source_id
+        d["webpage_url"] = provenance.webpage_url
         d["segments"] = [list(s) for s in self.segments]
         d["selected_tracks"] = list(self.selected_tracks)
         d["ytdlp_template_args"] = list(self.ytdlp_template_args)
@@ -124,6 +140,9 @@ class DownloadJobSpec:
 
     def apply_to_worker(self, worker):
         """Copy all spec fields onto a DownloadWorker instance."""
+        worker.source_platform = self.source_platform
+        worker.source_id = self.source_id
+        worker.webpage_url = self.webpage_url
         worker.playlist_url = self.playlist_url
         worker.segments = [list(s) for s in self.segments]
         worker.output_dir = self.output_dir
@@ -179,6 +198,9 @@ class DownloadJobSpec:
     def from_worker(cls, worker):
         """Capture the current state of a DownloadWorker as a frozen spec."""
         return cls(
+            source_platform=getattr(worker, "source_platform", "") or "",
+            source_id=getattr(worker, "source_id", "") or "",
+            webpage_url=getattr(worker, "webpage_url", "") or "",
             playlist_url=worker.playlist_url or "",
             segments=tuple(
                 tuple(s) for s in (worker.segments or [])

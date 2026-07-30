@@ -179,6 +179,7 @@ class HistoryEntry:
     size: str = ""
     path: str = ""
     url: str = ""
+    source_id: str = ""                    # stable platform-scoped media identity
     favorite: bool = False                 # exempt from lifecycle cleanup (F32)
     watched: bool = False                  # playback status (F32/F38)
     watch_position_secs: float = 0.0       # resume position (F38)
@@ -192,6 +193,7 @@ class HistoryEntry:
             "title": self.title, "channel": self.channel,
             "quality": self.quality, "size": self.size,
             "path": self.path, "url": self.url,
+            "source_id": self.source_id,
             "favorite": self.favorite, "watched": self.watched,
             "watch_position_secs": self.watch_position_secs,
             "bookmarks": list(self.bookmarks or []),
@@ -209,6 +211,7 @@ class HistoryEntry:
             size=str(d.get("size", "")),
             path=str(d.get("path", "")),
             url=str(d.get("url", "")),
+            source_id=str(d.get("source_id", "")),
             favorite=bool(d.get("favorite", False)),
             watched=bool(d.get("watched", False)),
             watch_position_secs=float(d.get("watch_position_secs", 0) or 0),
@@ -260,6 +263,8 @@ class ResumeState:
     # what they're resuming.
     source_url: str = ""                  # original page URL the user pasted
     platform: str = ""
+    source_id: str = ""
+    webpage_url: str = ""
     title: str = ""
     channel: str = ""
     # Playback target that was actually handed to ffmpeg / yt-dlp. May be

@@ -56,7 +56,9 @@ class DownloadVodMixin:
                         vod_source=vod.source,
                         vod_platform=vod.platform or platform_name,
                         vod_title=vod.title,
-                        vod_channel=vod.channel):
+                        vod_channel=vod.channel,
+                        source_id=getattr(vod, "source_id", ""),
+                        webpage_url=getattr(vod, "webpage_url", "")):
                     added += 1
             source_label = self._queue_active_item.get("title") or self._queue_active_item.get("url", "")
             self._release_queue_item("done")
@@ -164,6 +166,8 @@ class DownloadVodMixin:
                 vod_title=vod.title,
                 vod_channel=vod.channel,
                 feed_url=getattr(vod, "feed_url", ""),
+                source_id=getattr(vod, "source_id", ""),
+                webpage_url=getattr(vod, "webpage_url", ""),
             )
             if ok:
                 added += 1
@@ -186,6 +190,8 @@ class DownloadVodMixin:
                     vod_title=vod.title,
                     vod_channel=vod.channel,
                     feed_url=getattr(vod, "feed_url", ""),
+                    source_id=getattr(vod, "source_id", ""),
+                    webpage_url=getattr(vod, "webpage_url", ""),
                 )
                 return
         self._log("No VOD checked.")
@@ -423,6 +429,9 @@ class DownloadVodMixin:
         transfer = resolve_ytdlp_transfer_options(YtDlpExtractor)
         ext_dl = resolve_external_downloader_options(YtDlpExtractor)
         spec = DownloadJobSpec(
+            source_platform=str(getattr(info, "platform", "") or ""),
+            source_id=str(getattr(info, "source_id", "") or ""),
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
             playlist_url=playlist_url or "",
             segments=tuple(tuple(s) for s in segments),
             output_dir=out_dir,

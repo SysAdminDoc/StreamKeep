@@ -28,7 +28,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _write_lock = threading.Lock()
 
@@ -68,6 +68,8 @@ def init_db() -> None:
                 _migrate_monitor_v6(db)
             if 0 < v < 8:
                 _migrate_execution_v8(db)
+            if 0 < v < 9:
+                _migrate_identity_v9(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -96,6 +98,7 @@ def _apply_schema(db):
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             date                TEXT NOT NULL DEFAULT '',
             platform            TEXT NOT NULL DEFAULT '',
+            source_id           TEXT NOT NULL DEFAULT '',
             title               TEXT NOT NULL DEFAULT '',
             channel             TEXT NOT NULL DEFAULT '',
             quality             TEXT NOT NULL DEFAULT '',
@@ -108,6 +111,8 @@ def _apply_schema(db):
             bookmarks           TEXT    NOT NULL DEFAULT '[]'
         );
         CREATE INDEX IF NOT EXISTS idx_history_platform ON history(platform);
+        CREATE INDEX IF NOT EXISTS idx_history_identity
+            ON history(platform COLLATE NOCASE, source_id);
         CREATE INDEX IF NOT EXISTS idx_history_channel  ON history(channel);
         CREATE INDEX IF NOT EXISTS idx_history_date     ON history(date);
         CREATE INDEX IF NOT EXISTS idx_history_url      ON history(url);
@@ -372,6 +377,42 @@ def _migrate_monitor_v6(db):
         )
 
 
+def _migrate_identity_v9(db):
+    """Add stable, platform-scoped source identity to completed history."""
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(history)").fetchall()
+    }
+    if not existing_cols:
+        return
+    if "source_id" not in existing_cols:
+        db.execute(
+            "ALTER TABLE history ADD COLUMN "
+            "source_id TEXT NOT NULL DEFAULT ''"
+        )
+    # Only derive content identities from legacy public URLs. Channel-level
+    # identities are deliberately excluded: they identify a creator, not one
+    # recording, and must never make unrelated VODs upgrade-eligible.
+    from .metadata import build_archival_provenance
+    from .models import StreamInfo
+    rows = db.execute(
+        "SELECT id, platform, channel, url FROM history WHERE source_id=''"
+    ).fetchall()
+    for row in rows:
+        info = StreamInfo(
+            platform=str(row[1] or ""),
+            channel=str(row[2] or ""),
+            url=str(row[3] or ""),
+        )
+        identity = build_archival_provenance(
+            info, source_url=str(row[3] or "")
+        ).source_id
+        if identity and not identity.lower().startswith("channel:"):
+            db.execute(
+                "UPDATE history SET source_id=? WHERE id=?",
+                (identity, int(row[0])),
+            )
+
+
 # ── History CRUD ────────────────────────────────────────────────────
 
 def load_history() -> list[dict[str, Any]]:
@@ -593,17 +634,27 @@ def history_analytics(cutoff_date: str = "") -> dict[str, Any]:
 
 def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
     """Insert a single history entry. Returns the new row id."""
+    return save_completed_recording(entry_dict)
+
+
+def save_completed_recording(
+    entry_dict: dict[str, Any],
+    manifest: dict[str, Any] | None = None,
+) -> int | None:
+    """Atomically persist completed history and its optional manifest."""
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             cur = db.execute("""
                 INSERT INTO history
-                    (date, platform, title, channel, quality, size, path, url,
-                     favorite, watched, watch_position_secs, bookmarks)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                    (date, platform, source_id, title, channel, quality, size,
+                     path, url, favorite, watched, watch_position_secs, bookmarks)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("date", "")),
                 str(entry_dict.get("platform", "")),
+                str(entry_dict.get("source_id", "")),
                 str(entry_dict.get("title", "")),
                 str(entry_dict.get("channel", "")),
                 str(entry_dict.get("quality", "")),
@@ -615,8 +666,36 @@ def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
                 float(entry_dict.get("watch_position_secs", 0) or 0),
                 json.dumps(entry_dict.get("bookmarks", []) or []),
             ))
+            history_id = int(cur.lastrowid)
+            if manifest is not None:
+                if not isinstance(manifest, dict):
+                    raise TypeError("archive manifest must be a dictionary")
+                now = _utc_now_iso()
+                db.execute("""
+                    INSERT INTO archive_manifests
+                        (history_id, recording_path, manifest_json, created_at,
+                         updated_at, status, last_check_at, last_check_details)
+                    VALUES (?,?,?,?,?,?,?,?)
+                """, (
+                    history_id,
+                    str(entry_dict.get("path", "")),
+                    json.dumps(
+                        manifest, ensure_ascii=False, sort_keys=True,
+                    ),
+                    str(manifest.get("created_at", now) or now),
+                    now,
+                    "created",
+                    now,
+                    (
+                        f"Captured {len(manifest.get('files', []) or [])} "
+                        "file(s)"
+                    ),
+                ))
             db.commit()
-            return cur.lastrowid
+            return history_id
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -628,7 +707,7 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
     are applied (unknown keys are silently ignored).
     """
     allowed = {
-        "date", "platform", "title", "channel", "quality", "size",
+        "date", "platform", "source_id", "title", "channel", "quality", "size",
         "path", "url", "favorite", "watched", "watch_position_secs",
         "bookmarks",
     }
@@ -714,6 +793,25 @@ def find_history_by_url(url: str) -> dict[str, Any] | None:
         row = db.execute(
             "SELECT * FROM history WHERE url=? ORDER BY id DESC LIMIT 1",
             (str(url),),
+        ).fetchone()
+        return _row_to_history_dict(row) if row else None
+    finally:
+        db.close()
+
+
+def find_history_by_identity(platform: str, source_id: str) -> dict[str, Any] | None:
+    """Return the newest recording with an exact platform/source identity."""
+    platform = str(platform or "").strip()
+    source_id = str(source_id or "").strip()
+    if not platform or not source_id:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM history "
+            "WHERE platform=? COLLATE NOCASE AND source_id=? "
+            "ORDER BY id DESC LIMIT 1",
+            (platform, source_id),
         ).fetchone()
         return _row_to_history_dict(row) if row else None
     finally:
@@ -2139,13 +2237,14 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                         continue
                     db.execute("""
                         INSERT INTO history
-                            (date, platform, title, channel, quality, size,
-                             path, url, favorite, watched,
+                            (date, platform, source_id, title, channel, quality,
+                             size, path, url, favorite, watched,
                              watch_position_secs, bookmarks)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """, (
                         str(h.get("date", "")),
                         str(h.get("platform", "")),
+                        str(h.get("source_id", "")),
                         str(h.get("title", "")),
                         str(h.get("channel", "")),
                         str(h.get("quality", "")),

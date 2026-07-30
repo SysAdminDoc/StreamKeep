@@ -263,7 +263,8 @@ class DownloadSingleMixin:
     # ── Fetch / resolve ─────────────────────────────────────────
 
     def _on_fetch(self, vod_source=None, vod_platform=None, vod_title=None,
-                 vod_channel=None, feed_url=None):
+                 vod_channel=None, feed_url=None, source_id=None,
+                 webpage_url=None):
         url = self.url_input.text().strip()
         if not url:
             return
@@ -274,6 +275,8 @@ class DownloadSingleMixin:
             "vod_title": vod_title or "",
             "vod_channel": vod_channel or "",
             "feed_url": feed_url or "",
+            "source_id": source_id or "",
+            "webpage_url": webpage_url or "",
         }
         # Track recent URLs for the autocomplete dropdown
         if not vod_source:
@@ -333,6 +336,8 @@ class DownloadSingleMixin:
             vod_platform=vod_platform,
             vod_title=vod_title,
             vod_channel=vod_channel,
+            source_id=source_id,
+            webpage_url=webpage_url,
         )
         self._fetch_worker.log.connect(self._log)
         self._fetch_worker.finished.connect(self._on_fetch_done)
@@ -1035,6 +1040,9 @@ class DownloadSingleMixin:
 
         from ...job_spec import DownloadJobSpec
         spec = DownloadJobSpec(
+            source_platform=str(getattr(self.stream_info, "platform", "") or ""),
+            source_id=str(getattr(self.stream_info, "source_id", "") or ""),
+            webpage_url=str(getattr(self.stream_info, "webpage_url", "") or ""),
             playlist_url=playlist_url or "",
             segments=tuple(tuple(s) for s in segments),
             output_dir=out_dir,
@@ -1531,6 +1539,8 @@ class DownloadSingleMixin:
             if self._queue_add(
                 e.get("url", ""), title=e.get("title", ""),
                 platform="yt-dlp",
+                source_id=e.get("id", ""),
+                webpage_url=e.get("url", ""),
                 download_archive=options.get("archive_path", ""),
                 break_on_existing=options.get("break_on_existing", False),
             ):

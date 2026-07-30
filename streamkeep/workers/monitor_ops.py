@@ -38,7 +38,21 @@ class SeedArchiveWorker(QThread):
                 vods, _ = ext.list_vods(self.url, log_fn=self.log.emit)
                 if self._interrupted():
                     return
-                sources = [v.source for v in vods if getattr(v, "source", "")]
+                sources = []
+                for vod in vods:
+                    platform = str(
+                        getattr(vod, "platform", "") or ""
+                    ).strip().casefold()
+                    source_id = str(
+                        getattr(vod, "source_id", "") or ""
+                    ).strip()
+                    source = str(getattr(vod, "source", "") or "")
+                    key = (
+                        f"{platform}::{source_id}"
+                        if platform and source_id else source
+                    )
+                    if key:
+                        sources.append(key)
                 self.finished.emit(channel_id, sources)
         except Exception as e:
             if not self._interrupted():

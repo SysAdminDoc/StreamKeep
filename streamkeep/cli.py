@@ -351,6 +351,9 @@ def _run_download(args):
 
         from .job_spec import DownloadJobSpec
         spec = DownloadJobSpec(
+            source_platform=info.platform or "",
+            source_id=getattr(info, "source_id", "") or "",
+            webpage_url=getattr(info, "webpage_url", "") or "",
             playlist_url=qi.url,
             segments=tuple(tuple(s) for s in [segments[0]]),
             output_dir=output_dir,

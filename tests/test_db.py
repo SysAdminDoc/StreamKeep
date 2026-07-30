@@ -27,6 +27,53 @@ def _claim_queue_job_process(
 
 
 class DbMigrationTests(unittest.TestCase):
+    def test_v8_history_identity_is_backfilled_and_exactly_queryable(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("""
+                CREATE TABLE history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    channel TEXT NOT NULL DEFAULT '',
+                    quality TEXT NOT NULL DEFAULT '',
+                    size TEXT NOT NULL DEFAULT '',
+                    path TEXT NOT NULL DEFAULT '',
+                    url TEXT NOT NULL DEFAULT '',
+                    favorite INTEGER NOT NULL DEFAULT 0,
+                    watched INTEGER NOT NULL DEFAULT 0,
+                    watch_position_secs REAL NOT NULL DEFAULT 0.0,
+                    bookmarks TEXT NOT NULL DEFAULT '[]'
+                )
+            """)
+            conn.execute(
+                "INSERT INTO history(platform, title, url) VALUES(?,?,?)",
+                (
+                    "Twitch",
+                    "Archived VOD",
+                    "https://www.twitch.tv/videos/123456",
+                ),
+            )
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+            conn.close()
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                found = db.find_history_by_identity(
+                    "twitch", "vod:123456"
+                )
+                wrong_platform = db.find_history_by_identity(
+                    "Kick", "vod:123456"
+                )
+
+            self.assertIsNotNone(found)
+            self.assertEqual(found["source_id"], "vod:123456")
+            self.assertIsNone(wrong_platform)
+
     def test_monitor_argument_template_attachment_persists(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"
@@ -128,6 +175,27 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(loaded["manifest"]["files"][0]["path"], "clip.mp4")
             self.assertEqual(updated["status"], "verified")
             self.assertEqual(count, 0)
+
+    def test_completed_history_and_manifest_roll_back_together(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                with self.assertRaises(TypeError):
+                    db.save_completed_recording(
+                        {
+                            "platform": "Twitch",
+                            "source_id": "vod:123",
+                            "title": "Upgrade",
+                            "path": str(Path(tmpdir) / "upgrade"),
+                        },
+                        {"files": {"not", "json", "serializable"}},
+                    )
+                count = db.history_count()
+                manifest_count = db.archive_manifest_count()
+
+            self.assertEqual(count, 0)
+            self.assertEqual(manifest_count, 0)
 
     def test_failed_job_ledger_persists_retry_and_discard_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -13,6 +13,13 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from . import db
 from .config import write_log_line
 from .models import default_media_tracks
+from .upgrade import (
+    UpgradeSafetyError,
+    identity_matches,
+    plan_upgrade_paths,
+    prepare_upgrade_staging,
+    quality_rank,
+)
 from .utils import default_output_dir, fmt_size, safe_filename
 from .workers import DownloadWorker, FetchWorker, FinalizeWorker
 
@@ -259,7 +266,15 @@ class HeadlessJobService(QObject):
         )
         if not current:
             return
-        worker = FetchWorker(str(current.get("url", "")))
+        worker = FetchWorker(
+            str(current.get("url", "")),
+            vod_source=current.get("vod_source") or None,
+            vod_platform=current.get("vod_platform") or None,
+            vod_title=current.get("vod_title") or None,
+            vod_channel=current.get("vod_channel") or None,
+            source_id=current.get("source_id") or None,
+            webpage_url=current.get("webpage_url") or None,
+        )
         self._bind_fetcher(job_id, worker)
         write_log_line(f"[SERVICE] Fetching job {job_id}: {current.get('url', '')}")
         worker.start()
@@ -300,6 +315,8 @@ class HeadlessJobService(QObject):
             vod_platform=getattr(chosen, "platform", "") or platform,
             vod_title=getattr(chosen, "title", ""),
             vod_channel=getattr(chosen, "channel", ""),
+            source_id=getattr(chosen, "source_id", ""),
+            webpage_url=getattr(chosen, "webpage_url", ""),
         )
         self._bind_fetcher(job_id, worker)
         worker.start()
@@ -325,7 +342,92 @@ class HeadlessJobService(QObject):
         playlist_url = quality.url if quality else info.url
         format_type = quality.format_type if quality else "hls"
         title = str(getattr(info, "title", "") or job.get("title") or "download")
-        output_dir = str(job.get("output_dir", "") or self.output_dir)
+        resolved_platform = str(getattr(info, "platform", "") or "")
+        resolved_source_id = str(getattr(info, "source_id", "") or "")
+        chosen_quality = str(
+            (
+                getattr(quality, "resolution", "")
+                or getattr(quality, "name", "")
+            )
+            if quality else "Best available"
+        )
+        upgrade_paths = None
+        existing_history = None
+        if bool(job.get("is_upgrade", False)):
+            if not identity_matches(
+                str(job.get("vod_platform") or job.get("platform") or ""),
+                str(job.get("source_id", "") or ""),
+                resolved_platform,
+                resolved_source_id,
+            ):
+                self._fail_job(
+                    job_id,
+                    "fetch",
+                    "Resolved media identity does not match the queued "
+                    "upgrade candidate",
+                    info=info,
+                )
+                return
+            existing_history = db.find_history_by_identity(
+                resolved_platform, resolved_source_id,
+            )
+            if (
+                not existing_history
+                or not existing_history.get("path")
+                or not os.path.isdir(str(existing_history.get("path")))
+            ):
+                self._fail_job(
+                    job_id,
+                    "fetch",
+                    "Known-good recording for this upgrade is missing",
+                    info=info,
+                )
+                return
+            if quality_rank(chosen_quality) <= quality_rank(
+                str(existing_history.get("quality", ""))
+            ):
+                db.transition_owned_queue_job(
+                    job_id,
+                    self.owner_id,
+                    expected_statuses="fetching",
+                    status="done",
+                    progress=100,
+                    progress_text=(
+                        f"No upgrade: {chosen_quality} is not higher than "
+                        f"{existing_history.get('quality', '')}"
+                    ),
+                )
+                self._dispatch()
+                return
+            minimum = str(job.get("upgrade_min_quality", "") or "")
+            if minimum and quality_rank(chosen_quality) < quality_rank(minimum):
+                db.transition_owned_queue_job(
+                    job_id,
+                    self.owner_id,
+                    expected_statuses="fetching",
+                    status="done",
+                    progress=100,
+                    progress_text=(
+                        f"No upgrade: {chosen_quality} is below {minimum}"
+                    ),
+                )
+                self._dispatch()
+                return
+            try:
+                upgrade_paths = plan_upgrade_paths(
+                    str(existing_history.get("path")),
+                    job_id,
+                    chosen_quality,
+                )
+                prepare_upgrade_staging(upgrade_paths)
+            except (OSError, UpgradeSafetyError) as error:
+                self._fail_job(
+                    job_id, "download", str(error), info=info,
+                )
+                return
+            output_dir = str(upgrade_paths.staging)
+        else:
+            output_dir = str(job.get("output_dir", "") or self.output_dir)
         try:
             os.makedirs(output_dir, exist_ok=True)
         except OSError as error:
@@ -389,6 +491,9 @@ class HeadlessJobService(QObject):
             download_sections = f"*{clip_start}-{clip_end}"
 
         spec = DownloadJobSpec(
+            source_platform=str(getattr(info, "platform", "") or ""),
+            source_id=str(getattr(info, "source_id", "") or ""),
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
             playlist_url=playlist_url or "",
             segments=tuple(tuple(s) for s in final_segments),
             output_dir=output_dir,
@@ -430,6 +535,8 @@ class HeadlessJobService(QObject):
             ytdlp_template_args=tuple(ytdlp_template_args),
             chunk_length_secs=chunk_secs,
             download_sections=download_sections,
+            download_archive=str(job.get("download_archive", "") or ""),
+            break_on_existing=bool(job.get("break_on_existing", False)),
         )
         worker = DownloadWorker.from_spec(spec)
         worker.log.connect(write_log_line)
@@ -450,7 +557,14 @@ class HeadlessJobService(QObject):
         self._contexts[job_id] = {
             "info": info,
             "output_dir": output_dir,
-            "quality": str(getattr(quality, "name", "") or job.get("quality", "")),
+            "quality": chosen_quality,
+            "is_upgrade": bool(job.get("is_upgrade", False)),
+            "upgrade_existing_path": (
+                str(upgrade_paths.existing) if upgrade_paths else ""
+            ),
+            "upgrade_final_dir": (
+                str(upgrade_paths.final) if upgrade_paths else ""
+            ),
         }
         self._downloads[job_id] = worker
         current = db.transition_owned_queue_job(
@@ -460,8 +574,23 @@ class HeadlessJobService(QObject):
             status="downloading",
             progress=0,
             title=title,
-            platform=str(getattr(info, "platform", "") or ""),
+            platform=resolved_platform,
+            source_id=resolved_source_id,
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
             output_dir=output_dir,
+            upgrade_history_id=(
+                int(existing_history.get("id", 0) or 0)
+                if existing_history else 0
+            ),
+            upgrade_existing_path=(
+                str(upgrade_paths.existing) if upgrade_paths else ""
+            ),
+            upgrade_stage_dir=(
+                str(upgrade_paths.staging) if upgrade_paths else ""
+            ),
+            upgrade_final_dir=(
+                str(upgrade_paths.final) if upgrade_paths else ""
+            ),
         )
         if not current:
             self._contexts.pop(job_id, None)
@@ -544,6 +673,18 @@ class HeadlessJobService(QObject):
             "platform": str(getattr(info, "platform", "") or job.get("platform", "")),
             "channel": str(getattr(info, "channel", "") or ""),
             "title": str(getattr(info, "title", "") or job.get("title", "")),
+            "source_id": str(getattr(info, "source_id", "") or ""),
+            "queue_job_id": job_id,
+            "is_upgrade": bool(ctx.get("is_upgrade", False)),
+            "upgrade_existing_path": str(
+                ctx.get("upgrade_existing_path", "") or ""
+            ),
+            "upgrade_final_dir": str(
+                ctx.get("upgrade_final_dir", "") or ""
+            ),
+            "expected_duration": float(
+                getattr(info, "total_secs", 0) or 0
+            ),
         })
         finalizer.log.connect(write_log_line)
         finalizer.progress.connect(
@@ -594,50 +735,83 @@ class HeadlessJobService(QObject):
         if result.get("cancelled"):
             return
         output_dir = str(result.get("out_dir", "") or self.output_dir)
-        size_label = str(result.get("size_label", "") or "")
-        if not size_label:
-            size_label = fmt_size(self._folder_size(output_dir))
-        history_id = db.save_history_entry({
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "platform": str(result.get("platform", "") or job.get("platform", "")),
-            "title": str(result.get("title", "") or job.get("title", "")),
-            "channel": str(result.get("channel", "") or ""),
-            "quality": str(result.get("quality_name", "") or ""),
-            "size": size_label,
-            "path": output_dir,
-            "url": str(result.get("history_url", "") or job.get("url", "")),
-        })
-        manifest = result.get("archive_manifest")
-        if history_id and isinstance(manifest, dict):
-            db.save_archive_manifest(
-                int(history_id), output_dir, manifest, status="created",
-                details=f"Captured {len(manifest.get('files', []) or [])} file(s)",
-            )
-        warning = str(
-            result.get("finalize_error") or result.get("archive_manifest_error") or ""
+        failure = str(
+            result.get("finalize_error")
+            or result.get("archive_manifest_error")
+            or ""
         )
-        warning_failure_id = 0
-        if warning:
-            warning_failure_id = db.save_failed_job(
+        if result.get("is_upgrade") and not result.get("upgrade_activated"):
+            failure = failure or "Upgrade activation did not complete"
+        if failure:
+            failure_id = db.save_failed_job(
                 url=str(job.get("url", "")),
-                platform=str(result.get("platform", "") or job.get("platform", "")),
+                platform=str(
+                    result.get("platform", "") or job.get("platform", "")
+                ),
                 title=str(result.get("title", "") or job.get("title", "")),
-                stage="finalize", error=warning, output_dir=output_dir,
+                stage="finalize",
+                error=failure,
+                output_dir=output_dir,
                 queue_data=job,
                 context={"job_id": job_id, "service": "headless"},
             )
+            db.transition_owned_queue_job(
+                job_id,
+                self.owner_id,
+                expected_statuses="finalizing",
+                status="failed",
+                progress_text=failure[:240],
+                finalize_error=failure,
+                failure_id=int(failure_id or 0),
+            )
+            write_log_line(f"[SERVICE] Finalization failed for {job_id}: {failure}")
+            return
+        size_label = str(result.get("size_label", "") or "")
+        if not size_label:
+            size_label = fmt_size(self._folder_size(output_dir))
+        try:
+            manifest = result.get("archive_manifest")
+            history_id = db.save_completed_recording({
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "platform": str(
+                    result.get("platform", "") or job.get("platform", "")
+                ),
+                "source_id": str(
+                    result.get("source_id", "") or job.get("source_id", "")
+                ),
+                "title": str(result.get("title", "") or job.get("title", "")),
+                "channel": str(result.get("channel", "") or ""),
+                "quality": str(result.get("quality_name", "") or ""),
+                "size": size_label,
+                "path": output_dir,
+                "url": str(
+                    result.get("history_url", "") or job.get("url", "")
+                ),
+            }, manifest if isinstance(manifest, dict) else None)
+        except Exception as error:
+            self._fail_job(
+                job_id,
+                "finalize",
+                f"Could not persist completed recording: {error}",
+                info=result.get("info"),
+                output_dir=output_dir,
+                dispatch=False,
+            )
+            return
         previous_failure_id = int(job.get("failure_id", 0) or 0)
-        if previous_failure_id and previous_failure_id != warning_failure_id:
+        if previous_failure_id:
             db.mark_failed_job_resolved(previous_failure_id)
-        if not warning:
-            db.mark_failed_jobs_resolved_for_url(str(job.get("url", "")))
+        db.mark_failed_jobs_resolved_for_url(str(job.get("url", "")))
         completed = db.transition_owned_queue_job(
             job_id, self.owner_id, expected_statuses="finalizing",
             status="done", progress=100,
-            progress_text="Complete" if not warning else "Complete with finalization warning",
+            progress_text=(
+                "Verified upgrade version activated"
+                if result.get("is_upgrade") else "Complete"
+            ),
             completed_at=datetime.now(timezone.utc).isoformat(),
             history_id=int(history_id or 0), output_dir=output_dir,
-            finalize_error=warning, failure_id=warning_failure_id,
+            finalize_error="", failure_id=0,
         )
         if completed:
             write_log_line(f"[SERVICE] Completed job {job_id}")

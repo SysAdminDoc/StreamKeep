@@ -193,6 +193,9 @@ class MainWindowJobsMixin:
             ext_dl = resolve_external_downloader_options(state)
             template_name = state.ytdlp_template_name or ""
             spec = DownloadJobSpec(
+                source_platform=state.platform or "",
+                source_id=getattr(state, "source_id", "") or "",
+                webpage_url=getattr(state, "webpage_url", "") or "",
                 playlist_url=refreshed_url or state.playlist_url,
                 segments=tuple(tuple(s) for s in remaining),
                 output_dir=state.output_dir,

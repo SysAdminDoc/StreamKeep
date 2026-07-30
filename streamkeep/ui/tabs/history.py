@@ -445,15 +445,21 @@ class HistoryTabMixin:
 
     # ── History Actions ──────────────────────────────────────────────
 
-    def _add_history(self, platform, title, quality, size, path, url="", channel=""):
+    def _add_history(
+        self, platform, title, quality, size, path, url="", channel="",
+        source_id="", archive_manifest=None,
+    ):
         entry = HistoryEntry(
             date=datetime.now().strftime("%Y-%m-%d %H:%M"),
             platform=platform, title=title[:60],
             channel=self._infer_history_channel(url=url, platform=platform, channel=channel),
             quality=quality, size=size, path=path, url=url,
+            source_id=source_id,
         )
         # Persist to SQLite immediately (F41)
-        entry.db_id = _db.save_history_entry(entry.to_dict())
+        entry.db_id = _db.save_completed_recording(
+            entry.to_dict(), archive_manifest,
+        )
         self._refresh_history_table()
         self._schedule_persist_config()
         return entry

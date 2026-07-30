@@ -1,5 +1,6 @@
 """Podcast RSS — parses RSS/XML feeds for episode listing."""
 
+import hashlib
 import html
 import json
 import re
@@ -110,6 +111,13 @@ class PodcastRSSExtractor(Extractor):
             if not enc_m:
                 continue
             enc_url = enc_m.group(1)
+            guid_m = re.search(r"<guid[^>]*>(.*?)</guid>", item, re.DOTALL)
+            identity_seed = (
+                html.unescape(guid_m.group(1).strip()) if guid_m else enc_url
+            )
+            source_id = "episode:" + hashlib.sha256(
+                identity_seed.encode("utf-8", errors="replace")
+            ).hexdigest()
 
             dur_m = re.search(r'<itunes:duration>([\d:]+)</itunes:duration>', item)
             dur_str = ""
@@ -127,6 +135,7 @@ class PodcastRSSExtractor(Extractor):
                 is_live=False, viewers=0, duration=dur_str,
                 duration_ms=0, platform="Podcast", channel="",
                 feed_url=url,
+                source_id=source_id,
             ))
 
         self._log(log_fn, f"Found {len(vods)} episode(s)")
@@ -139,6 +148,9 @@ class PodcastRSSExtractor(Extractor):
                 url=url,
                 title=url.split("/")[-1],
                 channel=self.extract_channel_id(url) or "",
+                source_id="episode:" + hashlib.sha256(
+                    url.encode("utf-8", errors="replace")
+                ).hexdigest(),
             )
             info.qualities.append(QualityInfo(
                 name="audio", url=url, resolution="audio", format_type="mp4",

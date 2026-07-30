@@ -185,6 +185,7 @@ def import_folders(groups, *, db_module=None):
                     if group.newest_mtime else ""
                 ),
                 "platform": group.platform,
+                "source_id": provenance.get("source_id", ""),
                 "title": group.title,
                 "channel": group.channel,
                 "quality": "",

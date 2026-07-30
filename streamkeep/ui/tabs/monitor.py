@@ -1225,6 +1225,9 @@ class MonitorTabMixin:
             template_name = ""
             self._log(f"[AUTO-RECORD] Ignoring argument template: {error}")
         spec = DownloadJobSpec(
+            source_platform=str(getattr(info, "platform", "") or ""),
+            source_id=str(getattr(info, "source_id", "") or ""),
+            webpage_url=str(getattr(info, "webpage_url", "") or ""),
             playlist_url=q.url,
             segments=((0, "live_recording", 0, 0),),
             output_dir=out_dir,
@@ -1448,41 +1451,46 @@ class MonitorTabMixin:
 
     # ── VOD subscription + quality upgrade ──────────────────────────
 
-    def _check_quality_upgrade(self, channel_id, vod):
-        """Return True if *vod* should trigger a quality upgrade for
-        an existing recording of the same content."""
+    def _check_quality_upgrade(self, channel_id, vod, candidate_quality=""):
+        """Return the exact existing recording eligible for an upgrade."""
         entry = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 entry = e
                 break
         if not entry or not entry.auto_upgrade:
-            return False
-        # Find existing recording in history for this channel
-        row = _db.find_latest_history(channel=channel_id)
+            return None
+        platform = str(getattr(vod, "platform", "") or "")
+        source_id = str(getattr(vod, "source_id", "") or "")
+        if not platform or not source_id:
+            return None
+        row = _db.find_history_by_identity(platform, source_id)
         existing = HistoryEntry.from_dict(row) if row else None
-        if not existing or not existing.quality:
-            return False
-        # Compare quality rank
-        existing_rank = self._quality_rank(existing.quality)
-        # Use the VOD's resolution if available; otherwise skip
-        vod_quality = getattr(vod, "quality", "") or ""
-        if not vod_quality:
-            return False
-        new_rank = self._quality_rank(vod_quality)
-        if new_rank <= existing_rank:
-            return False
+        if (
+            not existing
+            or not existing.quality
+            or not existing.path
+            or not os.path.isdir(existing.path)
+        ):
+            return None
+        # Listing endpoints often omit resolution. In that case this is an
+        # upgrade candidate; the resolved quality is checked before any bytes
+        # are downloaded.
+        vod_quality = str(
+            candidate_quality or getattr(vod, "quality", "") or ""
+        )
+        if vod_quality:
+            existing_rank = self._quality_rank(existing.quality)
+            new_rank = self._quality_rank(vod_quality)
+            if new_rank <= existing_rank:
+                return None
         # Check minimum upgrade threshold
         min_q = entry.min_upgrade_quality or ""
-        if min_q:
+        if min_q and vod_quality:
             min_rank = self._quality_rank(min_q)
             if new_rank < min_rank:
-                return False
-        self._log(
-            f"[UPGRADE] {channel_id}: {existing.quality} → {vod_quality} "
-            f"— queuing quality upgrade"
-        )
-        return True
+                return None
+        return existing
 
     def _apply_sponsorblock_delay(self, item, vod):
         """Defer an auto-discovered YouTube VOD so SponsorBlock segments can
@@ -1532,7 +1540,8 @@ class MonitorTabMixin:
             archive_path = source_archive_path(source_url)
         for v in vods:
             # Quality auto-upgrade check (F25)
-            is_upgrade = self._check_quality_upgrade(channel_id, v)
+            upgrade_from = self._check_quality_upgrade(channel_id, v)
+            is_upgrade = upgrade_from is not None
             # Skip if already in history (prevents re-downloading on seed)
             if not is_upgrade and self._find_duplicate("", v.title, platform=v.platform):
                 continue
@@ -1544,17 +1553,44 @@ class MonitorTabMixin:
                 vod_platform=v.platform,
                 vod_title=v.title,
                 vod_channel=v.channel,
-                download_archive=archive_path,
-                break_on_existing=bool(archive_path),
+                source_id=getattr(v, "source_id", ""),
+                webpage_url=getattr(v, "webpage_url", ""),
+                download_archive="" if is_upgrade else archive_path,
+                break_on_existing=False if is_upgrade else bool(archive_path),
                 ytdlp_template_name=template_name,
+                is_upgrade=is_upgrade,
+                upgrade_history_id=(
+                    upgrade_from.db_id if upgrade_from is not None else 0
+                ),
+                upgrade_existing_path=(
+                    upgrade_from.path if upgrade_from is not None else ""
+                ),
+                upgrade_existing_quality=(
+                    upgrade_from.quality if upgrade_from is not None else ""
+                ),
+                upgrade_min_quality=(
+                    next(
+                        (
+                            entry.min_upgrade_quality
+                            for entry in self.monitor.entries
+                            if entry.channel_id == channel_id
+                        ),
+                        "",
+                    )
+                    if is_upgrade else ""
+                ),
             ):
                 if self._download_queue:
                     self._download_queue[-1]["vod_date"] = v.date
-                    if is_upgrade:
-                        self._download_queue[-1]["is_upgrade"] = True
                     self._apply_sponsorblock_delay(self._download_queue[-1], v)
                 added += 1
                 tag = "[UPGRADE]" if is_upgrade else "[SUBSCRIBE]"
+                if is_upgrade:
+                    self._log(
+                        f"[UPGRADE] {channel_id}: exact {v.platform}/"
+                        f"{getattr(v, 'source_id', '')} candidate from "
+                        f"{upgrade_from.quality}"
+                    )
                 self._log(f"{tag} Queued: {v.title[:60]}")
         if added and hasattr(self, "queue_table"):
             self._refresh_queue_table()
