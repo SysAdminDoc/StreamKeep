@@ -9,36 +9,33 @@ dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
 STREAMKEEP_DARK = {
-    "base": "#111318", "mantle": "#0d0f13", "crust": "#090b0e",
-    "surface0": "#252a33", "surface1": "#303641", "surface2": "#3b4350",
-    "overlay0": "#687180", "overlay1": "#87909d",
-    "text": "#f2f3f5", "subtext0": "#aeb4bd", "subtext1": "#c9cdd3",
-    "lavender": "#b4befe", "blue": "#89b4fa", "sapphire": "#74c7ec",
-    "sky": "#89dceb", "teal": "#94e2d5", "green": "#a6e3a1",
-    "yellow": "#f9e2af", "peach": "#fab387", "maroon": "#eba0ac",
-    "red": "#f38ba8", "mauve": "#cba6f7", "pink": "#f5c2e7",
-    "flamingo": "#f2cdcd", "rosewater": "#f5e0dc",
-    "panel": "#171a20", "panelHi": "#1d2128", "panelSoft": "#14171c",
-    "stroke": "#2b3039", "muted": "#9ca3af", "accent": "#8b9cf7",
-    "accentSoft": "#66c7bd", "gold": "#e8b86b",
+    "base": "#0d1219", "mantle": "#091019", "crust": "#060b11",
+    "surface0": "#1c2938", "surface1": "#26374a", "surface2": "#344960",
+    "overlay0": "#65758a", "overlay1": "#8795a8",
+    "text": "#f3f6fa", "subtext0": "#aeb9c8", "subtext1": "#cbd3df",
+    "lavender": "#9eabff", "blue": "#6aa6ff", "sapphire": "#66b7df",
+    "sky": "#78c7ed", "teal": "#65d6c2", "green": "#68d391",
+    "yellow": "#f2d27a", "peach": "#f4aa73", "maroon": "#e98d9b",
+    "red": "#f06f83", "mauve": "#bd9af7", "pink": "#ec9ed8",
+    "flamingo": "#eeb5b5", "rosewater": "#f1caca",
+    "panel": "#111923", "panelHi": "#172332", "panelSoft": "#0f1721",
+    "stroke": "#283648", "muted": "#98a6b8", "accent": "#5b8ff9",
+    "accentSoft": "#5ed3ad", "gold": "#e5b963",
 }
 
 STREAMKEEP_LIGHT = {
-    "base": "#eff1f5", "mantle": "#e6e9ef", "crust": "#dce0e8",
-    "surface0": "#ccd0da", "surface1": "#bcc0cc", "surface2": "#acb0be",
-    "overlay0": "#9ca0b0", "overlay1": "#8c8fa1",
-    # subtext0/muted darkened from Latte's #6c6f85 (4.06:1 on panel) to clear
-    # WCAG AA 4.5:1 for secondary/hint text while keeping the text hierarchy
-    # (subtext0 < subtext1 < text).
-    "text": "#4c4f69", "subtext0": "#606374", "subtext1": "#5c5f77",
-    "lavender": "#7287fd", "blue": "#1e66f5", "sapphire": "#209fb5",
-    "sky": "#04a5e5", "teal": "#179299", "green": "#40a02b",
-    "yellow": "#df8e1d", "peach": "#fe640b", "maroon": "#e64553",
-    "red": "#d20f39", "mauve": "#8839ef", "pink": "#ea76cb",
-    "flamingo": "#dd7878", "rosewater": "#dc8a78",
-    "panel": "#e6e9ef", "panelHi": "#dce0e8", "panelSoft": "#eff1f5",
-    "stroke": "#bcc0cc", "muted": "#606374", "accent": "#1e66f5",
-    "accentSoft": "#40a02b", "gold": "#df8e1d",
+    "base": "#f4f7fa", "mantle": "#eaf0f5", "crust": "#dce5ed",
+    "surface0": "#e1e8ef", "surface1": "#d2dce6", "surface2": "#bfccd9",
+    "overlay0": "#8290a1", "overlay1": "#6a788a",
+    "text": "#172235", "subtext0": "#4f5e71", "subtext1": "#344358",
+    "lavender": "#5d6fe5", "blue": "#2563d9", "sapphire": "#197b9c",
+    "sky": "#1685b7", "teal": "#147b72", "green": "#2f7d4b",
+    "yellow": "#9a6a08", "peach": "#b65313", "maroon": "#b33f52",
+    "red": "#bd2944", "mauve": "#7440b8", "pink": "#ac3a88",
+    "flamingo": "#aa5555", "rosewater": "#a95a48",
+    "panel": "#ffffff", "panelHi": "#eef3f7", "panelSoft": "#f8fafc",
+    "stroke": "#c8d3df", "muted": "#59687a", "accent": "#2563d9",
+    "accentSoft": "#2f7d5b", "gold": "#9a6a08",
 }
 
 # CAT is the "live" palette — mutated in-place so all ``CAT["x"]`` refs
@@ -175,7 +172,26 @@ QAbstractScrollArea#chrome > QWidget#chrome {{
 QFrame#appHeader {{
     background-color: transparent;
     border: none;
-    border-bottom: 1px solid {p['stroke']};
+}}
+QFrame#navRail {{
+    background-color: {p['mantle']};
+    border: none;
+    border-right: 1px solid {p['stroke']};
+}}
+QFrame#brandMark {{
+    background-color: {p['panelHi']};
+    border: 1px solid {p['stroke']};
+    border-radius: 8px;
+}}
+QFrame#navRule {{
+    background-color: {p['stroke']};
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}}
+QFrame#shellContent {{
+    background-color: {p['base']};
+    border: none;
 }}
 QFrame#pageHeader {{
     background-color: transparent;
@@ -186,14 +202,14 @@ QFrame#appNav {{
     border: none;
 }}
 QFrame#composerCard {{
-    background-color: transparent;
-    border: none;
-    border-radius: 0;
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-radius: 8px;
 }}
 QFrame#sourceField {{
-    background-color: {p['panelSoft']};
+    background-color: {p['base']};
     border: 1px solid {p['stroke']};
-    border-radius: 5px;
+    border-radius: 6px;
 }}
 QFrame#paneToolbar {{
     background-color: transparent;
@@ -216,12 +232,16 @@ QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
     border-radius: 0;
 }}
 QFrame#queuePane, QFrame#activityPane, QFrame#dataPane,
-QFrame#analyticsPanel {{
-    background-color: {p['panelSoft']};
+QFrame#analyticsPanel, QFrame#archiveHealthPane {{
+    background-color: {p['panel']};
     border: 1px solid {p['stroke']};
-    border-radius: 6px;
+    border-radius: 8px;
 }}
-QFrame#activityPane {{ background-color: {p['panel']}; }}
+QFrame#healthRow {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid {p['stroke']};
+}}
 QFrame#settingsNav {{
     background-color: transparent;
     border: none;
@@ -238,7 +258,7 @@ QFrame#panel, QFrame#shellCard, QFrame#shellMetaCard, QFrame#footerBar {{
     border-radius: {radius}px;
 }}
 QFrame#statusBar {{
-    background-color: transparent;
+    background-color: {p['mantle']};
     border: none;
     border-top: 1px solid {p['stroke']};
 }}
@@ -278,8 +298,22 @@ QLabel {{
 }}
 QLabel#appBrand {{
     color: {p['text']};
-    font-size: 21px;
+    font-size: 20px;
     font-weight: 750;
+}}
+QLabel#brandCaption, QLabel#navFootnote {{
+    color: {p['muted']};
+    font-size: 11px;
+    font-weight: 650;
+}}
+QLabel#shellPageTitle {{
+    color: {p['text']};
+    font-size: 27px;
+    font-weight: 750;
+}}
+QLabel#shellPageBody {{
+    color: {p['muted']};
+    font-size: 14px;
 }}
 QLabel#title {{
     color: {p['text']};
@@ -354,6 +388,9 @@ QLabel#statusTitle, QLabel#emptyStateTitle {{
     font-weight: 700;
 }}
 QLabel#emptyStateBody {{ color: {p['muted']}; font-size: 13px; }}
+QLabel#healthState {{ color: {p['green']}; font-size: 14px; font-weight: 700; }}
+QLabel#healthTitle {{ color: {p['text']}; font-size: 14px; font-weight: 650; }}
+QLabel#healthDetail {{ color: {p['muted']}; font-size: 12px; }}
 QLabel#pillBadge, QLabel#playerBadgeMuted {{
     color: {p['subtext1']};
     background-color: transparent;
@@ -394,7 +431,7 @@ QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
     selection-color: {on_accent};
 }}
 QLineEdit#globalSearch {{
-    background-color: {p['panelSoft']};
+    background-color: {p['panel']};
     font-size: 14px;
 }}
 QLineEdit#sourceComposer {{
@@ -456,6 +493,19 @@ QPushButton#headerIcon {{
     font-weight: 500;
 }}
 QPushButton#headerIcon:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#systemStatus {{
+    background-color: {p['panel']};
+    color: {p['subtext1']};
+    border: 1px solid {p['stroke']};
+    border-radius: 6px;
+    padding: 7px 11px;
+    font-size: 13px;
+    font-weight: 650;
+}}
+QPushButton#systemStatus:hover {{
+    background-color: {p['panelHi']};
+    border-color: {p['overlay0']};
+}}
 QPushButton#toolbarAction {{
     background-color: transparent;
     color: {p['subtext1']};
@@ -486,6 +536,10 @@ QPushButton#footerAction {{
 QPushButton#toggleAccent {{ background-color: transparent; color: {p['subtext1']}; }}
 QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {p['accent']}; }}
 QPushButton#danger {{ background-color: {p['red']}; color: {_accent_text(p['red'])}; }}
+QPushButton#danger:disabled {{
+    background-color: {p['panelSoft']};
+    color: {p['overlay0']};
+}}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox QAbstractItemView {{
     background-color: {p['panel']};
@@ -515,7 +569,7 @@ QTableWidget#downloadQueue::item {{
     border-bottom: 1px solid {p['stroke']};
 }}
 QTableWidget#downloadQueue QHeaderView::section {{
-    background-color: {p['panelSoft']};
+    background-color: {p['panel']};
     color: {p['subtext0']};
     font-size: 13px;
     font-weight: 600;

@@ -183,39 +183,46 @@ def update_accessible_status(widget, text, *, tone="info", label="Status"):
 
 
 def TAB_STYLE():
-    """Build the compact, text-led navigation style from the live theme."""
+    """Build the compact archive-workstation rail style from the live theme."""
     density = get_density()
-    vertical = density["padding"] + 2
+    vertical = density["padding"] + 5
     nav_font_size = max(13, density["font_size"] - 2)
     return f"""
 QPushButton#tab {{
     background-color: transparent;
     color: {CAT['subtext1']};
     border: none;
-    border-bottom: 2px solid transparent;
-    padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
+    border-left: 3px solid transparent;
+    padding: {vertical}px 14px;
     font-weight: 600;
     font-size: {nav_font_size}px;
-    border-radius: 0;
+    border-radius: 6px;
+    text-align: left;
 }}
 QPushButton#tab:hover {{
     color: {CAT['text']};
-    background-color: transparent;
-}}
-QPushButton#tab:focus, QPushButton#tabActive:focus {{
     background-color: {CAT['panelHi']};
-    border: none;
-    border-bottom: 2px solid {CAT['accent']};
+}}
+QPushButton#tab:focus {{
+    background-color: {CAT['panelHi']};
+    border: 1px solid {CAT['overlay0']};
+    border-left: 3px solid transparent;
+}}
+QPushButton#tabActive:focus {{
+    background-color: {CAT['panelHi']};
+    border: 1px solid {CAT['overlay0']};
+    border-left: 3px solid {CAT['accent']};
 }}
 QPushButton#tabActive {{
-    background-color: transparent;
-    color: {CAT['accent']};
+    background-color: {CAT['panelHi']};
+    color: {CAT['text']};
     border: none;
-    border-bottom: 2px solid {CAT['accent']};
-    padding: {vertical}px 0 {max(5, vertical - 1)}px 0;
+    border-left: 3px solid {CAT['accent']};
+    padding: {vertical}px 14px;
     font-weight: 700;
     font-size: {nav_font_size}px;
-    border-radius: 0;
+    border-radius: 6px;
+    text-align: left;
 }}
 """
 

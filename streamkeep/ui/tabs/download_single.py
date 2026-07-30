@@ -102,6 +102,8 @@ class DownloadSingleMixin:
 
         self.download_hero_title.setText(title)
         self.download_hero_body.setText(body)
+        if hasattr(self, "download_context_header"):
+            self.download_context_header.setVisible(bool(url or self.stream_info))
 
         platform_value = self.stream_info.platform if self.stream_info else "Auto detect"
         platform_sub = "Detected after fetch" if self.stream_info else "Waiting for a supported URL"

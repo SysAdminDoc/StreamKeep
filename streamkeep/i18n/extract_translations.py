@@ -51,6 +51,25 @@ SPANISH_CORE = {
     ("StreamKeep", "Settings"): "Configuración",
     ("StreamKeep", "Search downloads, URLs, channels, or podcasts…"):
         "Buscar descargas, URL, canales o pódcasts…",
+    ("StreamKeep", "LOCAL ARCHIVE"): "ARCHIVO LOCAL",
+    ("StreamKeep", "LOCAL-FIRST  •  v{version}"): "LOCAL PRIMERO  •  v{version}",
+    ("StreamKeep", "Capture and queue streams, VODs, and media for local archiving."):
+        "Capture y ponga en cola emisiones, VOD y archivos multimedia para archivarlos localmente.",
+    ("StreamKeep", "Watch channels and automate reliable live capture."):
+        "Vigile canales y automatice capturas en directo fiables.",
+    ("StreamKeep", "Understand archive growth and capture patterns."):
+        "Comprenda el crecimiento del archivo y los patrones de captura.",
+    ("StreamKeep", "Inspect disk use, integrity, and recoverable cleanup."):
+        "Revise el uso de disco, la integridad y la limpieza recuperable.",
+    ("StreamKeep", "Tune local workflows, privacy, and integrations."):
+        "Ajuste los flujos locales, la privacidad y las integraciones.",
+    ("StreamKeep", "Checking systems"): "Comprobando sistemas",
+    ("StreamKeep", "Systems ready"): "Sistemas listos",
+    ("StreamKeep", "Needs attention"): "Requiere atención",
+    ("StreamKeep", "Open Settings to inspect local runtime and storage health"):
+        "Abra Configuración para revisar el entorno local y el estado del almacenamiento",
+    ("StreamKeep", "Local-only  •  {active_jobs} active  •  {queued} queued"):
+        "Solo local  •  {active_jobs} activas  •  {queued} en cola",
     ("StreamKeep", "Recent notifications"): "Notificaciones recientes",
     ("StreamKeep", "Alerts 0"): "Alertas 0",
     ("StreamKeep", "Stop"): "Detener",
@@ -68,6 +87,10 @@ SPANISH_CORE = {
     ("StreamKeep", "Fetching"): "Obteniendo",
     ("StreamKeep", "Resolve"): "Resolver",
     ("StreamKeep", "Resolving"): "Resolviendo",
+    ("StreamKeep", "Resolve source"): "Resolver origen",
+    ("StreamKeep", "Capture a source"): "Capturar un origen",
+    ("StreamKeep", "Paste a stream, channel, VOD, podcast, or direct media URL to resolve it."):
+        "Pegue una URL de emisión, canal, VOD, pódcast o archivo multimedia para resolverla.",
     ("StreamKeep", "Import"): "Importar",
     ("StreamKeep", "Import URLs"): "Importar URL",
     ("StreamKeep", "Paste"): "Pegar",
@@ -79,6 +102,43 @@ SPANISH_CORE = {
         "Permitir LAN en el próximo análisis",
     ("StreamKeep", "Add URL to queue"): "Añadir URL a la cola",
     ("StreamKeep", "Download settings"): "Opciones de descarga",
+    ("StreamKeep", "Your queue is clear"): "La cola está vacía",
+    ("StreamKeep", "Resolve a source above or import a list to begin."):
+        "Resuelva un origen arriba o importe una lista para comenzar.",
+    ("StreamKeep", "Paste from clipboard"): "Pegar desde el portapapeles",
+    ("StreamKeep", "Paste a source URL from the clipboard into the capture field"):
+        "Pegue una URL de origen del portapapeles en el campo de captura",
+    ("StreamKeep", "Import a list"): "Importar una lista",
+    ("StreamKeep", "Empty download queue"): "Cola de descargas vacía",
+    ("StreamKeep", "No activity events"): "Sin eventos de actividad",
+    ("StreamKeep", "No activity yet"): "Aún no hay actividad",
+    ("StreamKeep", "Events appear here as capture tasks run."):
+        "Los eventos aparecen aquí mientras se ejecutan las capturas.",
+    ("StreamKeep", "No events yet"): "Aún no hay eventos",
+    ("StreamKeep", "Showing latest {count} event(s)"):
+        "Mostrando los últimos {count} eventos",
+    ("StreamKeep", "Archive health"): "Estado del archivo",
+    ("StreamKeep", "Runtime"): "Entorno",
+    ("StreamKeep", "Downloader"): "Descargador",
+    ("StreamKeep", "Checking free space"): "Comprobando espacio libre",
+    ("StreamKeep", "Checking FFmpeg"): "Comprobando FFmpeg",
+    ("StreamKeep", "Checking yt-dlp"): "Comprobando yt-dlp",
+    ("StreamKeep", "FFmpeg {version}"): "FFmpeg {version}",
+    ("StreamKeep", "FFmpeg ready"): "FFmpeg listo",
+    ("StreamKeep", "FFmpeg needs attention"): "FFmpeg requiere atención",
+    ("StreamKeep", "Runtime ready"): "Entorno listo",
+    ("StreamKeep", "Runtime needs attention"): "El entorno requiere atención",
+    ("StreamKeep", "yt-dlp {version} ready"): "yt-dlp {version} listo",
+    ("StreamKeep", "yt-dlp ready"): "yt-dlp listo",
+    ("StreamKeep", "Downloader ready"): "Descargador listo",
+    ("StreamKeep", "Downloader needs attention"): "El descargador requiere atención",
+    ("StreamKeep", "{component} status is being checked"):
+        "Comprobando el estado de {component}",
+    ("StreamKeep", "View diagnostics"): "Ver diagnósticos",
+    ("StreamKeep", "Open Settings and inspect the local toolchain"):
+        "Abra Configuración y revise las herramientas locales",
+    ("StreamKeep", "Storage monitoring off"): "Monitoreo de almacenamiento desactivado",
+    ("StreamKeep", "{free_gb:.0f} GB free"): "{free_gb:.0f} GB libres",
     ("StreamKeep", "Per-download overrides"):
         "Ajustes específicos de la descarga",
     ("StreamKeep", "Download Selected"): "Descargar selección",
@@ -124,6 +184,13 @@ SPANISH_CORE = {
         "El historial se crea automáticamente después de cada tarea completada.",
     ("StreamKeep", "History fills in automatically"):
         "El historial se completa automáticamente",
+    ("StreamKeep", "Your archive is ready"): "El archivo está listo",
+    ("StreamKeep", "Completed captures will appear here with verification, search, and playback actions."):
+        "Las capturas terminadas aparecerán aquí con verificación, búsqueda y reproducción.",
+    ("StreamKeep", "Clear search"): "Borrar búsqueda",
+    ("StreamKeep", "No matching downloads"): "No hay descargas coincidentes",
+    ("StreamKeep", "Clear the current search or try a broader title, platform, channel, folder, or transcript phrase."):
+        "Borre la búsqueda o pruebe un título, plataforma, canal, carpeta o frase de transcripción más general.",
     ("StreamKeep", "No downloads matched that search. Try a broader title, platform, channel, or folder term."):
         "Ninguna descarga coincide. Pruebe un título, plataforma, canal o carpeta más general.",
     # Settings workflow.
@@ -155,11 +222,18 @@ SPANISH_CORE = {
     ("StreamKeep", "Cozy"): "Cómoda",
     ("StreamKeep", "Spacious"): "Espaciosa",
     ("StreamKeep", "Theme default"): "Predeterminado del tema",
+    ("StreamKeep", "Theme"): "Tema",
     ("StreamKeep", "Default Output"): "Salida predeterminada",
     ("StreamKeep", "Local Toolchain"): "Herramientas locales",
     ("StreamKeep", "Save Settings"): "Guardar configuración",
     ("StreamKeep", "Settings saved and applied to future downloads."):
         "La configuración se guardó y se aplicará a futuras descargas.",
+    # First-run states for monitored channels.
+    ("StreamKeep", "AUTOMATED CAPTURE"): "CAPTURA AUTOMATIZADA",
+    ("StreamKeep", "No channels on watch"): "No hay canales vigilados",
+    ("StreamKeep", "Add a channel above, choose an interval, and optionally arm live auto-record."):
+        "Añada un canal arriba, elija un intervalo y active opcionalmente la grabación automática.",
+    ("StreamKeep", "Add your first channel"): "Añadir el primer canal",
     # Common dialogs and errors.
     ("StreamKeep", "Search"): "Buscar",
     ("StreamKeep", "All"): "Todo",

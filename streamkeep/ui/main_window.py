@@ -19,10 +19,10 @@ from PyQt6.QtWidgets import (
     QFrame, QStackedWidget, QSystemTrayIcon,
     QMenu, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QRectF, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QKeySequence, QPixmap, QPainter,
-    QBrush, QPen, QShortcut,
+    QBrush, QPen, QPolygon, QShortcut,
 )
 
 # Package re-exports under legacy underscore-prefixed names so the existing
@@ -65,27 +65,99 @@ from .main_window_jobs import MainWindowJobsMixin
 NATIVE_PROXY = ""
 
 
-def _chrome_icon(kind):
+def _chrome_icon(kind, *, active=False):
     """Draw small palette-aware shell icons without font-glyph dependencies."""
     pixmap = QPixmap(22, 22)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor(CAT["subtext1"]))
+    color = CAT["accent"] if active else CAT["subtext1"]
+    pen = QPen(QColor(color))
     pen.setWidthF(1.7)
     painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
     if kind == "search":
         painter.drawEllipse(4, 4, 10, 10)
         painter.drawLine(13, 13, 18, 18)
+    elif kind == "download":
+        painter.drawLine(11, 3, 11, 13)
+        painter.drawLine(7, 9, 11, 13)
+        painter.drawLine(15, 9, 11, 13)
+        painter.drawLine(4, 16, 4, 19)
+        painter.drawLine(4, 19, 18, 19)
+        painter.drawLine(18, 19, 18, 16)
+    elif kind == "monitor":
+        painter.drawPolyline(QPolygon([
+            QPoint(2, 12), QPoint(6, 12), QPoint(8, 5),
+            QPoint(12, 18), QPoint(15, 10), QPoint(20, 10),
+        ]))
+    elif kind == "history":
+        painter.drawEllipse(3, 3, 16, 16)
+        painter.drawLine(11, 6, 11, 11)
+        painter.drawLine(11, 11, 7, 13)
+        painter.drawLine(3, 5, 3, 10)
+        painter.drawLine(3, 5, 7, 5)
+    elif kind == "analytics":
+        painter.drawLine(3, 18, 19, 18)
+        painter.drawRect(4, 12, 3, 6)
+        painter.drawRect(10, 8, 3, 10)
+        painter.drawRect(16, 4, 3, 14)
+    elif kind == "storage":
+        painter.drawRoundedRect(QRectF(3, 5, 16, 12), 2, 2)
+        painter.drawLine(4, 13, 18, 13)
+        painter.drawEllipse(QRectF(15, 14, 1.5, 1.5))
     elif kind == "settings":
         for y, x in ((5, 8), (11, 14), (17, 6)):
             painter.drawLine(3, y, 19, y)
             painter.setBrush(QColor(CAT["panel"]))
             painter.drawEllipse(x - 2, y - 2, 4, 4)
             painter.setBrush(Qt.BrushStyle.NoBrush)
+    elif kind == "bell":
+        painter.drawArc(QRectF(5, 4, 12, 13), 0, 180 * 16)
+        painter.drawLine(5, 10, 5, 15)
+        painter.drawLine(17, 10, 17, 15)
+        painter.drawLine(4, 15, 18, 15)
+        painter.drawArc(QRectF(9, 15, 4, 4), 180 * 16, 180 * 16)
     else:
         painter.drawEllipse(3, 3, 16, 16)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "?")
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _brand_pixmap():
+    """Draw the small archive glyph used in the navigation rail."""
+    pixmap = QPixmap(38, 38)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(CAT["accent"]))
+    pen.setWidthF(2.2)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(5, 10, 28, 23), 3, 3)
+    painter.drawLine(4, 13, 34, 13)
+    painter.drawLine(9, 6, 29, 6)
+    painter.drawLine(9, 6, 5, 13)
+    painter.drawLine(29, 6, 33, 13)
+    painter.drawRoundedRect(QRectF(14, 20, 10, 5), 2, 2)
+    painter.end()
+    return pixmap
+
+
+def _status_icon(color_key="green"):
+    """Return a tiny non-font status icon for the operational header."""
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    color = QColor(CAT.get(color_key, CAT["green"]))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawEllipse(2, 2, 12, 12)
+    painter.setPen(QPen(QColor(CAT["crust"]), 1.6))
+    painter.drawLine(5, 8, 7, 10)
+    painter.drawLine(7, 10, 11, 6)
     painter.end()
     return QIcon(pixmap)
 
@@ -571,6 +643,7 @@ class StreamKeep(
             cfg.get("visual_accent", ""),
             app=QApplication.instance(),
         )
+        self._refresh_shell_chrome()
         if cfg.get("output_dir"):
             self.output_input.setText(cfg["output_dir"])
             self.settings_output.setText(cfg["output_dir"])
@@ -1408,7 +1481,9 @@ class StreamKeep(
         self.status_label.setText(translated_message)
         self.status_label.setToolTip(translated_message)
         idle = tone == "idle"
-        self.status_pill.setVisible(not idle)
+        # The workstation footer always exposes a non-color readiness label.
+        # Detailed copy stays quiet while idle and appears for active states.
+        self.status_pill.setVisible(True)
         self.status_label.setVisible(not idle)
         set_accessible(
             self.status_pill,
@@ -1464,7 +1539,128 @@ class StreamKeep(
         self.shell_snapshot_value.setText(headline)
         self.shell_snapshot_detail.setText(detail)
         self.shell_snapshot_meta.setText(
-            f"{active_jobs} active  •  {queued} queued  •  {archived} archived"
+            tr_format(
+                "Local-only  •  {active_jobs} active  •  {queued} queued",
+                active_jobs=active_jobs,
+                queued=queued,
+            )
+        )
+
+    def _prepare_page_for_shell(self, page):
+        """Remove duplicate page titles now owned by the persistent shell."""
+        hero = page.findChild(QFrame, "heroCard")
+        if hero is None:
+            return page
+        for label in hero.findChildren(QLabel):
+            if label.objectName() in {"eyebrow", "heroTitle", "heroBody"}:
+                label.setVisible(False)
+        return page
+
+    def _refresh_shell_chrome(self):
+        """Repaint palette-aware shell art after theme/accent changes."""
+        current = self._stack.currentIndex() if hasattr(self, "_stack") else 0
+        icon_names = (
+            "download", "monitor", "history", "analytics", "storage", "settings",
+        )
+        for index, button in enumerate(getattr(self, "_tab_btns", ())):
+            button.setIcon(_chrome_icon(
+                icon_names[index], active=index == current
+            ))
+        if hasattr(self, "brand_icon"):
+            self.brand_icon.setPixmap(_brand_pixmap())
+        if hasattr(self, "_global_search_action"):
+            self._global_search_action.setIcon(_chrome_icon("search"))
+        if hasattr(self, "notif_button"):
+            self.notif_button.setIcon(_chrome_icon("bell"))
+        if hasattr(self, "header_settings_btn"):
+            self.header_settings_btn.setIcon(_chrome_icon("settings"))
+        try:
+            from .tabs.download import _download_icon
+            if hasattr(self, "download_source_icon"):
+                self.download_source_icon.setPixmap(
+                    _download_icon("link").pixmap(18, 18)
+                )
+            for attr_name, kind in (
+                ("batch_import_btn", "import"),
+                ("queue_start_btn", "play"),
+                ("queue_pause_btn", "pause"),
+                ("queue_remove_btn", "remove"),
+                ("queue_retry_btn", "retry"),
+                ("queue_pause_all_btn", "pause"),
+                ("queue_empty_paste_btn", "import"),
+            ):
+                button = getattr(self, attr_name, None)
+                if button is not None:
+                    button.setIcon(_download_icon(kind))
+        except Exception:
+            pass
+        self._refresh_runtime_health()
+
+    def _refresh_runtime_health(self):
+        """Synchronize the header and Download health rail with live probes."""
+        registry = getattr(self, "_runtime_registry_snapshot", {}) or {}
+        yt_status = getattr(self, "_ytdlp_status_snapshot", {}) or {}
+        ffmpeg = registry.get("ffmpeg", {})
+        ffmpeg_ready = bool(
+            ffmpeg
+            and ffmpeg.get("available", True)
+            and ffmpeg.get("supported", ffmpeg.get("state") == "ready")
+        )
+        yt_ready = yt_status.get("state") == "ready"
+
+        if hasattr(self, "archive_runtime_detail"):
+            version = str(ffmpeg.get("version") or "").strip()
+            self.archive_runtime_detail.setText(
+                tr_format("FFmpeg {version}", version=version)
+                if ffmpeg_ready and version
+                else tr("FFmpeg ready" if ffmpeg_ready else "FFmpeg needs attention")
+            )
+            self.archive_runtime_state.setText("●" if ffmpeg_ready else "!")
+            self.archive_runtime_state.setStyleSheet(
+                f"color: {CAT['green' if ffmpeg_ready else 'gold']};"
+            )
+            set_accessible(
+                self.archive_runtime_state,
+                tr("Runtime ready" if ffmpeg_ready else "Runtime needs attention"),
+            )
+
+        if hasattr(self, "archive_downloader_detail"):
+            version = str(yt_status.get("yt_dlp_version") or "").strip()
+            fallback = str(yt_status.get("summary") or tr("Checking yt-dlp"))
+            self.archive_downloader_detail.setText(
+                tr_format("yt-dlp {version} ready", version=version)
+                if yt_ready and version
+                else (tr("yt-dlp ready") if yt_ready else fallback)
+            )
+            self.archive_downloader_state.setText("●" if yt_ready else "!")
+            self.archive_downloader_state.setStyleSheet(
+                f"color: {CAT['green' if yt_ready else 'gold']};"
+            )
+            set_accessible(
+                self.archive_downloader_state,
+                tr("Downloader ready" if yt_ready else "Downloader needs attention"),
+            )
+
+        if not hasattr(self, "system_status_btn"):
+            return
+        # During the first few milliseconds of construction the probes have not
+        # populated yet; communicate that explicitly instead of claiming health.
+        if not registry or not yt_status:
+            label, tone, icon_key = "Checking systems", "checking", "accent"
+        elif ffmpeg_ready and yt_ready:
+            label, tone, icon_key = "Systems ready", "ready", "green"
+        else:
+            label, tone, icon_key = "Needs attention", "warning", "gold"
+        label = tr(label)
+        self.system_status_btn.setText(label)
+        self.system_status_btn.setProperty("tone", tone)
+        self.system_status_btn.setIcon(_status_icon(icon_key))
+        self.system_status_btn.style().unpolish(self.system_status_btn)
+        self.system_status_btn.style().polish(self.system_status_btn)
+        set_accessible(
+            self.system_status_btn,
+            label,
+            "Open Settings to inspect local runtime and storage health",
         )
 
 
@@ -1476,37 +1672,62 @@ class StreamKeep(
         central = QWidget()
         central.setObjectName("chrome")
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(16, 8, 16, 6)
-        root.setSpacing(8)
+        outer = QHBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        header_card = QFrame()
-        header_card.setObjectName("appHeader")
-        header_card.setMinimumHeight(78)
-        header_lay = QVBoxLayout(header_card)
-        header_lay.setContentsMargins(0, 0, 0, 0)
-        header_lay.setSpacing(0)
+        # Persistent archive-workstation rail. The existing button list,
+        # indexes, shortcuts, and checked-state contract remain unchanged.
+        self.nav_rail = QFrame()
+        self.nav_rail.setObjectName("navRail")
+        self.nav_rail.setFixedWidth(220)
+        nav_lay = QVBoxLayout(self.nav_rail)
+        nav_lay.setContentsMargins(12, 20, 12, 14)
+        nav_lay.setSpacing(12)
 
-        header_top = QHBoxLayout()
-        header_top.setContentsMargins(16, 6, 16, 12)
-        header_top.setSpacing(24)
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(4, 0, 4, 12)
+        brand_row.setSpacing(10)
+        brand_mark = QFrame()
+        brand_mark.setObjectName("brandMark")
+        brand_mark.setFixedSize(46, 46)
+        brand_mark_lay = QVBoxLayout(brand_mark)
+        brand_mark_lay.setContentsMargins(4, 4, 4, 4)
+        self.brand_icon = QLabel()
+        self.brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.brand_icon.setPixmap(_brand_pixmap())
+        brand_mark_lay.addWidget(self.brand_icon)
+        brand_row.addWidget(brand_mark)
+        brand_copy = QVBoxLayout()
+        brand_copy.setSpacing(1)
         title = QLabel("StreamKeep")
         title.setObjectName("appBrand")
-        title.setMinimumWidth(148)
-        header_top.addWidget(title)
+        brand_copy.addWidget(title)
+        caption = QLabel("LOCAL ARCHIVE")
+        caption.setObjectName("brandCaption")
+        brand_copy.addWidget(caption)
+        brand_row.addLayout(brand_copy, 1)
+        nav_lay.addLayout(brand_row)
 
         tab_shell = QFrame()
         tab_shell.setObjectName("appNav")
-        tab_lay = QHBoxLayout(tab_shell)
+        tab_lay = QVBoxLayout(tab_shell)
         tab_lay.setContentsMargins(0, 0, 0, 0)
-        tab_lay.setSpacing(26)
+        tab_lay.setSpacing(4)
 
         self._tab_btns = []
-        self._tab_names = ["Download", "Monitor", "History", "Analytics", "Storage", "Settings"]
+        self._tab_names = [
+            "Download", "Monitor", "History", "Analytics", "Storage", "Settings",
+        ]
+        icon_names = (
+            "download", "monitor", "history", "analytics", "storage", "settings",
+        )
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
             btn.setCheckable(True)
             btn.setChecked(i == 0)
+            btn.setMinimumHeight(44)
+            btn.setIcon(_chrome_icon(icon_names[i], active=i == 0))
             set_accessible(
                 btn,
                 f"{name} tab",
@@ -1517,14 +1738,52 @@ class StreamKeep(
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
-        header_top.addWidget(tab_shell)
-        header_top.addStretch(1)
+        nav_lay.addWidget(tab_shell)
+        nav_lay.addStretch(1)
+        nav_rule = QFrame()
+        nav_rule.setFrameShape(QFrame.Shape.HLine)
+        nav_rule.setObjectName("navRule")
+        nav_lay.addWidget(nav_rule)
+        nav_footnote = QLabel(
+            tr_format("LOCAL-FIRST  •  v{version}", version=VERSION)
+        )
+        nav_footnote.setObjectName("navFootnote")
+        nav_footnote.setWordWrap(True)
+        nav_lay.addWidget(nav_footnote)
+        outer.addWidget(self.nav_rail)
+
+        content = QFrame()
+        content.setObjectName("shellContent")
+        root = QVBoxLayout(content)
+        root.setContentsMargins(20, 16, 20, 8)
+        root.setSpacing(10)
+        outer.addWidget(content, 1)
+
+        header_card = QFrame()
+        header_card.setObjectName("appHeader")
+        header_card.setMinimumHeight(88)
+        header_lay = QHBoxLayout(header_card)
+        header_lay.setContentsMargins(2, 0, 2, 10)
+        header_lay.setSpacing(10)
+
+        page_copy = QVBoxLayout()
+        page_copy.setSpacing(3)
+        self.shell_page_title = QLabel("Download")
+        self.shell_page_title.setObjectName("shellPageTitle")
+        self.shell_page_body = QLabel(
+            "Capture and queue streams, VODs, and media for local archiving."
+        )
+        self.shell_page_body.setObjectName("shellPageBody")
+        self.shell_page_body.setWordWrap(True)
+        page_copy.addWidget(self.shell_page_title)
+        page_copy.addWidget(self.shell_page_body)
+        header_lay.addLayout(page_copy, 1)
 
         self._global_search = QLineEdit()
         self._global_search.setPlaceholderText("Search downloads…")
         self._global_search.setClearButtonEnabled(True)
         self._global_search.setObjectName("globalSearch")
-        self._global_search.addAction(
+        self._global_search_action = self._global_search.addAction(
             _chrome_icon("search"), QLineEdit.ActionPosition.TrailingPosition
         )
         set_accessible(
@@ -1532,7 +1791,7 @@ class StreamKeep(
             "Search StreamKeep",
             "Search downloads, URLs, monitored channels, and podcasts",
         )
-        self._global_search.setFixedWidth(316)
+        self._global_search.setFixedWidth(286)
         self._global_search.setMinimumHeight(42)
         self._global_search_timer = QTimer(self)
         self._global_search_timer.setSingleShot(True)
@@ -1542,16 +1801,16 @@ class StreamKeep(
             lambda: self._global_search_timer.start()
         )
         self._global_search.returnPressed.connect(self._on_global_search)
-        header_top.addWidget(self._global_search)
+        header_lay.addWidget(self._global_search)
 
         self.notif_button = QPushButton("")
         self.notif_button.setObjectName("headerIcon")
-        self.notif_button.setIcon(_chrome_icon("help"))
+        self.notif_button.setIcon(_chrome_icon("bell"))
         self.notif_button.setFixedSize(42, 42)
         self.notif_button.setAccessibleName("Notifications")
         self.notif_button.setToolTip("Recent notifications")
         self.notif_button.clicked.connect(self._on_show_notifications)
-        header_top.addWidget(self.notif_button)
+        header_lay.addWidget(self.notif_button)
 
         self.header_settings_btn = QPushButton("")
         self.header_settings_btn.setObjectName("headerIcon")
@@ -1562,23 +1821,37 @@ class StreamKeep(
         self.header_settings_btn.clicked.connect(
             lambda: self._switch_tab(self._tab_names.index("Settings"))
         )
-        header_top.addWidget(self.header_settings_btn)
+        header_lay.addWidget(self.header_settings_btn)
 
-        header_lay.addLayout(header_top)
+        self.system_status_btn = QPushButton("Checking systems")
+        self.system_status_btn.setObjectName("systemStatus")
+        self.system_status_btn.setIcon(_status_icon("accent"))
+        self.system_status_btn.setMinimumHeight(42)
+        self.system_status_btn.setMinimumWidth(148)
+        self.system_status_btn.setToolTip(
+            "Open Settings to inspect local runtime and storage health"
+        )
+        self.system_status_btn.clicked.connect(
+            lambda: self._switch_tab(self._tab_names.index("Settings"))
+        )
+        header_lay.addWidget(self.system_status_btn)
+        root.addWidget(header_card)
 
-        # These labels retain the existing overview state contract without
-        # turning operational counts into a dashboard card.
+        # These hidden labels retain the existing overview-state contract.
         self.shell_snapshot_value = QLabel("Ready to capture", header_card)
         self.shell_snapshot_value.setVisible(False)
         self.shell_snapshot_detail = QLabel(f"Desktop build v{VERSION}", header_card)
         self.shell_snapshot_detail.setVisible(False)
-        self.shell_snapshot_meta = QLabel("0 active  •  0 queued")
+        self.shell_snapshot_meta = QLabel(
+            tr_format(
+                "Local-only  •  {active_jobs} active  •  {queued} queued",
+                active_jobs=0,
+                queued=0,
+            )
+        )
         self.shell_snapshot_meta.setObjectName("footerMeta")
-        self.shell_snapshot_meta.setVisible(False)
 
-        root.addWidget(header_card)
-
-        # Global search results dropdown (hidden until needed)
+        # Global search results dropdown (hidden until needed).
         from PyQt6.QtWidgets import QListWidget
         self._global_results = QListWidget(self)
         self._global_results.setObjectName("globalResults")
@@ -1588,26 +1861,31 @@ class StreamKeep(
         root.addWidget(self._global_results)
 
         self._stack = QStackedWidget()
-        self._download_scroll = self._wrap_scroll_page(build_download_tab(self))
-        self._stack.addWidget(self._download_scroll)
-        self._stack.addWidget(self._wrap_scroll_page(build_monitor_tab(self)))
-        self._stack.addWidget(self._wrap_scroll_page(build_history_tab(self)))
+        download_page = build_download_tab(self)
+        monitor_page = self._prepare_page_for_shell(build_monitor_tab(self))
+        history_page = self._prepare_page_for_shell(build_history_tab(self))
         from .tabs.analytics import build_analytics_tab
-        self._stack.addWidget(self._wrap_scroll_page(build_analytics_tab(self)))
-        self._stack.addWidget(self._wrap_scroll_page(build_storage_tab(self)))
-        self._stack.addWidget(self._wrap_scroll_page(build_settings_tab(self)))
+        analytics_page = self._prepare_page_for_shell(build_analytics_tab(self))
+        storage_page = self._prepare_page_for_shell(build_storage_tab(self))
+        settings_page = self._prepare_page_for_shell(build_settings_tab(self))
+        self._download_scroll = self._wrap_scroll_page(download_page)
+        self._stack.addWidget(self._download_scroll)
+        for page in (
+            monitor_page, history_page, analytics_page, storage_page, settings_page,
+        ):
+            self._stack.addWidget(self._wrap_scroll_page(page))
         root.addWidget(self._stack, 1)
 
         footer = QFrame()
         footer.setObjectName("statusBar")
-        footer.setMinimumHeight(17)
+        footer.setMinimumHeight(34)
         footer_lay = QHBoxLayout(footer)
-        footer_lay.setContentsMargins(0, 5, 0, 0)
+        footer_lay.setContentsMargins(2, 7, 2, 0)
         footer_lay.setSpacing(10)
 
-        self.status_pill = QLabel("Standby")
-        set_accessible(self.status_pill, "Application state: Standby")
-        footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignTop)
+        self.status_pill = QLabel("Ready")
+        set_accessible(self.status_pill, "Application state: Ready")
+        footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
@@ -1652,6 +1930,7 @@ class StreamKeep(
 
         footer_lay.addWidget(self.shell_snapshot_meta)
         root.addWidget(footer)
+        self._refresh_shell_chrome()
 
         configure_accessibility(
             self,
@@ -1672,13 +1951,41 @@ class StreamKeep(
         self._set_status("Paste a URL to begin.", "idle")
         QTimer.singleShot(0, lambda: self._download_scroll.verticalScrollBar().setValue(0))
 
+    def _update_responsive_chrome(self, width):
+        if hasattr(self, "_global_search"):
+            self._global_search.setVisible(width >= 1180)
+        if hasattr(self, "shell_page_body"):
+            self.shell_page_body.setVisible(width >= 1080)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_responsive_chrome(self.width())
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "_global_search"):
-            self._global_search.setVisible(event.size().width() >= 1240)
+        self._update_responsive_chrome(event.size().width())
 
     def _switch_tab(self, idx, *, focus_page=False):
         self._stack.setCurrentIndex(idx)
+        page_descriptions = (
+            "Capture and queue streams, VODs, and media for local archiving.",
+            "Watch channels and automate reliable live capture.",
+            "Search, verify, and reopen completed captures.",
+            "Understand archive growth and capture patterns.",
+            "Inspect disk use, integrity, and recoverable cleanup.",
+            "Tune local workflows, privacy, and integrations.",
+        )
+        if hasattr(self, "shell_page_title") and 0 <= idx < len(self._tab_names):
+            title_source = self._tab_names[idx]
+            body_source = page_descriptions[idx]
+            title_value = tr(title_source)
+            body_value = tr(body_source)
+            self.shell_page_title._streamkeep_i18n_source = {"text": title_source}
+            self.shell_page_title._streamkeep_i18n_last = {"text": title_value}
+            self.shell_page_body._streamkeep_i18n_source = {"text": body_source}
+            self.shell_page_body._streamkeep_i18n_last = {"text": body_value}
+            self.shell_page_title.setText(title_value)
+            self.shell_page_body.setText(body_value)
         for i, btn in enumerate(self._tab_btns):
             btn.setObjectName("tabActive" if i == idx else "tab")
             btn.setChecked(i == idx)
@@ -1687,6 +1994,7 @@ class StreamKeep(
                 f"keyboard shortcut Ctrl+{i + 1}"
             )
             btn.setStyleSheet(TAB_STYLE())
+        self._refresh_shell_chrome()
         if focus_page:
             targets = (
                 "url_input",
@@ -1781,10 +2089,12 @@ class StreamKeep(
         if not hasattr(self, "log_text"):
             return
         self.log_text.clear()
-        self.log_text.setPlainText("No activity yet.")
+        self.log_text.setVisible(False)
+        if hasattr(self, "activity_empty_state"):
+            self.activity_empty_state.setVisible(True)
         self._activity_event_count = 0
         if hasattr(self, "activity_count_label"):
-            self.activity_count_label.setText("No events yet")
+            self.activity_count_label.setText(tr("No events yet"))
 
     def _log(self, msg):
         if QThread.currentThread() is not self.thread():
@@ -1793,6 +2103,10 @@ class StreamKeep(
         lines = [line.strip() for line in str(msg or "").splitlines() if line.strip()]
         if lines and getattr(self, "_activity_event_count", 0) == 0:
             self.log_text.clear()
+        if lines:
+            self.log_text.setVisible(True)
+            if hasattr(self, "activity_empty_state"):
+                self.activity_empty_state.setVisible(False)
         for line in lines:
             display_message = self._format_activity_message(line)
             if not display_message:
@@ -1810,8 +2124,8 @@ class StreamKeep(
         if hasattr(self, "activity_count_label"):
             count = min(getattr(self, "_activity_event_count", 0), self._LOG_SOFT_MAX_BLOCKS)
             self.activity_count_label.setText(
-                f"Showing latest {count} event{'s' if count != 1 else ''}"
-                if count else "No events yet"
+                tr_format("Showing latest {count} event(s)", count=count)
+                if count else tr("No events yet")
             )
         doc = self.log_text.document()
         if doc.blockCount() > self._LOG_SOFT_MAX_BLOCKS:
@@ -1959,6 +2273,12 @@ class StreamKeep(
                 self.disk_status.setVisible(False)
             except Exception:
                 pass
+            if hasattr(self, "archive_storage_detail"):
+                self.archive_storage_detail.setText(tr("Storage monitoring off"))
+                self.archive_storage_state.setText("—")
+                self.archive_storage_state.setStyleSheet(
+                    f"color: {CAT['muted']};"
+                )
             return
         if getattr(self, "_disk_monitor", None) is None:
             self._init_disk_monitor()
@@ -1989,6 +2309,23 @@ class StreamKeep(
                 f"color: {self._disk_monitor.get_color()};"
             )
             self.disk_status.setVisible(True)
+            if hasattr(self, "archive_storage_detail"):
+                self.archive_storage_detail.setText(
+                    tr_format("{free_gb:.0f} GB free", free_gb=free_gb)
+                )
+                healthy = free_bytes >= self._disk_critical_bytes
+                self.archive_storage_state.setText("●" if healthy else "!")
+                self.archive_storage_state.setStyleSheet(
+                    f"color: {CAT['green' if healthy else 'red']};"
+                )
+                set_accessible(
+                    self.archive_storage_state,
+                    (
+                        f"Storage healthy, {free_gb:.0f} gigabytes free"
+                        if healthy
+                        else f"Storage critical, {free_gb:.0f} gigabytes free"
+                    ),
+                )
         except Exception:
             pass
         # Recovery: release an auto-pause once space climbs back above critical.

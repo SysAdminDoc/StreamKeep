@@ -9,7 +9,7 @@ converter buttons, import/export/save row.
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHeaderView, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHeaderView, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -389,8 +389,13 @@ def build_settings_tab(win):
     theme_copy.addWidget(theme_hint)
     theme_row.addLayout(theme_copy, 1)
     theme_lay.addLayout(theme_row)
-    controls_row = QHBoxLayout()
-    controls_row.setSpacing(10)
+    controls_grid = QGridLayout()
+    controls_grid.setContentsMargins(0, 0, 0, 0)
+    controls_grid.setHorizontalSpacing(10)
+    controls_grid.setVerticalSpacing(4)
+    theme_select_label = QLabel("Theme")
+    theme_select_label.setObjectName("fieldLabel")
+    controls_grid.addWidget(theme_select_label, 0, 0)
     win.theme_combo = QComboBox()
     win.theme_combo.setProperty("i18nTranslateItems", True)
     win.theme_combo.addItem("Dark", "dark")
@@ -400,11 +405,11 @@ def build_settings_tab(win):
     idx = max(0, win.theme_combo.findData(current_theme))
     win.theme_combo.setCurrentIndex(idx)
     win.theme_combo.currentIndexChanged.connect(win._on_theme_changed)
-    win.theme_combo.setMinimumWidth(190)
-    controls_row.addWidget(win.theme_combo)
+    win.theme_combo.setMinimumWidth(160)
+    controls_grid.addWidget(win.theme_combo, 1, 0)
     density_label = QLabel("Density")
     density_label.setObjectName("fieldLabel")
-    controls_row.addWidget(density_label)
+    controls_grid.addWidget(density_label, 0, 1)
     win.density_combo = QComboBox()
     win.density_combo.setProperty("i18nTranslateItems", True)
     for label, value in (
@@ -414,10 +419,10 @@ def build_settings_tab(win):
     density_idx = max(0, win.density_combo.findData(current_density))
     win.density_combo.setCurrentIndex(density_idx)
     win.density_combo.currentIndexChanged.connect(win._on_visual_settings_changed)
-    controls_row.addWidget(win.density_combo)
+    controls_grid.addWidget(win.density_combo, 1, 1)
     accent_label = QLabel("Accent")
     accent_label.setObjectName("fieldLabel")
-    controls_row.addWidget(accent_label)
+    controls_grid.addWidget(accent_label, 0, 2)
     win.accent_combo = QComboBox()
     win.accent_combo.setProperty("i18nTranslateItems", True)
     win.accent_combo.addItem("Theme default", "")
@@ -426,10 +431,10 @@ def build_settings_tab(win):
     accent_idx = max(0, win.accent_combo.findData(current_accent.lower()))
     win.accent_combo.setCurrentIndex(accent_idx)
     win.accent_combo.currentIndexChanged.connect(win._on_visual_settings_changed)
-    controls_row.addWidget(win.accent_combo)
+    controls_grid.addWidget(win.accent_combo, 1, 2)
     language_label = QLabel("Language")
     language_label.setObjectName("fieldLabel")
-    controls_row.addWidget(language_label)
+    controls_grid.addWidget(language_label, 0, 3)
     win.language_combo = QComboBox()
     win.language_combo.setProperty("i18nTranslateItems", True)
     language_labels = {
@@ -442,10 +447,11 @@ def build_settings_tab(win):
     lang_idx = max(0, win.language_combo.findData(win._config.get("language", "en")))
     win.language_combo.setCurrentIndex(lang_idx)
     win.language_combo.currentIndexChanged.connect(win._on_language_changed)
-    win.language_combo.setMinimumWidth(150)
-    controls_row.addWidget(win.language_combo)
-    controls_row.addStretch(1)
-    theme_lay.addLayout(controls_row)
+    win.language_combo.setMinimumWidth(140)
+    controls_grid.addWidget(win.language_combo, 1, 3)
+    for column in range(4):
+        controls_grid.setColumnStretch(column, 1)
+    theme_lay.addLayout(controls_grid)
     card_lay.addWidget(theme_bar)
 
     # Keep the output path and runtime health readable at the supported
@@ -473,10 +479,12 @@ def build_settings_tab(win):
         "StreamKeep relies on these binaries for robust downloads.",
     )
     registry = get_runtime_capabilities(refresh=True)
+    win._runtime_registry_snapshot = registry
     ffmpeg = registry["ffmpeg"]
     curl = registry["curl"]
     pillow = registry["pillow"]
     yt_status = ytdlp_runtime_status()
+    win._ytdlp_status_snapshot = yt_status
     ff_card, _, _ = make_metric_card(
         "FFmpeg",
         ffmpeg["state"].title(),
@@ -525,6 +533,10 @@ def build_settings_tab(win):
     row_cookies = QHBoxLayout()
     row_cookies.setSpacing(8)
     win.cookies_combo = QComboBox()
+    win.cookies_combo.setSizeAdjustPolicy(
+        QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    win.cookies_combo.setMinimumContentsLength(18)
     win.cookies_combo.addItem("None")
     row_cookies.addWidget(win.cookies_combo, 1)
     scan_btn = QPushButton("Scan for browsers")

@@ -99,19 +99,17 @@ def build_monitor_tab(win):
     lay.addWidget(win.active_recordings_panel)
 
     manage_card = QFrame()
-    manage_card.setObjectName("card")
+    manage_card.setObjectName("composerCard")
     manage_lay = QVBoxLayout(manage_card)
-    manage_lay.setContentsMargins(2, 4, 2, 6)
-    manage_lay.setSpacing(6)
+    manage_lay.setContentsMargins(18, 16, 18, 16)
+    manage_lay.setSpacing(10)
 
     manage_header = QVBoxLayout()
     manage_header.setSpacing(4)
     sec = QLabel("Add channel")
     sec.setObjectName("sectionTitle")
-    sec.setVisible(False)
     sec_body = QLabel("Supported examples: kick.com/user or twitch.tv/user")
     sec_body.setObjectName("sectionBody")
-    sec_body.setVisible(False)
     manage_header.addWidget(sec)
     manage_header.addWidget(sec_body)
     manage_lay.addLayout(manage_header)
@@ -123,9 +121,10 @@ def build_monitor_tab(win):
         "Channel URL", "Paste the channel link you want StreamKeep to poll."
     )
     win.monitor_url_input = QLineEdit()
-    win.monitor_url_input.setObjectName("sourceComposer")
+    win.monitor_url_input.setObjectName("monitorSourceInput")
     win.monitor_url_input.setPlaceholderText("Channel URL (kick.com/user, twitch.tv/user)…")
     win.monitor_url_input.setClearButtonEnabled(True)
+    win.monitor_url_input.setMinimumHeight(44)
     url_block_lay.addWidget(win.monitor_url_input)
     controls_row.addWidget(url_block, 1)
 
@@ -241,7 +240,41 @@ def build_monitor_tab(win):
         accessible_name="Monitored channels",
         accessible_description="Channels and their current live and recording state",
     )
-    table_lay.addWidget(win.monitor_table)
+    table_lay.addWidget(win.monitor_table, 1)
+
+    win.monitor_empty_state = QFrame()
+    win.monitor_empty_state.setObjectName("emptyStateCard")
+    monitor_empty_lay = QVBoxLayout(win.monitor_empty_state)
+    monitor_empty_lay.setContentsMargins(24, 30, 24, 30)
+    monitor_empty_lay.setSpacing(7)
+    monitor_empty_lay.addStretch(1)
+    monitor_empty_kicker = QLabel("AUTOMATED CAPTURE")
+    monitor_empty_kicker.setObjectName("eyebrow")
+    monitor_empty_kicker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    monitor_empty_lay.addWidget(monitor_empty_kicker)
+    monitor_empty_title = QLabel("No channels on watch")
+    monitor_empty_title.setObjectName("emptyStateTitle")
+    monitor_empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    monitor_empty_lay.addWidget(monitor_empty_title)
+    monitor_empty_body = QLabel(
+        "Add a channel above, choose an interval, and optionally arm live auto-record."
+    )
+    monitor_empty_body.setObjectName("emptyStateBody")
+    monitor_empty_body.setWordWrap(True)
+    monitor_empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    monitor_empty_lay.addWidget(monitor_empty_body)
+    monitor_empty_action = QPushButton("Add your first channel")
+    monitor_empty_action.setObjectName("primary")
+    monitor_empty_action.clicked.connect(
+        lambda: win.monitor_url_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+    )
+    monitor_empty_actions = QHBoxLayout()
+    monitor_empty_actions.addStretch(1)
+    monitor_empty_actions.addWidget(monitor_empty_action)
+    monitor_empty_actions.addStretch(1)
+    monitor_empty_lay.addLayout(monitor_empty_actions)
+    monitor_empty_lay.addStretch(1)
+    table_lay.addWidget(win.monitor_empty_state, 1)
 
     lay.addWidget(table_card, 1)
 
@@ -327,6 +360,9 @@ class MonitorTabMixin:
             self.monitor_summary_label.setText(" • ".join(summary_parts))
         else:
             self.monitor_summary_label.setText("Add a channel to start monitoring.")
+        if hasattr(self, "monitor_empty_state"):
+            self.monitor_table.setVisible(total > 0)
+            self.monitor_empty_state.setVisible(total == 0)
 
         if hasattr(self, "monitor_table_hint"):
             calendar_on = bool(

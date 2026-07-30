@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from ...utils import default_output_dir as _default_output_dir
 from ...theme import CAT
+from ...i18n import tr, tr_format
 from ..widgets import make_field_block, path_label, style_table
 from .download_queue import DownloadQueueMixin
 from .download_vod import DownloadVodMixin
@@ -49,12 +50,63 @@ class _ResponsiveQueueTable(QTableWidget):
         # supported minimum size, keep identity, state, and progress visible
         # and fold secondary diagnostics away instead of scrolling sideways.
         for column, hidden in (
-            (1, width < 860),   # Source
-            (4, width < 980),   # Speed
-            (5, width < 900),   # ETA
-            (6, width < 760),   # Size
+            (1, width < 800),   # Source
+            (4, width < 860),   # Speed
+            (5, width < 820),   # ETA
+            (6, width < 720),   # Size
         ):
             self.setColumnHidden(column, hidden)
+
+
+class _ArchiveEmptyGlyph(QWidget):
+    """Theme-aware archive tray used by the queue's actionable empty state."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(78)
+        self.setAccessibleName("Empty download queue")
+
+    def paintEvent(self, event):
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(CAT["overlay1"]))
+        pen.setWidthF(2.0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        center = self.width() / 2
+        tray = QRectF(center - 30, 28, 60, 38)
+        painter.drawRoundedRect(tray, 7, 7)
+        painter.drawLine(int(center - 30), 41, int(center - 14), 41)
+        painter.drawLine(int(center - 14), 41, int(center - 8), 48)
+        painter.drawLine(int(center - 8), 48, int(center + 8), 48)
+        painter.drawLine(int(center + 8), 48, int(center + 14), 41)
+        painter.drawLine(int(center + 14), 41, int(center + 30), 41)
+        painter.setPen(QPen(QColor(CAT["accent"]), 2.2))
+        painter.drawLine(int(center), 5, int(center), 24)
+        painter.drawLine(int(center - 7), 17, int(center), 24)
+        painter.drawLine(int(center + 7), 17, int(center), 24)
+        painter.end()
+
+
+class _ActivityEmptyGlyph(QWidget):
+    """Small clock glyph for the empty activity rail."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(66)
+        self.setAccessibleName("No activity events")
+
+    def paintEvent(self, event):
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(CAT["overlay1"]), 1.8))
+        center = self.width() / 2
+        painter.drawEllipse(QRectF(center - 20, 12, 40, 40))
+        painter.drawLine(int(center), 21, int(center), 33)
+        painter.drawLine(int(center), 33, int(center + 9), 33)
+        painter.end()
 
 
 def _download_icon(kind):
@@ -108,6 +160,8 @@ def build_download_tab(win):
 
     hero = QFrame()
     hero.setObjectName("pageHeader")
+    win.download_context_header = hero
+    hero.setVisible(False)
     hero_outer = QHBoxLayout(hero)
     hero_outer.setContentsMargins(16, 14, 16, 2)
     hero_outer.setSpacing(12)
@@ -130,7 +184,7 @@ def build_download_tab(win):
     win.download_hero_body = QLabel("Video, stream, podcast, or direct media.")
     win.download_hero_body.setObjectName("heroBody")
     win.download_hero_body.setWordWrap(True)
-    win.download_hero_body.setVisible(False)
+    win.download_hero_body.setVisible(True)
     hero_lay.addWidget(win.download_hero_title)
     hero_lay.addWidget(win.download_hero_body)
 
@@ -222,15 +276,20 @@ def build_download_tab(win):
     url_card = QFrame()
     url_card.setObjectName("composerCard")
     url_lay = QVBoxLayout(url_card)
-    url_lay.setContentsMargins(16, 0, 16, 34)
-    url_lay.setSpacing(6)
+    url_lay.setContentsMargins(18, 16, 18, 18)
+    url_lay.setSpacing(10)
 
     url_header = QVBoxLayout()
     url_header.setSpacing(4)
-    sec1 = QLabel("Source URL")
+    sec1 = QLabel("Capture a source")
     sec1.setObjectName("sectionTitle")
-    sec1.setVisible(False)
     url_header.addWidget(sec1)
+    source_hint = QLabel(
+        "Paste a stream, channel, VOD, podcast, or direct media URL to resolve it."
+    )
+    source_hint.setObjectName("sectionBody")
+    source_hint.setWordWrap(True)
+    url_header.addWidget(source_hint)
     url_lay.addLayout(url_header)
 
     url_row = QHBoxLayout()
@@ -241,6 +300,7 @@ def build_download_tab(win):
     source_field_lay.setContentsMargins(0, 0, 0, 0)
     source_field_lay.setSpacing(0)
     source_icon = QLabel()
+    win.download_source_icon = source_icon
     source_icon.setObjectName("sourceLinkIcon")
     source_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
     source_icon.setFixedWidth(46)
@@ -280,9 +340,9 @@ def build_download_tab(win):
     paste_btn.clicked.connect(win.url_input.paste)
     paste_btn.setVisible(False)
 
-    win.fetch_btn = QPushButton("Resolve")
+    win.fetch_btn = QPushButton("Resolve source")
     win.fetch_btn.setObjectName("primary")
-    win.fetch_btn.setMinimumWidth(104)
+    win.fetch_btn.setMinimumWidth(132)
     win.fetch_btn.setMinimumHeight(48)
     win.fetch_btn.clicked.connect(win._on_fetch)
     url_row.addWidget(win.fetch_btn)
@@ -1082,11 +1142,29 @@ def build_download_tab(win):
     log_header.addLayout(log_copy, 1)
     log_lay.addWidget(activity_toolbar)
 
+    win.activity_empty_state = QFrame()
+    activity_empty_lay = QVBoxLayout(win.activity_empty_state)
+    activity_empty_lay.setContentsMargins(18, 22, 18, 18)
+    activity_empty_lay.setSpacing(5)
+    activity_empty_lay.addStretch(1)
+    activity_empty_lay.addWidget(_ActivityEmptyGlyph())
+    activity_empty_title = QLabel("No activity yet")
+    activity_empty_title.setObjectName("emptyStateTitle")
+    activity_empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    activity_empty_lay.addWidget(activity_empty_title)
+    activity_empty_body = QLabel("Events appear here as capture tasks run.")
+    activity_empty_body.setObjectName("emptyStateBody")
+    activity_empty_body.setWordWrap(True)
+    activity_empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    activity_empty_lay.addWidget(activity_empty_body)
+    activity_empty_lay.addStretch(1)
+    log_lay.addWidget(win.activity_empty_state, 1)
+
     win.log_text = QTextEdit()
     win.log_text.setObjectName("log")
     win.log_text.setReadOnly(True)
-    win.log_text.setPlainText("No activity yet.")
-    log_lay.addWidget(win.log_text)
+    win.log_text.setVisible(False)
+    log_lay.addWidget(win.log_text, 1)
     activity_footer = QFrame()
     activity_footer.setObjectName("paneFooter")
     activity_footer_lay = QHBoxLayout(activity_footer)
@@ -1212,18 +1290,39 @@ def build_download_tab(win):
     qcard_lay.addWidget(win.queue_table)
     win.queue_empty_state = QFrame()
     empty_lay = QVBoxLayout(win.queue_empty_state)
-    empty_lay.setContentsMargins(12, 28, 12, 12)
-    empty_lay.setSpacing(5)
+    empty_lay.setContentsMargins(18, 24, 18, 20)
+    empty_lay.setSpacing(7)
     empty_lay.addStretch(1)
-    empty_title = QLabel("No downloads in the queue")
+    empty_lay.addWidget(_ArchiveEmptyGlyph())
+    empty_title = QLabel("Your queue is clear")
     empty_title.setObjectName("emptyStateTitle")
     empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
     empty_lay.addWidget(empty_title)
-    empty_body = QLabel("Add a URL above to get started.")
+    empty_body = QLabel("Resolve a source above or import a list to begin.")
     empty_body.setObjectName("emptyStateBody")
+    empty_body.setWordWrap(True)
     empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
     empty_lay.addWidget(empty_body)
-    empty_lay.addStretch(2)
+    empty_actions = QHBoxLayout()
+    empty_actions.setSpacing(8)
+    empty_actions.addStretch(1)
+    win.queue_empty_paste_btn = QPushButton("Paste from clipboard")
+    win.queue_empty_paste_btn.setObjectName("primary")
+    win.queue_empty_paste_btn.setIcon(_download_icon("import"))
+    win.queue_empty_paste_btn.setToolTip(
+        "Paste a source URL from the clipboard into the capture field"
+    )
+    win.queue_empty_paste_btn.clicked.connect(
+        lambda: (win.url_input.paste(), win.url_input.setFocus())
+    )
+    empty_actions.addWidget(win.queue_empty_paste_btn)
+    win.queue_empty_import_btn = QPushButton("Import a list")
+    win.queue_empty_import_btn.setObjectName("ghost")
+    win.queue_empty_import_btn.clicked.connect(win.batch_import_btn.click)
+    empty_actions.addWidget(win.queue_empty_import_btn)
+    empty_actions.addStretch(1)
+    empty_lay.addLayout(empty_actions)
+    empty_lay.addStretch(1)
     qcard_lay.addWidget(win.queue_empty_state, 1)
     queue_footer = QFrame()
     queue_footer.setObjectName("paneFooter")
@@ -1235,6 +1334,69 @@ def build_download_tab(win):
     queue_footer_lay.addStretch(1)
     qcard_lay.addWidget(queue_footer)
     root.addWidget(queue_card)
+
+    health_frame = QFrame()
+    health_frame.setObjectName("archiveHealthPane")
+    win.archive_health_panel = health_frame
+    health_lay = QVBoxLayout(health_frame)
+    health_lay.setContentsMargins(0, 0, 0, 0)
+    health_lay.setSpacing(0)
+    health_toolbar = QFrame()
+    health_toolbar.setObjectName("paneToolbar")
+    health_toolbar_lay = QHBoxLayout(health_toolbar)
+    health_toolbar_lay.setContentsMargins(16, 9, 12, 9)
+    health_title = QLabel("Archive health")
+    health_title.setObjectName("sectionTitle")
+    health_toolbar_lay.addWidget(health_title)
+    health_lay.addWidget(health_toolbar)
+
+    def add_health_row(title_text, detail_text, prefix):
+        row = QFrame()
+        row.setObjectName("healthRow")
+        row_lay = QHBoxLayout(row)
+        row_lay.setContentsMargins(14, 10, 12, 10)
+        row_lay.setSpacing(10)
+        state = QLabel("●")
+        state.setObjectName("healthState")
+        state.setFixedWidth(18)
+        state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        state.setAccessibleName(
+            tr_format(
+                "{component} status is being checked",
+                component=tr(title_text),
+            )
+        )
+        row_lay.addWidget(state)
+        copy = QVBoxLayout()
+        copy.setSpacing(1)
+        title_label = QLabel(title_text)
+        title_label.setObjectName("healthTitle")
+        detail_label = QLabel(detail_text)
+        detail_label.setObjectName("healthDetail")
+        detail_label.setWordWrap(True)
+        copy.addWidget(title_label)
+        copy.addWidget(detail_label)
+        row_lay.addLayout(copy, 1)
+        setattr(win, f"archive_{prefix}_state", state)
+        setattr(win, f"archive_{prefix}_detail", detail_label)
+        health_lay.addWidget(row)
+
+    add_health_row("Storage", "Checking free space", "storage")
+    add_health_row("Runtime", "Checking FFmpeg", "runtime")
+    add_health_row("Downloader", "Checking yt-dlp", "downloader")
+    health_footer = QFrame()
+    health_footer.setObjectName("paneFooter")
+    health_footer_lay = QHBoxLayout(health_footer)
+    health_footer_lay.setContentsMargins(12, 8, 12, 8)
+    diagnostics_btn = QPushButton("View diagnostics")
+    diagnostics_btn.setObjectName("footerAction")
+    diagnostics_btn.setToolTip("Open Settings and inspect the local toolchain")
+    diagnostics_btn.clicked.connect(
+        lambda: win._switch_tab(win._tab_names.index("Settings"))
+    )
+    health_footer_lay.addWidget(diagnostics_btn)
+    health_footer_lay.addStretch(1)
+    health_lay.addWidget(health_footer)
 
     # Main working surface: queue and activity share the viewport. Segment
     # details remain available below once metadata has been fetched.
@@ -1248,11 +1410,19 @@ def build_download_tab(win):
     work_surface = QSplitter(Qt.Orientation.Horizontal)
     work_surface.setObjectName("workSurface")
     work_surface.setChildrenCollapsible(False)
-    queue_card.setMinimumWidth(560)
-    log_frame.setMinimumWidth(320)
-    log_frame.setMinimumHeight(240)
+    queue_card.setMinimumWidth(480)
+    log_frame.setMinimumHeight(220)
+    health_frame.setMinimumHeight(232)
+    right_rail = QWidget()
+    right_rail.setObjectName("downloadOperationsRail")
+    right_rail.setMinimumWidth(270)
+    right_rail_lay = QVBoxLayout(right_rail)
+    right_rail_lay.setContentsMargins(0, 0, 0, 0)
+    right_rail_lay.setSpacing(10)
+    right_rail_lay.addWidget(log_frame, 1)
+    right_rail_lay.addWidget(health_frame)
     work_surface.addWidget(queue_card)
-    work_surface.addWidget(log_frame)
+    work_surface.addWidget(right_rail)
     work_surface.setStretchFactor(0, 2)
     work_surface.setStretchFactor(1, 1)
     work_surface.setSizes([960, 420])

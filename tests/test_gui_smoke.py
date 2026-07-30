@@ -153,14 +153,36 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             # capture controls above the queue/activity working surface.
             assert window.findChild(QFrame, "appHeader") is not None
             assert window.findChild(QFrame, "appNav") is not None
+            assert window.findChild(QFrame, "navRail") is window.nav_rail
+            assert window.nav_rail.width() == 220
+            assert window.shell_page_title.text() == "Download"
+            assert window.system_status_btn.text() == "Systems ready"
             assert window.findChild(QFrame, "composerCard") is not None
             assert window.findChild(QFrame, "queuePane") is not None
             assert window.findChild(QFrame, "activityPane") is not None
+            assert window.findChild(QFrame, "archiveHealthPane") is not None
             assert len(window.findChildren(QFrame, "dataPane")) == 4
             assert len(window.findChildren(QFrame, "analyticsPanel")) == 3
             work_surface = window.findChild(QSplitter, "workSurface")
             assert work_surface is not None
             assert work_surface.orientation() == Qt.Orientation.Horizontal
+            assert not window.queue_empty_state.isHidden()
+            assert window.queue_table.isHidden() is False
+            assert not window.activity_empty_state.isHidden()
+            assert window.log_text.isHidden()
+            assert not window.monitor_empty_state.isHidden()
+            assert window.monitor_table.isHidden()
+            assert window.history_empty_state.isHidden()
+            assert not window.history_table.isHidden()
+            window.resize(1120, 900)
+            window.show()
+            window._switch_tab(2)
+            qt_application.processEvents()
+            history_scroll = window._stack.widget(2)
+            assert history_scroll.horizontalScrollBar().maximum() == 0
+            assert window.history_metrics_grid._compact is True
+            window.hide()
+            window._switch_tab(0)
             assert window.download_hero_title.text() == "New download"
             assert window.scan_lan_check.text() == "Allow LAN for this scan"
             assert not window.scan_lan_check.isChecked()
@@ -368,6 +390,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 window._switch_tab(index)
                 qt_application.processEvents()
                 assert window._stack.currentIndex() == index
+                assert window.shell_page_title.text() == name
                 assert window._tab_btns[index].objectName() == "tabActive", name
                 assert window._tab_btns[index].isChecked(), name
                 assert sum(button.isChecked() for button in window._tab_btns) == 1
@@ -412,7 +435,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window._tab_btns[0].text() == "Descargar"
             assert window._tab_btns[2].text() == "Historial"
             assert window.download_hero_title.text() == "Origen detectado"
-            assert window.fetch_btn.text() == "Resolver"
+            assert window.fetch_btn.text() == "Resolver origen"
             assert window.history_search.placeholderText().startswith("Buscar título")
             assert window.status_label.text() == "El idioma se actualizó en StreamKeep."
             # Stable-value combos that still consume currentText() do not have

@@ -13,8 +13,8 @@ from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableView,
-    QVBoxLayout, QWidget,
+    QGridLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableView,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from streamkeep import db as _db
@@ -28,6 +28,36 @@ from streamkeep.verify import (
 )
 from ..history_model import HistoryTableModel
 from ..widgets import ask_premium_confirmation, make_metric_card, style_table
+
+
+class _ResponsiveHistoryMetrics(QWidget):
+    """Keep four archive metrics readable without widening the page."""
+
+    def __init__(self, cards, parent=None):
+        super().__init__(parent)
+        self._cards = tuple(cards)
+        self._compact = None
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(18)
+        self._grid.setVerticalSpacing(2)
+        self._relayout(compact=True)
+
+    def _relayout(self, *, compact):
+        if self._compact is compact:
+            return
+        self._compact = compact
+        for card in self._cards:
+            self._grid.removeWidget(card)
+        columns = 2 if compact else 4
+        for index, card in enumerate(self._cards):
+            self._grid.addWidget(card, index // columns, index % columns)
+        for column in range(4):
+            self._grid.setColumnStretch(column, 1 if column < columns else 0)
+
+    def resizeEvent(self, event):
+        self._relayout(compact=event.size().width() < 1000)
+        super().resizeEvent(event)
 
 
 def build_history_tab(win):
@@ -62,8 +92,6 @@ def build_history_tab(win):
     hero_copy.addWidget(body)
     hero_lay.addLayout(hero_copy)
 
-    history_metrics = QHBoxLayout()
-    history_metrics.setSpacing(18)
     count_card, win.history_count_value, win.history_count_sub = make_metric_card(
         "Downloads", "0", "saved downloads"
     )
@@ -76,11 +104,26 @@ def build_history_tab(win):
     channel_card, win.history_channel_value, win.history_channel_sub = make_metric_card(
         "Top Channel", "—", "most downloaded"
     )
-    history_metrics.addWidget(count_card)
-    history_metrics.addWidget(latest_card, 1)
-    history_metrics.addWidget(platform_card)
-    history_metrics.addWidget(channel_card, 1)
-    hero_lay.addLayout(history_metrics)
+    for card, subvalue in (
+        (count_card, win.history_count_sub),
+        (latest_card, win.history_latest_sub),
+        (platform_card, win.history_platform_sub),
+        (channel_card, win.history_channel_sub),
+    ):
+        subvalue.setMinimumWidth(0)
+        subvalue.setWordWrap(True)
+        subvalue.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        subvalue.setToolTip(subvalue.text())
+        card.setMinimumWidth(0)
+        card.layout().setStretch(2, 1)
+        card.layout().setStretch(3, 0)
+    win.history_metrics_grid = _ResponsiveHistoryMetrics(
+        (count_card, latest_card, platform_card, channel_card)
+    )
+    hero_lay.addWidget(win.history_metrics_grid)
     lay.addWidget(hero)
 
     card = QFrame()
@@ -103,6 +146,7 @@ def build_history_tab(win):
     header_copy.addWidget(win.history_summary_label)
     header.addLayout(header_copy, 1)
     clear_btn = QPushButton("Clear history")
+    win.history_clear_btn = clear_btn
     clear_btn.setObjectName("secondary")
     clear_btn.clicked.connect(win._on_clear_history)
     header.addWidget(clear_btn)
@@ -150,6 +194,11 @@ def build_history_tab(win):
     card_lay.addWidget(search_card)
 
     win.history_table = QTableView()
+    win.history_table.setMinimumWidth(0)
+    win.history_table.setSizePolicy(
+        QSizePolicy.Policy.Ignored,
+        QSizePolicy.Policy.Expanding,
+    )
     win.history_model = HistoryTableModel(win)
     win.history_table.setModel(win.history_model)
     hh = win.history_table.horizontalHeader()
@@ -187,7 +236,43 @@ def build_history_tab(win):
         accessible_name="Download history",
         accessible_description="Completed downloads; use arrow keys to navigate rows",
     )
-    card_lay.addWidget(win.history_table)
+    card_lay.addWidget(win.history_table, 1)
+
+    win.history_empty_state = QFrame()
+    win.history_empty_state.setObjectName("emptyStateCard")
+    history_empty_lay = QVBoxLayout(win.history_empty_state)
+    history_empty_lay.setContentsMargins(24, 32, 24, 32)
+    history_empty_lay.setSpacing(7)
+    history_empty_lay.addStretch(1)
+    empty_kicker = QLabel("LOCAL ARCHIVE")
+    empty_kicker.setObjectName("eyebrow")
+    empty_kicker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    history_empty_lay.addWidget(empty_kicker)
+    win.history_empty_title = QLabel("Your archive is ready")
+    win.history_empty_title.setObjectName("emptyStateTitle")
+    win.history_empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    history_empty_lay.addWidget(win.history_empty_title)
+    win.history_empty_body = QLabel(
+        "Completed captures will appear here with verification, search, and playback actions."
+    )
+    win.history_empty_body.setObjectName("emptyStateBody")
+    win.history_empty_body.setWordWrap(True)
+    win.history_empty_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    history_empty_lay.addWidget(win.history_empty_body)
+    history_empty_actions = QHBoxLayout()
+    history_empty_actions.addStretch(1)
+    win.history_empty_clear_btn = QPushButton("Clear search")
+    win.history_empty_clear_btn.setObjectName("ghost")
+    win.history_empty_clear_btn.clicked.connect(win.history_search.clear)
+    history_empty_actions.addWidget(win.history_empty_clear_btn)
+    win.history_empty_download_btn = QPushButton("Capture a source")
+    win.history_empty_download_btn.setObjectName("primary")
+    win.history_empty_download_btn.clicked.connect(lambda: win._switch_tab(0))
+    history_empty_actions.addWidget(win.history_empty_download_btn)
+    history_empty_actions.addStretch(1)
+    history_empty_lay.addLayout(history_empty_actions)
+    history_empty_lay.addStretch(1)
+    card_lay.addWidget(win.history_empty_state, 1)
 
     lay.addWidget(card, 1)
     win._refresh_history_summary()
@@ -313,6 +398,29 @@ class HistoryTabMixin:
             if hasattr(self, "history_filter_summary"):
                 self.history_filter_summary.setText("No downloads yet")
             self.history_summary_label.setText("Completed downloads appear here.")
+
+        if hasattr(self, "history_empty_state"):
+            is_empty = visible == 0
+            self.history_clear_btn.setEnabled(total > 0)
+            self.history_table.setVisible(not is_empty)
+            self.history_empty_state.setVisible(is_empty)
+            self.history_empty_clear_btn.setVisible(bool(query))
+            if total and query:
+                self.history_empty_title.setText(tr("No matching downloads"))
+                self.history_empty_body.setText(
+                    tr(
+                        "Clear the current search or try a broader title, platform, "
+                        "channel, folder, or transcript phrase."
+                    )
+                )
+            else:
+                self.history_empty_title.setText(tr("Your archive is ready"))
+                self.history_empty_body.setText(
+                    tr(
+                        "Completed captures will appear here with verification, "
+                        "search, and playback actions."
+                    )
+                )
 
     # ── Remove entries whose folders were recycled ───────────────────
 

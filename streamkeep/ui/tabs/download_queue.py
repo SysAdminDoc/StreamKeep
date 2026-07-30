@@ -941,6 +941,7 @@ class DownloadQueueMixin:
         selected = self._selected_queue_items()
         if hasattr(self, "queue_selected_label"):
             self.queue_selected_label.setText(f"{len(selected)} selected")
+            self.queue_selected_label.setVisible(bool(self._download_queue))
         statuses = {str(item.get("status", "queued")) for item in selected}
         locked = {"fetching", "downloading"}
         removable = any(str(item.get("status", "queued")) not in locked for item in selected)
