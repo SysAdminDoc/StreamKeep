@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from ..theme import CAT
 from ..i18n import TranslatableDialog
+from ..metadata import load_metadata_sidecar
 from .widgets import (
     make_dialog_hero,
     make_dialog_section,
@@ -24,14 +25,7 @@ from .widgets import (
 
 def _read_metadata(dir_path):
     """Read metadata.json from a recording directory."""
-    p = os.path.join(dir_path, "metadata.json")
-    if not os.path.isfile(p):
-        return {}
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    return load_metadata_sidecar(os.path.join(dir_path, "metadata.json"))
 
 
 def _safe_name(s, max_len=120):

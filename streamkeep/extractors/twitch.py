@@ -114,6 +114,8 @@ class TwitchExtractor(Extractor):
                 duration_ms=secs * 1000,
                 platform="Twitch",
                 channel=login,
+                source_id=f"vod:{vod_id}",
+                webpage_url=f"https://www.twitch.tv/videos/{vod_id}",
             ))
             last_cursor = edge.get("cursor")
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
@@ -180,7 +182,14 @@ class TwitchExtractor(Extractor):
             self._log(log_fn, "Failed to fetch m3u8 playlist")
             return None
 
-        info = StreamInfo(platform="Twitch", url=m3u8_url, is_master=True, channel=channel or "")
+        info = StreamInfo(
+            platform="Twitch",
+            url=m3u8_url,
+            is_master=True,
+            channel=channel or "",
+            source_id=f"vod:{vod_id}",
+            webpage_url=f"https://www.twitch.tv/videos/{vod_id}",
+        )
         info.qualities = []
         res, bw, name = "?", 0, "unknown"
         for line in body.splitlines():
@@ -244,6 +253,8 @@ class TwitchExtractor(Extractor):
             is_master=True,
             is_live=True,
             channel=login,
+            source_id=f"channel:{login.lower()}",
+            webpage_url=f"https://www.twitch.tv/{login.lower()}",
         )
         info.qualities = []
         res, bw, name = "?", 0, "unknown"

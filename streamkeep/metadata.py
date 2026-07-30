@@ -1,94 +1,626 @@
-"""Metadata saver — writes metadata.json, chapters, NFO, and thumbnails."""
+"""Versioned, public-safe metadata sidecars and NFO export."""
 
+import html
+import ipaddress
 import json
+import math
 import os
-from datetime import datetime
+import re
+import urllib.parse
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .models import ArchivalProvenance
+
+
+METADATA_SCHEMA = "streamkeep.metadata"
+METADATA_SCHEMA_VERSION = 1
+MAX_METADATA_BYTES = 4 * 1024 * 1024
+
+_PUBLIC_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
+_TWITCH_VOD_RE = re.compile(r"/(?:vod/|videos/)(\d+)(?:\.m3u8)?", re.I)
+_TWITCH_LIVE_RE = re.compile(
+    r"/api/channel/hls/([a-z0-9_]+)\.m3u8", re.I,
+)
+_SAFE_SOURCE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}\Z")
+_SAFE_CHANNEL_RE = re.compile(r"[A-Za-z0-9_]{1,64}\Z")
+_MEDIA_SUFFIXES = (
+    ".m3u8", ".m3u", ".mpd", ".mp4", ".mkv", ".webm", ".mov", ".ts",
+    ".avi", ".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac",
+)
+_SENSITIVE_FIELDS = frozenset({
+    "authorization",
+    "proxy_authorization",
+    "cookie",
+    "cookies",
+    "set_cookie",
+    "header",
+    "headers",
+    "http_header",
+    "http_headers",
+    "request_header",
+    "request_headers",
+    "token",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "oauth_token",
+    "sig",
+    "signature",
+    "secret",
+    "client_secret",
+    "password",
+    "passphrase",
+    "api_key",
+    "x_plex_token",
+    "credential",
+    "credentials",
+})
+
+
+class MetadataWriteError(OSError):
+    """Raised when a public sidecar cannot be written atomically."""
+
+
+def _clean_source_id(value):
+    text = str(value or "").strip()
+    if not _SAFE_SOURCE_ID_RE.fullmatch(text):
+        return ""
+    if "://" in text:
+        return ""
+    lowered = text.lower()
+    if re.search(
+        r"(?:^|[/@:._-])(?:token|sig|signature|secret|cookie|"
+        r"auth(?:orization)?|bearer|password|credential|api[_-]?key)"
+        r"(?:$|[/@:._-])",
+        lowered,
+    ):
+        return ""
+    return text
+
+
+def _host_is(host, domain):
+    return host == domain or host.endswith("." + domain)
+
+
+def _safe_authority(parsed):
+    if parsed.username is not None or parsed.password is not None:
+        return ""
+    host = str(parsed.hostname or "").rstrip(".")
+    if not host:
+        return ""
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except (UnicodeError, ValueError):
+            return ""
+        if host == "localhost" or host.endswith((".localhost", ".local")):
+            return ""
+    else:
+        if not literal.is_global:
+            return ""
+        host = str(literal)
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    authority_host = f"[{host}]" if ":" in host else host
+    if port and port != (443 if parsed.scheme.lower() == "https" else 80):
+        return f"{authority_host}:{port}"
+    return authority_host
+
+
+def _youtube_video_id(parsed):
+    host = str(parsed.hostname or "").lower()
+    path_parts = [part for part in parsed.path.split("/") if part]
+    candidate = ""
+    if host in {"youtu.be", "www.youtu.be"} and path_parts:
+        candidate = path_parts[0]
+    elif _host_is(host, "youtube.com"):
+        if parsed.path.rstrip("/") == "/watch":
+            candidate = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+        elif len(path_parts) >= 2 and path_parts[0].lower() in {
+            "embed", "live", "shorts",
+        }:
+            candidate = path_parts[1]
+    if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", candidate or ""):
+        return candidate
+    return ""
+
+
+def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
+    """Return a stable public page URL, never a signed delivery endpoint."""
+    text = html.unescape(str(value or "").strip())
+    if not text or any(
+        character.isspace() or ord(character) < 0x20
+        for character in text
+    ):
+        text = ""
+    try:
+        parsed = urllib.parse.urlsplit(text) if text else None
+    except ValueError:
+        parsed = None
+
+    platform_key = str(platform or "").strip().lower()
+    clean_id = _clean_source_id(source_id)
+    clean_channel = str(channel or "").strip().lower()
+    if parsed is not None and parsed.scheme.lower() in {"http", "https"}:
+        host = str(parsed.hostname or "").lower()
+        if _host_is(host, "twitch.tv") or _host_is(host, "ttvnw.net"):
+            vod_match = _TWITCH_VOD_RE.search(parsed.path)
+            if vod_match:
+                return f"https://www.twitch.tv/videos/{vod_match.group(1)}"
+            live_match = _TWITCH_LIVE_RE.search(parsed.path)
+            if live_match:
+                return f"https://www.twitch.tv/{live_match.group(1).lower()}"
+            path_parts = [part for part in parsed.path.split("/") if part]
+            if (
+                _host_is(host, "twitch.tv")
+                and len(path_parts) == 1
+                and _SAFE_CHANNEL_RE.fullmatch(path_parts[0])
+            ):
+                return f"https://www.twitch.tv/{path_parts[0].lower()}"
+
+        youtube_id = _youtube_video_id(parsed)
+        if youtube_id:
+            return f"https://www.youtube.com/watch?v={youtube_id}"
+
+    if "twitch" in platform_key:
+        if clean_id.startswith("vod:") and clean_id[4:].isdigit():
+            return f"https://www.twitch.tv/videos/{clean_id[4:]}"
+        if clean_id.startswith("channel:"):
+            clean_channel = clean_id.split(":", 1)[1].lower()
+        if _SAFE_CHANNEL_RE.fullmatch(clean_channel):
+            return f"https://www.twitch.tv/{clean_channel}"
+
+    if parsed is None or parsed.scheme.lower() not in {"http", "https"}:
+        return ""
+    authority = _safe_authority(parsed)
+    if not authority:
+        return ""
+    path = parsed.path or "/"
+    lower_path = path.lower().rstrip("/")
+    if lower_path.endswith(_MEDIA_SUFFIXES) or lower_path.rsplit("/", 1)[-1] in {
+        "manifest", "playlist",
+    }:
+        return ""
+    return urllib.parse.urlunsplit((
+        parsed.scheme.lower(), authority, path, "", "",
+    ))
+
+
+def _derived_identity(value, platform="", channel=""):
+    text = html.unescape(str(value or "").strip())
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        host = str(parsed.hostname or "").lower()
+        if _host_is(host, "twitch.tv") or _host_is(host, "ttvnw.net"):
+            match = _TWITCH_VOD_RE.search(parsed.path)
+            if match:
+                return f"vod:{match.group(1)}"
+            match = _TWITCH_LIVE_RE.search(parsed.path)
+            if match:
+                return f"channel:{match.group(1).lower()}"
+            path_parts = [part for part in parsed.path.split("/") if part]
+            if (
+                _host_is(host, "twitch.tv")
+                and len(path_parts) == 1
+                and _SAFE_CHANNEL_RE.fullmatch(path_parts[0])
+            ):
+                return f"channel:{path_parts[0].lower()}"
+        youtube_id = _youtube_video_id(parsed)
+        if youtube_id:
+            return youtube_id
+    if "twitch" in str(platform or "").lower():
+        if text.isdigit():
+            return f"vod:{text}"
+    return ""
+
+
+def build_archival_provenance(
+    stream_info=None,
+    vod_info=None,
+    *,
+    source_url="",
+):
+    """Build stable archival identity without retaining transport material."""
+    platform = scrub_public_text(
+        getattr(stream_info, "platform", "")
+        or getattr(vod_info, "platform", "")
+        or ""
+    ).strip()
+    channel = str(
+        getattr(stream_info, "channel", "")
+        or getattr(vod_info, "channel", "")
+        or ""
+    ).strip()
+    explicit_id = (
+        getattr(stream_info, "source_id", "")
+        or getattr(vod_info, "source_id", "")
+        or ""
+    )
+    source_id = _clean_source_id(explicit_id)
+    if "twitch" in platform.lower() and source_id.isdigit():
+        source_id = f"vod:{source_id}"
+
+    candidates = [
+        getattr(stream_info, "webpage_url", ""),
+        getattr(vod_info, "webpage_url", ""),
+        source_url,
+        getattr(vod_info, "source", ""),
+        getattr(stream_info, "url", ""),
+    ]
+    if not source_id:
+        for candidate in candidates:
+            source_id = _clean_source_id(
+                _derived_identity(candidate, platform, channel)
+            )
+            if source_id:
+                break
+    if not source_id and "twitch" in platform.lower():
+        clean_channel = channel.lower()
+        if _SAFE_CHANNEL_RE.fullmatch(clean_channel):
+            source_id = f"channel:{clean_channel}"
+
+    webpage_url = ""
+    for candidate in candidates:
+        webpage_url = canonical_webpage_url(
+            candidate,
+            platform=platform,
+            source_id=source_id,
+            channel=channel,
+        )
+        if webpage_url:
+            break
+    if not webpage_url:
+        webpage_url = canonical_webpage_url(
+            "",
+            platform=platform,
+            source_id=source_id,
+            channel=channel,
+        )
+    return ArchivalProvenance(platform, source_id, webpage_url)
+
+
+def _is_sensitive_field(key):
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").lower()).strip("_")
+    return (
+        normalized in _SENSITIVE_FIELDS
+        or normalized.endswith((
+            "_token",
+            "_secret",
+            "_signature",
+            "_cookie",
+            "_password",
+            "_credential",
+            "_authorization",
+            "_api_key",
+            "_headers",
+        ))
+        or normalized.startswith(("x_amz_", "x_goog_"))
+    )
+
+
+def _scrub_url_match(match):
+    value = match.group(0)
+    trailing = ""
+    while value and value[-1] in ".,);]}":
+        trailing = value[-1] + trailing
+        value = value[:-1]
+    try:
+        parsed = urllib.parse.urlsplit(html.unescape(value))
+        redaction = (
+            " [***REDACTED***]"
+            if parsed.query
+            or parsed.fragment
+            or parsed.username is not None
+            or parsed.password is not None
+            else ""
+        )
+        authority = _safe_authority(parsed)
+        if not authority:
+            return "[private URL removed]" + redaction + trailing
+        value = urllib.parse.urlunsplit((
+            parsed.scheme.lower(), authority, parsed.path or "/", "", "",
+        ))
+    except ValueError:
+        return "[invalid URL removed]" + trailing
+    return value + redaction + trailing
+
+
+def scrub_public_text(value):
+    """Remove credentials and signed query material from shareable text."""
+    text = _PUBLIC_URL_RE.sub(_scrub_url_match, str(value or ""))
+    text = re.sub(
+        r"(?im)^[ \t]*(?:authorization|proxy-authorization|cookie|"
+        r"set-cookie)[ \t]*:.*(?:\r?\n|$)",
+        "***REDACTED***\n",
+        text,
+    )
+    text = re.sub(r"(?i)\bbearer\s+\S+", "***REDACTED***", text)
+    text = re.sub(
+        r"(?i)\b(?:access[_-]?token|refresh[_-]?token|oauth[_-]?token|"
+        r"token|sig|signature|cookie|authorization|credential|"
+        r"x-amz-[a-z-]+|x-goog-[a-z-]+|api[_-]?key|secret)"
+        r"\s*[=:]\s*[\"']?[^\"'\s,;<>&]+[\"']?",
+        "***REDACTED***",
+        text,
+    )
+    return text
+
+
+def scrub_public_data(value, *, _depth=0):
+    """Return a bounded, recursively scrubbed public representation."""
+    if _depth > 32:
+        return None
+    if isinstance(value, dict):
+        cleaned = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 100_000:
+                break
+            if _is_sensitive_field(key):
+                continue
+            cleaned[scrub_public_text(key)] = scrub_public_data(
+                item, _depth=_depth + 1
+            )
+        return cleaned
+    if isinstance(value, list):
+        return [
+            scrub_public_data(item, _depth=_depth + 1)
+            for item in value[:100_000]
+        ]
+    if isinstance(value, tuple):
+        return [
+            scrub_public_data(item, _depth=_depth + 1)
+            for item in value[:100_000]
+        ]
+    if isinstance(value, str):
+        return scrub_public_text(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return scrub_public_text(value)
+
+
+def _safe_quality_rows(value):
+    rows = []
+    for item in list(value or [])[:500]:
+        if isinstance(item, dict):
+            get = item.get
+        else:
+            get = lambda name, default=None, row=item: getattr(
+                row, name, default,
+            )
+        try:
+            bandwidth = int(float(get("bandwidth", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            bandwidth = 0
+        rows.append({
+            "name": scrub_public_text(get("name", "") or ""),
+            "resolution": scrub_public_text(get("resolution", "") or ""),
+            "bandwidth": max(0, bandwidth),
+            "format": scrub_public_text(
+                get("format", "") or get("format_type", "") or ""
+            ),
+        })
+    return rows
+
+
+def normalize_metadata_payload(data):
+    """Migrate legacy metadata into the current public sidecar schema."""
+    raw = data if isinstance(data, dict) else {}
+    raw_provenance = raw.get("provenance")
+    raw_provenance = raw_provenance if isinstance(raw_provenance, dict) else {}
+    platform = scrub_public_text(
+        raw_provenance.get("platform") or raw.get("platform") or ""
+    ).strip()
+    source_id = _clean_source_id(
+        raw_provenance.get("source_id") or raw.get("source_id") or ""
+    )
+    channel = scrub_public_text(
+        raw.get("channel") or raw.get("vod_channel") or ""
+    )
+    legacy_url = (
+        raw_provenance.get("webpage_url")
+        or raw.get("webpage_url")
+        or raw.get("url")
+        or ""
+    )
+    if not source_id:
+        source_id = _clean_source_id(
+            _derived_identity(legacy_url, platform, channel)
+        )
+    webpage_url = canonical_webpage_url(
+        legacy_url,
+        platform=platform,
+        source_id=source_id,
+        channel=channel,
+    )
+    provenance = ArchivalProvenance(platform, source_id, webpage_url)
+    try:
+        parsed_total_secs = float(raw.get("total_secs", 0) or 0)
+        total_secs = (
+            parsed_total_secs
+            if 0 <= parsed_total_secs < float("inf")
+            else 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        total_secs = 0
+    payload = {
+        "schema": METADATA_SCHEMA,
+        "schema_version": METADATA_SCHEMA_VERSION,
+        "provenance": provenance.to_dict(),
+        "platform": platform,
+        "channel": channel,
+        "title": scrub_public_text(raw.get("title", "") or ""),
+        "duration": scrub_public_text(raw.get("duration", "") or ""),
+        "total_secs": total_secs,
+        "start_time": scrub_public_text(raw.get("start_time", "") or ""),
+        "is_live": bool(raw.get("is_live", False)),
+        "qualities": _safe_quality_rows(raw.get("qualities", [])),
+        "downloaded_at": scrub_public_text(raw.get("downloaded_at", "") or ""),
+    }
+    for key in ("vod_date", "vod_channel", "quality"):
+        if key in raw:
+            payload[key] = scrub_public_data(raw.get(key))
+    if "vod_viewers" in raw:
+        try:
+            payload["vod_viewers"] = max(
+                0, int(raw.get("vod_viewers", 0) or 0)
+            )
+        except (TypeError, ValueError, OverflowError):
+            payload["vod_viewers"] = 0
+    thumbnail = str(raw.get("thumbnail", "") or "")
+    if thumbnail == "thumbnail.jpg":
+        payload["thumbnail"] = thumbnail
+    return payload
+
+
+def load_metadata_sidecar(path_or_dir):
+    """Read current or legacy metadata and return a safe current payload."""
+    path = Path(path_or_dir)
+    if path.is_dir():
+        path = path / "metadata.json"
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_METADATA_BYTES:
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return normalize_metadata_payload(data)
+
+
+def _atomic_write_text(path, text):
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+    except OSError as error:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise MetadataWriteError(
+            f"Could not write public sidecar {target.name}: {error}"
+        ) from error
+    return str(target)
 
 
 class MetadataSaver:
     @staticmethod
-    def save(output_dir, stream_info, vod_info=None):
-        """Save metadata.json alongside downloads."""
-        if stream_info is None or not output_dir:
-            return
-        if not os.path.isdir(output_dir):
-            return
-        meta = {
-            "platform": getattr(stream_info, "platform", "") or "",
+    def save_thumbnail(output_dir, stream_info):
+        """Download a public local thumbnail without persisting its source URL."""
+        if not output_dir or not os.path.isdir(output_dir):
+            raise MetadataWriteError("Recording directory does not exist")
+        target = os.path.join(output_dir, "thumbnail.jpg")
+        remote = str(getattr(stream_info, "thumbnail_url", "") or "")
+        if remote:
+            from .image_fetch import download_image
+            if download_image(remote, target):
+                return target
+        return target if os.path.isfile(target) else ""
+
+    @staticmethod
+    def save(output_dir, stream_info, vod_info=None, *, source_url=""):
+        """Atomically save a versioned, credential-free metadata sidecar."""
+        if stream_info is None:
+            raise MetadataWriteError("Stream metadata is unavailable")
+        if not output_dir or not os.path.isdir(output_dir):
+            raise MetadataWriteError("Recording directory does not exist")
+        thumbnail_path = MetadataSaver.save_thumbnail(output_dir, stream_info)
+        provenance = build_archival_provenance(
+            stream_info, vod_info, source_url=source_url,
+        )
+        raw = {
+            "provenance": provenance.to_dict(),
+            "platform": provenance.platform,
+            "channel": getattr(stream_info, "channel", "") or "",
             "title": (
                 getattr(stream_info, "title", "")
                 or (getattr(vod_info, "title", "") if vod_info else "")
             ),
-            "url": getattr(stream_info, "url", "") or "",
             "duration": getattr(stream_info, "duration_str", "") or "",
             "total_secs": getattr(stream_info, "total_secs", 0) or 0,
             "start_time": getattr(stream_info, "start_time", "") or "",
             "is_live": bool(getattr(stream_info, "is_live", False)),
-            "qualities": [
-                {
-                    "name": q.name, "resolution": q.resolution,
-                    "bandwidth": q.bandwidth, "format": q.format_type,
-                }
-                for q in (stream_info.qualities or [])
-            ],
-            "downloaded_at": datetime.now().isoformat(),
+            "qualities": list(getattr(stream_info, "qualities", []) or []),
+            "downloaded_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            ),
         }
+        if thumbnail_path:
+            raw["thumbnail"] = os.path.basename(thumbnail_path)
         if vod_info:
-            meta["vod_date"] = vod_info.date
-            meta["vod_channel"] = vod_info.channel
-            meta["vod_viewers"] = vod_info.viewers
-        try:
-            p = os.path.join(output_dir, "metadata.json")
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
-        if stream_info.thumbnail_url:
-            try:
-                thumb_path = os.path.join(output_dir, "thumbnail.jpg")
-                from .image_fetch import download_image
-                download_image(stream_info.thumbnail_url, thumb_path)
-            except Exception:
-                pass
+            raw["vod_date"] = getattr(vod_info, "date", "") or ""
+            raw["vod_channel"] = getattr(vod_info, "channel", "") or ""
+            raw["vod_viewers"] = getattr(vod_info, "viewers", 0) or 0
+        payload = normalize_metadata_payload(raw)
+        metadata_path = _atomic_write_text(
+            os.path.join(output_dir, "metadata.json"),
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        )
+        return {
+            "metadata_path": metadata_path,
+            "thumbnail_path": thumbnail_path,
+            "provenance": provenance,
+        }
 
     @staticmethod
     def write_chapters(output_dir, stream_info, file_base=""):
-        """Write {file_base}.chapters.txt and .chapters.json files if the
-        stream has chapter metadata."""
-        if not stream_info or not output_dir:
-            return False
-        if not os.path.isdir(output_dir):
+        """Write chapter text/JSON sidecars and surface local write failures."""
+        if not stream_info or not output_dir or not os.path.isdir(output_dir):
             return False
         chapters = getattr(stream_info, "chapters", None) or []
         if not chapters:
             return False
         base = os.path.basename(file_base) if file_base else "chapters"
-        try:
-            txt_path = os.path.join(output_dir, f"{base}.chapters.txt")
-            with open(txt_path, "w", encoding="utf-8") as f:
-                for ch in chapters:
-                    secs = int(ch.get("start", 0) or 0)
-                    hh = secs // 3600
-                    mm = (secs % 3600) // 60
-                    ss = secs % 60
-                    ts = f"{hh:02d}:{mm:02d}:{ss:02d}"
-                    f.write(f"{ts} {ch.get('title', 'Chapter')}\n")
-        except Exception:
-            pass
-        try:
-            json_path = os.path.join(output_dir, f"{base}.chapters.json")
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump({"chapters": chapters}, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        clean_chapters = []
+        text_lines = []
+        for chapter in chapters:
+            try:
+                start = float(chapter.get("start", 0) or 0)
+                end = float(chapter.get("end", 0) or 0)
+            except (TypeError, ValueError):
+                start, end = 0.0, 0.0
+            title = scrub_public_text(chapter.get("title", "Chapter"))
+            clean_chapters.append({
+                "title": title,
+                "start": start,
+                "end": end,
+            })
+            secs = int(start)
+            hh = secs // 3600
+            mm = (secs % 3600) // 60
+            ss = secs % 60
+            text_lines.append(f"{hh:02d}:{mm:02d}:{ss:02d} {title}")
+        _atomic_write_text(
+            os.path.join(output_dir, f"{base}.chapters.txt"),
+            "\n".join(text_lines) + "\n",
+        )
+        _atomic_write_text(
+            os.path.join(output_dir, f"{base}.chapters.json"),
+            json.dumps(
+                {"chapters": clean_chapters}, indent=2, ensure_ascii=False,
+            ) + "\n",
+        )
         return True
 
     @staticmethod
-    def _xml_escape(s):
-        if not s:
+    def _xml_escape(value):
+        if not value:
             return ""
         return (
-            str(s)
+            str(value)
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
@@ -97,66 +629,83 @@ class MetadataSaver:
         )
 
     @staticmethod
-    def write_nfo(output_dir, stream_info, vod_info=None, file_base=""):
-        """Write a Kodi/Jellyfin/Plex-compatible .nfo file using the
-        <movie> schema (most widely supported)."""
-        if stream_info is None or not output_dir:
-            return
-        if not os.path.isdir(output_dir):
-            return
+    def write_nfo(
+        output_dir,
+        stream_info,
+        vod_info=None,
+        file_base="",
+        *,
+        source_url="",
+    ):
+        """Write a local-only Kodi/Jellyfin NFO with stable source identity."""
+        if stream_info is None:
+            raise MetadataWriteError("Stream metadata is unavailable")
+        if not output_dir or not os.path.isdir(output_dir):
+            raise MetadataWriteError("Recording directory does not exist")
         title = (
-            (stream_info.title or (vod_info.title if vod_info else "")).strip()
-            or "Untitled"
+            getattr(stream_info, "title", "")
+            or (getattr(vod_info, "title", "") if vod_info else "")
+        ).strip() or "Untitled"
+        provenance = build_archival_provenance(
+            stream_info, vod_info, source_url=source_url,
         )
-        platform = stream_info.platform or ""
-        channel = ""
-        if vod_info and vod_info.channel:
-            channel = vod_info.channel
-        elif stream_info.channel:
-            channel = stream_info.channel
+        channel = (
+            getattr(vod_info, "channel", "") if vod_info else ""
+        ) or getattr(stream_info, "channel", "") or ""
         date_str = ""
+        start_time = getattr(stream_info, "start_time", "") or ""
+        vod_date = getattr(vod_info, "date", "") if vod_info else ""
         try:
-            if stream_info.start_time:
-                date_str = stream_info.start_time.split("T")[0]
-            elif vod_info and vod_info.date:
-                date_str = vod_info.date.split("T")[0].split(" ")[0]
-        except Exception:
-            pass
-        runtime_min = int((stream_info.total_secs or 0) // 60)
+            if start_time:
+                date_str = start_time.split("T")[0]
+            elif vod_date:
+                date_str = vod_date.split("T")[0].split(" ")[0]
+        except (AttributeError, IndexError):
+            date_str = ""
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+            date_str = ""
+        runtime_min = int(
+            (getattr(stream_info, "total_secs", 0) or 0) // 60
+        )
 
         esc = MetadataSaver._xml_escape
         lines = [
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-            '<movie>',
-            f'  <title>{esc(title)}</title>',
-            f'  <originaltitle>{esc(title)}</originaltitle>',
-            f'  <studio>{esc(platform)}</studio>',
+            "<movie>",
+            f"  <title>{esc(scrub_public_text(title))}</title>",
+            f"  <originaltitle>{esc(scrub_public_text(title))}</originaltitle>",
+            f"  <studio>{esc(provenance.platform)}</studio>",
         ]
-        if channel:
-            lines.append(f'  <director>{esc(channel)}</director>')
-            lines.append(f'  <credits>{esc(channel)}</credits>')
-        if date_str:
-            lines.append(f'  <premiered>{esc(date_str)}</premiered>')
-            lines.append(f'  <year>{esc(date_str[:4])}</year>')
-        if runtime_min > 0:
-            lines.append(f'  <runtime>{runtime_min}</runtime>')
-        if stream_info.url:
-            lines.append(f'  <trailer>{esc(stream_info.url)}</trailer>')
-        if stream_info.thumbnail_url:
-            lines.append(f'  <thumb>{esc(stream_info.thumbnail_url)}</thumb>')
-        lines.append(
-            f'  <plot>Archived from {esc(platform)} on '
-            f'{esc(datetime.now().strftime("%Y-%m-%d"))}.</plot>'
-        )
-        lines.append('</movie>')
-
-        try:
-            safe_base = os.path.basename(file_base) if file_base else ""
-            nfo_path = os.path.join(
-                output_dir,
-                (safe_base + ".nfo") if safe_base else "movie.nfo",
+        if provenance.source_id:
+            source_type = re.sub(
+                r"[^a-z0-9_-]+", "-", provenance.platform.lower(),
+            ).strip("-") or "streamkeep"
+            lines.append(
+                f'  <uniqueid type="{esc(source_type)}" default="true">'
+                f"{esc(provenance.source_id)}</uniqueid>"
             )
-            with open(nfo_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-        except Exception:
-            pass
+        if channel:
+            lines.append(
+                f"  <director>{esc(scrub_public_text(channel))}</director>"
+            )
+            lines.append(
+                f"  <credits>{esc(scrub_public_text(channel))}</credits>"
+            )
+        if date_str:
+            lines.append(f"  <premiered>{esc(date_str)}</premiered>")
+            lines.append(f"  <year>{esc(date_str[:4])}</year>")
+        if runtime_min > 0:
+            lines.append(f"  <runtime>{runtime_min}</runtime>")
+        if os.path.isfile(os.path.join(output_dir, "thumbnail.jpg")):
+            lines.append("  <thumb>thumbnail.jpg</thumb>")
+        lines.append(
+            f"  <plot>Archived from {esc(provenance.platform)} on "
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.</plot>"
+        )
+        lines.append("</movie>")
+        safe_base = os.path.basename(file_base) if file_base else ""
+        nfo_path = os.path.join(
+            output_dir,
+            (safe_base + ".nfo") if safe_base else "movie.nfo",
+        )
+        return _atomic_write_text(nfo_path, "\n".join(lines) + "\n")

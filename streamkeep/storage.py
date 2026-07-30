@@ -5,9 +5,10 @@ Read-only. Deletion is handled in the UI via send2trash so the user sees a
 confirm dialog and the deletion is recycle-bin-first (never permanent).
 """
 
-import json
 import os
 from dataclasses import dataclass, field
+
+from .metadata import load_metadata_sidecar
 
 
 # Metadata sidecars written by streamkeep.metadata.MetadataSaver live next
@@ -50,15 +51,7 @@ class StorageScan:
 
 
 def _read_sidecar(dir_path):
-    path = os.path.join(dir_path, METADATA_SIDECAR)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    return load_metadata_sidecar(os.path.join(dir_path, METADATA_SIDECAR))
 
 
 def _platform_from_path(dir_path, root):
@@ -184,6 +177,8 @@ def import_folders(groups, *, db_module=None):
         meta = _read_sidecar(group.dir_path)
         try:
             from datetime import datetime, timezone
+            provenance = meta.get("provenance")
+            provenance = provenance if isinstance(provenance, dict) else {}
             entry = {
                 "date": meta.get("downloaded_at", "") or (
                     datetime.fromtimestamp(group.newest_mtime, tz=timezone.utc).isoformat(timespec="seconds")
@@ -195,7 +190,7 @@ def import_folders(groups, *, db_module=None):
                 "quality": "",
                 "size": _fmt_size(group.total_size),
                 "path": group.dir_path,
-                "url": meta.get("url", ""),
+                "url": provenance.get("webpage_url", ""),
             }
             db_module.save_history_entry(entry)
             imported += 1

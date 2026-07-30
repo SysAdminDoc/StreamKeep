@@ -977,6 +977,8 @@ class YtDlpExtractor(Extractor):
                 or ""
             ),
             is_live=data.get("is_live", False),
+            source_id=str(data.get("id") or ""),
+            webpage_url=url,
         )
 
         raw_chapters = data.get("chapters") or []

@@ -64,30 +64,49 @@ def generate_sidecars(output_dir, stream_info, vod_info=None, *, profile="full",
     if cfg.get("metadata_json"):
         p = os.path.join(output_dir, "metadata.json")
         if overwrite or not os.path.isfile(p):
-            from ..metadata import MetadataSaver
-            MetadataSaver.save(output_dir, stream_info, vod_info)
-            results["metadata_json"] = p
+            from ..metadata import MetadataSaver, MetadataWriteError
+            try:
+                saved = MetadataSaver.save(
+                    output_dir, stream_info, vod_info,
+                )
+                results["metadata_json"] = saved["metadata_path"]
+            except MetadataWriteError as error:
+                results["metadata_json"] = None
+                if log_fn:
+                    log_fn(f"[SIDECAR] {error}")
         else:
             results["metadata_json"] = None
 
     if cfg.get("nfo"):
-        p = os.path.join(output_dir, "movie.nfo")
         existing_nfo = _find_nfo(output_dir)
         if overwrite or not existing_nfo:
-            from ..metadata import MetadataSaver
-            MetadataSaver.write_nfo(output_dir, stream_info, vod_info)
-            results["nfo"] = existing_nfo or p
+            from ..metadata import MetadataSaver, MetadataWriteError
+            try:
+                results["nfo"] = MetadataSaver.write_nfo(
+                    output_dir, stream_info, vod_info,
+                )
+            except MetadataWriteError as error:
+                results["nfo"] = None
+                if log_fn:
+                    log_fn(f"[SIDECAR] {error}")
         else:
             results["nfo"] = None
 
     if cfg.get("thumbnail"):
-        p = os.path.join(output_dir, "thumbnail.jpg")
-        if overwrite or not os.path.isfile(p):
+        thumbnail_path = os.path.join(output_dir, "thumbnail.jpg")
+        if overwrite or not os.path.isfile(thumbnail_path):
             thumb_url = getattr(stream_info, "thumbnail_url", "") if stream_info else ""
             if thumb_url:
-                from ..metadata import MetadataSaver
-                MetadataSaver.save(output_dir, stream_info, vod_info)
-                results["thumbnail"] = p if os.path.isfile(p) else None
+                from ..metadata import MetadataSaver, MetadataWriteError
+                try:
+                    results["thumbnail"] = (
+                        MetadataSaver.save_thumbnail(output_dir, stream_info)
+                        or None
+                    )
+                except MetadataWriteError as error:
+                    results["thumbnail"] = None
+                    if log_fn:
+                        log_fn(f"[SIDECAR] {error}")
             else:
                 results["thumbnail"] = None
         else:

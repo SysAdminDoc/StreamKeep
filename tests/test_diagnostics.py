@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from streamkeep.diagnostics import (
     create_diagnostic_snapshot,
@@ -38,6 +39,26 @@ class RedactionTests(unittest.TestCase):
         result = redact_text(text)
         self.assertNotIn("hunter2", result)
 
+    def test_redacts_signed_urls_and_request_headers(self):
+        text = (
+            "https://cdn.example/video.mp4"
+            "?X-Amz-Credential=AKIASECRET&X-Amz-Signature=URLSECRET\n"
+            "Authorization: Bearer HEADERSECRET\n"
+            "Cookie: session=COOKIESECRET\n"
+        )
+        result = redact_text(text)
+        self.assertIn("https://cdn.example/video.mp4", result)
+        for secret in (
+            "AKIASECRET",
+            "URLSECRET",
+            "HEADERSECRET",
+            "COOKIESECRET",
+        ):
+            self.assertNotIn(secret, result)
+        self.assertNotIn("X-Amz-", result)
+        self.assertNotIn("Authorization:", result)
+        self.assertNotIn("Cookie:", result)
+
     def test_config_redacts_sensitive_keys(self):
         cfg = {
             "output_dir": "C:\\Videos",
@@ -52,6 +73,17 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(redacted["webhook_url"], "***REDACTED***")
         self.assertEqual(redacted["proxy"], "***REDACTED***")
         self.assertEqual(redacted["companion_token"], "***REDACTED***")
+
+    def test_config_redacts_mixed_case_delivery_credentials(self):
+        cfg = {
+            "Authorization": "Bearer HEADERSECRET",
+            "HTTP-Headers": {"Cookie": "session=COOKIESECRET"},
+            "X-Amz-Signature": "URLSECRET",
+        }
+        redacted = redact_config(cfg)
+        self.assertEqual(redacted["Authorization"], "***REDACTED***")
+        self.assertEqual(redacted["HTTP-Headers"], "***REDACTED***")
+        self.assertEqual(redacted["X-Amz-Signature"], "***REDACTED***")
 
     def test_config_redacts_empty_sensitive_keys_as_empty(self):
         cfg = {"webhook_url": "", "proxy": ""}
@@ -99,6 +131,47 @@ class SnapshotTests(unittest.TestCase):
                 for key in ("webhook_url", "proxy", "companion_token"):
                     if key in cfg and cfg[key]:
                         self.assertEqual(cfg[key], "***REDACTED***")
+
+    def test_snapshot_scrubs_delivery_credentials_from_logs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "streamkeep.log"
+            crash_path = Path(tmpdir) / "crash.log"
+            log_path.write_text(
+                "GET https://cdn.example/video.mp4"
+                "?token=QUERYSECRET&sig=SIGNATURESECRET\n"
+                "Authorization: Bearer HEADERSECRET\n",
+                encoding="utf-8",
+            )
+            crash_path.write_text(
+                "Cookie: session=COOKIESECRET\n", encoding="utf-8"
+            )
+            out = Path(tmpdir) / "diag.zip"
+
+            with (
+                mock.patch(
+                    "streamkeep.diagnostics.LOG_FILE", log_path
+                ),
+                mock.patch(
+                    "streamkeep.diagnostics.CRASH_LOG", crash_path
+                ),
+            ):
+                ok, _ = create_diagnostic_snapshot(str(out))
+
+            self.assertTrue(ok)
+            with zipfile.ZipFile(out, "r") as archive:
+                public_text = "\n".join(
+                    archive.read(name).decode("utf-8", errors="ignore")
+                    for name in archive.namelist()
+                )
+            for secret in (
+                "QUERYSECRET",
+                "SIGNATURESECRET",
+                "HEADERSECRET",
+                "COOKIESECRET",
+            ):
+                self.assertNotIn(secret, public_text)
+            self.assertNotIn("Authorization:", public_text)
+            self.assertNotIn("Cookie:", public_text)
 
 
 if __name__ == "__main__":

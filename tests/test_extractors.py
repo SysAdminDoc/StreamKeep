@@ -453,6 +453,10 @@ class TestTwitchExtractorResolve(unittest.TestCase):
         self.assertTrue(info.is_master)
         self.assertGreater(len(info.qualities), 0)
         self.assertEqual(info.qualities[0].name, "1080p60")
+        self.assertEqual(info.source_id, "vod:123456")
+        self.assertEqual(
+            info.webpage_url, "https://www.twitch.tv/videos/123456"
+        )
 
     @patch(f"{_TWITCH}.curl_post_json")
     def test_resolve_vod_no_token(self, mock_post):
@@ -520,6 +524,10 @@ class TestTwitchExtractorResolve(unittest.TestCase):
         self.assertEqual(vods[0].platform, "Twitch")
         self.assertEqual(vods[0].channel, "shroud")
         self.assertEqual(vods[0].duration_ms, 14400000)
+        self.assertEqual(vods[0].source_id, "vod:111")
+        self.assertEqual(
+            vods[0].webpage_url, "https://www.twitch.tv/videos/111"
+        )
         self.assertIsNone(cursor)
 
     @patch(f"{_TWITCH}.curl_post_json")
@@ -1509,6 +1517,7 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
     @patch(f"{_YTDLP}.run_capture_interruptible")
     def test_resolve_youtube_video(self, mock_run):
         yt_json = {
+            "id": "dQw4w9WgXcQ",
             "title": "Never Gonna Give You Up",
             "channel": "RickAstleyVEVO",
             "duration": 212,
@@ -1543,6 +1552,11 @@ class TestYtDlpExtractorResolve(unittest.TestCase):
         self.assertEqual(info.platform, "yt-dlp")
         self.assertEqual(info.title, "Never Gonna Give You Up")
         self.assertEqual(info.channel, "RickAstleyVEVO")
+        self.assertEqual(info.source_id, "dQw4w9WgXcQ")
+        self.assertEqual(
+            info.webpage_url,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        )
         self.assertGreater(len(info.qualities), 0)
         video_q = [q for q in info.qualities if q.resolution != "audio"]
         if video_q:

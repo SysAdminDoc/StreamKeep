@@ -9,10 +9,18 @@ Safety: never follows out-of-tree symlinks; never includes files whose
 resolved path escapes the recording root.
 """
 
+import json
 import os
+import re
 import zipfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from ..metadata import (
+    normalize_metadata_payload,
+    scrub_public_data,
+    scrub_public_text,
+)
 
 
 # File extensions worth bundling. Everything else stays on disk.
@@ -21,6 +29,10 @@ _MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".ts", ".avi",
 _SIDECAR_EXTS = {".json", ".nfo", ".ass", ".srt", ".vtt",
                  ".txt", ".jsonl", ".jpg", ".png", ".webp"}
 _ALLOWED = _MEDIA_EXTS | _SIDECAR_EXTS
+_TEXT_SIDECAR_EXTS = {
+    ".json", ".nfo", ".ass", ".srt", ".vtt", ".txt", ".jsonl",
+}
+_MAX_SHARE_SIDECAR_BYTES = 64 * 1024 * 1024
 
 
 def _safe_relpath(child, root):
@@ -62,6 +74,72 @@ def _list_bundle_files(folder):
             selected.append((path, rel))
             total += size
     return selected, total
+
+
+def _scrub_nfo(text):
+    # Legacy StreamKeep NFO used <trailer> for the signed delivery URL.
+    # A trailer is also the wrong media-library semantic for source identity.
+    text = re.sub(
+        r"(?is)[ \t]*<trailer\b[^>]*>.*?</trailer>[ \t]*(?:\r?\n)?",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?is)<thumb\b[^>]*>\s*https?://.*?</thumb>",
+        "<thumb>thumbnail.jpg</thumb>",
+        text,
+    )
+    return scrub_public_text(text)
+
+
+def _scrub_json_lines(text):
+    output = []
+    for line in text.splitlines():
+        if not line.strip():
+            output.append("")
+            continue
+        try:
+            value = json.loads(line)
+        except (TypeError, ValueError):
+            return None
+        else:
+            output.append(json.dumps(
+                scrub_public_data(value), ensure_ascii=False,
+            ))
+    return "\n".join(output) + ("\n" if text.endswith(("\n", "\r")) else "")
+
+
+def _sanitized_sidecar_bytes(path):
+    """Return scrubbed public bytes, or ``None`` when sharing is blocked."""
+    try:
+        if os.path.getsize(path) > _MAX_SHARE_SIDECAR_BYTES:
+            return None
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    suffix = os.path.splitext(path)[1].lower()
+    name = os.path.basename(path).lower()
+    if suffix == ".json":
+        try:
+            value = json.loads(text)
+        except (TypeError, ValueError):
+            return None
+        else:
+            if name == "metadata.json":
+                value = normalize_metadata_payload(value)
+            else:
+                value = scrub_public_data(value)
+            text = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+    elif suffix == ".jsonl":
+        text = _scrub_json_lines(text)
+        if text is None:
+            return None
+    elif suffix == ".nfo":
+        text = _scrub_nfo(text)
+    else:
+        text = scrub_public_text(text)
+    return text.encode("utf-8")
 
 
 class BundleWorker(QThread):
@@ -129,8 +207,23 @@ class BundleWorker(QThread):
                         f"{arcname} ({size // 1024} KB)",
                     )
                     try:
-                        zf.write(path, arcname)
-                    except OSError:
+                        ext = os.path.splitext(path)[1].lower()
+                        if ext in _TEXT_SIDECAR_EXTS:
+                            payload = _sanitized_sidecar_bytes(path)
+                            if payload is None:
+                                self.progress.emit(
+                                    min(99, int(
+                                        (written / max(1, total)) * 100
+                                    )),
+                                    f"Blocked unsafe or oversized sidecar: "
+                                    f"{arcname}",
+                                )
+                                written += size
+                                continue
+                            zf.writestr(arcname, payload)
+                        else:
+                            zf.write(path, arcname)
+                    except (OSError, RuntimeError, ValueError):
                         # One bad file shouldn't abort the whole bundle.
                         continue
                     written += size

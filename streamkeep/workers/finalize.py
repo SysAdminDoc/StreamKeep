@@ -166,7 +166,19 @@ class FinalizeWorker(QThread):
 
                 step_no += 1
                 self._emit_progress("Saving metadata", step_no, total_steps)
-                MetadataSaver.save(out_dir, info)
+                saved = MetadataSaver.save(
+                    out_dir,
+                    info,
+                    source_url=task.get("history_url", ""),
+                )
+                if (
+                    getattr(info, "thumbnail_url", "")
+                    and not saved.get("thumbnail_path")
+                ):
+                    self.log.emit(
+                        "[METADATA] Remote thumbnail could not be saved; "
+                        "public sidecars contain no remote fallback URL."
+                    )
                 if self._interrupted():
                     result["cancelled"] = True
                     self.done.emit(result)
@@ -174,7 +186,12 @@ class FinalizeWorker(QThread):
                 if task.get("write_nfo"):
                     step_no += 1
                     self._emit_progress("Writing NFO", step_no, total_steps)
-                    MetadataSaver.write_nfo(out_dir, info, file_base=file_base)
+                    MetadataSaver.write_nfo(
+                        out_dir,
+                        info,
+                        file_base=file_base,
+                        source_url=task.get("history_url", ""),
+                    )
                     self.log.emit(f"[NFO] Wrote {file_base or 'movie'}.nfo for media library")
                 if getattr(info, "chapters", None):
                     step_no += 1

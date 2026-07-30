@@ -9,7 +9,9 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
+from streamkeep.metadata import MetadataWriteError
 from streamkeep.workers.finalize import FinalizeWorker
 
 
@@ -116,6 +118,38 @@ class InterruptTests(unittest.TestCase):
         self.assertFalse(worker._interrupted())
         worker.cancel()
         self.assertTrue(worker._interrupted())
+
+
+class FinalizeFailureTests(unittest.TestCase):
+    def test_metadata_write_failure_is_returned_to_the_caller(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            worker = _worker({
+                "info": SimpleNamespace(
+                    platform="Twitch",
+                    url="https://www.twitch.tv/videos/123",
+                    chapters=[],
+                    thumbnail_url="",
+                ),
+                "out_dir": tmpdir,
+                "record_manifest": False,
+            })
+            results = []
+            logs = []
+            worker.done.connect(results.append)
+            worker.log.connect(logs.append)
+
+            with mock.patch(
+                "streamkeep.workers.finalize.MetadataSaver.save",
+                side_effect=MetadataWriteError("disk full"),
+            ):
+                worker.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["finalize_error"], "disk full")
+        self.assertTrue(
+            any("Background finalization error: disk full" in line
+                for line in logs)
+        )
 
 
 if __name__ == "__main__":

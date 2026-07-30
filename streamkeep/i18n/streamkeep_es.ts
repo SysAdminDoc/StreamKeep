@@ -840,7 +840,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="89" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="83" />
             <source>Batch Rename Studio</source>
             <translation type="unfinished" />
         </message>
@@ -850,7 +850,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="99" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
             <source>BATCH TOOLS</source>
             <translation type="unfinished" />
         </message>
@@ -956,7 +956,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="99" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
             <source>Build a consistent naming pattern before you commit changes. Preview updates instantly, duplicate names are flagged, and an undo log is written after the batch runs.</source>
             <translation type="unfinished" />
         </message>
@@ -1013,7 +1013,7 @@ Archive workstation</source>
         </message>
         <message>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="69" />
-            <location filename="streamkeep/ui/rename_dialog.py" line="171" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="165" />
             <location filename="streamkeep/ui/tabs/settings.py" line="2238" />
             <location filename="streamkeep/ui/tabs/storage.py" line="234" />
             <source>Cancel</source>
@@ -1270,7 +1270,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="222" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="216" />
             <source>Choose one or more recordings from History to generate a rename preview.</source>
             <translation type="unfinished" />
         </message>
@@ -1451,7 +1451,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="234" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="228" />
             <source>Conflicting rows are highlighted in red. Adjust the template before renaming.</source>
             <translation type="unfinished" />
         </message>
@@ -1616,7 +1616,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="146" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
             <source>Current name</source>
             <translation type="unfinished" />
         </message>
@@ -1997,7 +1997,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="234" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="228" />
             <source>Duplicate names detected</source>
             <translation type="unfinished" />
         </message>
@@ -2258,7 +2258,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation>Los eventos aparecen aquí mientras se ejecutan las capturas.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="244" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="238" />
             <source>Every selected recording has a unique destination name.</source>
             <translation type="unfinished" />
         </message>
@@ -3470,7 +3470,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="146" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
             <source>New name</source>
             <translation type="unfinished" />
         </message>
@@ -3651,7 +3651,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="221" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="215" />
             <source>No recordings selected</source>
             <translation type="unfinished" />
         </message>
@@ -3796,7 +3796,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="222" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="216" />
             <source>Nothing selected</source>
             <translation type="unfinished" />
         </message>
@@ -3806,7 +3806,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="159" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="153" />
             <source>Nothing to rename</source>
             <translation type="unfinished" />
         </message>
@@ -4364,7 +4364,7 @@ Saves your settings first.</source>
         </message>
         <message>
             <location filename="streamkeep/ui/history_model.py" line="20" />
-            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="134" />
             <location filename="streamkeep/ui/storage_model.py" line="11" />
             <source>Preview</source>
             <translation>Vista previa</translation>
@@ -4385,7 +4385,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="244" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="238" />
             <source>Preview looks good</source>
             <translation type="unfinished" />
         </message>
@@ -4548,7 +4548,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="125" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="119" />
             <source>Quick presets</source>
             <translation type="unfinished" />
         </message>
@@ -4815,22 +4815,22 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="305" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="299" />
             <source>Rename pass complete</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="99" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
             <source>Rename recordings with a live preview</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="175" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="169" />
             <source>Rename selected</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="317" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="311" />
             <source>Renamed {renamed} • Skipped {skipped}</source>
             <translation type="unfinished" />
         </message>
@@ -4967,7 +4967,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="134" />
             <source>Review the current folder names against the generated results before renaming anything on disk.</source>
             <translation type="unfinished" />
         </message>
@@ -5346,7 +5346,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="159" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="153" />
             <source>Select one or more finished recordings from History, then reopen Batch Rename Studio.</source>
             <translation type="unfinished" />
         </message>
@@ -5885,7 +5885,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation>Sistemas listos</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="107" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="101" />
             <source>Template</source>
             <translation type="unfinished" />
         </message>
@@ -6110,7 +6110,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="111" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="105" />
             <source>Tokens: {channel}  {date}  {title}  {quality}  {duration}  {platform}  {seq:001}</source>
             <translation type="unfinished" />
         </message>
@@ -6383,7 +6383,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="107" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="101" />
             <source>Use tokens to build a naming pattern that stays readable across platforms, dates, and long recording libraries.</source>
             <translation type="unfinished" />
         </message>
@@ -6766,7 +6766,7 @@ Download again?</source>
             <translation>Comprobando el estado de {component}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="233" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="227" />
             <source>{conflicts} naming conflict(s) detected</source>
             <translation type="unfinished" />
         </message>
@@ -6863,7 +6863,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="99" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
             <source>{len(entries)} selected</source>
             <translation type="unfinished" />
         </message>
@@ -6893,7 +6893,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="243" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="237" />
             <source>{len(self._entries)} recording(s) ready to rename</source>
             <translation type="unfinished" />
         </message>

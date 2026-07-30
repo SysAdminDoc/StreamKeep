@@ -65,6 +65,11 @@ class ReconcileTests(unittest.TestCase):
             self.assertEqual(len(history), 2)
             titles = {h["title"] for h in history}
             self.assertEqual(titles, {"Stream 1", "Stream 2"})
+            imported_by_title = {h["title"]: h for h in history}
+            self.assertEqual(
+                imported_by_title["Stream 1"]["url"],
+                "https://kick.com/ch1/v1",
+            )
 
     def test_dry_run_does_not_modify_db(self):
         with tempfile.TemporaryDirectory() as tmpdir:

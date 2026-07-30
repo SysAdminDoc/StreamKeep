@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import VERSION
 from .capabilities import get_runtime_capabilities
+from .metadata import scrub_public_text
 from .paths import CONFIG_DIR, LOG_FILE, CRASH_LOG, PORTABLE
 
 _REDACT_PATTERNS = [
@@ -48,22 +49,33 @@ _SENSITIVE_CONFIG_KEYS = frozenset({
     "token", "api_key", "secret", "password",
     "oauth_token", "access_token", "refresh_token",
     "access_key", "secret_key",
+    "authorization", "proxy_authorization", "cookie", "cookies",
+    "header", "headers", "http_header", "http_headers",
 })
 
 
 def redact_text(text):
     """Redact known secret patterns from a text string."""
-    result = text
+    result = str(text or "")
     for pat in _REDACT_PATTERNS:
         result = pat.sub(lambda m: m.group(1) + "***REDACTED***", result)
-    return result
+    return scrub_public_text(result)
 
 
 def redact_config(cfg):
     """Return a deep copy of the config dict with sensitive values masked."""
     out = {}
     for key, value in cfg.items():
-        if key in _SENSITIVE_CONFIG_KEYS:
+        normalized = re.sub(
+            r"[^a-z0-9]+", "_", str(key).lower()
+        ).strip("_")
+        if (
+            normalized in _SENSITIVE_CONFIG_KEYS
+            or normalized.endswith(
+                ("_token", "_secret", "_signature", "_cookie", "_password")
+            )
+            or normalized.startswith(("x_amz_", "x_goog_"))
+        ):
             out[key] = "***REDACTED***" if value else ""
         elif isinstance(value, dict):
             out[key] = redact_config(value)

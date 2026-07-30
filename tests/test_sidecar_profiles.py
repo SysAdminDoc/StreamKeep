@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from streamkeep.integrations.sidecar_profiles import (
     generate_sidecars,
@@ -86,6 +87,25 @@ class SidecarProfileTests(unittest.TestCase):
             r2 = generate_sidecars(tmpdir, info, profile="full", overwrite=False)
             self.assertIsNotNone(r1.get("metadata_json"))
             self.assertIsNone(r2.get("metadata_json"))
+
+    def test_metadata_write_failure_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            messages = []
+            with mock.patch(
+                "streamkeep.metadata.os.replace",
+                side_effect=PermissionError("read only"),
+            ):
+                results = generate_sidecars(
+                    tmpdir,
+                    _make_info(),
+                    profile="archive",
+                    log_fn=messages.append,
+                )
+            self.assertIsNone(results["metadata_json"])
+            self.assertTrue(
+                any("Could not write public sidecar" in message
+                    for message in messages)
+            )
 
 
 if __name__ == "__main__":

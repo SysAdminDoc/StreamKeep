@@ -130,6 +130,10 @@ class StreamInfo:
     # feed. Lets finalize auto-fetch transcript/chapter sidecars for the
     # episode (the enclosure URL alone doesn't reference its feed).
     feed_url: str = ""
+    # Stable archival identity. ``url`` remains the short-lived delivery
+    # endpoint used by the downloader; these fields are safe for sidecars.
+    source_id: str = ""
+    webpage_url: str = ""
 
 
 @dataclass
@@ -144,6 +148,24 @@ class VODInfo:
     platform: str = ""
     channel: str = ""
     feed_url: str = ""  # originating RSS feed (podcast episodes)
+    source_id: str = ""
+    webpage_url: str = ""
+
+
+@dataclass(frozen=True)
+class ArchivalProvenance:
+    """Stable, public identity kept separate from delivery credentials."""
+
+    platform: str = ""
+    source_id: str = ""
+    webpage_url: str = ""
+
+    def to_dict(self):
+        return {
+            "platform": self.platform,
+            "source_id": self.source_id,
+            "webpage_url": self.webpage_url,
+        }
 
 
 @dataclass
