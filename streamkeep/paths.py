@@ -19,11 +19,23 @@ _CREATE_NO_WINDOW = (
     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 )
 
-# ffmpeg safety flags — restrict protocols and prevent stdin reads.
-FFMPEG_SAFETY = [
+# FFmpeg safety flags for trusted local post-processing and staging. Local
+# concat/filter workflows intentionally need ``file`` and occasionally
+# ``pipe``; remote downloads use the stricter policy below.
+FFMPEG_LOCAL_SAFETY = [
     "-nostdin",
     "-protocol_whitelist", "file,pipe,http,https,tcp,tls,crypto",
 ]
+FFMPEG_SAFETY = FFMPEG_LOCAL_SAFETY
+
+# Remote manifests are untrusted documents. They may reference only network
+# transports, and every connection is additionally forced through the
+# address-validating proxy in ``net_guard.GuardedHTTPProxy``.
+FFMPEG_REMOTE_INPUT_SAFETY = [
+    "-protocol_whitelist", "http,https,httpproxy,tcp,tls,crypto",
+    "-protocol_blacklist", "file,pipe,concat,concatf,subfile,unix,data",
+]
+FFMPEG_REMOTE_SAFETY = ["-nostdin", *FFMPEG_REMOTE_INPUT_SAFETY]
 
 # ── Portable mode detection (F43) ──────────────────────────────────
 # Check for a ``portable.txt`` marker next to the exe/script.

@@ -1,10 +1,11 @@
 """HLS m3u8 parsing."""
 
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from urllib.parse import urljoin
 
 from .models import HLSMediaPlaylist, HLSSegment, MediaTrackInfo, QualityInfo
+from .net_guard import RemoteURLPolicyError, validate_remote_url
 
 
 _ATTR_RE = re.compile(r'([A-Z0-9-]+)=("(?:[^"\\]|\\.)*"|[^,]*)')
@@ -37,6 +38,152 @@ def _parse_attributes(value):
 def _resolve(base_url, value):
     value = str(value or "").strip()
     return urljoin(base_url, value) if value else ""
+
+
+@dataclass(frozen=True)
+class HLSManifestReferences:
+    """Policy-checked resources and child playlists in one HLS document."""
+
+    resources: tuple
+    playlists: tuple
+
+
+_HLS_PLAYLIST_URI_TAGS = frozenset({
+    "#EXT-X-I-FRAME-STREAM-INF",
+    "#EXT-X-IMAGE-STREAM-INF",
+    "#EXT-X-RENDITION-REPORT",
+})
+_HLS_URI_ATTRIBUTE_TAGS = frozenset({
+    "#EXT-X-CONTENT-STEERING",
+    "#EXT-X-I-FRAME-STREAM-INF",
+    "#EXT-X-IMAGE-STREAM-INF",
+    "#EXT-X-KEY",
+    "#EXT-X-MAP",
+    "#EXT-X-MEDIA",
+    "#EXT-X-PART",
+    "#EXT-X-PRELOAD-HINT",
+    "#EXT-X-RENDITION-REPORT",
+    "#EXT-X-SESSION-DATA",
+    "#EXT-X-SESSION-KEY",
+})
+
+
+def validate_hls_manifest(
+    body,
+    base_url,
+    *,
+    allow_private_network=False,
+    max_references=10_000,
+):
+    """Normalize and policy-check every URI carried by an HLS document.
+
+    This covers master variants and renditions as well as media segments,
+    encryption keys, initialization maps, low-latency parts, preload hints,
+    iframe/image playlists, session resources, and content steering.
+    """
+    base = validate_remote_url(
+        base_url, allow_private_network=allow_private_network,
+    ).url
+    resources = []
+    playlists = []
+    resource_seen = set()
+    playlist_seen = set()
+    pending_playlist = False
+
+    def add(raw_value, *, playlist=False):
+        if not str(raw_value or "").strip():
+            return
+        target = validate_remote_url(
+            raw_value,
+            base_url=base,
+            allow_private_network=allow_private_network,
+        ).url
+        if target not in resource_seen:
+            resource_seen.add(target)
+            resources.append(target)
+        if playlist and target not in playlist_seen:
+            playlist_seen.add(target)
+            playlists.append(target)
+        if len(resources) > max_references:
+            raise RemoteURLPolicyError(
+                "HLS manifest exceeds the URI reference limit"
+            )
+
+    for raw_line in str(body or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            tag, separator, value = line.partition(":")
+            if tag == "#EXT-X-STREAM-INF":
+                pending_playlist = True
+            if not separator or tag not in _HLS_URI_ATTRIBUTE_TAGS:
+                continue
+            attrs = _parse_attributes(value)
+            uri_values = []
+            if attrs.get("URI"):
+                uri_values.append(attrs["URI"])
+            if attrs.get("SERVER-URI"):
+                uri_values.append(attrs["SERVER-URI"])
+            for uri_value in uri_values:
+                is_playlist = tag in _HLS_PLAYLIST_URI_TAGS
+                if tag == "#EXT-X-MEDIA":
+                    is_playlist = attrs.get("TYPE", "").upper() in {
+                        "AUDIO", "SUBTITLES", "VIDEO",
+                    }
+                add(uri_value, playlist=is_playlist)
+            continue
+        add(line, playlist=pending_playlist)
+        pending_playlist = False
+
+    return HLSManifestReferences(tuple(resources), tuple(playlists))
+
+
+def preflight_hls_manifest_tree(
+    url,
+    fetch_text,
+    *,
+    allow_private_network=False,
+    max_depth=8,
+    max_manifests=128,
+):
+    """Fetch and validate a bounded recursive HLS playlist graph."""
+    root = validate_remote_url(
+        url, allow_private_network=allow_private_network,
+    ).url
+    pending = [(root, 0)]
+    seen = []
+    seen_set = set()
+    while pending:
+        current, depth = pending.pop(0)
+        if current in seen_set:
+            continue
+        if len(seen) >= max_manifests:
+            raise RemoteURLPolicyError(
+                "HLS playlist graph exceeds the manifest limit"
+            )
+        body = fetch_text(current)
+        if body is None:
+            raise RemoteURLPolicyError(
+                "HLS manifest could not be fetched through guarded transport"
+            )
+        seen.append(current)
+        seen_set.add(current)
+        references = validate_hls_manifest(
+            body,
+            current,
+            allow_private_network=allow_private_network,
+        )
+        if references.playlists and depth >= max_depth:
+            raise RemoteURLPolicyError(
+                "HLS playlist graph exceeds the recursion limit"
+            )
+        pending.extend(
+            (playlist, depth + 1)
+            for playlist in references.playlists
+            if playlist not in seen_set
+        )
+    return tuple(seen)
 
 
 def parse_hls_master(body, base_url):

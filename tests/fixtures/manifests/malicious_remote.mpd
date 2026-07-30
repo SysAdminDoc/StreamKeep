@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <Representation id="unsafe" bandwidth="1000">
+        <BaseURL>file:///STREAMKEEP_SENTINEL</BaseURL>
+        <SegmentList>
+          <Initialization sourceURL="http://127.0.0.1:9/init.mp4"/>
+          <SegmentURL media="http://169.254.169.254/latest/meta-data/segment.m4s"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>

@@ -266,6 +266,94 @@ def test_native_download_exports_equivalent_ffmpeg_plan(tmp_path):
     assert argv[argv.index("-t") + 1] == "30"
 
 
+def test_remote_ffmpeg_inputs_exclude_local_protocols(tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 0, 30)],
+        str(tmp_path),
+        "hls",
+    )
+    argv = worker.build_export_argv()
+    whitelist = argv[argv.index("-protocol_whitelist") + 1].split(",")
+    blacklist = argv[argv.index("-protocol_blacklist") + 1].split(",")
+
+    assert "file" not in whitelist
+    assert "pipe" not in whitelist
+    assert {"file", "pipe", "concat", "subfile"}.issubset(blacklist)
+
+
+def test_guarded_proxy_is_applied_to_each_ffmpeg_input(tmp_path):
+    video = "https://video.example.com/video.m3u8"
+    audio = "https://audio.example.net/audio.m3u8"
+    worker = DownloadWorker(
+        video, [(0, "capture", 0, 30)], str(tmp_path), "hls"
+    )
+    worker.audio_url = audio
+    worker._guarded_proxy = mock.Mock(
+        url="http://127.0.0.1:54321"
+    )
+
+    argv = worker._build_ffmpeg_download_cmd(
+        str(tmp_path / "capture.mp4"), 0, 30, executable="ffmpeg"
+    )
+
+    assert argv.count("-http_proxy") == 2
+    assert [
+        argv[index + 1]
+        for index, value in enumerate(argv)
+        if value == "-http_proxy"
+    ] == ["http://127.0.0.1:54321"] * 2
+
+
+def test_guarded_child_environment_cannot_bypass_proxy(monkeypatch, tmp_path):
+    worker = DownloadWorker(
+        "https://cdn.example.com/media.m3u8",
+        [(0, "capture", 0, 30)],
+        str(tmp_path),
+        "hls",
+    )
+    worker._guarded_proxy = mock.Mock(
+        url="http://127.0.0.1:54321"
+    )
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("no_proxy", "*")
+    monkeypatch.setenv("HTTPS_PROXY", "http://untrusted.example:8080")
+
+    env = worker._guarded_child_env()
+
+    assert env["NO_PROXY"] == ""
+    assert env["HTTP_PROXY"] == "http://127.0.0.1:54321"
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:54321"
+    assert env["ALL_PROXY"] == "http://127.0.0.1:54321"
+    assert "*" not in {
+        value for key, value in env.items() if key.lower() == "no_proxy"
+    }
+
+
+def test_remote_manifest_file_uri_is_blocked_before_ffmpeg(tmp_path):
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("do-not-read", encoding="utf-8")
+    worker = DownloadWorker(
+        sentinel.as_uri(),
+        [(0, "capture", 0, 30)],
+        str(tmp_path),
+        "hls",
+    )
+    errors = []
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True,
+    ), mock.patch(
+        "streamkeep.workers.download.subprocess.Popen"
+    ) as popen:
+        worker.run()
+
+    popen.assert_not_called()
+    assert errors and "Only HTTP(S)" in errors[0][1]
+    assert sentinel.read_text(encoding="utf-8") == "do-not-read"
+
+
 def test_hls_clear_key_exports_native_ytdlp_override(tmp_path):
     source = "https://cdn.example.com/media.m3u8"
     worker = DownloadWorker(
@@ -285,6 +373,25 @@ def test_hls_clear_key_exports_native_ytdlp_override(tmp_path):
     )
 
 
+def test_hls_clear_key_runtime_guards_ytdlp_and_ffmpeg_transport(tmp_path):
+    source = "https://cdn.example.com/media.m3u8"
+    worker = DownloadWorker(
+        source, [(0, "capture", 0, 30)], str(tmp_path), "hls"
+    )
+    worker.hls_key_override = "00112233445566778899aabbccddeeff"
+    worker._guarded_proxy = mock.Mock(url="http://127.0.0.1:54321")
+
+    argv = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "capture.%(ext)s")
+    )
+
+    assert argv[argv.index("--proxy") + 1] == "http://127.0.0.1:54321"
+    downloader_args = argv[argv.index("--downloader-args") + 1]
+    assert downloader_args.startswith("ffmpeg_i:")
+    assert "-protocol_blacklist file,pipe,concat" in downloader_args
+    assert "-http_proxy http://127.0.0.1:54321" in downloader_args
+
+
 def test_hls_clear_key_uses_ytdlp_download_path(tmp_path):
     worker = DownloadWorker(
         "https://cdn.example.com/media.m3u8",
@@ -296,6 +403,8 @@ def test_hls_clear_key_uses_ytdlp_download_path(tmp_path):
         worker, "_ensure_supported_ffmpeg", return_value=True,
     ), mock.patch.object(
         worker, "_ensure_supported_ytdlp", return_value=True,
+    ), mock.patch.object(
+        worker, "_ensure_guarded_transport", return_value=True,
     ), mock.patch.object(
         worker, "_download_with_ytdlp", return_value=True,
     ) as download:
@@ -794,6 +903,8 @@ def _run_live_ffmpeg_worker(tmp_path, returncode, make_output):
 
     with mock.patch.object(
         worker, "_ensure_supported_ffmpeg", return_value=True
+    ), mock.patch.object(
+        worker, "_ensure_guarded_transport", return_value=True
     ), mock.patch(
         "streamkeep.workers.download.resolve_tool_command", return_value="ffmpeg"
     ), mock.patch(

@@ -16,10 +16,147 @@ import xml.etree.ElementTree as ET
 
 from .http import curl
 from .models import MediaTrackInfo, QualityInfo
+from .net_guard import RemoteURLPolicyError, validate_remote_url
 
 # MPD namespace — most manifests use this, but some omit it
 _MPD_NS = "urn:mpeg:dash:schema:mpd:2011"
 _NS = {"mpd": _MPD_NS}
+
+
+_DASH_URI_ATTRIBUTES = {
+    "SegmentTemplate": (
+        "media", "initialization", "index", "bitstreamSwitching",
+    ),
+    "SegmentURL": ("media", "index"),
+    "Initialization": ("sourceURL",),
+    "RepresentationIndex": ("sourceURL",),
+    "BitstreamSwitching": ("sourceURL",),
+    "ContentSteering": ("proxyServerURL",),
+}
+
+
+def _local_name(value):
+    return str(value or "").rsplit("}", 1)[-1]
+
+
+def validate_dash_manifest(
+    xml_text,
+    base_url,
+    *,
+    allow_private_network=False,
+    max_references=20_000,
+):
+    """Normalize and policy-check every remotely dereferenced DASH URI."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as error:
+        raise RemoteURLPolicyError(f"DASH manifest is malformed: {error}") from None
+    root_url = validate_remote_url(
+        base_url, allow_private_network=allow_private_network,
+    ).url
+    references = []
+    seen = set()
+
+    def add(raw_value, parent_url):
+        value = str(raw_value or "").strip()
+        if not value:
+            return ""
+        target = validate_remote_url(
+            value,
+            base_url=parent_url,
+            allow_private_network=allow_private_network,
+        ).url
+        if target not in seen:
+            seen.add(target)
+            references.append(target)
+        if len(references) > max_references:
+            raise RemoteURLPolicyError(
+                "DASH manifest exceeds the URI reference limit"
+            )
+        return target
+
+    def walk(element, parent_bases):
+        base_children = [
+            child for child in list(element)
+            if _local_name(child.tag) == "BaseURL"
+            and str(child.text or "").strip()
+        ]
+        if base_children:
+            bases = []
+            for parent_base in parent_bases:
+                for child in base_children:
+                    target = add(child.text, parent_base)
+                    if target and target not in bases:
+                        bases.append(target)
+        else:
+            bases = list(parent_bases)
+
+        tag = _local_name(element.tag)
+        for attribute in _DASH_URI_ATTRIBUTES.get(tag, ()):
+            value = element.attrib.get(attribute, "")
+            for base in bases:
+                add(value, base)
+
+        if tag in {"Location", "PatchLocation"}:
+            for base in parent_bases:
+                add(element.text, base)
+        if tag == "ContentSteering":
+            for base in bases:
+                add(element.text, base)
+        if tag == "UTCTiming":
+            value = str(element.attrib.get("value", "") or "").strip()
+            scheme_id = str(
+                element.attrib.get("schemeIdUri", "") or ""
+            ).lower()
+            try:
+                value_scheme = urllib.parse.urlsplit(value).scheme.lower()
+            except ValueError:
+                value_scheme = "invalid"
+            if (
+                ":utc:http-" in scheme_id
+                or value.startswith("//")
+                or bool(value_scheme)
+            ):
+                for base in bases:
+                    add(value, base)
+
+        for attribute, value in element.attrib.items():
+            if _local_name(attribute) != "href":
+                continue
+            if value == "urn:mpeg:dash:resolve-to-zero:2013":
+                continue
+            for base in bases:
+                add(value, base)
+
+        for child in list(element):
+            if _local_name(child.tag) != "BaseURL":
+                walk(child, bases)
+
+    walk(root, [root_url])
+    return tuple(references)
+
+
+def preflight_dash_manifest(
+    url,
+    fetch_text,
+    *,
+    allow_private_network=False,
+):
+    """Fetch one MPD through guarded transport and validate its URI graph."""
+    manifest_url = validate_remote_url(
+        url, allow_private_network=allow_private_network,
+    ).url
+    body = fetch_text(manifest_url)
+    if body is None:
+        raise RemoteURLPolicyError(
+            "DASH manifest could not be fetched through guarded transport"
+        )
+    validate_dash_manifest(
+        body,
+        manifest_url,
+        allow_private_network=allow_private_network,
+    )
+    return manifest_url
 
 
 def parse_mpd(url, log_fn=None):

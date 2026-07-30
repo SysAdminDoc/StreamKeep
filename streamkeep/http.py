@@ -20,6 +20,7 @@ import subprocess
 import threading
 import time
 from typing import Any
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +242,64 @@ def curl(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -
         return None
     result = run_capture_interruptible(cmd, timeout=timeout + 2)
     return result.stdout if result.returncode == 0 else None
+
+
+def guarded_curl(
+    url: str,
+    proxy_url: str,
+    timeout: float = 15,
+    max_bytes: int = 4 * 1024 * 1024,
+) -> str | None:
+    """Fetch bounded text through StreamKeep's loopback policy proxy.
+
+    The explicit empty ``--noproxy`` prevents environment bypasses. Redirects
+    remain enabled because every new HTTP request or HTTPS CONNECT traverses
+    the guarded proxy and is independently resolved, validated, and pinned.
+    Host-profile headers are intentionally not replayed across CDN redirects.
+    """
+    try:
+        proxy = urllib.parse.urlsplit(str(proxy_url or ""))
+        if (
+            proxy.scheme != "http"
+            or proxy.hostname not in {"127.0.0.1", "::1", "localhost"}
+            or not proxy.port
+        ):
+            raise ValueError("guarded proxy must be an explicit loopback URL")
+        curl_path = resolve_tool_command("curl")
+    except (CapabilityUnavailableError, ValueError) as error:
+        logger.warning("Guarded manifest fetch unavailable: %s", error)
+        return None
+
+    max_time = max(1, int(timeout or 15))
+    connect_timeout = max(1, min(10, max_time))
+    cmd = [
+        curl_path,
+        "-sS",
+        "-L",
+        "--fail",
+        "--globoff",
+        "--proto", "=http,https",
+        "--proto-redir", "=http,https",
+        "--max-redirs", "5",
+        "--connect-timeout", str(connect_timeout),
+        "--max-time", str(max_time),
+        "--max-filesize", str(
+            max(1024, min(int(max_bytes), 16 * 1024 * 1024))
+        ),
+        "--proxy", proxy_url,
+        "--noproxy", "",
+    ]
+    _append_cookie_args(cmd)
+    cmd.append(str(url))
+    result = run_capture_interruptible(cmd, timeout=max_time + 2)
+    if result.returncode != 0 or result.timed_out or result.interrupted:
+        logger.warning(
+            "Guarded manifest fetch failed (exit=%s, timeout=%s)",
+            result.returncode,
+            result.timed_out,
+        )
+        return None
+    return result.stdout
 
 
 def curl_json(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -> Any:

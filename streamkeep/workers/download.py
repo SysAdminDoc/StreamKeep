@@ -8,6 +8,7 @@ import subprocess
 import time
 from glob import glob
 from pathlib import Path
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,17 @@ from ..capabilities import (
     require_capability,
     resolve_tool_command,
 )
-from ..http import parallel_http_download
-from ..paths import FFMPEG_SAFETY, _CREATE_NO_WINDOW
+from ..http import guarded_curl, parallel_http_download
+from ..net_guard import (
+    GuardedHTTPProxy,
+    RemoteURLPolicyError,
+    validate_remote_url,
+)
+from ..paths import (
+    FFMPEG_REMOTE_INPUT_SAFETY,
+    FFMPEG_REMOTE_SAFETY,
+    _CREATE_NO_WINDOW,
+)
 from ..postprocess.codecs import AUDIO_EXTS, VIDEO_EXTS
 from ..resume import (
     clear_resume_state, merge_completed, save_resume_state,
@@ -111,6 +121,8 @@ class DownloadWorker(QThread):
         self._proc = None
         self._ffmpeg_path = ""
         self._proc_lock = __import__("threading").Lock()
+        self._guarded_proxy = None
+        self._guarded_transport_ready = False
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
         # (main_window) attach this via `attach_resume_state` just before
@@ -377,8 +389,13 @@ class DownloadWorker(QThread):
             enabled = transfer_options[f"embed_{name}"]
             if enabled is not None:
                 cmd.append(f"--embed-{name}" if enabled else f"--no-embed-{name}")
-        if self.proxy:
-            cmd.extend(["--proxy", self.proxy])
+        effective_proxy = (
+            self._guarded_proxy.url
+            if self._guarded_proxy is not None
+            else self.proxy
+        )
+        if effective_proxy:
+            cmd.extend(["--proxy", effective_proxy])
         from ..extractors.ytdlp import _is_youtube_url as _yt_url
         capture_chat = bool(self.capture_youtube_chat) and _yt_url(
             self._effective_ytdlp_source()
@@ -438,6 +455,15 @@ class DownloadWorker(QThread):
             cmd.extend([
                 "--extractor-args", hls_key_options["extractor_arg"],
             ])
+        if self.hls_key_override and self._guarded_proxy is not None:
+            ffmpeg_guard_args = [
+                *FFMPEG_REMOTE_INPUT_SAFETY,
+                "-http_proxy", self._guarded_proxy.url,
+            ]
+            cmd.extend([
+                "--downloader-args",
+                "ffmpeg_i:" + " ".join(ffmpeg_guard_args),
+            ])
         if impersonate:
             cmd.extend(ytdlp_impersonate_args())
         try:
@@ -481,6 +507,142 @@ class DownloadWorker(QThread):
             and (self.ytdlp_format or self.ytdlp_audio_format)
         )
 
+    @staticmethod
+    def _is_remote_input(url):
+        try:
+            return urlsplit(str(url or "")).scheme.lower() in {"http", "https"}
+        except ValueError:
+            return False
+
+    def _guarded_input_urls(self):
+        if self.hls_key_override and self._uses_ytdlp_download():
+            return list(dict.fromkeys(
+                value for value in (
+                    self._effective_ytdlp_source(), self.playlist_url,
+                ) if value
+            ))
+        if self.selected_tracks:
+            values = [
+                str(self._track_record(track).get("url") or "")
+                for track in self.selected_tracks
+            ]
+        else:
+            values = [self.playlist_url, self.audio_url]
+        return list(dict.fromkeys(value for value in values if value))
+
+    def _manifest_kind(self, url):
+        try:
+            path = urlsplit(str(url or "")).path.lower()
+        except ValueError:
+            path = ""
+        if path.endswith(".m3u8"):
+            return "hls"
+        if path.endswith(".mpd"):
+            return "dash"
+        if str(url) == str(self.playlist_url):
+            if str(self.format_type).startswith("hls"):
+                return "hls"
+            if str(self.format_type).startswith("dash"):
+                return "dash"
+        return ""
+
+    def _ensure_guarded_transport(self):
+        """Start the runtime address gate and preflight current manifests."""
+        if self._guarded_transport_ready:
+            return True
+        inputs = self._guarded_input_urls()
+        manifest_inputs = [
+            (url, self._manifest_kind(url))
+            for url in inputs
+            if self._manifest_kind(url)
+        ]
+        if not inputs:
+            raise RemoteURLPolicyError("Download has no media input URL")
+
+        normalized = {}
+        for url in inputs:
+            target = validate_remote_url(url)
+            normalized[url] = target.url
+
+        self._guarded_proxy = GuardedHTTPProxy()
+        proxy_url = self._guarded_proxy.start()
+
+        def fetch_text(current):
+            return guarded_curl(current, proxy_url, timeout=20)
+
+        try:
+            from ..dash import preflight_dash_manifest
+            from ..hls import preflight_hls_manifest_tree
+
+            for url, kind in manifest_inputs:
+                safe_url = normalized[url]
+                if kind == "hls":
+                    preflight_hls_manifest_tree(safe_url, fetch_text)
+                elif kind == "dash":
+                    preflight_dash_manifest(safe_url, fetch_text)
+        except Exception:
+            self._stop_guarded_transport()
+            raise
+        self._guarded_transport_ready = True
+        if manifest_inputs:
+            self.log.emit(
+                "[SECURITY] Manifest URI graph validated; runtime connections "
+                "are address-pinned."
+            )
+        return True
+
+    def _stop_guarded_transport(self):
+        proxy = self._guarded_proxy
+        self._guarded_proxy = None
+        self._guarded_transport_ready = False
+        if proxy is not None:
+            proxy.stop()
+
+    def _guard_transport_or_report(self, segment_index):
+        try:
+            return self._ensure_guarded_transport()
+        except (RemoteURLPolicyError, OSError, ValueError) as error:
+            message = f"Remote media policy rejected this job: {error}"
+            self.log.emit(f"[BLOCKED] {message}")
+            self.error.emit(segment_index, message)
+            return False
+
+    def _ffmpeg_input_args(self, url, *, start=None):
+        args = list(FFMPEG_REMOTE_INPUT_SAFETY)
+        if start is not None:
+            args.extend(["-ss", str(start)])
+        if self._guarded_proxy is not None and self._is_remote_input(url):
+            args.extend(["-http_proxy", self._guarded_proxy.url])
+        args.extend(["-i", url])
+        return args
+
+    def _guarded_child_env(self):
+        """Force child network stacks through the active policy proxy."""
+        env = os.environ.copy()
+        if self._guarded_proxy is None:
+            return env
+        proxy_url = self._guarded_proxy.url
+        proxy_keys = {
+            "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+        }
+        for key in tuple(env):
+            if key.lower() in proxy_keys:
+                env.pop(key, None)
+        env.update({
+            "HTTP_PROXY": proxy_url,
+            "HTTPS_PROXY": proxy_url,
+            "ALL_PROXY": proxy_url,
+            "NO_PROXY": "",
+        })
+        if os.name != "nt":
+            env.update({
+                "http_proxy": proxy_url,
+                "https_proxy": proxy_url,
+                "all_proxy": proxy_url,
+                "no_proxy": "",
+            })
+        return env
+
     def _build_ffmpeg_download_cmd(
         self, outfile, start, duration, *, executable=None,
     ):
@@ -500,34 +662,43 @@ class DownloadWorker(QThread):
         if chunk_mode:
             base = os.path.splitext(outfile)[0] + "_part%03d.mp4"
             return [
-                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                "-i", self.playlist_url, "-c", "copy", "-f", "segment",
+                executable, *FFMPEG_REMOTE_SAFETY,
+                "-hide_banner", "-loglevel", "info",
+                *self._ffmpeg_input_args(self.playlist_url),
+                "-c", "copy", "-f", "segment",
                 "-segment_time", str(int(self.chunk_length_secs)),
                 "-reset_timestamps", "1", "-strftime", "0", "-y", base,
             ]
         if self.audio_url:
             if self.format_type == "mp4":
                 return [
-                    executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                    "-i", self.playlist_url, "-i", self.audio_url,
+                    executable, *FFMPEG_REMOTE_SAFETY,
+                    "-hide_banner", "-loglevel", "info",
+                    *self._ffmpeg_input_args(self.playlist_url),
+                    *self._ffmpeg_input_args(self.audio_url),
                     "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
                     "-y", outfile,
                 ]
             cmd = [
-                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                "-ss", str(start), "-i", self.playlist_url,
-                "-ss", str(start), "-i", self.audio_url,
+                executable, *FFMPEG_REMOTE_SAFETY,
+                "-hide_banner", "-loglevel", "info",
+                *self._ffmpeg_input_args(self.playlist_url, start=start),
+                *self._ffmpeg_input_args(self.audio_url, start=start),
                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
             ]
         elif self.format_type == "mp4":
             return [
-                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                "-i", self.playlist_url, "-c", "copy", "-y", outfile,
+                executable, *FFMPEG_REMOTE_SAFETY,
+                "-hide_banner", "-loglevel", "info",
+                *self._ffmpeg_input_args(self.playlist_url),
+                "-c", "copy", "-y", outfile,
             ]
         else:
             cmd = [
-                executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
-                "-ss", str(start), "-i", self.playlist_url, "-c", "copy",
+                executable, *FFMPEG_REMOTE_SAFETY,
+                "-hide_banner", "-loglevel", "info",
+                *self._ffmpeg_input_args(self.playlist_url, start=start),
+                "-c", "copy",
             ]
         if not is_live_capture:
             cmd.extend(["-t", str(duration)])
@@ -585,12 +756,13 @@ class DownloadWorker(QThread):
                 inputs.append(url)
 
         cmd = [
-            executable, *FFMPEG_SAFETY, "-hide_banner", "-loglevel", "info",
+            executable, *FFMPEG_REMOTE_SAFETY,
+            "-hide_banner", "-loglevel", "info",
         ]
         for url in inputs:
-            if start > 0:
-                cmd.extend(["-ss", str(start)])
-            cmd.extend(["-i", url])
+            cmd.extend(self._ffmpeg_input_args(
+                url, start=start if start > 0 else None,
+            ))
         output_indexes = {"audio": 0, "subtitle": 0}
         for record in records:
             kind = record["kind"]
@@ -746,6 +918,7 @@ class DownloadWorker(QThread):
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1, encoding="utf-8", errors="replace",
                     creationflags=_CREATE_NO_WINDOW,
+                    env=self._guarded_child_env(),
                 )
             output_lines = []
             try:
@@ -972,6 +1145,12 @@ class DownloadWorker(QThread):
             return False
 
     def run(self):
+        try:
+            self._run_downloads()
+        finally:
+            self._stop_guarded_transport()
+
+    def _run_downloads(self):
         logger.info("Download started: %d segment(s) to %s", len(self.segments), self.output_dir)
         all_succeeded = True
         for seg_idx, label, start, duration in self.segments:
@@ -1026,6 +1205,10 @@ class DownloadWorker(QThread):
                         seg_idx,
                         "Unsafe or missing yt-dlp; see log for repair guidance",
                     )
+                    return
+                if self.hls_key_override and not self._guard_transport_or_report(
+                    seg_idx
+                ):
                     return
                 success = self._download_with_ytdlp(
                     seg_idx, label, outfile, expected_ytdlp_outfile,
@@ -1099,6 +1282,8 @@ class DownloadWorker(QThread):
                     "Unsafe or missing FFmpeg; see log for repair guidance",
                 )
                 return
+            if not self._guard_transport_or_report(seg_idx):
+                return
 
             # Live-only: split long captures into chunks via ffmpeg segment
             # muxer. The outfile pattern `<base>_part%03d.mp4` gives us
@@ -1130,6 +1315,7 @@ class DownloadWorker(QThread):
                             text=True, bufsize=1, encoding="utf-8",
                             errors="replace",
                             creationflags=_CREATE_NO_WINDOW,
+                            env=self._guarded_child_env(),
                         )
                     for line in self._proc.stderr:
                         line = line.strip()
@@ -1216,6 +1402,7 @@ class DownloadWorker(QThread):
                             text=True, bufsize=1, encoding="utf-8",
                             errors="replace",
                             creationflags=_CREATE_NO_WINDOW,
+                            env=self._guarded_child_env(),
                         )
                     output_lines = []
                     try:

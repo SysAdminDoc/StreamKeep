@@ -84,6 +84,41 @@ class HttpCommandTests(unittest.TestCase):
         self.assertEqual(details["etag"], '"representation-1"')
         self.assertEqual(details["content_digest"], f"sha-256=:{digest}:")
 
+    def test_guarded_curl_forces_loopback_proxy_for_every_redirect(self):
+        captured = {}
+
+        def fake_run(cmd, timeout):
+            captured["cmd"] = cmd
+            captured["timeout"] = timeout
+            return http.CommandResult(returncode=0, stdout="#EXTM3U\n")
+
+        with mock.patch.object(http, "_append_cookie_args"), mock.patch.object(
+            http, "run_capture_interruptible", side_effect=fake_run
+        ):
+            body = http.guarded_curl(
+                "https://cdn.example.com/master.m3u8",
+                "http://127.0.0.1:54321",
+            )
+
+        self.assertEqual(body, "#EXTM3U\n")
+        self.assertEqual(
+            captured["cmd"][captured["cmd"].index("--proxy") + 1],
+            "http://127.0.0.1:54321",
+        )
+        no_proxy_index = captured["cmd"].index("--noproxy")
+        self.assertEqual(captured["cmd"][no_proxy_index + 1], "")
+        self.assertIn("--proto-redir", captured["cmd"])
+        self.assertIn("--max-filesize", captured["cmd"])
+
+    def test_guarded_curl_rejects_non_loopback_proxy(self):
+        with mock.patch.object(http, "run_capture_interruptible") as run:
+            body = http.guarded_curl(
+                "https://cdn.example.com/master.m3u8",
+                "https://proxy.example.com:443",
+            )
+        self.assertIsNone(body)
+        run.assert_not_called()
+
 
 class ParallelDownloadTests(unittest.TestCase):
     payload = b"abcdefgh"

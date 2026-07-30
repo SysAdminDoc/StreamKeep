@@ -5,23 +5,40 @@ break the test suite. Each fixture represents a real-world manifest
 pattern that the parsers must handle correctly.
 """
 
+import ipaddress
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from streamkeep.dash import parse_mpd_xml
+from streamkeep.dash import (
+    parse_mpd_xml,
+    preflight_dash_manifest,
+    validate_dash_manifest,
+)
 from streamkeep.hls import (
     parse_hls_duration,
     parse_hls_master,
     parse_hls_media_playlist,
+    preflight_hls_manifest_tree,
     resume_identity_matches,
+    validate_hls_manifest,
 )
 from streamkeep.models import ResumeState, default_media_tracks
+from streamkeep.net_guard import RemoteURLPolicyError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
 
 
 def _read(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def _resolved_addresses(host, _port):
+    try:
+        return (ipaddress.ip_address(host),)
+    except ValueError:
+        return (ipaddress.ip_address("93.184.216.34"),)
 
 
 class DashStaticMPDTests(unittest.TestCase):
@@ -107,6 +124,105 @@ class DashDRMTests(unittest.TestCase):
         )
 
 
+class DashManifestPolicyTests(unittest.TestCase):
+    def test_base_template_list_initialization_and_cdn_changes_are_checked(self):
+        manifest = """\
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+  <ContentSteering proxyServerURL="https://proxy.example.net/steer">
+    https://steering.example.com/api
+  </ContentSteering>
+  <BaseURL>https://media.example.com/root/</BaseURL>
+  <Period>
+    <AdaptationSet mimeType="video/mp4">
+      <SegmentTemplate initialization="init-$RepresentationID$.mp4"
+                       media="//segments.example.net/v-$Number$.m4s"
+                       bitstreamSwitching="switch-$RepresentationID$.mp4"/>
+      <Representation id="v1">
+        <SegmentList>
+          <Initialization sourceURL="https://init.example.org/v1.mp4"/>
+          <BitstreamSwitching sourceURL="switch-init.mp4"/>
+          <SegmentURL media="chunk-1.m4s" index="chunk-1.sidx"/>
+        </SegmentList>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>"""
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            references = validate_dash_manifest(
+                manifest, "https://origin.example.com/main.mpd"
+            )
+
+        self.assertIn(
+            "https://media.example.com/root/init-$RepresentationID$.mp4",
+            references,
+        )
+        self.assertIn(
+            "https://segments.example.net/v-$Number$.m4s", references
+        )
+        self.assertIn("https://init.example.org/v1.mp4", references)
+        self.assertIn(
+            "https://media.example.com/root/chunk-1.m4s", references
+        )
+        self.assertIn(
+            "https://media.example.com/root/chunk-1.sidx", references
+        )
+        self.assertIn(
+            "https://media.example.com/root/switch-$RepresentationID$.mp4",
+            references,
+        )
+        self.assertIn(
+            "https://media.example.com/root/switch-init.mp4", references
+        )
+        self.assertIn(
+            "https://steering.example.com/api", references
+        )
+        self.assertIn(
+            "https://proxy.example.net/steer", references
+        )
+
+    def test_malicious_dash_fixture_cannot_reach_sentinel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sentinel = Path(tmpdir) / "sentinel.txt"
+            sentinel.write_text("do-not-read", encoding="utf-8")
+            manifest = _read("malicious_remote.mpd").replace(
+                "file:///STREAMKEEP_SENTINEL", sentinel.as_uri()
+            )
+            with mock.patch(
+                "streamkeep.net_guard.resolve_host_addresses",
+                side_effect=_resolved_addresses,
+            ), self.assertRaises(RemoteURLPolicyError):
+                validate_dash_manifest(
+                    manifest, "https://origin.example.com/main.mpd"
+                )
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8"), "do-not-read"
+            )
+
+    def test_dash_preflight_fetches_only_through_supplied_guard(self):
+        manifest = """\
+<MPD><Period><AdaptationSet mimeType="video/mp4">
+<Representation id="v"><BaseURL>https://cdn.example.net/video.mp4</BaseURL>
+</Representation></AdaptationSet></Period></MPD>"""
+        fetched = []
+
+        def fetch(url):
+            fetched.append(url)
+            return manifest
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            result = preflight_dash_manifest(
+                "https://origin.example.com/main.mpd", fetch
+            )
+        self.assertEqual(result, "https://origin.example.com/main.mpd")
+        self.assertEqual(fetched, [result])
+
+
 class HLSMasterPlaylistTests(unittest.TestCase):
     def test_master_playlist_parses_three_variants(self):
         qualities = parse_hls_master(
@@ -169,6 +285,89 @@ class HLSMasterPlaylistTests(unittest.TestCase):
         sdr = next(q for q in qualities if q.resolution == "1920x1080")
         self.assertEqual(sdr.video_range, "SDR")
         self.assertAlmostEqual(sdr.frame_rate, 29.97, places=2)
+
+
+class HLSManifestPolicyTests(unittest.TestCase):
+    def test_variants_renditions_keys_maps_parts_and_cdn_changes_are_checked(self):
+        manifest = """\
+#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="//audio.example.net/en.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",URI="subs/en.m3u8"
+#EXT-X-KEY:METHOD=AES-128,URI="https://keys.example.org/key.bin"
+#EXT-X-MAP:URI="init.mp4"
+#EXT-X-PART:DURATION=0.5,URI="//parts.example.net/part-1.m4s"
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,AUDIO="a",SUBTITLES="s"
+https://video.example.com/720p.m3u8
+"""
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            references = validate_hls_manifest(
+                manifest, "https://origin.example.com/live/master.m3u8"
+            )
+
+        self.assertEqual(
+            set(references.playlists),
+            {
+                "https://audio.example.net/en.m3u8",
+                "https://origin.example.com/live/subs/en.m3u8",
+                "https://video.example.com/720p.m3u8",
+            },
+        )
+        self.assertIn("https://keys.example.org/key.bin", references.resources)
+        self.assertIn(
+            "https://origin.example.com/live/init.mp4", references.resources
+        )
+        self.assertIn(
+            "https://parts.example.net/part-1.m4s", references.resources
+        )
+
+    def test_recursive_hls_graph_validates_media_segments(self):
+        documents = {
+            "https://origin.example.com/master.m3u8": (
+                "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n"
+                "https://cdn.example.net/media.m3u8\n"
+            ),
+            "https://cdn.example.net/media.m3u8": (
+                "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n"
+                "#EXTINF:4,\nseg-1.ts\n#EXT-X-ENDLIST\n"
+            ),
+        }
+        fetched = []
+
+        def fetch(url):
+            fetched.append(url)
+            return documents.get(url)
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            manifests = preflight_hls_manifest_tree(
+                "https://origin.example.com/master.m3u8", fetch
+            )
+
+        self.assertEqual(manifests, tuple(documents))
+        self.assertEqual(fetched, list(documents))
+
+    def test_malicious_hls_fixture_cannot_reach_sentinel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sentinel = Path(tmpdir) / "sentinel.txt"
+            sentinel.write_text("do-not-read", encoding="utf-8")
+            manifest = _read("malicious_remote.m3u8").replace(
+                "file:///STREAMKEEP_SENTINEL", sentinel.as_uri()
+            )
+            with mock.patch(
+                "streamkeep.net_guard.resolve_host_addresses",
+                side_effect=_resolved_addresses,
+            ), self.assertRaises(RemoteURLPolicyError):
+                validate_hls_manifest(
+                    manifest, "https://origin.example.com/media.m3u8"
+                )
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8"), "do-not-read"
+            )
 
 
 class HLSMediaPlaylistTests(unittest.TestCase):
