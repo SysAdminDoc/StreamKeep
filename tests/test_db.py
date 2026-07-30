@@ -1,9 +1,29 @@
 import tempfile
 import unittest
+import multiprocessing
 from pathlib import Path
 from unittest import mock
 
 from streamkeep import db
+
+
+def _enqueue_queue_job_process(db_path, url, result_queue):
+    from streamkeep import db as process_db
+    process_db.DB_PATH = Path(db_path)
+    process_db.init_db()
+    result_queue.put(process_db.enqueue_queue_job({"url": url})["job_id"])
+
+
+def _claim_queue_job_process(
+    db_path, job_id, owner_id, start_event, result_queue,
+):
+    from streamkeep import db as process_db
+    process_db.DB_PATH = Path(db_path)
+    start_event.wait(10)
+    claimed = process_db.claim_queue_job(
+        job_id, owner_id, now=101.0,
+    )
+    result_queue.put(bool(claimed))
 
 
 class DbMigrationTests(unittest.TestCase):
@@ -143,6 +163,173 @@ class DbMigrationTests(unittest.TestCase):
 
 
 class DbQueueNormalizationTests(unittest.TestCase):
+    def test_executor_lease_takeover_recovers_only_expired_owner(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job = db.enqueue_queue_job({"url": "https://a.example/video"})
+                first = db.acquire_executor_lease(
+                    "owner-a", owner_kind="desktop", now=100.0,
+                    lease_seconds=10,
+                )
+                claimed = db.claim_queue_job(
+                    job["job_id"], "owner-a", now=101.0,
+                )
+                refused = db.acquire_executor_lease(
+                    "owner-b", owner_kind="server", now=105.0,
+                    lease_seconds=10,
+                )
+                takeover = db.acquire_executor_lease(
+                    "owner-b", owner_kind="server", now=111.0,
+                    lease_seconds=10,
+                )
+                recovered = db.load_queue_job(job["job_id"])
+                stale_transition = db.transition_owned_queue_job(
+                    job["job_id"], "owner-a",
+                    expected_statuses="fetching", status="done",
+                )
+                reclaimed = db.claim_queue_job(
+                    job["job_id"], "owner-b", now=112.0,
+                )
+
+            self.assertTrue(first["acquired"])
+            self.assertEqual(claimed["execution_owner"], "owner-a")
+            self.assertFalse(refused["acquired"])
+            self.assertIn("desktop", refused["message"])
+            self.assertTrue(takeover["acquired"])
+            self.assertEqual(takeover["recovered"], 1)
+            self.assertEqual(recovered["status"], "queued")
+            self.assertEqual(recovered["execution_owner"], "")
+            self.assertIsNone(stale_transition)
+            self.assertEqual(reclaimed["execution_owner"], "owner-b")
+
+    def test_stale_snapshot_merge_preserves_concurrent_enqueue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                first = db.enqueue_queue_job({"url": "https://a.example/video"})
+                stale_snapshot = db.load_queue()
+
+                context = multiprocessing.get_context("spawn")
+                result_queue = context.Queue()
+                process = context.Process(
+                    target=_enqueue_queue_job_process,
+                    args=(
+                        str(db_path), "https://b.example/video", result_queue,
+                    ),
+                )
+                process.start()
+                process.join(20)
+                self.assertEqual(process.exitcode, 0)
+                second_id = result_queue.get(timeout=5)
+
+                stale_snapshot[0]["title"] = "Edited in desktop"
+                merged = db.sync_queue_items(stale_snapshot)
+
+            self.assertEqual(
+                {item["job_id"] for item in merged},
+                {first["job_id"], second_id},
+            )
+            self.assertEqual(merged[0]["title"], "Edited in desktop")
+
+    def test_stale_snapshot_cannot_requeue_completed_job(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job = db.enqueue_queue_job({"url": "https://a.example/video"})
+                stale_snapshot = db.load_queue()
+                completed = db.update_queue_job(
+                    job["job_id"], status="done", progress=100,
+                )
+                merged = db.sync_queue_items(stale_snapshot)
+                stale_snapshot[0].update(merged[0])
+                merged_again = db.sync_queue_items(stale_snapshot)
+
+            self.assertEqual(completed["status"], "done")
+            self.assertEqual(merged[0]["status"], "done")
+            self.assertEqual(merged[0]["progress"], 100)
+            self.assertEqual(merged_again[0]["status"], "done")
+
+    def test_multiprocess_claim_compare_and_swap_has_one_winner(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job = db.enqueue_queue_job({"url": "https://a.example/video"})
+                db.acquire_executor_lease(
+                    "owner-a", owner_kind="test", now=100.0,
+                    lease_seconds=30,
+                )
+
+                context = multiprocessing.get_context("spawn")
+                start_event = context.Event()
+                result_queue = context.Queue()
+                processes = [
+                    context.Process(
+                        target=_claim_queue_job_process,
+                        args=(
+                            str(db_path), job["job_id"], "owner-a",
+                            start_event, result_queue,
+                        ),
+                    )
+                    for _ in range(2)
+                ]
+                for process in processes:
+                    process.start()
+                start_event.set()
+                for process in processes:
+                    process.join(20)
+                    self.assertEqual(process.exitcode, 0)
+                results = [result_queue.get(timeout=5) for _ in processes]
+                durable = db.load_queue_job(job["job_id"])
+
+            self.assertEqual(sorted(results), [False, True])
+            self.assertEqual(durable["status"], "fetching")
+            self.assertEqual(durable["execution_owner"], "owner-a")
+
+    def test_delete_refuses_another_executors_active_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job = db.enqueue_queue_job({"url": "https://a.example/video"})
+                db.acquire_executor_lease(
+                    "owner-a", owner_kind="server", now=100.0,
+                )
+                db.claim_queue_job(job["job_id"], "owner-a", now=101.0)
+                removed = db.delete_queue_job(
+                    job["job_id"], requester_owner="owner-b",
+                )
+                durable = db.load_queue_job(job["job_id"])
+
+            self.assertFalse(removed)
+            self.assertEqual(durable["status"], "fetching")
+
+    def test_optimistic_update_rejects_stale_revision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                job = db.enqueue_queue_job({"url": "https://a.example/video"})
+                first = db.update_queue_job(
+                    job["job_id"],
+                    expected_revision=job["revision"],
+                    title="first",
+                )
+                stale = db.update_queue_job(
+                    job["job_id"],
+                    expected_revision=job["revision"],
+                    title="stale",
+                )
+                durable = db.load_queue_job(job["job_id"])
+
+            self.assertEqual(first["title"], "first")
+            self.assertIsNone(stale)
+            self.assertEqual(durable["title"], "first")
+
     def test_queue_job_ids_survive_full_queue_rewrites(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"

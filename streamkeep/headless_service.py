@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ class HeadlessJobService(QObject):
         max_concurrent: int = 2,
         parallel_connections: int = 4,
         config: dict[str, Any] | None = None,
+        owner_id: str = "",
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -41,6 +43,8 @@ class HeadlessJobService(QObject):
         self.max_concurrent = max(1, int(max_concurrent or 1))
         self.parallel_connections = max(1, int(parallel_connections or 1))
         self.config = dict(config or {})
+        self.owner_id = str(owner_id or f"server:{os.getpid()}:{uuid.uuid4().hex}")
+        self._lease_acquired = False
         self._apply_runtime_config()
         self._fetchers: dict[str, FetchWorker] = {}
         self._downloads: dict[str, DownloadWorker] = {}
@@ -53,6 +57,9 @@ class HeadlessJobService(QObject):
         self._dispatch_timer = QTimer(self)
         self._dispatch_timer.setInterval(1000)
         self._dispatch_timer.timeout.connect(self._dispatch)
+        self._lease_timer = QTimer(self)
+        self._lease_timer.setInterval(10_000)
+        self._lease_timer.timeout.connect(self._heartbeat_lease)
         self._wake_requested.connect(
             self._dispatch, Qt.ConnectionType.QueuedConnection
         )
@@ -63,10 +70,17 @@ class HeadlessJobService(QObject):
     def start(self) -> int:
         """Recover interrupted work and begin dispatching eligible jobs."""
         db.init_db()
-        recovered = db.recover_interrupted_queue_jobs()
+        lease = db.acquire_executor_lease(
+            self.owner_id, owner_kind="headless server",
+        )
+        if not lease.get("acquired"):
+            raise RuntimeError(str(lease.get("message") or "Queue executor is busy"))
+        recovered = int(lease.get("recovered", 0) or 0)
+        self._lease_acquired = True
         self._started = True
         self._stopping = False
         self._dispatch_timer.start()
+        self._lease_timer.start()
         QTimer.singleShot(0, self._dispatch)
         return recovered
 
@@ -75,6 +89,7 @@ class HeadlessJobService(QObject):
         self._stopping = True
         self._started = False
         self._dispatch_timer.stop()
+        self._lease_timer.stop()
         for worker in list(self._fetchers.values()):
             worker.requestInterruption()
         for worker in list(self._downloads.values()):
@@ -87,13 +102,36 @@ class HeadlessJobService(QObject):
         ]:
             if worker.isRunning():
                 worker.wait(max(0, int(wait_ms)))
-        db.recover_interrupted_queue_jobs()
+        if self._lease_acquired:
+            db.release_executor_lease(self.owner_id)
+            self._lease_acquired = False
         self._fetchers.clear()
         self._downloads.clear()
         self._finalizers.clear()
         self._contexts.clear()
         self._download_errors.clear()
         self._last_progress.clear()
+
+    def _heartbeat_lease(self) -> None:
+        if not self._started or self._stopping or not self._lease_acquired:
+            return
+        if db.heartbeat_executor_lease(self.owner_id):
+            return
+        self._lease_acquired = False
+        self._started = False
+        self._stopping = True
+        self._dispatch_timer.stop()
+        self._lease_timer.stop()
+        for worker in list(self._fetchers.values()):
+            worker.requestInterruption()
+        for worker in list(self._downloads.values()):
+            worker.cancel()
+        for worker in list(self._finalizers.values()):
+            worker.cancel()
+        write_log_line(
+            "[SERVICE] Queue executor lease was lost; active work was stopped "
+            "to prevent duplicate execution."
+        )
 
     # These provider methods are intentionally thread-safe for local_server.
 
@@ -216,8 +254,8 @@ class HeadlessJobService(QObject):
 
     def _start_fetch(self, job: dict[str, Any]) -> None:
         job_id = str(job["job_id"])
-        current = db.update_queue_job(
-            job_id, status="fetching", progress=0, error=""
+        current = db.claim_queue_job(
+            job_id, self.owner_id, status="fetching", progress=0, error=""
         )
         if not current:
             return
@@ -249,7 +287,11 @@ class HeadlessJobService(QObject):
             return
         chosen = vods[0]
         job = db.load_queue_job(job_id)
-        if not job or job.get("status") == "cancelled":
+        if (
+            not job
+            or job.get("status") != "fetching"
+            or job.get("execution_owner") != self.owner_id
+        ):
             self._dispatch()
             return
         worker = FetchWorker(
@@ -267,7 +309,12 @@ class HeadlessJobService(QObject):
         if worker and worker.isRunning():
             worker.wait(500)
         job = db.load_queue_job(job_id)
-        if not job or job.get("status") == "cancelled" or self._stopping:
+        if (
+            not job
+            or job.get("status") != "fetching"
+            or job.get("execution_owner") != self.owner_id
+            or self._stopping
+        ):
             self._dispatch()
             return
         quality = self._pick_quality(getattr(info, "qualities", []), job.get("quality", "best"))
@@ -406,14 +453,21 @@ class HeadlessJobService(QObject):
             "quality": str(getattr(quality, "name", "") or job.get("quality", "")),
         }
         self._downloads[job_id] = worker
-        db.update_queue_job(
+        current = db.transition_owned_queue_job(
             job_id,
+            self.owner_id,
+            expected_statuses="fetching",
             status="downloading",
             progress=0,
             title=title,
             platform=str(getattr(info, "platform", "") or ""),
             output_dir=output_dir,
         )
+        if not current:
+            self._contexts.pop(job_id, None)
+            self._downloads.pop(job_id, None)
+            self._dispatch()
+            return
         write_log_line(f"[SERVICE] Downloading job {job_id}: {title}")
         worker.start()
 
@@ -434,8 +488,15 @@ class HeadlessJobService(QObject):
             return
         self._last_progress[job_id] = value
         job = db.load_queue_job(job_id)
-        if job and job.get("status") == "downloading":
-            db.update_queue_job(job_id, progress=value, progress_text=str(text or ""))
+        if (
+            job
+            and job.get("status") == "downloading"
+            and job.get("execution_owner") == self.owner_id
+        ):
+            db.transition_owned_queue_job(
+                job_id, self.owner_id, expected_statuses="downloading",
+                progress=value, progress_text=str(text or ""),
+            )
 
     def _on_download_error(self, job_id: str, error: str) -> None:
         if job_id in self._download_errors:
@@ -456,16 +517,20 @@ class HeadlessJobService(QObject):
         if (
             self._stopping or job_id in self._download_errors or not job
             or job.get("status") != "downloading"
+            or job.get("execution_owner") != self.owner_id
         ):
             return
         ctx = self._contexts.get(job_id, {})
         info = ctx.get("info")
         output_dir = str(ctx.get("output_dir", "") or self.output_dir)
-        db.update_queue_job(
-            job_id, status="finalizing", progress=100,
+        current = db.transition_owned_queue_job(
+            job_id, self.owner_id, expected_statuses="downloading",
+            status="finalizing", progress=100,
             progress_text="Saving metadata and integrity manifest",
             output_dir=output_dir,
         )
+        if not current:
+            return
         finalizer = FinalizeWorker({
             "out_dir": output_dir,
             "quality_name": str(ctx.get("quality", "")),
@@ -506,15 +571,25 @@ class HeadlessJobService(QObject):
         self, job_id: str, label: str, step: int, total: int
     ) -> None:
         job = db.load_queue_job(job_id)
-        if job and job.get("status") == "finalizing":
+        if (
+            job
+            and job.get("status") == "finalizing"
+            and job.get("execution_owner") == self.owner_id
+        ):
             suffix = f" ({int(step)}/{int(total)})" if total else ""
-            db.update_queue_job(
-                job_id, progress_text=f"{str(label or 'Finalizing')}{suffix}"
+            db.transition_owned_queue_job(
+                job_id, self.owner_id, expected_statuses="finalizing",
+                progress_text=f"{str(label or 'Finalizing')}{suffix}"
             )
 
     def _on_finalize_done(self, job_id: str, result: dict[str, Any]) -> None:
         job = db.load_queue_job(job_id)
-        if self._stopping or not job or job.get("status") == "cancelled":
+        if (
+            self._stopping
+            or not job
+            or job.get("status") != "finalizing"
+            or job.get("execution_owner") != self.owner_id
+        ):
             return
         if result.get("cancelled"):
             return
@@ -556,14 +631,16 @@ class HeadlessJobService(QObject):
             db.mark_failed_job_resolved(previous_failure_id)
         if not warning:
             db.mark_failed_jobs_resolved_for_url(str(job.get("url", "")))
-        db.update_queue_job(
-            job_id, status="done", progress=100,
+        completed = db.transition_owned_queue_job(
+            job_id, self.owner_id, expected_statuses="finalizing",
+            status="done", progress=100,
             progress_text="Complete" if not warning else "Complete with finalization warning",
             completed_at=datetime.now(timezone.utc).isoformat(),
             history_id=int(history_id or 0), output_dir=output_dir,
             finalize_error=warning, failure_id=warning_failure_id,
         )
-        write_log_line(f"[SERVICE] Completed job {job_id}")
+        if completed:
+            write_log_line(f"[SERVICE] Completed job {job_id}")
 
     def _on_finalize_finished(self, job_id: str) -> None:
         self._finalizers.pop(job_id, None)
@@ -581,7 +658,14 @@ class HeadlessJobService(QObject):
         dispatch: bool = True,
     ) -> None:
         job = db.load_queue_job(job_id)
-        if not job or job.get("status") == "cancelled" or self._stopping:
+        if (
+            not job
+            or job.get("execution_owner") != self.owner_id
+            or job.get("status") not in {
+                "fetching", "downloading", "finalizing", "running", "cancelling",
+            }
+            or self._stopping
+        ):
             if dispatch:
                 self._dispatch()
             return
@@ -598,11 +682,16 @@ class HeadlessJobService(QObject):
             queue_data=job,
             context={"job_id": job_id, "service": "headless"},
         )
-        db.update_queue_job(
-            job_id, status="failed", error=str(error or "Unknown error"),
+        failed = db.transition_owned_queue_job(
+            job_id, self.owner_id,
+            expected_statuses={
+                "fetching", "downloading", "finalizing", "running", "cancelling",
+            },
+            status="failed", error=str(error or "Unknown error"),
             failure_id=failure_id, failed_at=datetime.now(timezone.utc).isoformat(),
         )
-        write_log_line(f"[SERVICE] Job {job_id} failed during {stage}: {error}")
+        if failed:
+            write_log_line(f"[SERVICE] Job {job_id} failed during {stage}: {error}")
         if dispatch:
             self._dispatch()
 

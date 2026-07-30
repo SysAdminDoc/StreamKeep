@@ -285,7 +285,12 @@ class DownloadQueueMixin:
             default_action="secondary",
         ):
             return
-        self._download_queue = [q for q in self._download_queue if q is active]
+        removed = self._remove_queue_items_durably(removable)
+        if removed != len(removable):
+            self._set_status(
+                "Some jobs changed in another StreamKeep process and were kept.",
+                "warning",
+            )
         self._persist_config()
         self._refresh_queue_table()
         self._set_status("Queue cleared.", "success")
@@ -314,6 +319,10 @@ class DownloadQueueMixin:
             vod_platform = platform
         if not vod_title:
             vod_title = title
+        try:
+            revision = int(item.get("revision", 0) or 0)
+        except (TypeError, ValueError):
+            revision = 0
         normalized = {
             "job_id": str(item.get("job_id", "") or ""),
             "url": url,
@@ -335,6 +344,8 @@ class DownloadQueueMixin:
             "ytdlp_template_name": str(
                 item.get("ytdlp_template_name", "") or ""
             ),
+            "revision": revision,
+            "execution_owner": str(item.get("execution_owner", "") or ""),
         }
         vod_date = str(item.get("vod_date", "") or "")
         if vod_date:
@@ -419,12 +430,47 @@ class DownloadQueueMixin:
             if item is self._queue_active_item or item.get("status") in ("fetching", "downloading"):
                 self._set_status("The active queue job cannot be removed while it is running.", "warning")
                 return None
-            removed = self._download_queue.pop(idx)
+            removed = self._remove_queue_items_durably([item])
+            if not removed:
+                latest = _db.load_queue_job(str(item.get("job_id", "") or ""))
+                if latest:
+                    item.update(latest)
+                self._set_status(
+                    "Queue job changed in another StreamKeep process and was kept.",
+                    "warning",
+                )
+                return None
             self._persist_config()
             if hasattr(self, "queue_table"):
                 self._refresh_queue_table()
-            return removed
+            return item
         return None
+
+    def _remove_queue_items_durably(self, items):
+        candidates = [item for item in items if isinstance(item, dict)]
+        job_ids = {
+            str(item.get("job_id", "") or "")
+            for item in candidates
+            if str(item.get("job_id", "") or "")
+        }
+        removed_ids = _db.delete_queue_jobs(
+            job_ids,
+            requester_owner=(
+                self._executor_owner_id
+                if getattr(self, "_queue_execution_enabled", False)
+                else ""
+            ),
+        )
+        removable_objects = {
+            id(item) for item in candidates
+            if not str(item.get("job_id", "") or "")
+            or str(item.get("job_id", "") or "") in removed_ids
+        }
+        self._download_queue = [
+            item for item in self._download_queue
+            if id(item) not in removable_objects
+        ]
+        return len(removable_objects)
 
     def _active_queue_download_count(self):
         """Return the number of currently active queue downloads + fetches."""
@@ -438,6 +484,16 @@ class DownloadQueueMixin:
     def _advance_queue(self):
         """Start the next queued item(s) up to the concurrent download limit.
         Scheduled items (start_at in the future) are skipped."""
+        if not getattr(self, "_queue_execution_enabled", False):
+            if not getattr(self, "_queue_executor_warning_shown", False):
+                self._queue_executor_warning_shown = True
+                message = (
+                    getattr(self, "_executor_lease_message", "")
+                    or "Queue execution is owned by another StreamKeep process."
+                )
+                self._set_status(message, "warning")
+                self._log(f"[QUEUE] {message}")
+            return
         # Hold the queue while the storage monitor has auto-paused for low disk.
         if getattr(self, "_disk_pause_active", False):
             return
@@ -515,7 +571,8 @@ class DownloadQueueMixin:
         item_id = id(item)
         # Arm the queue-complete power action for this batch (V24).
         self._power_action_armed = True
-        self._set_queue_item_status(item, "fetching")
+        if not self._set_queue_item_status(item, "fetching"):
+            return
         self._log(f"[QUEUE] Starting: {item.get('title', '')[:60]}")
         # Use a dedicated FetchWorker that doesn't share the foreground UI state
         url = item.get("vod_source") or item["url"]
@@ -599,7 +656,13 @@ class DownloadQueueMixin:
             self._advance_queue()
             return
         # Create and start the DownloadWorker
-        self._set_queue_item_status(item, "downloading")
+        if not self._set_queue_item_status(item, "downloading"):
+            self._log(
+                f"[QUEUE] Ownership changed before download start: "
+                f"{item.get('title', '')[:60]}"
+            )
+            self._advance_queue()
+            return
         item["quality"] = (
             (q_data.resolution or q_data.name) if q_data else "Best available"
         )
@@ -769,18 +832,17 @@ class DownloadQueueMixin:
         if rec:
             next_fire = self._compute_next_fire(item)
             if next_fire:
-                item["status"] = "queued"
                 item["start_at"] = next_fire.isoformat()
                 item["note"] = f"recurring ({rec}) — next fire {next_fire.strftime('%Y-%m-%d %H:%M')}"
+                self._set_queue_item_status(item, "queued", item["note"])
             else:
-                item["status"] = "done"
+                self._set_queue_item_status(item, "done")
         else:
-            item["status"] = "done"
+            self._set_queue_item_status(item, "done")
         failure_id = int(item.get("failure_id", 0) or 0)
         if failure_id:
             _db.mark_failed_job_resolved(failure_id)
         _db.mark_failed_jobs_resolved_for_url(item.get("url", ""))
-        self._queue_status_changed()
         self._update_tray_badge()
         self._advance_queue()
 
@@ -992,13 +1054,13 @@ class DownloadQueueMixin:
             index for index, item in enumerate(self._download_queue)
             if item.get("_ui_selected", True) and item.get("status", "queued") not in locked
         ]
-        for index in reversed(removable):
-            self._download_queue.pop(index)
-        if removable:
+        selected = [self._download_queue[index] for index in removable]
+        removed = self._remove_queue_items_durably(selected)
+        if removed:
             self._queue_status_changed()
         self._set_status(
-            f"Removed {len(removable)} queue job(s).",
-            "success" if removable else "warning",
+            f"Removed {removed} queue job(s).",
+            "success" if removed else "warning",
         )
 
     def _on_queue_retry_selected(self):
@@ -1528,10 +1590,56 @@ class DownloadQueueMixin:
 
     def _set_queue_item_status(self, item, status, note=""):
         if item is None:
-            return
-        item["status"] = status
-        item["note"] = note
+            return False
+        job_id = str(item.get("job_id", "") or "")
+        if not job_id:
+            self._persist_config()
+            job_id = str(item.get("job_id", "") or "")
+        if not job_id:
+            self._set_status("Queue job could not be persisted.", "error")
+            return False
+
+        current_status = str(item.get("status", "queued") or "queued")
+        owner_id = str(getattr(self, "_executor_owner_id", "") or "")
+        if status == "fetching":
+            if not getattr(self, "_queue_execution_enabled", False):
+                return False
+            durable = _db.claim_queue_job(
+                job_id, owner_id, status="fetching", note=note,
+            )
+        elif owner_id and str(item.get("execution_owner", "") or "") == owner_id:
+            durable = _db.transition_owned_queue_job(
+                job_id,
+                owner_id,
+                expected_statuses=current_status,
+                status=status,
+                note=note,
+                failure_id=int(item.get("failure_id", 0) or 0),
+                quality=str(item.get("quality", "") or ""),
+            )
+        else:
+            durable = _db.update_queue_job(
+                job_id,
+                expected_revision=int(item.get("revision", 0) or 0),
+                status=status,
+                note=note,
+                failure_id=int(item.get("failure_id", 0) or 0),
+            )
+        if durable is None:
+            latest = _db.load_queue_job(job_id)
+            if latest:
+                item.update(latest)
+            self._set_status(
+                "Queue job changed in another StreamKeep process; refreshed "
+                "the durable state instead of overwriting it.",
+                "warning",
+            )
+            if hasattr(self, "queue_table"):
+                self._refresh_queue_table()
+            return False
+        item.update(durable)
         self._queue_status_changed()
+        return True
 
     def _failure_resume_sidecar(self, out_dir):
         if not out_dir:
@@ -1642,7 +1750,9 @@ class DownloadQueueMixin:
                 continue
             kept.append(q)
         if removed:
-            self._download_queue = kept
+            self._remove_queue_items_durably([
+                q for q in self._download_queue if q not in kept
+            ])
             self._queue_status_changed()
         self._set_status("Failed-job recovery item discarded.", "success")
 
@@ -1659,7 +1769,6 @@ class DownloadQueueMixin:
             recurrence = (item.get("recurrence") or "").strip().lower()
             next_fire = self._compute_next_fire(recurrence, item.get("start_at", ""))
             if next_fire:
-                item["status"] = "queued"
                 item["start_at"] = next_fire.isoformat(timespec="minutes")
                 item["note"] = f"recurring ({recurrence}) — next fire {next_fire.strftime('%a %H:%M')}"
                 self._log(
@@ -1667,12 +1776,10 @@ class DownloadQueueMixin:
                     f"{next_fire.strftime('%Y-%m-%d %H:%M')}: "
                     f"{(item.get('title') or item.get('url', ''))[:60]}"
                 )
-                self._queue_status_changed()
+                self._set_queue_item_status(item, "queued", item["note"])
                 return
-            try:
-                self._download_queue.remove(item)
-            except ValueError:
-                pass
+            self._set_queue_item_status(item, "done", note)
+            self._remove_queue_items_durably([item])
             self._queue_status_changed()
             return
         if status:

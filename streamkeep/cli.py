@@ -725,7 +725,12 @@ def _run_server(args):
     server.url_received.connect(
         lambda url, action: _print_line(f"[{action}] {url}")
     )
-    recovered = service.start()
+    try:
+        recovered = service.start()
+    except RuntimeError as error:
+        _print_line(f"ERROR: {error}")
+        server.stop()
+        raise SystemExit(2) from None
     server.start()
 
     _print_line(f"StreamKeep v{VERSION} - server mode")

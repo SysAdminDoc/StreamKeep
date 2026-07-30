@@ -13,6 +13,10 @@ def _fake_self(**extra):
     )
     ns._set_status = lambda msg, tone="info": ns.statuses.append((msg, tone))
     ns._persist_config = lambda: None
+    ns._remove_queue_items_durably = (
+        lambda items:
+        queue_mod.DownloadQueueMixin._remove_queue_items_durably(ns, items)
+    )
     for k, v in extra.items():
         setattr(ns, k, v)
     return ns

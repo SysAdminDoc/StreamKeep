@@ -10,6 +10,7 @@ import json
 import html
 import os
 import subprocess
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -225,6 +226,10 @@ class StreamKeep(
         self._webhook_url = ""
         self._check_duplicates = True
         self._download_queue = []  # list of dicts: url, title, platform, status
+        self._executor_owner_id = f"gui:{os.getpid()}:{uuid.uuid4().hex}"
+        self._queue_execution_enabled = False
+        self._executor_lease_message = ""
+        self._queue_executor_warning_shown = False
         self._write_nfo = False
         self._dl_overrides = {}  # Per-download settings overrides (F18)
         self._parallel_connections = 4  # Multi-connection splits per direct MP4
@@ -315,7 +320,23 @@ class StreamKeep(
         self._config_save_timer = QTimer(self)
         self._config_save_timer.setSingleShot(True)
         self._config_save_timer.timeout.connect(self._persist_config)
+        lease = _db.acquire_executor_lease(
+            self._executor_owner_id, owner_kind="desktop app",
+        )
+        self._queue_execution_enabled = bool(lease.get("acquired"))
+        self._executor_lease_message = str(lease.get("message") or "")
+        self._executor_lease_timer = QTimer(self)
+        self._executor_lease_timer.setInterval(10_000)
+        self._executor_lease_timer.timeout.connect(self._heartbeat_executor_lease)
+        if self._queue_execution_enabled:
+            self._executor_lease_timer.start()
         self._apply_config()
+        recovered = int(lease.get("recovered", 0) or 0)
+        if recovered:
+            self._log(f"[QUEUE] Recovered {recovered} job(s) from an expired executor.")
+        if not self._queue_execution_enabled:
+            self._log(f"[QUEUE] {self._executor_lease_message}")
+            self._set_status(self._executor_lease_message, "warning")
         self._refresh_companion_ui()
         self._init_tray_icon()
         self._init_disk_monitor()
@@ -485,12 +506,16 @@ class StreamKeep(
                 {idx.row() for idx in self.queue_table.selectionModel().selectedRows()},
                 reverse=True,
             )
+            removable = []
             for row in sel:
                 if 0 <= row < len(self._download_queue):
                     item = self._download_queue[row]
-                    if item.get("status") != "downloading":
-                        self._download_queue.pop(row)
+                    if item.get("status") not in {
+                        "fetching", "downloading", "finalizing",
+                    }:
+                        removable.append(item)
             if sel:
+                self._remove_queue_items_durably(removable)
                 self._refresh_queue_table()
                 self._persist_config()
 
@@ -905,8 +930,25 @@ class StreamKeep(
         cfg["file_template"] = self._file_template
         cfg["webhook_url"] = self._webhook_url
         cfg["check_duplicates"] = self._check_duplicates
-        # Queue is persisted to SQLite (F41)
-        _db.save_queue(list(self._download_queue))
+        # Merge/reorder known rows without deleting jobs added by another
+        # process since this window loaded its queue view.
+        durable_queue = _db.sync_queue_items(
+            list(self._download_queue),
+            owner_id=(
+                self._executor_owner_id if self._queue_execution_enabled else ""
+            ),
+        )
+        durable_by_id = {
+            str(item.get("job_id", "")): item for item in durable_queue
+        }
+        for item in self._download_queue:
+            durable = durable_by_id.get(str(item.get("job_id", "")))
+            if not durable:
+                continue
+            # This also refreshes stale terminal state. Merely copying the new
+            # revision would let the next save overwrite a concurrently
+            # completed row after its ownership had already been cleared.
+            item.update(durable)
         cfg["write_nfo"] = self._write_nfo
         cfg["parallel_connections"] = self._parallel_connections
         cfg["max_concurrent_downloads"] = self._max_concurrent_downloads
@@ -949,6 +991,24 @@ class StreamKeep(
             self._persist_config()
             return
         timer.start(max(0, int(delay_ms)))
+
+    def _heartbeat_executor_lease(self):
+        if not self._queue_execution_enabled:
+            return
+        if _db.heartbeat_executor_lease(self._executor_owner_id):
+            return
+        self._queue_execution_enabled = False
+        self._executor_lease_timer.stop()
+        self._executor_lease_message = (
+            "Queue execution ownership was lost. Active queue workers were "
+            "stopped to prevent duplicate downloads; restart StreamKeep to retry."
+        )
+        for worker in list(getattr(self, "_queue_fetch_workers", {}).values()):
+            worker.requestInterruption()
+        for worker in list(getattr(self, "_queue_workers", {}).values()):
+            worker.cancel()
+        self._log(f"[QUEUE] {self._executor_lease_message}")
+        self._set_status(self._executor_lease_message, "error")
 
     def _init_tray_icon(self):
         """Create a system tray icon with badge overlay and live dropdown (F28).
@@ -1403,6 +1463,10 @@ class StreamKeep(
             self._config_save_timer.stop()
         except Exception:
             pass
+        try:
+            self._executor_lease_timer.stop()
+        except Exception:
+            pass
         # Stop clipboard monitor
         try:
             self.clipboard_monitor.stop()
@@ -1423,6 +1487,9 @@ class StreamKeep(
         except Exception:
             pass
         self._persist_config()
+        if self._queue_execution_enabled:
+            _db.release_executor_lease(self._executor_owner_id)
+            self._queue_execution_enabled = False
         super().closeEvent(event)
 
     # Widget builders are thin forwarders to streamkeep.ui.widgets so the

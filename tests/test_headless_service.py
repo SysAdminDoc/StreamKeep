@@ -171,6 +171,55 @@ class HeadlessJobServiceTests(unittest.TestCase):
             self.assertEqual(cancelled["status"], "cancelled")
             self.assertEqual(state["queue"][0]["status"], "cancelled")
 
+    def test_second_executor_refuses_with_actionable_owner_message(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.object(db, "DB_PATH", root / "library.db"):
+                db.init_db()
+                desktop = db.acquire_executor_lease(
+                    "desktop-owner", owner_kind="desktop app",
+                )
+                service = HeadlessJobService(
+                    output_dir=str(root / "output"),
+                    owner_id="server-owner",
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "already owned by desktop app",
+                ):
+                    service.start()
+                lease = db.get_executor_lease()
+                db.release_executor_lease("desktop-owner")
+
+            self.assertTrue(desktop["acquired"])
+            self.assertEqual(lease["owner_id"], "desktop-owner")
+
+    def test_clean_stop_requeues_only_services_owned_work(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.object(db, "DB_PATH", root / "library.db"):
+                db.init_db()
+                owned = db.enqueue_queue_job(
+                    {"url": "https://example.com/owned"},
+                )
+                untouched = db.enqueue_queue_job(
+                    {"url": "https://example.com/untouched", "status": "failed"},
+                )
+                service = HeadlessJobService(
+                    output_dir=str(root / "output"),
+                    owner_id="server-owner",
+                )
+                service.start()
+                db.claim_queue_job(owned["job_id"], "server-owner")
+                service.stop()
+                owned_after = db.load_queue_job(owned["job_id"])
+                untouched_after = db.load_queue_job(untouched["job_id"])
+                lease = db.get_executor_lease()
+
+            self.assertEqual(owned_after["status"], "queued")
+            self.assertEqual(owned_after["execution_owner"], "")
+            self.assertEqual(untouched_after["status"], "failed")
+            self.assertIsNone(lease)
+
     def test_failure_retry_reuses_durable_job_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
