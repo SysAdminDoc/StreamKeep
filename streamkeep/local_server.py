@@ -570,6 +570,43 @@ def _build_handler(
                 and secrets.compare_digest(forwarded_host, external_authority)
             )
 
+        def _effective_request_origin(self):
+            """Return the browser-visible origin after validating its boundary.
+
+            Same-origin fetches omit ``Origin`` on safe methods.  In that case
+            the request authority plus ``Sec-Fetch-Site: same-origin`` is the
+            browser invariant we can verify.  Reverse-proxy deployments use
+            their already-validated forwarded authority; direct requests must
+            name this listener's exact loopback port.
+            """
+            forwarded_proto = str(
+                self.headers.get("X-Forwarded-Proto", "") or ""
+            ).lower()
+            forwarded_host = str(
+                self.headers.get("X-Forwarded-Host", "") or ""
+            ).lower()
+            if (
+                external_origin
+                and forwarded_proto == "https"
+                and secrets.compare_digest(forwarded_host, external_authority)
+                and self._external_boundary_ok()
+            ):
+                return external_origin
+
+            host_values = self.headers.get_all("Host", failobj=[])
+            if len(host_values) != 1:
+                return ""
+            origin = _normalize_origin(
+                f"http://{host_values[0]}", allow_extensions=False
+            )
+            if not origin:
+                return ""
+            parsed = urlsplit(origin)
+            return origin if (
+                _canonical_host(parsed.hostname) in _LOCAL_HOSTS
+                and parsed.port == int(self.server.server_address[1])
+            ) else ""
+
         def _reject_bad_host(self):
             if not self._host_ok():
                 self._json_response(403, {
@@ -588,32 +625,67 @@ def _build_handler(
             return False
 
         def _token_grant(self):
-            """Return ``(grant, token)`` for a valid origin-bound bearer."""
+            """Return ``((grant, token), error)`` for a bearer request."""
             hdr = self.headers.get("Authorization", "") or ""
             scheme, separator, candidate = hdr.partition(" ")
             if not separator or scheme.lower() != "bearer":
-                return None
+                return None, "token_invalid"
             candidate = candidate.strip()
             if not candidate:
-                return None
+                return None, "token_invalid"
             grant = token_store.check(candidate)
             if grant is None:
-                return None
+                return None, "token_invalid"
             if grant.origin:
                 origin = _normalize_origin(self.headers.get("Origin", ""))
-                if not origin or not secrets.compare_digest(origin, grant.origin):
-                    return None
-            return grant, candidate
+                if origin:
+                    if not secrets.compare_digest(origin, grant.origin):
+                        return None, "token_origin_mismatch"
+                else:
+                    fetch_site = str(
+                        self.headers.get("Sec-Fetch-Site", "") or ""
+                    ).lower()
+                    if fetch_site == "cross-site":
+                        return None, "cross_site_denied"
+                    if fetch_site != "same-origin":
+                        return None, "token_origin_required"
+                    request_origin = self._effective_request_origin()
+                    if (
+                        not request_origin
+                        or not secrets.compare_digest(request_origin, grant.origin)
+                    ):
+                        return None, "token_origin_mismatch"
+            return (grant, candidate), ""
 
         def _require_auth(self, scope=None, *, mutating=False):
             """Check auth + optional scope. Returns True if authorized."""
-            auth = self._token_grant()
+            auth, error = self._token_grant()
             if auth is None:
-                self._json_response(401, {
-                    "ok": False,
-                    "err": "token_invalid",
-                    "message": "Missing, expired, or origin-mismatched token. Re-pair from Settings.",
-                })
+                messages = {
+                    "token_invalid": (
+                        "The access token is missing, expired, or revoked. "
+                        "Re-pair with a new code from StreamKeep Settings."
+                    ),
+                    "token_origin_required": (
+                        "This paired token requires its original browser origin. "
+                        "Open the StreamKeep remote from the same address used to pair."
+                    ),
+                    "token_origin_mismatch": (
+                        "This token was paired with a different browser origin. "
+                        "Return to the original StreamKeep remote address or pair again."
+                    ),
+                    "cross_site_denied": (
+                        "A cross-site page cannot use this paired StreamKeep session."
+                    ),
+                }
+                self._json_response(
+                    403 if error == "cross_site_denied" else 401,
+                    {
+                        "ok": False,
+                        "err": error,
+                        "message": messages[error],
+                    },
+                )
                 return False
             grant, token = auth
             if scope and scope not in grant.scopes:
@@ -859,6 +931,18 @@ def _build_handler(
                     })
                     return
             origin = _normalize_origin(origin_header) if origin_header else ""
+            if not origin and fetch_site == "same-origin":
+                origin = self._effective_request_origin()
+                if not origin:
+                    self._json_response(403, {
+                        "ok": False,
+                        "err": "origin_denied",
+                        "message": (
+                            "The browser's same-origin pairing address could not "
+                            "be verified."
+                        ),
+                    })
+                    return
             token = generate_bearer_token()
             expires_at = time.time() + PAIRED_TOKEN_TTL_SECONDS
             token_store.add(token, scopes, origin=origin, expires_at=expires_at)
@@ -1200,15 +1284,16 @@ function api(path,opts){
   if((opts.method||'GET').toUpperCase()!=='GET'){
     Object.assign(opts.headers,freshHeaders());
     opts.headers['Content-Type']=opts.headers['Content-Type']||'application/json';}
-  return fetch(BASE+path,opts).then(r=>{
+  return fetch(BASE+path,opts).then(async r=>{
+    let d={};try{d=await r.json();}catch(e){}
     if(r.status===401){clearInterval(_refreshId);
       document.getElementById('app').style.display='none';
       document.getElementById('auth').style.display='block';
       document.getElementById('auth-err').style.display='block';
       document.getElementById('auth-err').textContent=
-        'Access expired or was rotated. Generate a new pairing code in Settings.';
-      return {ok:false};}
-    return r.json();});
+        d.message||d.err||'StreamKeep rejected this session.';}
+    if(!r.ok)throw new Error(d.message||d.err||('Request failed ('+r.status+')'));
+    return d;});
 }
 function doAuth(){
   const code=document.getElementById('token-input').value.trim();

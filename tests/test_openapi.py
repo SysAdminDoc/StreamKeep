@@ -21,6 +21,10 @@ class OpenApiSpecTests(unittest.TestCase):
             spec["paths"]["/api/status"]["get"]["security"],
             [{"bearerAuth": []}],
         )
+        auth_description = spec["components"]["securitySchemes"]["bearerAuth"][
+            "description"
+        ]
+        self.assertIn("Sec-Fetch-Site: same-origin", auth_description)
 
     def test_spec_version_tracks_package_version(self):
         from streamkeep import VERSION

@@ -212,6 +212,41 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(paired["scopes"], [SCOPE_STATUS])
         self.assertTrue(payload["ok"])
 
+    def test_lan_pairing_allows_verified_same_origin_get_without_origin(self):
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            external_origin="https://streamkeepbox.local",
+        )
+        lan_server.start()
+        boundary_headers = {
+            "Host": "streamkeepbox.local",
+            "Origin": "https://streamkeepbox.local",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "streamkeepbox.local",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        try:
+            code = lan_server.create_pairing_code()
+            paired, _ = self._open_json(
+                "/pair",
+                server=lan_server,
+                method="POST",
+                headers=boundary_headers,
+                data={"code": code, "scopes": [SCOPE_STATUS]},
+            )
+            same_origin_headers = dict(boundary_headers)
+            same_origin_headers.pop("Origin")
+            payload, _ = self._open_json(
+                "/ping",
+                server=lan_server,
+                token=paired["token"],
+                headers=same_origin_headers,
+            )
+        finally:
+            lan_server.stop()
+
+        self.assertTrue(payload["ok"])
+
     def test_ping_requires_bearer_token(self):
         err = self._expect_error("/ping", 401)
         self.assertEqual(err.get("err"), "token_invalid")
@@ -247,12 +282,20 @@ class LocalServerTests(unittest.TestCase):
             headers={"Origin": extension_origin},
         )
         self.assertTrue(payload["ok"])
-        self._expect_error(
+        mismatch = self._expect_error(
             "/ping",
             401,
             token=paired["token"],
             headers={"Origin": "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba"},
         )
+        self.assertEqual(mismatch["err"], "token_origin_mismatch")
+        missing_origin = self._expect_error(
+            "/ping",
+            401,
+            token=paired["token"],
+            headers={"Sec-Fetch-Site": "same-origin"},
+        )
+        self.assertEqual(missing_origin["err"], "token_origin_mismatch")
         reused = self._expect_error(
             "/pair",
             401,
@@ -281,6 +324,82 @@ class LocalServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 201)
         self.assertTrue(paired["token"])
+
+    def test_browser_pairing_allows_same_origin_get_without_origin_header(self):
+        origin = f"http://127.0.0.1:{self.server.port}"
+        code = self.server.create_pairing_code()
+        paired, status = self._open_json(
+            "/pair",
+            method="POST",
+            headers={"Origin": origin, "Sec-Fetch-Site": "same-origin"},
+            data={"code": code, "scopes": [SCOPE_STATUS]},
+        )
+
+        payload, _ = self._open_json(
+            "/ping",
+            token=paired["token"],
+            headers={"Sec-Fetch-Site": "same-origin"},
+        )
+
+        self.assertEqual(status, 201)
+        self.assertEqual(paired["origin"], origin)
+        self.assertTrue(payload["ok"])
+
+    def test_origin_bound_token_reports_missing_mismatch_and_cross_site_reasons(self):
+        origin = f"http://127.0.0.1:{self.server.port}"
+        token = self.server.create_scoped_token({SCOPE_STATUS}, origin=origin)
+
+        missing = self._expect_error("/ping", 401, token=token)
+        self.assertEqual(missing["err"], "token_origin_required")
+        self.assertIn("same address", missing["message"])
+
+        mismatch = self._expect_error(
+            "/ping",
+            401,
+            token=token,
+            headers={
+                "Origin": f"http://localhost:{self.server.port}",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        self.assertEqual(mismatch["err"], "token_origin_mismatch")
+        self.assertIn("different browser origin", mismatch["message"])
+
+        cross_site = self._expect_error(
+            "/ping",
+            403,
+            token=token,
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        self.assertEqual(cross_site["err"], "cross_site_denied")
+
+    def test_same_origin_mutation_requires_nonce_and_rejects_replay(self):
+        origin = f"http://127.0.0.1:{self.server.port}"
+        token = self.server.create_scoped_token({SCOPE_QUEUE}, origin=origin)
+        headers = {
+            "Sec-Fetch-Site": "same-origin",
+            "X-StreamKeep-Timestamp": str(int(time.time())),
+            "X-StreamKeep-Nonce": secrets.token_urlsafe(18),
+        }
+        payload, status = self._open_json(
+            "/api/queue",
+            token=token,
+            method="POST",
+            headers=headers,
+            data={"url": "https://example.com/video"},
+        )
+        replay = self._expect_error(
+            "/api/queue",
+            409,
+            token=token,
+            method="POST",
+            headers=headers,
+            data={"url": "https://example.com/video"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(replay["err"], "request_replayed")
 
     def test_pairing_code_locks_after_repeated_wrong_attempts(self):
         code = self.server.create_pairing_code()

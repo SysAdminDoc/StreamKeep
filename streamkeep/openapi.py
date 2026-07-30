@@ -70,7 +70,10 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
     """Return the OpenAPI 3.1 document describing the REST server."""
     bearer = [{"bearerAuth": []}]
     unauthorized = {
-        "description": "Missing or invalid bearer token.",
+        "description": (
+            "Bearer token is missing, expired, revoked, or not presented from "
+            "its paired browser origin."
+        ),
         "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
     }
     forbidden = {
@@ -107,7 +110,10 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                     "description": (
                         "Bearer token minted by the pairing flow. Scopes: "
                         "status (read state), queue (submit/cancel), recovery "
-                        "(retry/discard failures)."
+                        "(retry/discard failures). Paired browser tokens are "
+                        "bound to their exact Origin; safe same-origin requests "
+                        "that omit Origin require Sec-Fetch-Site: same-origin "
+                        "and a matching request authority."
                     ),
                 }
             },
