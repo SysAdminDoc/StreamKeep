@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -29,7 +30,10 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
+
+_PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_PUBLISHING_TEXT_LIMIT = 256
 
 _write_lock = threading.Lock()
 
@@ -78,6 +82,8 @@ def init_db() -> None:
                 _migrate_auth_profiles_v11(db)
             if 0 < v < 12:
                 _migrate_media_layout_v12(db)
+            if 0 < v < 13:
+                _migrate_publishing_v13(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -303,6 +309,34 @@ def _apply_schema(db):
             statement = []
     if statement and "".join(statement).strip():
         db.execute("".join(statement))
+    _apply_publishing_schema(db)
+
+
+def _apply_publishing_schema(db):
+    """Create the durable gallery/feed publication registry."""
+    for statement in (
+        """
+        CREATE TABLE IF NOT EXISTS published_recordings (
+            share_id    TEXT PRIMARY KEY,
+            history_id  INTEGER NOT NULL UNIQUE,
+            created_at  TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(history_id) REFERENCES history(id) ON DELETE CASCADE
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_published_recordings_history "
+        "ON published_recordings(history_id)",
+        """
+        CREATE TABLE IF NOT EXISTS published_feeds (
+            feed_id     TEXT PRIMARY KEY,
+            channel     TEXT NOT NULL DEFAULT '',
+            title       TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_published_feeds_channel "
+        "ON published_feeds(channel COLLATE NOCASE)",
+    ):
+        db.execute(statement)
 
 
 def _migrate_queue_v4(db):
@@ -502,6 +536,11 @@ def _migrate_media_layout_v12(db):
             "ALTER TABLE monitor_channels ADD COLUMN "
             "media_server_layout TEXT NOT NULL DEFAULT ''"
         )
+
+
+def _migrate_publishing_v13(db):
+    """Create durable, revocable gallery and feed publication state."""
+    _apply_publishing_schema(db)
 
 
 def _migrate_retry_v10(db):
@@ -922,6 +961,279 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
             db.close()
 
 
+def _publishing_id(value: Any, field: str = "share_id") -> str:
+    candidate = str(value or "").strip().lower()
+    if not _PUBLISHING_ID_RE.fullmatch(candidate):
+        raise ValueError(f"{field} is invalid")
+    return candidate
+
+
+def _publishing_text(value: Any, field: str) -> str:
+    text = str(value or "").strip()
+    if len(text) > _PUBLISHING_TEXT_LIMIT:
+        raise ValueError(f"{field} is too long")
+    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+        raise ValueError(f"{field} contains control characters")
+    return text
+
+
+def _new_publishing_id(db) -> str:
+    """Generate an unguessable id without trusting caller-provided ids."""
+    while True:
+        candidate = secrets.token_hex(16)
+        if not db.execute(
+            "SELECT 1 FROM published_recordings WHERE share_id=? "
+            "UNION ALL SELECT 1 FROM published_feeds WHERE feed_id=? LIMIT 1",
+            (candidate, candidate),
+        ).fetchone():
+            return candidate
+
+
+def publish_recording(history_id: int) -> dict[str, Any] | None:
+    """Publish one history row and return its stable share metadata."""
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        return None
+    if history_id <= 0:
+        return None
+    with _write_lock:
+        db = _connect()
+        try:
+            row = db.execute(
+                "SELECT * FROM history WHERE id=?", (history_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            existing = db.execute(
+                "SELECT share_id, created_at FROM published_recordings "
+                "WHERE history_id=?", (history_id,)
+            ).fetchone()
+            if existing is not None:
+                result = dict(row)
+                result.update({
+                    "share_id": str(existing[0]),
+                    "created_at": str(existing[1] or ""),
+                })
+                return result
+            share_id = _new_publishing_id(db)
+            created_at = _utc_now_iso()
+            db.execute(
+                "INSERT INTO published_recordings(share_id, history_id, created_at) "
+                "VALUES(?,?,?)",
+                (share_id, history_id, created_at),
+            )
+            db.commit()
+            result = dict(row)
+            result.update({"share_id": share_id, "created_at": created_at})
+            return result
+        finally:
+            db.close()
+
+
+def unpublish_recording(*, share_id: Any = "", history_id: Any = 0) -> bool:
+    """Revoke a recording share immediately."""
+    if share_id:
+        share_id = _publishing_id(share_id)
+    else:
+        try:
+            history_id = int(history_id)
+        except (TypeError, ValueError):
+            history_id = 0
+        if history_id <= 0:
+            return False
+    with _write_lock:
+        db = _connect()
+        try:
+            if share_id:
+                cur = db.execute(
+                    "DELETE FROM published_recordings WHERE share_id=?",
+                    (share_id,),
+                )
+            else:
+                cur = db.execute(
+                    "DELETE FROM published_recordings WHERE history_id=?",
+                    (history_id,),
+                )
+            db.commit()
+            return bool(cur.rowcount)
+        finally:
+            db.close()
+
+
+def published_recording(share_id: Any) -> dict[str, Any] | None:
+    """Return one published recording joined to its canonical history row."""
+    try:
+        share_id = _publishing_id(share_id)
+    except ValueError:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT p.share_id, p.created_at AS share_created_at, h.* "
+            "FROM published_recordings p JOIN history h ON h.id=p.history_id "
+            "WHERE p.share_id=?",
+            (share_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def published_recording_for_history(history_id: Any) -> dict[str, Any] | None:
+    """Return publication metadata for one history id, if it is shared."""
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        return None
+    if history_id <= 0:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT p.share_id, p.created_at AS share_created_at, h.* "
+            "FROM published_recordings p JOIN history h ON h.id=p.history_id "
+            "WHERE p.history_id=?",
+            (history_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def published_recordings() -> list[dict[str, Any]]:
+    """Return all current recording shares, newest history first."""
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            "SELECT p.share_id, p.created_at AS share_created_at, h.* "
+            "FROM published_recordings p JOIN history h ON h.id=p.history_id "
+            "ORDER BY h.id DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def publish_feed(*, channel: Any = "", title: Any = "") -> dict[str, Any]:
+    """Publish a feed for one channel, or all currently shared recordings."""
+    channel = _publishing_text(channel, "channel")
+    title = _publishing_text(title, "title")
+    if not title:
+        title = f"{channel} - StreamKeep" if channel else "StreamKeep"
+    with _write_lock:
+        db = _connect()
+        try:
+            existing = db.execute(
+                "SELECT feed_id, channel, title, created_at FROM published_feeds "
+                "WHERE channel=? COLLATE NOCASE",
+                (channel,),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "feed_id": str(existing[0]),
+                    "channel": str(existing[1] or ""),
+                    "title": str(existing[2] or ""),
+                    "created_at": str(existing[3] or ""),
+                }
+            feed_id = _new_publishing_id(db)
+            created_at = _utc_now_iso()
+            db.execute(
+                "INSERT INTO published_feeds(feed_id, channel, title, created_at) "
+                "VALUES(?,?,?,?)",
+                (feed_id, channel, title, created_at),
+            )
+            db.commit()
+            return {
+                "feed_id": feed_id,
+                "channel": channel,
+                "title": title,
+                "created_at": created_at,
+            }
+        finally:
+            db.close()
+
+
+def published_feed(feed_id: Any) -> dict[str, Any] | None:
+    """Return one published feed definition."""
+    try:
+        feed_id = _publishing_id(feed_id, "feed_id")
+    except ValueError:
+        return None
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT feed_id, channel, title, created_at FROM published_feeds "
+            "WHERE feed_id=?", (feed_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def published_feeds() -> list[dict[str, Any]]:
+    """Return all published feed definitions."""
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            "SELECT feed_id, channel, title, created_at FROM published_feeds "
+            "ORDER BY created_at, feed_id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def unpublish_feed(feed_id: Any) -> bool:
+    """Revoke one feed immediately."""
+    try:
+        feed_id = _publishing_id(feed_id, "feed_id")
+    except ValueError:
+        return False
+    with _write_lock:
+        db = _connect()
+        try:
+            cur = db.execute(
+                "DELETE FROM published_feeds WHERE feed_id=?", (feed_id,)
+            )
+            db.commit()
+            return bool(cur.rowcount)
+        finally:
+            db.close()
+
+
+def published_recordings_for_feed(feed_id: Any) -> list[dict[str, Any]] | None:
+    """Return shared recordings selected by a feed, or None for an unknown feed."""
+    try:
+        feed_id = _publishing_id(feed_id, "feed_id")
+    except ValueError:
+        return None
+    db = _connect(readonly=True)
+    try:
+        feed = db.execute(
+            "SELECT channel FROM published_feeds WHERE feed_id=?", (feed_id,)
+        ).fetchone()
+        if feed is None:
+            return None
+        channel = str(feed[0] or "")
+        if channel:
+            rows = db.execute(
+                "SELECT p.share_id, p.created_at AS share_created_at, h.* "
+                "FROM published_recordings p JOIN history h ON h.id=p.history_id "
+                "WHERE h.channel=? COLLATE NOCASE ORDER BY h.id DESC",
+                (channel,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT p.share_id, p.created_at AS share_created_at, h.* "
+                "FROM published_recordings p JOIN history h ON h.id=p.history_id "
+                "ORDER BY h.id DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
 def delete_history_entries(entry_ids: list[int]) -> None:
     """Delete history rows by id list."""
     if not entry_ids:
@@ -931,6 +1243,10 @@ def delete_history_entries(entry_ids: list[int]) -> None:
         try:
             placeholders = ",".join("?" for _ in entry_ids)
             ids = [int(i) for i in entry_ids]
+            db.execute(
+                f"DELETE FROM published_recordings WHERE history_id IN ({placeholders})",
+                ids,
+            )
             db.execute(
                 f"DELETE FROM archive_manifests WHERE history_id IN ({placeholders})",
                 ids,
@@ -949,6 +1265,7 @@ def clear_history() -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("DELETE FROM published_recordings")
             db.execute("DELETE FROM archive_manifests")
             db.execute("DELETE FROM history")
             db.commit()

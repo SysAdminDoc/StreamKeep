@@ -179,8 +179,12 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
-        "gallery-publishing", "Authenticated local gallery publishing", "experimental",
-        "Gallery/RSS publishing", reason="No GUI, CLI, or REST caller invokes gallery.py.",
+        "gallery-publishing", "Authenticated local gallery publishing", "shipped",
+        "Gallery/RSS publishing",
+        (ReachableProductPath(
+            "rest", "GET /gallery",
+            "tests/test_local_server.py::LocalServerTests::test_authenticated_gallery_and_feed_routes",
+        ),),
     ),
     ProductCapabilityClaim(
         "upload-delivery", "Secure upload and media-server delivery", "experimental",
@@ -199,8 +203,12 @@ PRODUCT_CAPABILITY_CLAIMS = (
         "Smart thumbnails", reason="The intelligence worker has no supported user entry point.",
     ),
     ProductCapabilityClaim(
-        "rss-publishing", "Recording RSS feed publishing", "experimental",
-        "Gallery/RSS publishing", reason="Feed generation is not wired to a supported caller.",
+        "rss-publishing", "Recording RSS feed publishing", "shipped",
+        "Gallery/RSS publishing",
+        (ReachableProductPath(
+            "rest", "GET /feed/{id}.xml",
+            "tests/test_local_server.py::LocalServerTests::test_authenticated_gallery_and_feed_routes",
+        ),),
     ),
     ProductCapabilityClaim(
         "native-notifications", "Native desktop notification adapter", "shipped",

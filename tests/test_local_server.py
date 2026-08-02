@@ -1070,6 +1070,111 @@ class LocalServerTests(unittest.TestCase):
                 finally:
                     recovery_server.stop()
 
+    def test_authenticated_gallery_and_feed_routes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            recording_dir = Path(tmpdir) / "recording"
+            recording_dir.mkdir()
+            media = recording_dir / "episode.mp4"
+            media.write_bytes(b"0123456789")
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "date": "2026-08-02 12:00",
+                    "platform": "Podcast",
+                    "title": "Episode & One",
+                    "channel": "Example Show",
+                    "size": "10 B",
+                    "path": str(recording_dir),
+                    "url": "https://example.com/episode",
+                })
+
+                self._expect_error("/gallery", 401)
+                published, status = self._open_json(
+                    "/api/shares/recording",
+                    token=self.server.token,
+                    method="POST",
+                    data={"history_id": history_id},
+                )
+                self.assertEqual(status, 201)
+                share_id = published["recording"]["share_id"]
+                self.assertRegex(share_id, r"^[0-9a-f]{32}$")
+                self.assertNotIn(str(recording_dir), json.dumps(published))
+
+                gallery_req = self._open(
+                    "/gallery", token=self.server.token,
+                )
+                self.assertEqual(gallery_req.status, 200)
+                gallery_html = gallery_req.read().decode("utf-8")
+                self.assertIn(f"/share/{share_id}", gallery_html)
+                self.assertNotIn(str(recording_dir), gallery_html)
+
+                share_req = self._open(
+                    f"/share/{share_id}", token=self.server.token,
+                )
+                self.assertEqual(share_req.status, 200)
+                self.assertIn(
+                    f"/media/{share_id}",
+                    share_req.read().decode("utf-8"),
+                )
+
+                media_req = self._open(
+                    f"/media/{share_id}",
+                    token=self.server.token,
+                    headers={"Range": "bytes=2-5"},
+                )
+                self.assertEqual(media_req.status, 206)
+                self.assertEqual(media_req.read(), b"2345")
+                self.assertEqual(media_req.headers["Content-Range"], "bytes 2-5/10")
+
+                feed, status = self._open_json(
+                    "/api/shares/feed",
+                    token=self.server.token,
+                    method="POST",
+                    data={"channel": "Example Show", "title": "Example Feed"},
+                )
+                self.assertEqual(status, 201)
+                feed_id = feed["feed"]["feed_id"]
+                rss_req = self._open(
+                    f"/feed/{feed_id}.xml", token=self.server.token,
+                )
+                rss = rss_req.read().decode("utf-8")
+                self.assertEqual(rss_req.status, 200)
+                self.assertIn("application/rss+xml", rss_req.headers["Content-Type"])
+                self.assertIn(f"/media/{share_id}", rss)
+                self.assertIn('type="video/mp4"', rss)
+
+                self._expect_error(
+                    "/media/not-a-share", 404, token=self.server.token,
+                )
+                revoked, status = self._open_json(
+                    "/api/shares/recording/revoke",
+                    token=self.server.token,
+                    method="POST",
+                    data={"share_id": share_id},
+                )
+                self.assertTrue(revoked["revoked"])
+                self.assertEqual(status, 200)
+                self._expect_error(
+                    f"/media/{share_id}", 404, token=self.server.token,
+                )
+                feed_after_revoke = self._open(
+                    f"/feed/{feed_id}.xml", token=self.server.token,
+                ).read().decode("utf-8")
+                self.assertNotIn(f"/media/{share_id}", feed_after_revoke)
+
+                revoked_feed, status = self._open_json(
+                    "/api/shares/feed/revoke",
+                    token=self.server.token,
+                    method="POST",
+                    data={"feed_id": feed_id},
+                )
+                self.assertTrue(revoked_feed["revoked"])
+                self.assertEqual(status, 200)
+                self._expect_error(
+                    f"/feed/{feed_id}.xml", 404, token=self.server.token,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

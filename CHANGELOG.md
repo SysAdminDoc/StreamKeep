@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added authenticated gallery and RSS publishing. History can publish or revoke
+  selected recordings and channel/all-recording feeds; durable random ids survive
+  restart, while gallery/media/feed routes enforce bearer access, canonical media
+  paths, bounded Range delivery, stale-file handling, and immediate revocation.
+
 - Added V20 pre-queue validation for desktop companion and headless REST flows.
   `POST /api/validate` resolves a URL into bounded, delivery-URL-free media
   picker metadata with per-item video/audio/photo/GIF types and optional

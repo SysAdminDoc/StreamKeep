@@ -686,8 +686,43 @@ class HistoryTabMixin:
         fav_label = "Remove from favorites" if getattr(h, "favorite", False) else "Add to favorites"
         fav_act = menu.addAction(fav_label)
         bookmark_act = menu.addAction("Add bookmark…")
-        # Multi-stream sync (F54) — show when 2+ rows are selected
         selected_rows = sorted({idx.row() for idx in table.selectionModel().selectedRows()})
+        selected_entries = [
+            entry for row in selected_rows
+            if (entry := self._history_entry_at(row)) is not None
+        ]
+        publication_entries = selected_entries or [h]
+        published_entries = [
+            entry for entry in publication_entries
+            if entry.db_id and _db.published_recording_for_history(entry.db_id)
+        ]
+        publishable_entries = [
+            entry for entry in publication_entries
+            if entry.db_id and entry.path and os.path.isdir(entry.path)
+            and not _db.published_recording_for_history(entry.db_id)
+        ]
+        publish_act = menu.addAction(
+            f"Publish {len(publishable_entries)} recording(s)"
+        )
+        publish_act.setEnabled(bool(publishable_entries))
+        revoke_publish_act = menu.addAction(
+            f"Revoke {len(published_entries)} recording share(s)"
+        )
+        revoke_publish_act.setEnabled(bool(published_entries))
+        feed_channel = str(getattr(h, "channel", "") or "").strip()
+        feed_rows = [
+            feed for feed in _db.published_feeds()
+            if str(feed.get("channel", "") or "").casefold()
+            == feed_channel.casefold()
+        ]
+        publish_feed_act = menu.addAction(
+            "Publish RSS feed"
+            + (f" for {feed_channel}" if feed_channel else " for shared recordings")
+        )
+        publish_feed_act.setEnabled(not feed_rows)
+        revoke_feed_act = menu.addAction("Revoke RSS feed")
+        revoke_feed_act.setEnabled(bool(feed_rows))
+        # Multi-stream sync (F54) — show when 2+ rows are selected
         sync_entries = [
             entry for row in selected_rows
             if (entry := self._history_entry_at(row)) is not None
@@ -740,6 +775,14 @@ class HistoryTabMixin:
             self._generate_storyboard(h.path)
         elif chosen == highlight_act and h.path:
             self._generate_highlights(h.path)
+        elif chosen == publish_act:
+            self._publish_history_recordings(publishable_entries)
+        elif chosen == revoke_publish_act:
+            self._revoke_history_recordings(published_entries)
+        elif chosen == publish_feed_act:
+            self._publish_history_feed(feed_channel)
+        elif chosen == revoke_feed_act and feed_rows:
+            self._revoke_history_feed(feed_rows[0].get("feed_id", ""))
         elif chosen == watch_act:
             h.watched = not getattr(h, "watched", False)
             if h.watched:
@@ -784,6 +827,69 @@ class HistoryTabMixin:
             self._set_status(
                 f"Removed {removed} missing history entries.", "success"
             )
+
+    def _publishing_base_url(self):
+        server = getattr(self, "_companion_server", None)
+        return str(getattr(server, "url", "") or "").rstrip("/")
+
+    def _publish_history_recordings(self, entries):
+        from ...gallery import find_media_file
+
+        published = []
+        for entry in entries or []:
+            if not entry.db_id or not entry.path or not os.path.isdir(entry.path):
+                continue
+            row = _db.publish_recording(entry.db_id)
+            if row is None:
+                continue
+            if not find_media_file(row.get("path", "")):
+                _db.unpublish_recording(history_id=entry.db_id)
+                continue
+            published.append(row)
+        if not published:
+            self._set_status(
+                "No existing media files were available to publish.", "warning"
+            )
+            return
+        base = self._publishing_base_url()
+        suffix = (
+            f" First link: {base}/share/{published[0]['share_id']}"
+            if base else " Enable the companion server to open the link."
+        )
+        self._set_status(
+            f"Published {len(published)} recording share(s).{suffix}", "success"
+        )
+        self._notify_center(
+            f"Published {len(published)} recording share(s).", "success"
+        )
+
+    def _revoke_history_recordings(self, entries):
+        revoked = 0
+        for entry in entries or []:
+            if entry.db_id and _db.unpublish_recording(history_id=entry.db_id):
+                revoked += 1
+        self._set_status(
+            f"Revoked {revoked} recording share(s).", "success" if revoked else "info"
+        )
+
+    def _publish_history_feed(self, channel):
+        try:
+            feed = _db.publish_feed(channel=channel)
+        except ValueError as error:
+            self._set_status(f"RSS feed not published: {error}", "warning")
+            return
+        base = self._publishing_base_url()
+        suffix = (
+            f" Link: {base}/feed/{feed['feed_id']}.xml"
+            if base else " Enable the companion server to open the feed."
+        )
+        self._set_status(f"Published RSS feed.{suffix}", "success")
+
+    def _revoke_history_feed(self, feed_id):
+        if _db.unpublish_feed(feed_id):
+            self._set_status("Revoked RSS feed.", "success")
+        else:
+            self._set_status("RSS feed was already revoked.", "info")
 
     def _verify_archive_integrity(self, h):
         """Verify a history row against its DB-backed or sidecar manifest."""

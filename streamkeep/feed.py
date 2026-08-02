@@ -9,9 +9,22 @@ Feeds:
   /feed/{channel}.xml — per-channel feed
 """
 
+import mimetypes
 import os
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from xml.sax.saxutils import escape
+from urllib.parse import urlsplit
+
+
+_PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_MIME_OVERRIDES = {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".opus": "audio/ogg",
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+}
 
 
 def _escape_xml_attribute(value):
@@ -30,30 +43,58 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
 
     Returns XML string.
     """
+    base_url = str(base_url or "").strip().rstrip("/")
+    try:
+        parsed_base = urlsplit(base_url)
+    except ValueError:
+        parsed_base = None
+    if (
+        parsed_base is None
+        or parsed_base.scheme not in {"http", "https"}
+        or not parsed_base.netloc
+        or parsed_base.username
+        or parsed_base.password
+        or parsed_base.query
+        or parsed_base.fragment
+    ):
+        raise ValueError("RSS base_url must use HTTP or HTTPS")
+    if any(char.isspace() or ord(char) < 32 for char in base_url):
+        raise ValueError("RSS base_url contains invalid characters")
     feed_title = f"{title} - {channel}" if channel else title
     feed_desc = f"Recordings from {channel}" if channel else "All StreamKeep recordings"
+    try:
+        limit = max(1, min(1000, int(limit or 100)))
+    except (TypeError, ValueError):
+        limit = 100
 
     # Filter by channel if specified
     if channel:
         entries = [e for e in entries if (e.get("channel", "") or "").lower() == channel.lower()]
 
     # Limit to most recent
-    entries = entries[-limit:]
+    entries = list(entries or [])[-limit:]
 
     items_xml = ""
     for e in reversed(entries):
-        sid = e.get("share_id", "")
-        etitle = escape(e.get("title", "Untitled"))
-        echannel = escape(e.get("channel", ""))
-        edate = e.get("date", "")
+        sid = str(e.get("share_id", "") or "").strip()
+        if not sid:
+            continue
+        etitle = escape(str(e.get("title", "Untitled") or "Untitled"))
+        echannel = escape(str(e.get("channel", "") or ""))
+        edate = str(e.get("date", "") or "")
         media_url = f"{base_url}/media/{sid}" if sid else ""
-        duration = int(e.get("duration_secs", 0) or 0)
+        try:
+            duration = max(0, int(e.get("duration_secs", 0) or 0))
+        except (TypeError, ValueError):
+            duration = 0
 
         # RFC 822 date
         pub_date = ""
         try:
             dt = datetime.strptime(edate[:16], "%Y-%m-%d %H:%M")
-            pub_date = dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+            pub_date = dt.replace(tzinfo=timezone.utc).strftime(
+                "%a, %d %b %Y %H:%M:%S +0000"
+            )
         except (ValueError, TypeError):
             pass
 
@@ -65,6 +106,12 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
                 file_size = os.path.getsize(media_path)
             except OSError:
                 pass
+        extension = os.path.splitext(str(media_path or ""))[1].lower()
+        media_type = (
+            _MIME_OVERRIDES.get(extension)
+            or mimetypes.guess_type(str(media_path or ""))[0]
+            or "application/octet-stream"
+        )
 
         # Duration in HH:MM:SS for itunes:duration
         dur_str = ""
@@ -82,7 +129,7 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
 
         if media_url:
             items_xml += f"""
-      <enclosure url="{_escape_xml_attribute(media_url)}" length="{file_size}" type="video/mp4"/>"""
+      <enclosure url="{_escape_xml_attribute(media_url)}" length="{file_size}" type="{_escape_xml_attribute(media_type)}"/>"""
 
         if dur_str:
             items_xml += f"""
@@ -101,7 +148,7 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
     <description>{escape(feed_desc)}</description>
     <link>{escape(base_url)}</link>
     <generator>StreamKeep</generator>
-    <lastBuildDate>{datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}</lastBuildDate>
+    <lastBuildDate>{datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")}</lastBuildDate>
 {items_xml}  </channel>
 </rss>"""
 

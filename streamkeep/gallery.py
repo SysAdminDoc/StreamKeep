@@ -1,16 +1,18 @@
-"""Clip Share via Local Web Gallery — serve shared recordings over HTTP (F69).
+"""Safe rendering and media delivery helpers for published recordings (F69).
 
 Extends the local web server with:
   GET /gallery       — browsable grid of shared recordings
   GET /share/{id}    — HTML page with embedded video player
   GET /media/{id}    — video file streaming with HTTP Range support
 
-Only recordings explicitly marked as ``shared=True`` are accessible.
-Share IDs are UUID-based for unguessable URLs.
+Only recordings explicitly present in the durable publishing registry are
+accessible. Share IDs are random 128-bit values and media paths are resolved
+from the stored history directory, never from a request parameter.
 """
 
 import mimetypes
 import os
+import re
 import secrets
 import threading
 
@@ -22,15 +24,22 @@ _shared = {}   # share_id -> {"path": str, "title": str, "channel": str, "media"
 _shared_lock = threading.Lock()
 
 _MAX_RANGE_CHUNK = 8 * 1024 * 1024  # 8 MB per Range-request read
+PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".ts", ".mov", ".avi", ".flv", ".m4v")
 _AUDIO_EXTS = (".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac")
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
 _MIME_OVERRIDES = {
     ".mp3": "audio/mpeg",
     ".opus": "audio/ogg",
     ".m4a": "audio/mp4",
     ".flac": "audio/flac",
     ".wav": "audio/wav",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
 }
 
 
@@ -72,9 +81,18 @@ def all_shared():
 
 # ── HTML rendering ──────────────────────────────────────────────────
 
-def render_gallery_html(base_url=""):
+def render_gallery_html(base_url="", entries=None):
     """Render the gallery page HTML."""
-    snapshot = all_shared()
+    if entries is None:
+        snapshot = all_shared()
+    elif isinstance(entries, dict):
+        snapshot = entries
+    else:
+        snapshot = {
+            str(info.get("share_id", "")): dict(info)
+            for info in entries
+            if isinstance(info, dict) and info.get("share_id")
+        }
     items_html = ""
     if not snapshot:
         items_html = '<p style="color:#aaa;text-align:center;">No shared recordings.</p>'
@@ -109,17 +127,30 @@ h1 {{ color: {CAT['blue']}; }}
 </body></html>"""
 
 
-def render_share_html(share_id, base_url=""):
+def render_share_html(share_id, base_url="", info=None):
     """Render the player page for a shared recording."""
-    info = get_shared(share_id)
+    info = dict(info) if isinstance(info, dict) else get_shared(share_id)
     if not info:
         return "<h1>Not Found</h1>"
     title = info.get("title", "Untitled")
     channel = info.get("channel", "")
     media_type = _media_type(info.get("media", ""))
-    player_tag = "audio" if media_type.startswith("audio/") else "video"
+    if media_type.startswith("audio/"):
+        player_tag = "audio"
+    elif media_type.startswith("image/"):
+        player_tag = "img"
+    else:
+        player_tag = "video"
     safe_base_url = _esc(base_url)
     safe_share_id = _esc(share_id)
+    player = (
+        f'<img class="media" src="{safe_base_url}/media/{safe_share_id}" '
+        f'alt="{_esc(title)}">'
+        if player_tag == "img" else
+        f'<{player_tag} controls preload="metadata">\n'
+        f'<source src="{safe_base_url}/media/{safe_share_id}" '
+        f'type="{_esc(media_type)}">\n</{player_tag}>'
+    )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{_esc(title)} - StreamKeep</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -127,25 +158,68 @@ def render_share_html(share_id, base_url=""):
 body {{ background: {CAT['base']}; color: {CAT['text']}; font-family: system-ui; margin: 0; padding: 20px; }}
 h1 {{ color: {CAT['blue']}; font-size: 1.4em; }}
 h2 {{ color: {CAT['subtext0']}; font-size: 1em; font-weight: normal; }}
-video, audio {{ width: 100%; max-width: 1200px; border-radius: 8px; background: #000; }}
+video, audio, .media {{ width: 100%; max-width: 1200px; border-radius: 8px; background: #000; }}
 a {{ color: {CAT['blue']}; }}
 </style></head><body>
 <a href="{safe_base_url}/gallery">&larr; Gallery</a>
 <h1>{_esc(title)}</h1>
 <h2>{_esc(channel)}</h2>
-<{player_tag} controls preload="metadata">
-<source src="{safe_base_url}/media/{safe_share_id}" type="{_esc(media_type)}">
-</{player_tag}>
+{player}
 </body></html>"""
+
+
+def _canonical_recording_dir(recording_dir):
+    """Resolve a history directory while refusing symlink redirection."""
+    if not recording_dir:
+        return ""
+    try:
+        raw = os.path.abspath(os.path.expanduser(os.fspath(recording_dir)))
+        if os.path.islink(raw) or not os.path.isdir(raw):
+            return ""
+        resolved = os.path.realpath(raw)
+        return resolved if os.path.isdir(resolved) else ""
+    except (OSError, TypeError, ValueError):
+        return ""
+
+
+def canonical_media_file(recording_dir, media_path=""):
+    """Return a media file canonically contained by a recording directory."""
+    root = _canonical_recording_dir(recording_dir)
+    if not root:
+        return ""
+    try:
+        candidate = (
+            os.path.join(root, os.fspath(media_path))
+            if media_path and not os.path.isabs(os.fspath(media_path))
+            else os.fspath(media_path or "")
+        )
+        candidate = os.path.abspath(candidate)
+        resolved = os.path.realpath(candidate)
+        if os.path.islink(candidate) or not os.path.isfile(candidate):
+            return ""
+        if os.path.commonpath((root, resolved)) != root:
+            return ""
+        if not resolved.lower().endswith(_VIDEO_EXTS + _AUDIO_EXTS + _IMAGE_EXTS):
+            return ""
+        return resolved
+    except (OSError, TypeError, ValueError):
+        return ""
 
 
 def find_media_file(recording_dir):
     """Find the first media file in a recording directory."""
-    if not recording_dir or not os.path.isdir(recording_dir):
+    root = _canonical_recording_dir(recording_dir)
+    if not root:
         return ""
-    for fn in sorted(os.listdir(recording_dir)):
-        if fn.lower().endswith(_VIDEO_EXTS + _AUDIO_EXTS) and not fn.startswith("."):
-            return os.path.join(recording_dir, fn)
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return ""
+    for fn in names:
+        if fn.lower().endswith(_VIDEO_EXTS + _AUDIO_EXTS + _IMAGE_EXTS) and not fn.startswith("."):
+            path = canonical_media_file(root, fn)
+            if path:
+                return path
     return ""
 
 
@@ -164,7 +238,10 @@ def serve_media_range(media_path, range_header=None):
     except (OSError, ValueError):
         return None, 403, {}
 
-    file_size = os.path.getsize(media_path)
+    try:
+        file_size = os.path.getsize(media_path)
+    except OSError:
+        return None, 404, {}
     content_type = _media_type(media_path)
 
     if range_header and range_header.startswith("bytes="):
@@ -197,9 +274,12 @@ def serve_media_range(media_path, range_header=None):
         read_size = min(length, _MAX_RANGE_CHUNK)
         actual_end = start + read_size - 1
 
-        with open(media_path, "rb") as f:
-            f.seek(start)
-            data = f.read(read_size)
+        try:
+            with open(media_path, "rb") as f:
+                f.seek(start)
+                data = f.read(read_size)
+        except OSError:
+            return None, 404, {}
 
         headers = {
             "Content-Type": content_type,
@@ -213,8 +293,11 @@ def serve_media_range(media_path, range_header=None):
         # need the full file should use Range requests (browsers/players do).
         _MAX_FULL_READ = 256 * 1024 * 1024  # 256 MB
         read_size = min(file_size, _MAX_FULL_READ)
-        with open(media_path, "rb") as f:
-            data = f.read(read_size)
+        try:
+            with open(media_path, "rb") as f:
+                data = f.read(read_size)
+        except OSError:
+            return None, 404, {}
         headers = {
             "Content-Type": content_type,
             "Content-Length": str(read_size),
@@ -229,8 +312,9 @@ def serve_media_range(media_path, range_header=None):
 
 def _esc(s):
     """Basic HTML escape."""
+    s = str(s or "")
     return (
-        (s or "")
+        s
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

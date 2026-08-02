@@ -17,6 +17,11 @@ REST API endpoints (F37):
   POST /api/queue     — add a URL to the download queue         [queue]
   POST /api/jobs/cancel — durably cancel a queue job             [queue]
   GET  /api/library   — search/list recorded VODs               [status]
+  GET  /gallery       — authenticated published-recording gallery [status]
+  GET  /share/{id}    — authenticated player page                [status]
+  GET  /media/{id}    — authenticated Range media stream         [status]
+  GET  /feed/{id}.xml — authenticated published RSS feed         [status]
+  GET  /api/shares    — published recordings/feed definitions     [status]
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
   POST /api/failures/cancel-retry — stop an automatic retry     [recovery]
@@ -48,6 +53,12 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
     "POST /api/validate",
     "POST /api/queue",
+    "GET /gallery",
+    "GET /feed/{id}.xml",
+    "POST /api/shares/recording",
+    "POST /api/shares/recording/revoke",
+    "POST /api/shares/feed",
+    "POST /api/shares/feed/revoke",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
 })
@@ -680,9 +691,10 @@ def _build_handler(
             """Return ``((grant, token), error)`` for a bearer request."""
             hdr = self.headers.get("Authorization", "") or ""
             scheme, separator, candidate = hdr.partition(" ")
-            if not separator or scheme.lower() != "bearer":
-                return None, "token_invalid"
-            candidate = candidate.strip()
+            if separator and scheme.lower() == "bearer":
+                candidate = candidate.strip()
+            else:
+                candidate = self._session_cookie()
             if not candidate:
                 return None, "token_invalid"
             grant = token_store.check(candidate)
@@ -707,7 +719,17 @@ def _build_handler(
                         or not secrets.compare_digest(request_origin, grant.origin)
                     ):
                         return None, "token_origin_mismatch"
+            self._auth_token = candidate
             return (grant, candidate), ""
+
+        def _session_cookie(self):
+            """Read the browser-only session cookie used by HTML media links."""
+            raw = str(self.headers.get("Cookie", "") or "")
+            for part in raw.split(";"):
+                name, separator, value = part.strip().partition("=")
+                if separator and name == "streamkeep_session":
+                    return value.strip()
+            return ""
 
         def _require_auth(self, scope=None, *, mutating=False):
             """Check auth + optional scope. Returns True if authorized."""
@@ -821,10 +843,44 @@ def _build_handler(
             self.send_response(code)
             self._cors()
             self._security_headers()
+            self._set_auth_cookie()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _html_response(self, code, body):
+            payload = str(body or "").encode("utf-8")
+            self.send_response(code)
+            self._cors()
+            self._security_headers()
+            self._csp_header()
+            self._set_auth_cookie()
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _bytes_response(self, code, body, headers=None):
+            payload = bytes(body or b"")
+            self.send_response(code)
+            self._cors()
+            self._security_headers()
+            self._set_auth_cookie()
+            for name, value in (headers or {}).items():
+                self.send_header(str(name), str(value))
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _set_auth_cookie(self):
+            token = str(getattr(self, "_auth_token", "") or "")
+            if token:
+                self.send_header(
+                    "Set-Cookie",
+                    "streamkeep_session=" + token
+                    + "; Path=/; HttpOnly; SameSite=Strict",
+                )
 
         def _discard_unread_body(self, max_bytes=1_048_576):
             if getattr(self, "_request_body_consumed", False):
@@ -890,12 +946,27 @@ def _build_handler(
             elif path == "/ping":
                 if self._require_auth():
                     self._json_response(200, {"ok": True, "app": "StreamKeep"})
+            elif path == "/gallery":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_gallery()
+            elif path.startswith("/share/"):
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_share(path.removeprefix("/share/"))
+            elif path.startswith("/media/"):
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_media(path.removeprefix("/media/"))
+            elif path.startswith("/feed/") and path.endswith(".xml"):
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_feed(path.removeprefix("/feed/")[:-4])
             elif path == "/api/status":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_status()
             elif path == "/api/library":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_library()
+            elif path == "/api/shares":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_shares()
             elif path == "/api/monitor":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_monitor()
@@ -920,6 +991,18 @@ def _build_handler(
             elif path == "/api/validate":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_validate()
+            elif path == "/api/shares/recording":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_share_recording()
+            elif path == "/api/shares/recording/revoke":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_share_recording_revoke()
+            elif path == "/api/shares/feed":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_share_feed()
+            elif path == "/api/shares/feed/revoke":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_share_feed_revoke()
             elif path == "/api/queue":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_queue()
@@ -1140,6 +1223,222 @@ def _build_handler(
                 "ok": True,
                 "history": state.get("history", []),
             })
+
+        def _publishing_base_url(self):
+            if external_origin:
+                return external_origin.rstrip("/")
+            host = _format_url_host(self.server.server_address[0])
+            return f"http://{host}:{int(self.server.server_address[1])}"
+
+        @staticmethod
+        def _published_media(row):
+            from .gallery import find_media_file
+
+            return find_media_file(row.get("path", "")) if row else ""
+
+        def _share_public_view(self, row, media_path=""):
+            from .gallery import _media_type
+
+            share_id = str(row.get("share_id", "") or "")
+            base = self._publishing_base_url()
+            return {
+                "share_id": share_id,
+                "history_id": int(row.get("id", 0) or 0),
+                "title": str(row.get("title", "") or ""),
+                "platform": str(row.get("platform", "") or ""),
+                "channel": str(row.get("channel", "") or ""),
+                "date": str(row.get("date", "") or ""),
+                "size": str(row.get("size", "") or ""),
+                "available": bool(media_path),
+                "media_type": _media_type(media_path) if media_path else "",
+                "share_url": f"{base}/share/{share_id}",
+                "media_url": f"{base}/media/{share_id}",
+            }
+
+        def _handle_gallery(self):
+            from . import db as _db
+            from .gallery import render_gallery_html
+
+            entries = []
+            for row in _db.published_recordings():
+                media_path = self._published_media(row)
+                if not media_path:
+                    continue
+                entry = dict(row)
+                entry["media"] = media_path
+                entries.append(entry)
+            self._html_response(
+                200,
+                render_gallery_html(self._publishing_base_url(), entries),
+            )
+
+        def _handle_share(self, share_id):
+            from . import db as _db
+            from .gallery import render_share_html
+
+            row = _db.published_recording(share_id)
+            media_path = self._published_media(row)
+            if not row or not media_path:
+                self._html_response(404, "<h1>Not Found</h1>")
+                return
+            entry = dict(row)
+            entry["media"] = media_path
+            self._html_response(
+                200,
+                render_share_html(
+                    row.get("share_id", share_id),
+                    self._publishing_base_url(),
+                    info=entry,
+                ),
+            )
+
+        def _handle_media(self, share_id):
+            from . import db as _db
+            from .gallery import serve_media_range
+
+            row = _db.published_recording(share_id)
+            media_path = self._published_media(row)
+            if not row or not media_path:
+                self._bytes_response(404, b"", {"Content-Type": "text/plain"})
+                return
+            data, status, headers = serve_media_range(
+                media_path, self.headers.get("Range", "")
+            )
+            if data is None:
+                data = b""
+            self._bytes_response(status, data, headers)
+
+        def _handle_feed(self, feed_id):
+            from . import db as _db
+            from .feed import generate_rss
+
+            feed_row = _db.published_feed(feed_id)
+            if feed_row is None:
+                self._bytes_response(404, b"", {"Content-Type": "text/plain"})
+                return
+            entries = []
+            for row in _db.published_recordings_for_feed(feed_id) or []:
+                media_path = self._published_media(row)
+                if not media_path:
+                    continue
+                entry = dict(row)
+                entry["media_path"] = media_path
+                entries.append(entry)
+            try:
+                body = generate_rss(
+                    entries,
+                    self._publishing_base_url(),
+                    title=feed_row.get("title", "StreamKeep"),
+                    channel=feed_row.get("channel") or None,
+                ).encode("utf-8")
+            except ValueError:
+                self._bytes_response(500, b"", {"Content-Type": "text/plain"})
+                return
+            self._bytes_response(
+                200,
+                body,
+                {"Content-Type": "application/rss+xml; charset=utf-8"},
+            )
+
+        def _handle_api_shares(self):
+            from . import db as _db
+
+            recordings = [
+                self._share_public_view(row, self._published_media(row))
+                for row in _db.published_recordings()
+            ]
+            feeds = []
+            base = self._publishing_base_url()
+            for row in _db.published_feeds():
+                feed = dict(row)
+                feed["feed_url"] = f"{base}/feed/{feed['feed_id']}.xml"
+                feeds.append(feed)
+            self._json_response(200, {
+                "ok": True,
+                "recordings": recordings,
+                "feeds": feeds,
+            })
+
+        def _handle_api_share_recording(self):
+            from . import db as _db
+
+            data = self._read_body()
+            try:
+                history_id = int(data.get("history_id") or data.get("id") or 0)
+            except (TypeError, ValueError):
+                history_id = 0
+            if history_id <= 0:
+                self._json_response(400, {
+                    "ok": False, "err": "invalid history_id",
+                })
+                return
+            row = _db.publish_recording(history_id)
+            media_path = self._published_media(row)
+            if row is None or not media_path:
+                if row is not None:
+                    _db.unpublish_recording(history_id=history_id)
+                self._json_response(404, {
+                    "ok": False,
+                    "err": "recording_not_available",
+                    "message": "The recording folder or media file is missing.",
+                })
+                return
+            self._json_response(201, {
+                "ok": True,
+                "recording": self._share_public_view(row, media_path),
+            })
+
+        def _handle_api_share_recording_revoke(self):
+            from . import db as _db
+
+            data = self._read_body()
+            share_id = str(data.get("share_id") or "").strip()
+            try:
+                history_id = int(data.get("history_id") or data.get("id") or 0)
+            except (TypeError, ValueError):
+                history_id = 0
+            try:
+                revoked = _db.unpublish_recording(
+                    share_id=share_id, history_id=history_id,
+                )
+            except ValueError:
+                revoked = False
+            if not revoked:
+                self._json_response(404, {"ok": False, "err": "share_not_found"})
+                return
+            self._json_response(200, {"ok": True, "revoked": True})
+
+        def _handle_api_share_feed(self):
+            from . import db as _db
+
+            data = self._read_body()
+            if "channel" not in data:
+                self._json_response(400, {
+                    "ok": False, "err": "channel is required",
+                })
+                return
+            try:
+                feed = _db.publish_feed(
+                    channel=data.get("channel", ""),
+                    title=data.get("title", ""),
+                )
+            except ValueError as error:
+                self._json_response(400, {"ok": False, "err": str(error)})
+                return
+            feed["feed_url"] = (
+                f"{self._publishing_base_url()}/feed/{feed['feed_id']}.xml"
+            )
+            self._json_response(201, {"ok": True, "feed": feed})
+
+        def _handle_api_share_feed_revoke(self):
+            from . import db as _db
+
+            data = self._read_body()
+            feed_id = str(data.get("feed_id") or data.get("id") or "").strip()
+            if not _db.unpublish_feed(feed_id):
+                self._json_response(404, {"ok": False, "err": "feed_not_found"})
+                return
+            self._json_response(200, {"ok": True, "revoked": True})
 
         def _handle_api_monitor(self):
             state = self._get_state()

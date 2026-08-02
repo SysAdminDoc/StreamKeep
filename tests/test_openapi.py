@@ -62,6 +62,12 @@ class OpenApiRouteConsistencyTests(unittest.TestCase):
                     ops.add(f"{method} {route}")
                 elif 'path.startswith("/api/jobs/")' in line:
                     ops.add(f"{method} /api/jobs/{{id}}")
+                elif 'path.startswith("/share/")' in line:
+                    ops.add(f"{method} /share/{{id}}")
+                elif 'path.startswith("/media/")' in line:
+                    ops.add(f"{method} /media/{{id}}")
+                elif 'path.startswith("/feed/")' in line:
+                    ops.add(f"{method} /feed/{{id}}.xml")
         # "/" is served in do_GET via _serve_web_ui without an explicit ``==``.
         ops.add("GET /")
         return ops

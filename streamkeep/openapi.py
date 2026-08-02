@@ -30,11 +30,20 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /api/status",
     "GET /api/library",
     "GET /api/monitor",
+    "GET /gallery",
+    "GET /share/{id}",
+    "GET /media/{id}",
+    "GET /feed/{id}.xml",
+    "GET /api/shares",
     "GET /api/jobs/{id}",
     "POST /pair",
     "POST /send_url",
     "POST /api/validate",
     "POST /api/queue",
+    "POST /api/shares/recording",
+    "POST /api/shares/recording/revoke",
+    "POST /api/shares/feed",
+    "POST /api/shares/feed/revoke",
     "POST /api/jobs/cancel",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
@@ -171,6 +180,24 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                     },
                     "required": ["code"],
                 },
+                "ShareRecordingRequest": {
+                    "type": "object",
+                    "properties": {
+                        "history_id": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["history_id"],
+                },
+                "ShareFeedRequest": {
+                    "type": "object",
+                    "properties": {
+                        "channel": {
+                            "type": "string",
+                            "description": "Empty publishes all shared recordings.",
+                        },
+                        "title": {"type": "string"},
+                    },
+                    "required": ["channel"],
+                },
             },
         },
         "paths": {
@@ -267,6 +294,90 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                             "properties": {
                                 "ok": {"type": "boolean"},
                                 "channels": {"type": "array", "items": {"type": "object"}},
+                            },
+                        }),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                }
+            },
+            "/gallery": {
+                "get": {
+                    "summary": "Browse currently published recordings.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "responses": {
+                        "200": {"description": "Authenticated gallery HTML."},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                }
+            },
+            "/share/{id}": {
+                "get": {
+                    "summary": "Open one published recording player page.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "id", "in": "path", "required": True,
+                        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    }],
+                    "responses": {
+                        "200": {"description": "Authenticated player HTML."},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Share revoked or media missing.", "content": error_content},
+                    },
+                }
+            },
+            "/media/{id}": {
+                "get": {
+                    "summary": "Stream one published media file with Range support.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "id", "in": "path", "required": True,
+                        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    }],
+                    "responses": {
+                        "200": {"description": "Media bytes."},
+                        "206": {"description": "Partial media bytes."},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Share revoked or media missing."},
+                        "416": {"description": "Invalid byte range."},
+                    },
+                }
+            },
+            "/feed/{id}.xml": {
+                "get": {
+                    "summary": "Read one published, authenticated RSS feed.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "id", "in": "path", "required": True,
+                        "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+                    }],
+                    "responses": {
+                        "200": {"description": "RSS 2.0 feed XML."},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Feed revoked or unknown."},
+                    },
+                }
+            },
+            "/api/shares": {
+                "get": {
+                    "summary": "List published recordings and feed definitions.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Publication state.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "recordings": {"type": "array", "items": {"type": "object"}},
+                                "feeds": {"type": "array", "items": {"type": "object"}},
                             },
                         }),
                         "401": unauthorized,
@@ -426,6 +537,87 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "403": forbidden,
                         "500": {"description": "Probe failed.", "content": error_content},
                         "503": {"description": "Probe service unavailable.", "content": error_content},
+                    },
+                }
+            },
+            "/api/shares/recording": {
+                "post": {
+                    "summary": "Publish one existing history recording.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {
+                            "schema": {"$ref": "#/components/schemas/ShareRecordingRequest"}}},
+                    },
+                    "responses": {
+                        "201": json_ok("Recording published.", {"type": "object"}),
+                        "400": {"description": "Invalid history id or request.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Recording folder/media is missing.", "content": error_content},
+                    },
+                }
+            },
+            "/api/shares/recording/revoke": {
+                "post": {
+                    "summary": "Revoke one recording share immediately.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "properties": {
+                                "share_id": {"type": "string"},
+                                "history_id": {"type": "integer"},
+                            },
+                        }}},
+                    },
+                    "responses": {
+                        "200": json_ok("Recording share revoked.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Share not found.", "content": error_content},
+                    },
+                }
+            },
+            "/api/shares/feed": {
+                "post": {
+                    "summary": "Publish an authenticated RSS feed.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {
+                            "schema": {"$ref": "#/components/schemas/ShareFeedRequest"}}},
+                    },
+                    "responses": {
+                        "201": json_ok("Feed published.", {"type": "object"}),
+                        "400": {"description": "Invalid channel or title.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                }
+            },
+            "/api/shares/feed/revoke": {
+                "post": {
+                    "summary": "Revoke an RSS feed immediately.",
+                    "tags": ["publishing"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "properties": {"feed_id": {"type": "string"}},
+                            "required": ["feed_id"],
+                        }}},
+                    },
+                    "responses": {
+                        "200": json_ok("Feed revoked.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Feed not found.", "content": error_content},
                     },
                 }
             },
