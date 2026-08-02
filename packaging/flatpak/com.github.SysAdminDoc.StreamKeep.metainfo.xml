@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.44.0" date="2026-08-02">
+      <description><p>Failed downloads now retry themselves on transient errors and survive a restart; credentials become named profiles bound to the sites they may authenticate; automatic rotating backups are schedulable and observable; live captures report dropped fragments and preserve raw footage for salvage; and audio downloads get their album-artist filled in. Windows now ships as a fast-starting directory install with an unsigned installer instead of a 520 MB single file.</p></description>
+    </release>
     <release version="4.43.5" date="2026-07-27">
       <description><p>Audit fixes: fetching a video URL that carries a playlist parameter now resolves the requested video instead of failing or picking another entry; playlist URLs get an actionable hint instead of a slow failure; a stopped live recording no longer offers a bogus resume next launch; command-line output no longer garbles or drops lines with special characters.</p></description>
     </release>
