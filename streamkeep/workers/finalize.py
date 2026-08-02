@@ -94,6 +94,8 @@ class FinalizeWorker(QThread):
             steps.append(("Downloading chat", "chat"))
         if self._podcast_feed_url(task, info):
             steps.append(("Fetching podcast sidecars", "sidecars"))
+        if self._music_tag_targets(task, info):
+            steps.append(("Filling music tags", "music_tags"))
         if self._has_postprocess_work(snapshot):
             steps.append(("Running post-processing", "postprocess"))
         if task.get("record_manifest", True):
@@ -132,6 +134,51 @@ class FinalizeWorker(QThread):
         if manifest:
             kinds = ", ".join(sorted({entry.get("kind", "?") for entry in manifest}))
             self.log.emit(f"[SIDECARS] Wrote {len(manifest)} sidecar(s): {kinds}")
+
+    def _music_tag_targets(self, task, info):
+        """Return audio outputs whose album-artist should be filled (V41)."""
+        platform = str(
+            getattr(info, "platform", "") or task.get("platform", "")
+        )
+        from ..postprocess.music_tags import find_audio_outputs, is_music_platform
+        if not is_music_platform(platform):
+            return []
+        out_dir = task.get("out_dir", "") or task.get("output_dir", "")
+        if not out_dir:
+            return []
+        return find_audio_outputs(out_dir)
+
+    def _run_music_tags(self, task, info, targets):
+        """Fill missing album-artist tags without overwriting existing ones."""
+        from ..capabilities import CapabilityUnavailableError, resolve_tool_command
+        from ..postprocess.music_tags import apply_music_tags
+
+        try:
+            ffmpeg = resolve_tool_command("ffmpeg")
+            ffprobe = resolve_tool_command("ffprobe")
+        except CapabilityUnavailableError as error:
+            self.log.emit(f"[TAGS] {error}")
+            return
+        channel = str(getattr(info, "channel", "") or task.get("channel", ""))
+        album = str(task.get("album", "") or getattr(info, "album", "") or "")
+        if not album and str(
+            getattr(info, "platform", "") or ""
+        ).lower() == "podcast":
+            # A podcast show groups naturally as an album; a music track does
+            # not, so only this case derives one.
+            album = channel
+        for target in targets:
+            ok, applied, message = apply_music_tags(
+                target, channel=channel, album=album,
+                title=str(getattr(info, "title", "") or ""),
+                ffmpeg=ffmpeg, ffprobe=ffprobe,
+            )
+            if applied:
+                self.log.emit(
+                    f"[TAGS] {Path(target).name}: {message}"
+                )
+            elif not ok:
+                self.log.emit(f"[TAGS] {Path(target).name}: {message}")
 
     def _emit_progress(self, label, index, total):
         self.progress.emit(label, index, total)
@@ -242,6 +289,11 @@ class FinalizeWorker(QThread):
                     step_no += 1
                     self._emit_progress("Fetching podcast sidecars", step_no, total_steps)
                     self._run_podcast_sidecars(task, info, out_dir, file_base)
+                music_targets = self._music_tag_targets(task, info)
+                if music_targets and not self._interrupted():
+                    step_no += 1
+                    self._emit_progress("Filling music tags", step_no, total_steps)
+                    self._run_music_tags(task, info, music_targets)
                 if self._has_postprocess_work(snapshot) and not self._interrupted():
                     step_no += 1
                     self._emit_progress("Running post-processing", step_no, total_steps)

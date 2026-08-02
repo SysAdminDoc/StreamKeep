@@ -230,13 +230,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Acceptance: a per-download control selects a dubbed audio language when the source offers one, and a `mute` toggle produces a video-only file without a stray empty audio track; both round-trip through the override payload with unit tests.
   Complexity: M
 
-- [ ] P2 — V41 — Music metadata auto-fill (album-artist) for SoundCloud/Audius/podcast audio
-  Why: StreamKeep writes metadata but audio-only outputs frequently lack album-artist, which breaks media-library grouping; MeTube added a dedicated post-processor for exactly this.
-  Evidence: https://github.com/alexta69/metube/releases/tag/Release%202026.07.16; `streamkeep/metadata.py`, `streamkeep/extractors/{soundcloud,audius,podcast}.py`, `streamkeep/postprocess/`.
-  Touches: a metadata post-processor that fills album-artist (and album where derivable) from uploader/channel fields, audio extractors, tests.
-  Acceptance: audio downloads from SoundCloud/Audius/podcast RSS get album-artist populated from source fields when absent; existing tags are never overwritten; a unit test covers fill + no-overwrite.
-  Complexity: S
-
 #### P3 — Under Consideration
 
 - [ ] P3 — V42 — yt-dlp stable/nightly update channel toggle
