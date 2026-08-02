@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 # QCoreApplication drives the event loop without requiring a display
 # server.  This lets us reuse QThread workers and pyqtSignal infra.
@@ -1283,6 +1284,181 @@ def _run_youtube_health(args):
         sys.exit(1)
 
 
+def _run_intelligence(args):
+    """Run local-first summaries/thumbnails with explicit cloud consent."""
+    from .intelligence.runtime import (
+        IntelligenceError,
+        delete_profile,
+        get_runtime,
+        list_profiles,
+        save_profile,
+    )
+
+    command = str(getattr(args, "intelligence_command", "") or "jobs")
+    profile_command = str(getattr(args, "profile_command", "") or "")
+    as_json = bool(getattr(args, "json", False))
+
+    if command == "profiles":
+        if profile_command in ("", "list"):
+            profiles = list_profiles()
+            _print_line(json.dumps(profiles, indent=2) if as_json else (
+                "No intelligence profiles configured."
+                if not profiles else "\n".join(
+                    f"  {item['label'] or item['profile_id']:<20s} "
+                    f"{item['profile_id']} [{item['provider_label']}] "
+                    f"model={item['model']} "
+                    f"{'[key]' if item['has_api_key'] else '[no key]'}"
+                    for item in profiles
+                )
+            ))
+            return
+        if profile_command == "delete":
+            if not delete_profile(args.profile_id):
+                _print_line("Error: intelligence profile was not found")
+                sys.exit(2)
+            _print_line(f"Deleted intelligence profile {args.profile_id}")
+            return
+        if profile_command == "save":
+            api_key = ""
+            if getattr(args, "api_key_stdin", False):
+                api_key = sys.stdin.readline().rstrip("\r\n")
+            config = {
+                "model": args.model,
+                "api_url": args.api_url,
+                "redact_default": bool(args.redact_default),
+            }
+            if api_key:
+                config["api_key"] = api_key
+            try:
+                profile = save_profile(
+                    args.profile_id, args.provider, config, label=args.label,
+                )
+            except Exception as error:
+                _print_line(f"Error: {error}")
+                sys.exit(2)
+            _print_line(json.dumps(profile, indent=2) if as_json else (
+                f"Saved intelligence profile {profile['profile_id']} "
+                f"({profile['provider_label']}, model={profile['model']})."
+            ))
+            return
+
+    runtime = get_runtime()
+    if command == "jobs":
+        jobs = runtime.list_jobs(kind=getattr(args, "kind", ""), limit=100)
+        _print_line(json.dumps(jobs, indent=2) if as_json else (
+            "No intelligence jobs." if not jobs else "\n".join(
+                f"  {job['job_id']} {job['kind']} {job['status']} "
+                f"{int(float(job.get('progress', 0)) * 100)}% "
+                f"{job.get('provider_label', '')}"
+                for job in jobs
+            )
+        ))
+        return
+    if command == "cancel":
+        if not runtime.cancel(args.job_id):
+            _print_line("Error: intelligence job was not cancellable")
+            sys.exit(2)
+        _print_line(f"Cancellation requested for {args.job_id}")
+        return
+    if command == "edit":
+        text = args.text
+        if args.file:
+            try:
+                text = Path(args.file).read_text(encoding="utf-8")
+            except OSError as error:
+                _print_line(f"Error: {error}")
+                sys.exit(2)
+        try:
+            job = runtime.edit_summary(args.job_id, text)
+        except Exception as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        _print_line(json.dumps(job, indent=2) if as_json else "Summary updated.")
+        return
+    if command == "rebuild":
+        try:
+            job = runtime.rebuild_summary(
+                args.job_id, consent_token=args.consent_token, wait=True,
+            )
+        except Exception as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        _print_line(json.dumps(job, indent=2) if as_json else (
+            f"Summary rebuild {job.get('status', 'unknown')}: {job.get('job_id', '')}"
+        ))
+        return
+    if command == "thumbnail":
+        try:
+            job = runtime.start_thumbnail(
+                args.recording_dir, title=args.title, channel=args.channel,
+                date=args.date, wait=True,
+            )
+        except Exception as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        _print_line(json.dumps(job, indent=2) if as_json else (
+            f"Smart thumbnail {job.get('status', 'unknown')}: "
+            f"{job.get('result_name', '')}"
+        ))
+        return
+    if command == "preview":
+        try:
+            preview = runtime.preview(
+                args.recording_dir, profile_id=args.profile_id,
+                provider=args.provider, model=args.model, api_url=args.api_url,
+                redact=args.redact,
+            )
+        except Exception as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        _print_line(json.dumps(preview, indent=2) if as_json else (
+            f"Provider: {preview['provider_label']}\n"
+            f"Model: {preview['model']}\n"
+            f"Payload: {preview['payload_chars']} chars, "
+            f"sha256={preview['payload_sha256']}\n"
+            f"Redaction: {'applied' if preview['redaction_applied'] else 'off'}\n"
+            f"Consent token: {preview['consent_token'] or '(not required)'}\n\n"
+            f"{preview['payload']}"
+        ))
+        return
+    if command == "summary":
+        try:
+            preview = runtime.preview(
+                args.recording_dir, profile_id=args.profile_id,
+                provider=args.provider, model=args.model, api_url=args.api_url,
+                redact=args.redact,
+            )
+            if preview["requires_consent"] and not args.consent:
+                _print_line(json.dumps(preview, indent=2) if as_json else (
+                    f"Cloud summary requires explicit consent for "
+                    f"{preview['provider_label']} ({preview['model']}).\n"
+                    f"Exact payload ({preview['payload_chars']} chars, "
+                    f"sha256={preview['payload_sha256']}):\n\n{preview['payload']}\n\n"
+                    "Re-run with --consent after reviewing this payload."
+                ))
+                sys.exit(2)
+            job = runtime.start_summary(
+                args.recording_dir, profile_id=args.profile_id,
+                provider=args.provider, model=args.model, api_url=args.api_url,
+                consent_token=preview["consent_token"], redact=args.redact,
+                wait=True,
+            )
+        except IntelligenceError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        except Exception as error:
+            _print_line(f"Error: {error}")
+            sys.exit(1)
+        _print_line(json.dumps({"preview": preview, "job": job}, indent=2)
+                    if as_json else (
+                        f"Summary {job.get('status', 'unknown')}: "
+                        f"{job.get('result_name', '')}"
+                    ))
+        return
+
+    _print_line("Use 'intelligence --help' for available commands.")
+
+
 def _run_protocol_register(args):
     """Register the per-user streamkeep:// handler (Windows)."""
     from .protocol import register_windows_protocol
@@ -1763,6 +1939,99 @@ def build_parser():
     auth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
 
+    # -- local-first intelligence --
+    intelligence_p = sub.add_parser(
+        "intelligence",
+        help="Run consent-aware summaries and smart thumbnail analysis",
+    )
+    intelligence_sub = intelligence_p.add_subparsers(
+        dest="intelligence_command"
+    )
+    intelligence_sub.required = False
+
+    intelligence_profiles = intelligence_sub.add_parser(
+        "profiles", help="List, save, or delete provider profiles"
+    )
+    profile_sub = intelligence_profiles.add_subparsers(dest="profile_command")
+    profile_sub.required = False
+    profile_sub.add_parser("list", help="List redacted profiles")
+    profile_save = profile_sub.add_parser("save", help="Save a provider profile")
+    profile_save.add_argument("profile_id")
+    profile_save.add_argument("--provider", choices=["ollama", "openai", "anthropic"],
+                              default="ollama")
+    profile_save.add_argument("--model", default="")
+    profile_save.add_argument("--api-url", default="")
+    profile_save.add_argument("--label", default="")
+    profile_save.add_argument("--api-key-stdin", action="store_true",
+                              help="Read the API key from one line of stdin")
+    profile_save.add_argument("--redact-default", action="store_true")
+    profile_delete = profile_sub.add_parser("delete", help="Delete a provider profile")
+    profile_delete.add_argument("profile_id")
+    intelligence_profiles.add_argument("--json", action="store_true")
+    intelligence_profiles.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_preview = intelligence_sub.add_parser(
+        "preview", help="Show the exact transcript boundary before analysis"
+    )
+    intelligence_preview.add_argument("recording_dir")
+    intelligence_preview.add_argument("--profile-id", default="")
+    intelligence_preview.add_argument("--provider", choices=["ollama", "openai", "anthropic"],
+                                      default="ollama")
+    intelligence_preview.add_argument("--model", default="")
+    intelligence_preview.add_argument("--api-url", default="")
+    intelligence_preview.add_argument("--redact", action="store_true")
+    intelligence_preview.add_argument("--json", action="store_true")
+    intelligence_preview.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_summary = intelligence_sub.add_parser(
+        "summary", help="Generate a local or explicitly consented cloud summary"
+    )
+    intelligence_summary.add_argument("recording_dir")
+    intelligence_summary.add_argument("--profile-id", default="")
+    intelligence_summary.add_argument("--provider", choices=["ollama", "openai", "anthropic"],
+                                      default="ollama")
+    intelligence_summary.add_argument("--model", default="")
+    intelligence_summary.add_argument("--api-url", default="")
+    intelligence_summary.add_argument("--redact", action="store_true")
+    intelligence_summary.add_argument("--consent", action="store_true",
+                                      help="Confirm the displayed cloud transcript payload")
+    intelligence_summary.add_argument("--json", action="store_true")
+    intelligence_summary.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_thumbnail = intelligence_sub.add_parser(
+        "thumbnail", help="Generate a resource-bounded local smart thumbnail"
+    )
+    intelligence_thumbnail.add_argument("recording_dir")
+    intelligence_thumbnail.add_argument("--title", default="")
+    intelligence_thumbnail.add_argument("--channel", default="")
+    intelligence_thumbnail.add_argument("--date", default="")
+    intelligence_thumbnail.add_argument("--json", action="store_true")
+    intelligence_thumbnail.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_jobs = intelligence_sub.add_parser("jobs", help="List analysis jobs")
+    intelligence_jobs.add_argument("--kind", choices=["", "summary", "thumbnail"], default="")
+    intelligence_jobs.add_argument("--json", action="store_true")
+    intelligence_jobs.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_cancel = intelligence_sub.add_parser("cancel", help="Cancel an analysis job")
+    intelligence_cancel.add_argument("job_id")
+    intelligence_cancel.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_edit = intelligence_sub.add_parser("edit", help="Edit a saved summary")
+    intelligence_edit.add_argument("job_id")
+    intelligence_edit.add_argument("--text", default="")
+    intelligence_edit.add_argument("--file", default="")
+    intelligence_edit.add_argument("--json", action="store_true")
+    intelligence_edit.add_argument("--config-dir", default=argparse.SUPPRESS)
+
+    intelligence_rebuild = intelligence_sub.add_parser(
+        "rebuild", help="Rebuild a saved summary with fresh consent if needed"
+    )
+    intelligence_rebuild.add_argument("job_id")
+    intelligence_rebuild.add_argument("--consent-token", default="")
+    intelligence_rebuild.add_argument("--json", action="store_true")
+    intelligence_rebuild.add_argument("--config-dir", default=argparse.SUPPRESS)
+
     # -- packaged startup contract --
     startup_p = sub.add_parser(
         "startup-check",
@@ -1895,6 +2164,8 @@ def run_cli(argv=None):
         _run_auth(args, p)
     elif args.command == "youtube-health":
         _run_youtube_health(args)
+    elif args.command == "intelligence":
+        _run_intelligence(args)
     elif args.command == "register-protocol":
         _run_protocol_register(args)
     elif args.command == "unregister-protocol":
@@ -1916,7 +2187,7 @@ def has_cli_args():
         "download", "dl", "capture", "server", "extractors", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
-        "unregister-protocol", "bookmarklet",
+        "unregister-protocol", "bookmarklet", "intelligence",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }
     if any(arg in cli_triggers for arg in sys.argv[1:]):

@@ -30,7 +30,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 _PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _PUBLISHING_TEXT_LIMIT = 256
@@ -86,6 +86,8 @@ def init_db() -> None:
                 _migrate_publishing_v13(db)
             if 0 < v < 14:
                 _migrate_upload_v14(db)
+            if 0 < v < 15:
+                _migrate_intelligence_v15(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -313,6 +315,7 @@ def _apply_schema(db):
         db.execute("".join(statement))
     _apply_publishing_schema(db)
     _apply_upload_schema(db)
+    _apply_intelligence_schema(db)
 
 
 def _apply_publishing_schema(db):
@@ -388,6 +391,69 @@ def _apply_upload_schema(db):
 def _migrate_upload_v14(db):
     """Install the durable upload profile and transfer ledger."""
     _apply_upload_schema(db)
+
+
+def _apply_intelligence_schema(db):
+    """Create redacted intelligence profiles and durable analysis jobs."""
+    for statement in (
+        """
+        CREATE TABLE IF NOT EXISTS intelligence_profiles (
+            profile_id  TEXT PRIMARY KEY,
+            label       TEXT NOT NULL DEFAULT '',
+            provider    TEXT NOT NULL DEFAULT 'ollama',
+            model       TEXT NOT NULL DEFAULT '',
+            api_url     TEXT NOT NULL DEFAULT '',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            secret_ref  TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT '',
+            updated_at  TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS intelligence_jobs (
+            job_id              TEXT PRIMARY KEY,
+            kind                TEXT NOT NULL DEFAULT 'summary',
+            history_id          INTEGER NOT NULL DEFAULT 0,
+            source_path         TEXT NOT NULL DEFAULT '',
+            profile_id          TEXT NOT NULL DEFAULT '',
+            provider            TEXT NOT NULL DEFAULT 'local',
+            model               TEXT NOT NULL DEFAULT '',
+            provider_version    TEXT NOT NULL DEFAULT '',
+            status              TEXT NOT NULL DEFAULT 'queued',
+            progress            REAL NOT NULL DEFAULT 0.0,
+            payload_sha256      TEXT NOT NULL DEFAULT '',
+            payload_chars       INTEGER NOT NULL DEFAULT 0,
+            redaction_applied   INTEGER NOT NULL DEFAULT 0,
+            result_path         TEXT NOT NULL DEFAULT '',
+            result_json         TEXT NOT NULL DEFAULT '{}',
+            error               TEXT NOT NULL DEFAULT '',
+            cancel_requested    INTEGER NOT NULL DEFAULT 0,
+            edited              INTEGER NOT NULL DEFAULT 0,
+            created_at          TEXT NOT NULL DEFAULT '',
+            updated_at          TEXT NOT NULL DEFAULT '',
+            completed_at        TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_intelligence_jobs_status "
+        "ON intelligence_jobs(status, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_intelligence_jobs_source "
+        "ON intelligence_jobs(source_path, kind, updated_at)",
+    ):
+        db.execute(statement)
+    columns = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(intelligence_jobs)"
+        ).fetchall()
+    }
+    if "profile_id" not in columns:
+        db.execute(
+            "ALTER TABLE intelligence_jobs ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _migrate_intelligence_v15(db):
+    """Install the durable intelligence profile and job ledger."""
+    _apply_intelligence_schema(db)
 
 
 def _migrate_queue_v4(db):
@@ -2734,6 +2800,318 @@ def cancel_upload_job(upload_id: str) -> bool:
             )
             conn.commit()
             return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+# ── Intelligence profiles and durable analysis jobs ─────────────────
+
+def save_intelligence_profile(
+    profile_id: str,
+    provider: str,
+    model: str,
+    api_url: str,
+    config: dict[str, Any] | None = None,
+    *,
+    label: str = "",
+    secret_ref: str = "",
+) -> dict[str, Any]:
+    """Persist non-secret intelligence settings and return the profile row."""
+    profile_id = str(profile_id or "").strip()
+    provider = str(provider or "").strip().lower()
+    if not profile_id or not provider:
+        raise ValueError("intelligence profile id and provider are required")
+    payload = json.dumps(dict(config or {}), ensure_ascii=False, sort_keys=True)
+    now = _utc_now_iso()
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO intelligence_profiles
+                    (profile_id, label, provider, model, api_url, config_json,
+                     secret_ref, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(profile_id) DO UPDATE SET
+                    label=excluded.label,
+                    provider=excluded.provider,
+                    model=excluded.model,
+                    api_url=excluded.api_url,
+                    config_json=excluded.config_json,
+                    secret_ref=excluded.secret_ref,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    profile_id, str(label or ""), provider, str(model or ""),
+                    str(api_url or ""), payload, str(secret_ref or ""),
+                    now, now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_intelligence_profile(profile_id) or {
+        "profile_id": profile_id,
+        "label": str(label or ""),
+        "provider": provider,
+        "model": str(model or ""),
+        "api_url": str(api_url or ""),
+        "config": dict(config or {}),
+        "secret_ref": str(secret_ref or ""),
+    }
+
+
+def _decode_intelligence_profile(row) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        config = json.loads(row["config_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    return {
+        "profile_id": str(row["profile_id"] or ""),
+        "label": str(row["label"] or ""),
+        "provider": str(row["provider"] or ""),
+        "model": str(row["model"] or ""),
+        "api_url": str(row["api_url"] or ""),
+        "config": config,
+        "secret_ref": str(row["secret_ref"] or ""),
+        "created_at": str(row["created_at"] or ""),
+        "updated_at": str(row["updated_at"] or ""),
+    }
+
+
+def load_intelligence_profile(profile_id: str) -> dict[str, Any] | None:
+    conn = _connect(readonly=True)
+    try:
+        row = conn.execute(
+            "SELECT * FROM intelligence_profiles WHERE profile_id=?",
+            (str(profile_id or ""),),
+        ).fetchone()
+        return _decode_intelligence_profile(row)
+    finally:
+        conn.close()
+
+
+def load_intelligence_profiles() -> list[dict[str, Any]]:
+    conn = _connect(readonly=True)
+    try:
+        return [
+            item for item in (
+                _decode_intelligence_profile(row)
+                for row in conn.execute(
+                    "SELECT * FROM intelligence_profiles "
+                    "ORDER BY label COLLATE NOCASE, profile_id"
+                ).fetchall()
+            ) if item is not None
+        ]
+    finally:
+        conn.close()
+
+
+def delete_intelligence_profile(profile_id: str) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "DELETE FROM intelligence_profiles WHERE profile_id=?",
+                (str(profile_id or ""),),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def _decode_intelligence_job(row) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        result = json.loads(row["result_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+    item = dict(row)
+    item.pop("result_json", None)
+    item["result"] = result
+    item["history_id"] = int(item.get("history_id", 0) or 0)
+    item["payload_chars"] = int(item.get("payload_chars", 0) or 0)
+    item["redaction_applied"] = bool(item.get("redaction_applied", 0))
+    item["cancel_requested"] = bool(item.get("cancel_requested", 0))
+    item["edited"] = bool(item.get("edited", 0))
+    item["progress"] = max(0.0, min(1.0, float(item.get("progress", 0) or 0)))
+    return item
+
+
+def create_intelligence_job(
+    kind: str,
+    source_path: str,
+    *,
+    history_id: int = 0,
+    profile_id: str = "",
+    provider: str = "local",
+    model: str = "",
+    provider_version: str = "",
+    payload_sha256: str = "",
+    payload_chars: int = 0,
+    redaction_applied: bool = False,
+    result_path: str = "",
+    job_id: str = "",
+) -> dict[str, Any]:
+    source_path = os.path.abspath(str(source_path or ""))
+    if not source_path or not os.path.exists(source_path):
+        raise FileNotFoundError(source_path)
+    kind = str(kind or "").strip().lower()
+    if kind not in {"summary", "thumbnail"}:
+        raise ValueError("unsupported intelligence job kind")
+    job_id = str(job_id or uuid.uuid4().hex).strip()
+    now = _utc_now_iso()
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO intelligence_jobs
+                    (job_id, kind, history_id, source_path, profile_id, provider, model,
+                     provider_version, status, progress, payload_sha256,
+                     payload_chars, redaction_applied, result_path, result_json,
+                     error, cancel_requested, edited, created_at, updated_at,
+                     completed_at)
+                VALUES (?,?,?,?,?,?,?,?,'queued',0,?,?,?,?, '{}','',0,0,?,?, '')
+                """,
+                (
+                    job_id, kind, int(history_id or 0), source_path,
+                    str(profile_id or ""),
+                    str(provider or ""), str(model or ""),
+                    str(provider_version or ""), str(payload_sha256 or ""),
+                    max(0, int(payload_chars or 0)), int(bool(redaction_applied)),
+                    str(result_path or ""), now, now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_intelligence_job(job_id) or {}
+
+
+def load_intelligence_job(job_id: str) -> dict[str, Any] | None:
+    conn = _connect(readonly=True)
+    try:
+        row = conn.execute(
+            "SELECT * FROM intelligence_jobs WHERE job_id=?",
+            (str(job_id or ""),),
+        ).fetchone()
+        return _decode_intelligence_job(row)
+    finally:
+        conn.close()
+
+
+def load_intelligence_jobs(limit: int = 100, *, kind: str = "") -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 100), 1000))
+    kind = str(kind or "").strip().lower()
+    conn = _connect(readonly=True)
+    try:
+        if kind:
+            rows = conn.execute(
+                "SELECT * FROM intelligence_jobs WHERE kind=? "
+                "ORDER BY updated_at DESC LIMIT ?", (kind, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM intelligence_jobs ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [item for item in (_decode_intelligence_job(row) for row in rows)
+                if item is not None]
+    finally:
+        conn.close()
+
+
+def update_intelligence_job(job_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    allowed = {
+        "status", "progress", "provider_version", "result_path", "result",
+        "error", "cancel_requested", "edited", "completed_at",
+        "payload_sha256", "payload_chars", "redaction_applied",
+    }
+    parts = []
+    values: list[Any] = []
+    for key, value in dict(fields or {}).items():
+        if key not in allowed:
+            continue
+        column = "result_json" if key == "result" else key
+        if key == "result":
+            value = json.dumps(value if isinstance(value, dict) else {},
+                               ensure_ascii=False, sort_keys=True)
+        elif key in {"progress"}:
+            value = max(0.0, min(1.0, float(value or 0)))
+        elif key in {"cancel_requested", "edited", "redaction_applied"}:
+            value = int(bool(value))
+        elif key in {"payload_chars"}:
+            value = max(0, int(value or 0))
+        else:
+            value = str(value or "")
+        parts.append(f"{column}=?")
+        values.append(value)
+    if not parts:
+        return load_intelligence_job(job_id)
+    parts.append("updated_at=?")
+    values.append(_utc_now_iso())
+    values.append(str(job_id or ""))
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                f"UPDATE intelligence_jobs SET {', '.join(parts)} WHERE job_id=?",
+                values,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_intelligence_job(job_id)
+
+
+def request_intelligence_cancel(job_id: str) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE intelligence_jobs
+                   SET cancel_requested=1,
+                       status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
+                       updated_at=?
+                 WHERE job_id=? AND status IN ('queued','running','retryable')
+                """,
+                (_utc_now_iso(), str(job_id or "")),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def recover_intelligence_jobs() -> int:
+    """Expose interrupted analysis as retryable rather than completed."""
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE intelligence_jobs
+                   SET status='retryable', progress=0,
+                       error='Analysis interrupted; rebuild required',
+                       updated_at=?
+                 WHERE status='running'
+                """,
+                (_utc_now_iso(),),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
         finally:
             conn.close()
 

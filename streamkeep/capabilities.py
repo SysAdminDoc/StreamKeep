@@ -199,12 +199,23 @@ PRODUCT_CAPABILITY_CLAIMS = (
         "Plugin adapters", reason="Discovery exists but startup never loads approved plugins.",
     ),
     ProductCapabilityClaim(
-        "llm-summaries", "Cloud or local LLM summaries", "experimental",
-        "LLM summaries", reason="The summary worker has no supported user entry point.",
+        "llm-summaries", "Consent-aware local or cloud LLM summaries", "shipped",
+        "LLM summaries",
+        (ReachableProductPath(
+            "cli", "intelligence",
+            "tests/test_intelligence.py::test_summary_runtime_records_provider_and_supports_edit",
+        ), ReachableProductPath(
+            "rest", "POST /api/intelligence/summary",
+            "tests/test_local_server.py::LocalServerTests::test_authenticated_intelligence_preview_and_summary",
+        )),
     ),
     ProductCapabilityClaim(
-        "smart-thumbnails", "Content-scored smart thumbnails", "experimental",
-        "Smart thumbnails", reason="The intelligence worker has no supported user entry point.",
+        "smart-thumbnails", "Content-scored smart thumbnails", "shipped",
+        "Smart thumbnails",
+        (ReachableProductPath(
+            "cli", "intelligence",
+            "tests/test_intelligence.py::test_smart_thumbnail_preserves_original_and_enforces_limits",
+        ),),
     ),
     ProductCapabilityClaim(
         "rss-publishing", "Recording RSS feed publishing", "shipped",

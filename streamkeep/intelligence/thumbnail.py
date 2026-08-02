@@ -3,13 +3,16 @@
 Extracts candidate frames at scene boundaries, scores each by luminance
 variance (contrast) and edge density (detail). Optionally detects faces
 via mediapipe if available. Selects the top-scored frame and saves as
-``thumbnail.jpg`` (1280x720).
+``smart-thumbnail.jpg`` (1280x720), preserving any existing ``thumbnail.jpg``.
 
 Optional text overlay via Pillow (stream title, channel, date).
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
+import warnings
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -19,6 +22,38 @@ from ..capabilities import (
     resolve_tool_command,
 )
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
+
+
+MAX_THUMBNAIL_PIXELS = 20_000_000
+MAX_THUMBNAIL_FRAMES = 8
+THUMBNAIL_PROVIDER_VERSION = "smart-thumbnail-v2"
+SMART_THUMBNAIL_NAME = "smart-thumbnail.jpg"
+
+
+def _open_bounded_image(image_path, *, mode="L"):
+    """Open one still image under explicit Pillow pixel/frame limits."""
+    require_capability("pillow")
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = MAX_THUMBNAIL_PIXELS
+    image = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            image = Image.open(image_path)
+            width, height = image.size
+            if width <= 0 or height <= 0 or width * height > MAX_THUMBNAIL_PIXELS:
+                raise ValueError("thumbnail exceeds the Pillow pixel limit")
+            if int(getattr(image, "n_frames", 1) or 1) > MAX_THUMBNAIL_FRAMES:
+                raise ValueError("thumbnail exceeds the Pillow animation-frame limit")
+            image.seek(0)
+            result = image.convert(mode).copy()
+    except Exception as error:
+        raise ValueError("thumbnail could not be decoded within Pillow limits") from error
+    finally:
+        if image is not None:
+            image.close()
+    return result
 
 
 def _extract_frame(media_path, at_secs, out_path, width=1280, height=720):
@@ -54,10 +89,9 @@ def _score_frame(image_path):
 
     try:
         require_capability("pillow")
-        from PIL import Image, ImageFilter, ImageStat
-        Image.MAX_IMAGE_PIXELS = 89_478_485
+        from PIL import ImageFilter, ImageStat
+        img = _open_bounded_image(image_path, mode="L")
         pillow_ready = True
-        img = Image.open(image_path).convert("L")  # grayscale
 
         # Luminance variance (contrast)
         stat = ImageStat.Stat(img)
@@ -70,7 +104,7 @@ def _score_frame(image_path):
         edge_mean = edge_stat.mean[0] if edge_stat.mean else 0
         score += min(edge_mean / 30.0, 1.0)
 
-    except (CapabilityUnavailableError, ImportError):
+    except (CapabilityUnavailableError, ImportError, OSError, ValueError):
         # No Pillow — basic file-size heuristic (larger JPEG = more detail)
         try:
             size_kb = os.path.getsize(image_path) / 1024
@@ -105,10 +139,8 @@ def _apply_text_overlay(image_path, title="", channel="", date=""):
         return
     try:
         require_capability("pillow")
-        from PIL import Image, ImageDraw, ImageFont
-        Image.MAX_IMAGE_PIXELS = 89_478_485
-
-        img = Image.open(image_path)
+        from PIL import ImageDraw, ImageFont
+        img = _open_bounded_image(image_path, mode="RGB")
         draw = ImageDraw.Draw(img)
 
         # Use a default font (Pillow's built-in)
@@ -138,8 +170,15 @@ def _apply_text_overlay(image_path, title="", channel="", date=""):
             draw.text((x + 1, y + 1), sub, fill="black", font=font_small)
             draw.text((x, y), sub, fill=(200, 200, 200), font=font_small)
 
-        img.save(image_path, "JPEG", quality=92)
-    except (CapabilityUnavailableError, ImportError):
+        temp_path = image_path + ".tmp"
+        img.save(temp_path, "JPEG", quality=92)
+        os.replace(temp_path, image_path)
+    except (CapabilityUnavailableError, ImportError, OSError, ValueError):
+        try:
+            if os.path.exists(image_path + ".tmp"):
+                os.unlink(image_path + ".tmp")
+        except OSError:
+            pass
         pass
 
 
@@ -149,7 +188,8 @@ def generate_thumbnail(recording_dir, *, num_candidates=10, width=1280,
     """Generate a smart thumbnail for a recording.
 
     Extracts *num_candidates* frames at evenly-spaced timestamps, scores
-    each, and saves the best as ``thumbnail.jpg``.
+    each, and saves the best as ``smart-thumbnail.jpg`` without replacing an
+    existing source thumbnail.
 
     Returns ``(path, score)`` or ``("", 0)`` on failure.
     """
@@ -170,44 +210,42 @@ def generate_thumbnail(recording_dir, *, num_candidates=10, width=1280,
     if duration <= 0:
         return "", 0
 
-    # Extract candidate frames
-    import tempfile
-    tmp_dir = tempfile.mkdtemp(prefix="sk_thumb_")
+    # Extract candidate frames in a context-managed directory so cancellation,
+    # ffmpeg failures, and Pillow rejection never leave an unbounded cache.
     candidates = []
-    interval = duration / (num_candidates + 1)
+    interval = duration / (max(1, min(int(num_candidates or 10), 50)) + 1)
+    with tempfile.TemporaryDirectory(prefix="sk_thumb_") as tmp_dir:
+        for i in range(max(1, min(int(num_candidates or 10), 50))):
+            at_secs = interval * (i + 1)
+            out = os.path.join(tmp_dir, f"cand_{i:03d}.jpg")
+            if _extract_frame(media, at_secs, out, width, height):
+                score = _score_frame(out)
+                candidates.append((out, score, at_secs))
 
-    for i in range(num_candidates):
-        at_secs = interval * (i + 1)
-        out = os.path.join(tmp_dir, f"cand_{i:03d}.jpg")
-        if _extract_frame(media, at_secs, out, width, height):
-            score = _score_frame(out)
-            candidates.append((out, score, at_secs))
+        if not candidates:
+            return "", 0
 
-    if not candidates:
-        return "", 0
+        # Pick the best. Never overwrite the source thumbnail: media metadata
+        # and server exports continue to use thumbnail.jpg as the original.
+        candidates.sort(key=lambda c: -c[1])
+        best_path, best_score, _best_time = candidates[0]
+        final = os.path.join(recording_dir, SMART_THUMBNAIL_NAME)
+        temp_final = final + ".tmp"
+        try:
+            shutil.copy2(best_path, temp_final)
+            os.replace(temp_final, final)
+        except OSError:
+            try:
+                if os.path.exists(temp_final):
+                    os.unlink(temp_final)
+            except OSError:
+                pass
+            return "", 0
 
-    # Pick the best
-    candidates.sort(key=lambda c: -c[1])
-    best_path, best_score, best_time = candidates[0]
-
-    # Copy to final location
-    final = os.path.join(recording_dir, "thumbnail.jpg")
-    try:
-        import shutil
-        shutil.copy2(best_path, final)
-    except OSError:
-        return "", 0
-
-    # Apply text overlay
+    # Apply text overlay after the candidate directory is removed. The output
+    # remains an atomic smart-thumbnail replacement and the source is intact.
     if overlay_text and (title or channel):
         _apply_text_overlay(final, title=title, channel=channel, date=date)
-
-    # Cleanup temp files
-    try:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-    except Exception:
-        pass
 
     return final, best_score
 

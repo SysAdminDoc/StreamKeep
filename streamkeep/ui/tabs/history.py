@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QGridLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableView,
     QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -679,6 +679,10 @@ class HistoryTabMixin:
         storyboard_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         highlight_act = menu.addAction("Generate highlights (AI)")
         highlight_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        summary_act = menu.addAction("Generate summary…")
+        summary_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        smart_thumbnail_act = menu.addAction("Generate smart thumbnail")
+        smart_thumbnail_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         menu.addSeparator()
         # Watch status + bookmarks (F38)
         watched_label = "Mark as unwatched" if getattr(h, "watched", False) else "Mark as watched"
@@ -775,6 +779,10 @@ class HistoryTabMixin:
             self._generate_storyboard(h.path)
         elif chosen == highlight_act and h.path:
             self._generate_highlights(h.path)
+        elif chosen == summary_act and h.path:
+            self._generate_summary(h)
+        elif chosen == smart_thumbnail_act and h.path:
+            self._generate_smart_thumbnail(h)
         elif chosen == publish_act:
             self._publish_history_recordings(publishable_entries)
         elif chosen == revoke_publish_act:
@@ -1468,3 +1476,88 @@ class HistoryTabMixin:
         worker.done.connect(_on_done)
         self._highlight_worker = worker
         worker.start()
+
+    def _poll_intelligence_job(self, job_id, label):
+        from ...intelligence.runtime import get_runtime
+
+        job = next(
+            (item for item in get_runtime().list_jobs(limit=100)
+             if item.get("job_id") == job_id),
+            None,
+        )
+        if job is None or job.get("status") in {
+            "completed", "failed", "cancelled", "retryable",
+        }:
+            status = str((job or {}).get("status", "missing"))
+            if status == "completed":
+                self._set_status(f"{label} complete.", "success")
+                self._notify_center(f"{label} complete", "success")
+            elif status in {"failed", "retryable"}:
+                self._set_status(
+                    f"{label} failed: {(job or {}).get('error', 'unknown error')}",
+                    "warning",
+                )
+            elif status == "cancelled":
+                self._set_status(f"{label} cancelled.", "info")
+            return
+        self._set_status(
+            f"{label}: {int(float(job.get('progress', 0)) * 100)}%",
+            "working",
+        )
+        QTimer.singleShot(250, lambda: self._poll_intelligence_job(job_id, label))
+
+    def _generate_summary(self, history_entry):
+        from ..intelligence_dialog import SummaryConsentDialog
+        from ...intelligence.runtime import get_runtime
+
+        dialog = SummaryConsentDialog(self, history_entry.path)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        request = dialog.request()
+        if not request:
+            return
+        try:
+            job = get_runtime().start_summary(
+                history_entry.path,
+                profile_id=request.get("profile_id", ""),
+                provider=request.get("provider", "ollama"),
+                model=request.get("model", ""),
+                consent_token=request.get("consent_token", ""),
+                redact=bool(request.get("redact", False)),
+                history_id=int(getattr(history_entry, "db_id", 0) or 0),
+            )
+        except Exception as error:
+            self._set_status(f"Summary not started: {error}", "warning")
+            return
+        self._log(
+            f"[SUMMARY] Queued {job.get('job_id', '')} via "
+            f"{job.get('provider_label', job.get('provider', 'local'))}."
+        )
+        self._set_status("Summary queued.", "working")
+        QTimer.singleShot(
+            100, lambda: self._poll_intelligence_job(
+                job.get("job_id", ""), "Summary"
+            )
+        )
+
+    def _generate_smart_thumbnail(self, history_entry):
+        from ...intelligence.runtime import get_runtime
+
+        try:
+            job = get_runtime().start_thumbnail(
+                history_entry.path,
+                history_id=int(getattr(history_entry, "db_id", 0) or 0),
+                title=str(getattr(history_entry, "title", "") or ""),
+                channel=str(getattr(history_entry, "channel", "") or ""),
+                date=str(getattr(history_entry, "date", "") or ""),
+            )
+        except Exception as error:
+            self._set_status(f"Smart thumbnail not started: {error}", "warning")
+            return
+        self._log(f"[THUMBNAIL] Queued {job.get('job_id', '')}.")
+        self._set_status("Smart thumbnail queued.", "working")
+        QTimer.singleShot(
+            100, lambda: self._poll_intelligence_job(
+                job.get("job_id", ""), "Smart thumbnail"
+            )
+        )

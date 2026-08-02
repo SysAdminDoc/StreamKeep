@@ -37,6 +37,8 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /api/shares",
     "GET /api/uploads",
     "GET /api/uploads/profiles",
+    "GET /api/intelligence",
+    "GET /api/intelligence/profiles",
     "GET /api/jobs/{id}",
     "POST /pair",
     "POST /send_url",
@@ -52,6 +54,13 @@ DOCUMENTED_OPERATIONS = frozenset({
     "POST /api/uploads/cancel",
     "POST /api/media-server/preview",
     "POST /api/media-server/export",
+    "POST /api/intelligence/profiles",
+    "POST /api/intelligence/preview",
+    "POST /api/intelligence/summary",
+    "POST /api/intelligence/thumbnail",
+    "POST /api/intelligence/cancel",
+    "POST /api/intelligence/summary/edit",
+    "POST /api/intelligence/summary/rebuild",
     "POST /api/jobs/cancel",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
@@ -237,6 +246,38 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "upload_profile_id": {"type": "string"},
                     },
                     "required": ["config", "out_dir"],
+                },
+                "IntelligenceProfileRequest": {
+                    "type": "object",
+                    "properties": {
+                        "profile_id": {"type": "string"},
+                        "label": {"type": "string"},
+                        "provider": {"type": "string", "enum": ["ollama", "openai", "anthropic"]},
+                        "config": {
+                            "type": "object",
+                            "description": "Model and endpoint settings; API keys are stored in the secure store.",
+                        },
+                    },
+                    "required": ["profile_id", "provider", "config"],
+                },
+                "IntelligenceRequest": {
+                    "type": "object",
+                    "properties": {
+                        "recording_dir": {"type": "string"},
+                        "profile_id": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "api_url": {"type": "string"},
+                        "redact": {"type": "boolean"},
+                        "consent_token": {"type": "string"},
+                        "history_id": {"type": "integer"},
+                    },
+                    "required": ["recording_dir"],
+                },
+                "IntelligenceJobRequest": {
+                    "type": "object",
+                    "properties": {"job_id": {"type": "string"}},
+                    "required": ["job_id"],
                 },
             },
         },
@@ -512,6 +553,140 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "401": unauthorized,
                         "403": forbidden,
                         "404": {"description": "Upload is not cancellable.", "content": error_content},
+                    },
+                },
+            },
+            "/api/intelligence": {
+                "get": {
+                    "summary": "List persisted summary and smart-thumbnail jobs.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Intelligence jobs.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/profiles": {
+                "get": {
+                    "summary": "List redacted local/cloud intelligence profiles.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Intelligence profiles.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+                "post": {
+                    "summary": "Save an intelligence profile in the secure store.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceProfileRequest"}}
+                    }},
+                    "responses": {
+                        "201": json_ok("Profile saved.", {"type": "object"}),
+                        "400": {"description": "Invalid profile.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/preview": {
+                "post": {
+                    "summary": "Show the exact transcript payload and cloud consent boundary.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceRequest"}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Transcript preview.", {"type": "object"}),
+                        "400": {"description": "Preview failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/summary": {
+                "post": {
+                    "summary": "Queue a local summary or a consent-bound cloud summary.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceRequest"}}
+                    }},
+                    "responses": {
+                        "202": json_ok("Summary queued.", {"type": "object"}),
+                        "400": {"description": "Consent/provider/job validation failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/thumbnail": {
+                "post": {
+                    "summary": "Queue a local resource-bounded smart thumbnail.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceRequest"}}
+                    }},
+                    "responses": {
+                        "202": json_ok("Thumbnail queued.", {"type": "object"}),
+                        "400": {"description": "Thumbnail job validation failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/cancel": {
+                "post": {
+                    "summary": "Cancel a queued or active intelligence job.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceJobRequest"}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Cancellation requested.", {"type": "object"}),
+                        "404": {"description": "Job not cancellable.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/summary/edit": {
+                "post": {
+                    "summary": "Edit a persisted summary without rebuilding it.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "object", "required": ["job_id", "text"]}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Summary updated.", {"type": "object"}),
+                        "400": {"description": "Summary edit failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/intelligence/summary/rebuild": {
+                "post": {
+                    "summary": "Rebuild a saved summary; cloud rebuilds require fresh consent.",
+                    "tags": ["intelligence"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/IntelligenceJobRequest"}}
+                    }},
+                    "responses": {
+                        "202": json_ok("Summary rebuild queued.", {"type": "object"}),
+                        "400": {"description": "Summary rebuild failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
                     },
                 },
             },

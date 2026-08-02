@@ -13,7 +13,10 @@ then the chunk summaries are summarized into a final output.
 """
 
 import json
+import hashlib
 import os
+import re
+import threading
 import urllib.request
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -21,6 +24,19 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 MAX_CHUNK_CHARS = 24000   # ~6K tokens at 4 chars/token
 MAX_SUMMARY_WORDS = 500
+MAX_TRANSCRIPT_CHARS = 1_500_000
+SUMMARY_PROVIDER_VERSION = "summary-contract-v1"
+_CLOUD_PROVIDERS = frozenset({"anthropic", "openai"})
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+_URL_RE = re.compile(r"https?://[^\s<>]+", re.I)
+_TOKEN_RE = re.compile(
+    r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{12,})\b"
+)
+
+
+class SummaryConsentRequired(RuntimeError):
+    """Raised when a cloud provider is selected without explicit consent."""
 
 SYSTEM_PROMPT = """You are a content analyst. Given a transcript from a live stream or video recording, produce a structured summary in Markdown with these sections:
 
@@ -39,6 +55,32 @@ A 2-3 sentence overview of the content.
 Keep the summary under 500 words. Use timestamps from the transcript."""
 
 
+def is_cloud_provider(provider: str) -> bool:
+    """Return whether a provider sends transcript data to a hosted API."""
+    return str(provider or "").strip().lower() in _CLOUD_PROVIDERS
+
+
+def provider_label(provider: str) -> str:
+    labels = {
+        "ollama": "Ollama (local)",
+        "openai": "OpenAI-compatible cloud endpoint",
+        "anthropic": "Anthropic Claude cloud API",
+    }
+    return labels.get(str(provider or "").strip().lower(), str(provider or "unknown"))
+
+
+def redact_transcript(text: str) -> str:
+    """Redact common personal data and bearer tokens before a cloud request."""
+    value = str(text or "")
+    value = _TOKEN_RE.sub("[REDACTED_TOKEN]", value)
+    value = _EMAIL_RE.sub("[REDACTED_EMAIL]", value)
+    return _URL_RE.sub("[REDACTED_URL]", value)
+
+
+def transcript_digest(text: str) -> str:
+    return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+
+
 def _load_transcript(recording_dir):
     """Load transcript text from .transcript.json or .srt files."""
     # Prefer .transcript.json (has timestamps)
@@ -50,6 +92,8 @@ def _load_transcript(recording_dir):
             if isinstance(data, list):
                 lines = []
                 for seg in data:
+                    if not isinstance(seg, dict):
+                        continue
                     ts = seg.get("start", 0)
                     text = seg.get("text", seg.get("word", ""))
                     speaker = seg.get("speaker", "")
@@ -60,7 +104,7 @@ def _load_transcript(recording_dir):
                     if speaker:
                         prefix += f" {speaker}:"
                     lines.append(f"{prefix} {text}")
-                return "\n".join(lines)
+                return "\n".join(lines)[:MAX_TRANSCRIPT_CHARS]
         except (OSError, json.JSONDecodeError, ValueError):
             pass
 
@@ -69,11 +113,14 @@ def _load_transcript(recording_dir):
         if fn.endswith(".srt"):
             try:
                 with open(os.path.join(recording_dir, fn), "r", encoding="utf-8") as f:
-                    return f.read()
+                    return f.read(MAX_TRANSCRIPT_CHARS)
             except OSError:
                 pass
 
     return ""
+
+
+load_transcript = _load_transcript
 
 
 def _chunk_text(text, max_chars=MAX_CHUNK_CHARS):
@@ -174,8 +221,10 @@ def _query_anthropic(prompt, api_key, model="claude-sonnet-4-20250514", log_fn=N
 
 
 def _query_llm(prompt, provider="ollama", model="", api_url="", api_key="",
-               log_fn=None):
+               log_fn=None, cancel_event=None):
     """Dispatch to the appropriate LLM backend."""
+    if cancel_event is not None and cancel_event.is_set():
+        return ""
     if provider == "ollama":
         return _query_ollama(prompt, model=model or "llama3", log_fn=log_fn)
     elif provider == "anthropic":
@@ -190,33 +239,72 @@ def _query_llm(prompt, provider="ollama", model="", api_url="", api_key="",
 # ── Main summarize function ─────────────────────────────────────────
 
 def summarize_recording(recording_dir, *, provider="ollama", model="",
-                        api_url="", api_key="", log_fn=None):
+                        api_url="", api_key="", log_fn=None,
+                        cloud_consent=False, transcript_text=None,
+                        redact=False, cancel_event=None, progress_fn=None):
     """Generate a summary for a recording directory.
 
     Returns the summary text (Markdown), or '' on failure.
     """
-    transcript = _load_transcript(recording_dir)
+    provider = str(provider or "ollama").strip().lower()
+    if is_cloud_provider(provider) and not cloud_consent:
+        if log_fn:
+            log_fn(
+                f"[SUMMARY] Cloud provider {provider_label(provider)} requires "
+                "explicit transcript consent."
+            )
+        raise SummaryConsentRequired(
+            f"Explicit consent is required before sending transcript data to "
+            f"{provider_label(provider)}."
+        )
+
+    transcript = (
+        _load_transcript(recording_dir)
+        if transcript_text is None else str(transcript_text or "")
+    )
+    if redact and is_cloud_provider(provider):
+        transcript = redact_transcript(transcript)
     if not transcript or len(transcript.strip()) < 100:
         if log_fn:
             log_fn("[SUMMARY] No transcript found or too short (<100 chars)")
         return ""
 
     chunks = _chunk_text(transcript)
+    if progress_fn:
+        progress_fn(0.05)
+
+    def cancelled():
+        return cancel_event is not None and cancel_event.is_set()
+
+    if cancelled():
+        return ""
 
     if len(chunks) == 1:
         prompt = f"Summarize this stream transcript:\n\n{chunks[0]}"
-        summary = _query_llm(prompt, provider, model, api_url, api_key, log_fn=log_fn)
+        summary = _query_llm(
+            prompt, provider, model, api_url, api_key, log_fn=log_fn,
+            cancel_event=cancel_event,
+        )
+        if progress_fn:
+            progress_fn(0.85 if summary else 0.5)
     else:
         # Multi-chunk: summarize each, then summarize summaries
         chunk_summaries = []
         for i, chunk in enumerate(chunks):
+            if cancelled():
+                return ""
             prompt = (
                 f"Summarize part {i+1}/{len(chunks)} of a stream transcript. "
                 f"Focus on key events and topics:\n\n{chunk}"
             )
-            cs = _query_llm(prompt, provider, model, api_url, api_key, log_fn=log_fn)
+            cs = _query_llm(
+                prompt, provider, model, api_url, api_key, log_fn=log_fn,
+                cancel_event=cancel_event,
+            )
             if cs:
                 chunk_summaries.append(cs)
+            if progress_fn:
+                progress_fn(0.1 + 0.6 * ((i + 1) / len(chunks)))
         if not chunk_summaries:
             if log_fn:
                 log_fn("[SUMMARY] All chunk summaries failed — no output")
@@ -226,9 +314,16 @@ def summarize_recording(recording_dir, *, provider="ollama", model="",
             f"These are summaries of {len(chunk_summaries)} consecutive parts "
             f"of the same stream. Combine them into one final summary:\n\n{combined}"
         )
-        summary = _query_llm(prompt, provider, model, api_url, api_key, log_fn=log_fn)
+        if cancelled():
+            return ""
+        summary = _query_llm(
+            prompt, provider, model, api_url, api_key, log_fn=log_fn,
+            cancel_event=cancel_event,
+        )
+        if progress_fn:
+            progress_fn(0.85 if summary else 0.75)
 
-    if summary:
+    if summary and not cancelled():
         # Save alongside recording
         out_path = os.path.join(recording_dir, ".summary.md")
         try:
@@ -237,7 +332,9 @@ def summarize_recording(recording_dir, *, provider="ollama", model="",
         except OSError:
             pass
 
-    return summary
+    if progress_fn and summary and not cancelled():
+        progress_fn(1.0)
+    return summary if not cancelled() else ""
 
 
 # ── Worker thread ───────────────────────────────────────────────────
@@ -249,13 +346,22 @@ class SummarizeWorker(QThread):
     log = pyqtSignal(str)
 
     def __init__(self, recording_dir, provider="ollama", model="",
-                 api_url="", api_key=""):
+                 api_url="", api_key="", *, cloud_consent=False,
+                 transcript_text=None, redact=False):
         super().__init__()
         self._dir = recording_dir
         self._provider = provider
         self._model = model
         self._api_url = api_url
         self._api_key = api_key
+        self._cloud_consent = bool(cloud_consent)
+        self._transcript_text = transcript_text
+        self._redact = bool(redact)
+        self._cancel_event = threading.Event()
+
+    def cancel(self):
+        """Request cancellation between bounded provider calls."""
+        self._cancel_event.set()
 
     def run(self):
         try:
@@ -267,6 +373,13 @@ class SummarizeWorker(QThread):
                 api_url=self._api_url,
                 api_key=self._api_key,
                 log_fn=self.log.emit,
+                cloud_consent=self._cloud_consent,
+                transcript_text=self._transcript_text,
+                redact=self._redact,
+                cancel_event=self._cancel_event,
+                progress_fn=lambda value: self.log.emit(
+                    f"[SUMMARY] Progress {int(value * 100)}%"
+                ),
             )
             if result:
                 self.log.emit(f"[SUMMARY] Summary generated ({len(result)} chars)")

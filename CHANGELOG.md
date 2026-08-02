@@ -4,6 +4,15 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added reachable local-first intelligence workflows. History can preview the
+  exact transcript payload and queue summaries or resource-bounded smart
+  thumbnails; the CLI and authenticated REST API expose the same durable,
+  cancellable jobs. Ollama remains the default local provider, cloud summaries
+  require a one-use consent token bound to provider/model/payload, optional
+  redaction is visible, provider credentials stay in the secure store, and
+  summary metadata records provider/model/version for editing and rebuilding.
+  Smart thumbnails are written beside, never over, an existing source thumbnail.
+
 - Added secure upload and media-server export delivery. Authenticated REST
   clients can save redacted destination profiles, preview and materialize
   Plex/Jellyfin/Emby/Kodi layouts with sidecars, and queue durable per-file

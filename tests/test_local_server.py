@@ -1293,6 +1293,83 @@ class LocalServerTests(unittest.TestCase):
         self.assertTrue(any(item["kind"] == "media" for item in exported["files"]))
         self.assertTrue(exported["upload_jobs"])
 
+    def test_authenticated_intelligence_preview_and_summary(self):
+        from streamkeep.intelligence import runtime as intelligence_runtime
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            recording = root / "recording"
+            recording.mkdir()
+            (recording / ".transcript.json").write_text(
+                json.dumps([{"start": 1, "text": "local transcript " * 20}]),
+                encoding="utf-8",
+            )
+            database = root / "library.db"
+            server = LocalCompanionServer()
+            with mock.patch.object(db, "DB_PATH", database), \
+                    mock.patch.object(intelligence_runtime, "_RUNTIME", None), \
+                    mock.patch.object(
+                        intelligence_runtime,
+                        "summarize_recording",
+                        return_value="## Overview\nREST result",
+                    ):
+                db.init_db()
+                server.start()
+                try:
+                    profile, profile_status = self._open_json(
+                        "/api/intelligence/profiles",
+                        server=server, token=server.token,
+                        method="POST",
+                        data={
+                            "profile_id": "local",
+                            "provider": "ollama",
+                            "config": {"model": "llama3"},
+                        },
+                    )
+                    preview, preview_status = self._open_json(
+                        "/api/intelligence/preview",
+                        server=server, token=server.token,
+                        method="POST",
+                        data={
+                            "recording_dir": str(recording),
+                            "profile_id": "local",
+                        },
+                    )
+                    queued, queued_status = self._open_json(
+                        "/api/intelligence/summary",
+                        server=server, token=server.token,
+                        method="POST",
+                        data={
+                            "recording_dir": str(recording),
+                            "profile_id": "local",
+                        },
+                    )
+                    job_id = queued["job"]["job_id"]
+                    job = intelligence_runtime.get_runtime().wait(job_id)
+                    edited, edited_status = self._open_json(
+                        "/api/intelligence/summary/edit",
+                        server=server, token=server.token,
+                        method="POST",
+                        data={"job_id": job_id, "text": "## Overview\nEdited"},
+                    )
+                    edited_text = (recording / ".summary.md").read_text(encoding="utf-8")
+                finally:
+                    server.stop()
+
+        self.assertEqual(profile_status, 201)
+        self.assertFalse(profile["profile"]["has_api_key"])
+        self.assertEqual(preview_status, 200)
+        self.assertFalse(preview["preview"]["requires_consent"])
+        self.assertIn("local transcript", preview["preview"]["payload"])
+        self.assertEqual(queued_status, 202)
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(edited_status, 200)
+        self.assertTrue(edited["job"]["edited"])
+        self.assertEqual(
+            edited_text,
+            "## Overview\nEdited",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

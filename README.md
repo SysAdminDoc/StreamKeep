@@ -83,7 +83,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 - Convert video and audio after download or through the standalone batch converter.
 - Use GPU encoders when available: NVENC, Intel Quick Sync, AMD AMF, and VideoToolbox.
-- Generate contact sheets, thumbnails, chapters, subtitle files, transcripts, highlights, and silence-removed cuts.
+- Generate contact sheets, chapters, subtitle files, transcripts, highlights, and silence-removed cuts. **Smart thumbnails** are resource-bounded and preserve source artwork. **LLM summaries** are local-first through History, CLI, and the authenticated local API; cloud requests require an exact transcript preview and one-use consent, with optional redaction.
 - Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
 
 ### Backup and Recovery
@@ -97,7 +97,6 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 The source tree contains early engines and unit-tested helpers that are not yet wired to a supported GUI, CLI, or REST caller. They are excluded from the shipped-capability registry until the corresponding roadmap item adds a reachable integration path:
 
 - **Plugin adapters** — manifest discovery and trust validation exist, but approved plugins are not loaded by application startup.
-- **LLM summaries** and **Smart thumbnails** — intelligence workers exist without user-reachable controls or commands.
 - **Recording notes** — note storage exists without a GUI, CLI, or REST editor.
 
 **Native notifications** are shipped: notable events (download complete, channel live, automatic backup, update available) raise a native OS toast through the platform backend, falling back to the tray icon when no native backend is installed. Toasts are suppressed while the StreamKeep window is focused so they never interrupt a user already watching the in-app notification bell.
@@ -118,6 +117,9 @@ python StreamKeep.py download "https://example.com/video" --audio-format opus --
 python StreamKeep.py download "https://example.com/video" --sponsorblock-mark intro,chapter --sponsorblock-remove sponsor
 python StreamKeep.py download "https://example.com/video" --sub-langs en,es --auto-subs --convert-subs srt --sub-delivery sidecar
 python StreamKeep.py download "https://www.youtube.com/watch?v=VIDEO" --youtube-chat
+python StreamKeep.py intelligence preview C:\Videos\recording --redact
+python StreamKeep.py intelligence summary C:\Videos\recording
+python StreamKeep.py intelligence thumbnail C:\Videos\recording
 python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite --fragment-retries 20 --retry-sleep "fragment:exp=1:20" --live-from-start
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
 python StreamKeep.py credentials
@@ -332,6 +334,7 @@ The artifact suite exercises empty, legacy-migrated, and populated libraries off
 ## Development Notes
 
 - Keep the app local-first: no cloud sync by default and no DRM circumvention features.
+- Keep intelligence local-first: show the exact transcript payload before cloud requests, require explicit one-use consent, store provider credentials in the secure store, and preserve editable summary/smart-thumbnail outputs.
 - Keep local HTTP APIs bound to loopback and token-gated.
 - Use `QThread`/signals for background work; do not block the GUI thread.
 - Keep subprocess arguments explicit, use `--` separators for user URLs, restrict curl/ffmpeg protocols, and pass `-nostdin` to ffmpeg jobs.

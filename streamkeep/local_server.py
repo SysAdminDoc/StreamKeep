@@ -24,10 +24,19 @@ REST API endpoints (F37):
   GET  /api/shares    — published recordings/feed definitions     [status]
   GET  /api/uploads   — persisted upload progress and retry state  [status]
   GET  /api/uploads/profiles — redacted upload profiles           [status]
+  GET  /api/intelligence — persisted summary/thumbnail jobs       [status]
+  GET  /api/intelligence/profiles — redacted AI profiles          [status]
   POST /api/uploads   — queue one completed file for delivery      [queue]
   POST /api/uploads/profiles — save a secure destination profile   [queue]
   POST /api/media-server/preview — preview a library layout        [status]
   POST /api/media-server/export — materialize and optionally upload [queue]
+  POST /api/intelligence/preview — show exact transcript boundary  [status]
+  POST /api/intelligence/profiles — save a secure AI profile       [queue]
+  POST /api/intelligence/summary — queue a consent-aware summary   [queue]
+  POST /api/intelligence/thumbnail — queue smart thumbnail        [queue]
+  POST /api/intelligence/cancel — cancel an analysis job          [queue]
+  POST /api/intelligence/summary/edit — edit a saved summary      [queue]
+  POST /api/intelligence/summary/rebuild — rebuild a saved summary [queue]
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
   POST /api/failures/cancel-retry — stop an automatic retry     [recovery]
@@ -67,12 +76,21 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /api/shares/feed/revoke",
     "GET /api/uploads",
     "GET /api/uploads/profiles",
+    "GET /api/intelligence",
+    "GET /api/intelligence/profiles",
     "POST /api/uploads",
     "POST /api/uploads/profiles",
     "POST /api/uploads/retry",
     "POST /api/uploads/cancel",
     "POST /api/media-server/preview",
     "POST /api/media-server/export",
+    "POST /api/intelligence/preview",
+    "POST /api/intelligence/profiles",
+    "POST /api/intelligence/summary",
+    "POST /api/intelligence/thumbnail",
+    "POST /api/intelligence/cancel",
+    "POST /api/intelligence/summary/edit",
+    "POST /api/intelligence/summary/rebuild",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
 })
@@ -987,6 +1005,12 @@ def _build_handler(
             elif path == "/api/uploads/profiles":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_upload_profiles()
+            elif path == "/api/intelligence":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_intelligence()
+            elif path == "/api/intelligence/profiles":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_intelligence_profiles()
             elif path == "/api/monitor":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_monitor()
@@ -1026,6 +1050,9 @@ def _build_handler(
             elif path == "/api/uploads/profiles":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_upload_profile_save()
+            elif path == "/api/intelligence/profiles":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_profile_save()
             elif path == "/api/uploads":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_upload_create()
@@ -1041,6 +1068,24 @@ def _build_handler(
             elif path == "/api/media-server/export":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_media_server_export()
+            elif path == "/api/intelligence/preview":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_intelligence_preview()
+            elif path == "/api/intelligence/summary":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_summary()
+            elif path == "/api/intelligence/thumbnail":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_thumbnail()
+            elif path == "/api/intelligence/cancel":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_cancel()
+            elif path == "/api/intelligence/summary/edit":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_summary_edit()
+            elif path == "/api/intelligence/summary/rebuild":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_intelligence_summary_rebuild()
             elif path == "/api/queue":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_queue()
@@ -1497,6 +1542,189 @@ def _build_handler(
                 "ok": True,
                 "job": public_job(_db.load_upload_job(upload_id)),
             })
+
+        @staticmethod
+        def _intelligence_error(error):
+            from .diagnostics import redact_text
+
+            return redact_text(str(error or "intelligence request failed"))
+
+        def _handle_api_intelligence(self):
+            from .intelligence.runtime import get_runtime
+
+            runtime = get_runtime()
+            self._json_response(200, {
+                "ok": True, "jobs": runtime.list_jobs(limit=100),
+            })
+
+        def _handle_api_intelligence_profiles(self):
+            from .intelligence.runtime import list_profiles
+
+            self._json_response(200, {"ok": True, "profiles": list_profiles()})
+
+        def _handle_api_intelligence_profile_save(self):
+            from .intelligence.runtime import save_profile
+
+            data = self._read_body()
+            profile_id = str(data.get("profile_id") or data.get("id") or "").strip()
+            provider = str(data.get("provider") or "").strip()
+            config = data.get("config", {})
+            if not profile_id or not provider or not isinstance(config, dict):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "profile_id, provider, and object config are required",
+                })
+                return
+            try:
+                profile = save_profile(
+                    profile_id, provider, config,
+                    label=str(data.get("label") or "").strip(),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_profile_invalid",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(201, {"ok": True, "profile": profile})
+
+        @staticmethod
+        def _intelligence_request(data):
+            return {
+                "profile_id": str(data.get("profile_id") or "").strip(),
+                "provider": str(data.get("provider") or "ollama").strip(),
+                "model": str(data.get("model") or "").strip(),
+                "api_url": str(data.get("api_url") or "").strip(),
+                "redact": bool(data.get("redact", False)),
+            }
+
+        def _handle_api_intelligence_preview(self):
+            from .intelligence.runtime import get_runtime
+
+            data = self._read_body()
+            recording_dir = str(
+                data.get("recording_dir") or data.get("source_path") or ""
+            ).strip()
+            if not recording_dir:
+                self._json_response(400, {"ok": False, "err": "recording_dir is required"})
+                return
+            try:
+                preview = get_runtime().preview(
+                    recording_dir, **self._intelligence_request(data),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_preview_failed",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(200, {"ok": True, "preview": preview})
+
+        def _handle_api_intelligence_summary(self):
+            from .intelligence.runtime import get_runtime, public_job
+
+            data = self._read_body()
+            recording_dir = str(
+                data.get("recording_dir") or data.get("source_path") or ""
+            ).strip()
+            if not recording_dir:
+                self._json_response(400, {"ok": False, "err": "recording_dir is required"})
+                return
+            try:
+                request = self._intelligence_request(data)
+                job = get_runtime().start_summary(
+                    recording_dir, **request,
+                    consent_token=str(data.get("consent_token") or "").strip(),
+                    history_id=int(data.get("history_id") or 0),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_summary_failed",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(202, {"ok": True, "job": public_job(job)})
+
+        def _handle_api_intelligence_thumbnail(self):
+            from .intelligence.runtime import get_runtime, public_job
+
+            data = self._read_body()
+            recording_dir = str(
+                data.get("recording_dir") or data.get("source_path") or ""
+            ).strip()
+            if not recording_dir:
+                self._json_response(400, {"ok": False, "err": "recording_dir is required"})
+                return
+            try:
+                job = get_runtime().start_thumbnail(
+                    recording_dir,
+                    history_id=int(data.get("history_id") or 0),
+                    title=str(data.get("title") or ""),
+                    channel=str(data.get("channel") or ""),
+                    date=str(data.get("date") or ""),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_thumbnail_failed",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(202, {"ok": True, "job": public_job(job)})
+
+        def _handle_api_intelligence_cancel(self):
+            from .intelligence.runtime import get_runtime
+
+            data = self._read_body()
+            job_id = str(data.get("job_id") or data.get("id") or "").strip()
+            if not job_id or not get_runtime().cancel(job_id):
+                self._json_response(404, {"ok": False, "err": "intelligence_job_not_cancellable"})
+                return
+            from . import db as _db
+            from .intelligence.runtime import public_job
+            self._json_response(200, {
+                "ok": True, "job": public_job(_db.load_intelligence_job(job_id)),
+            })
+
+        def _handle_api_intelligence_summary_edit(self):
+            from .intelligence.runtime import get_runtime
+
+            data = self._read_body()
+            job_id = str(data.get("job_id") or data.get("id") or "").strip()
+            if not job_id or not isinstance(data.get("text"), str):
+                self._json_response(400, {
+                    "ok": False, "err": "job_id and string text are required",
+                })
+                return
+            try:
+                job = get_runtime().edit_summary(job_id, data["text"])
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_summary_edit_failed",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(200, {"ok": True, "job": job})
+
+        def _handle_api_intelligence_summary_rebuild(self):
+            from .intelligence.runtime import get_runtime
+
+            data = self._read_body()
+            job_id = str(data.get("job_id") or data.get("id") or "").strip()
+            if not job_id:
+                self._json_response(400, {"ok": False, "err": "job_id is required"})
+                return
+            try:
+                job = get_runtime().rebuild_summary(
+                    job_id,
+                    consent_token=str(data.get("consent_token") or "").strip(),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "intelligence_summary_rebuild_failed",
+                    "message": self._intelligence_error(error),
+                })
+                return
+            self._json_response(202, {"ok": True, "job": job})
 
         @staticmethod
         def _media_server_info(data):
