@@ -421,7 +421,8 @@ class DownloadQueueMixin:
             "quality", "container", "thumbnail_path", "thumbnail_url",
             "progress", "speed", "eta", "size", "size_bytes",
             "output_dir", "folder_template", "file_template", "proxy",
-            "auth_profile_id", "smart_profile",
+            "auth_profile_id", "smart_profile", "media_item_id",
+            "media_item_type", "background_audio_id",
         ):
             value = item.get(key)
             if value not in (None, ""):
@@ -442,6 +443,10 @@ class DownloadQueueMixin:
         feed_url="",
         source_id="",
         webpage_url="",
+        quality="",
+        media_item_id="",
+        media_item_type="",
+        background_audio_id="",
         download_archive="",
         break_on_existing=False,
         ytdlp_template_name="",
@@ -457,6 +462,25 @@ class DownloadQueueMixin:
         up by _advance_queue after that time."""
         if not url:
             return False
+        try:
+            from ...preflight import validate_queue_payload
+            validated = validate_queue_payload({
+                "url": url,
+                "vod_source": vod_source,
+                "vod_platform": vod_platform,
+                "quality": quality,
+                "media_item_id": media_item_id,
+                "media_item_type": media_item_type,
+                "background_audio_id": background_audio_id,
+                "title": title or vod_title,
+                "platform": platform,
+                "source_id": source_id,
+                "webpage_url": webpage_url,
+            })
+            url = validated["url"]
+        except Exception as error:
+            self._set_status(f"Cannot queue this media: {error}", "warning")
+            return False
         item_key = str(vod_source or url)
         if any(
             (q.get("vod_source") or q.get("url")) == item_key
@@ -471,7 +495,7 @@ class DownloadQueueMixin:
                 "webpage_url": webpage_url or url,
                 "platform": platform or "",
                 "title": title or vod_title or "",
-                "quality": "",
+                "quality": quality or "",
                 "output_dir": "",
                 "folder_template": "",
                 "file_template": "",
@@ -519,7 +543,10 @@ class DownloadQueueMixin:
             "ytdlp_template_name": (
                 smart_job.get("arg_template") or ytdlp_template_name
             ),
-            "quality": smart_job.get("quality", ""),
+            "quality": quality or smart_job.get("quality", ""),
+            "media_item_id": media_item_id,
+            "media_item_type": media_item_type,
+            "background_audio_id": background_audio_id,
             "output_dir": smart_job.get("output_dir", ""),
             "folder_template": smart_job.get("folder_template", ""),
             "file_template": smart_job.get("file_template", ""),

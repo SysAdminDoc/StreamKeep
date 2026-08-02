@@ -150,6 +150,8 @@ class VODInfo:
     feed_url: str = ""  # originating RSS feed (podcast episodes)
     source_id: str = ""
     webpage_url: str = ""
+    media_type: str = "video"  # video, audio, photo, or gif
+    background_audio: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

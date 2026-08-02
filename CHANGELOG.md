@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added V20 pre-queue validation for desktop companion and headless REST flows.
+  `POST /api/validate` resolves a URL into bounded, delivery-URL-free media
+  picker metadata with per-item video/audio/photo/GIF types and optional
+  background-audio choices. A short-lived server-side validation id binds the
+  selected item to the subsequent durable queue job; the desktop VOD picker
+  shows the same media type information.
+
 - Added V18 media-server layouts for monitored channels. Imports now support
   Season or flat S/E naming for Plex, Jellyfin, Emby, and Kodi, write existing
   privacy-safe NFO sidecars, and can maintain a portable M3U or native server

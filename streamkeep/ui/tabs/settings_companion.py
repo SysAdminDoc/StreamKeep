@@ -8,11 +8,21 @@ from PyQt6.QtGui import QDesktopServices
 
 from ... import VERSION
 from ... import db as _db
+from ...har import normalize_replay_headers
 from ...models import HistoryEntry
 from ...local_server import (
     LocalCompanionServer,
     generate_bearer_token,
     valid_bearer_token,
+)
+from ...preflight import (
+    PreflightError,
+    ProbeCache,
+    build_picker_response,
+    collect_probe_result,
+    serialize_stream_picker,
+    serialize_vod_picker,
+    validate_probe_request,
 )
 from ...updater import DownloadUpdateWorker, UpdateCheckWorker, arm_self_replace
 from ..widgets import (
@@ -24,6 +34,45 @@ from ..widgets import (
 
 class SettingsCompanionMixin:
     """Companion trust boundary, cleanup, and release-update orchestration."""
+
+    def _companion_probe(self, data):
+        """Resolve a companion probe without exposing delivery credentials."""
+        item = validate_probe_request(data)
+        request_headers = normalize_replay_headers(
+            item.get("request_headers")
+        )
+        url = item["url"]
+        from ...workers import FetchWorker
+
+        def worker_factory():
+            return FetchWorker(
+                url,
+                vod_source=item.get("vod_source") or None,
+                vod_platform=item.get("vod_platform") or None,
+                vod_title=item.get("vod_title") or None,
+                vod_channel=item.get("vod_channel") or None,
+                source_id=item.get("source_id") or None,
+                webpage_url=item.get("webpage_url") or None,
+                request_headers=request_headers,
+            )
+
+        kind, value = collect_probe_result(
+            worker_factory,
+            timeout_seconds=45.0,
+        )
+        picker = (
+            serialize_vod_picker(value, url)
+            if kind == "vods"
+            else serialize_stream_picker(value, url)
+        )
+        if not picker.get("media_items"):
+            raise PreflightError("probe returned no playable media")
+        cache = getattr(self, "_companion_probe_cache", None)
+        if cache is None:
+            cache = ProbeCache()
+            self._companion_probe_cache = cache
+        validation_id, expires_at = cache.put(url, picker)
+        return build_picker_response(url, picker, validation_id, expires_at)
 
     def _on_companion_toggled(self, checked):
         """Settings toggle — start or stop the companion server in-place."""
@@ -426,6 +475,7 @@ class SettingsCompanionMixin:
                     allow_private_network=allow_private,
                 )
                 srv.state_provider = self._api_state_snapshot
+                srv.probe_submitter = self._companion_probe
                 srv.handoff_received.connect(self._on_companion_handoff)
                 srv.url_received.connect(self._on_companion_url)
                 srv.clip_received.connect(self._on_companion_clip)

@@ -88,33 +88,42 @@ class DownloadVodMixin:
             self.vod_table.setCellWidget(i, 0, cb_widget)
             self._vod_checks.append(cb)
 
+            type_item = QTableWidgetItem(
+                str(getattr(v, "media_type", "video") or "video").title()
+            )
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            type_item.setToolTip(
+                "The media type selected by the source probe."
+            )
+            self.vod_table.setItem(i, 1, type_item)
+
             # Platform badge
             badge = PLATFORM_BADGES.get(v.platform, {})
             plat_item = QTableWidgetItem(v.platform)
             plat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if badge.get("color"):
                 plat_item.setForeground(QColor(badge["color"]))
-            self.vod_table.setItem(i, 1, plat_item)
+            self.vod_table.setItem(i, 2, plat_item)
 
             # Title
             live = " [LIVE]" if v.is_live else ""
             title_item = QTableWidgetItem(f"{v.title}{live}")
             if v.is_live:
                 title_item.setForeground(QColor(CAT["green"]))
-            self.vod_table.setItem(i, 2, title_item)
+            self.vod_table.setItem(i, 3, title_item)
 
             date_item = QTableWidgetItem(v.date)
             date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 3, date_item)
+            self.vod_table.setItem(i, 4, date_item)
 
             dur_item = QTableWidgetItem(v.duration if v.duration else "Live")
             dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 4, dur_item)
+            self.vod_table.setItem(i, 5, dur_item)
 
             views_str = f"{v.viewers:,}" if v.viewers else "—"
             views_item = QTableWidgetItem(views_str)
             views_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 5, views_item)
+            self.vod_table.setItem(i, 6, views_item)
 
         self._vod_last_checked_row = -1  # shift-click anchor
         self.vod_widget.setVisible(True)
@@ -243,27 +252,36 @@ class DownloadVodMixin:
             cb_lay.setContentsMargins(0, 0, 0, 0)
             self.vod_table.setCellWidget(i, 0, cb_widget)
             self._vod_checks.append(cb)
+            type_item = QTableWidgetItem(
+                str(getattr(v, "media_type", "video") or "video").title()
+            )
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            type_item.setToolTip(
+                "The media type selected by the source probe."
+            )
+            self.vod_table.setItem(i, 1, type_item)
+
             badge = PLATFORM_BADGES.get(v.platform, {})
             plat_item = QTableWidgetItem(v.platform)
             plat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if badge.get("color"):
                 plat_item.setForeground(QColor(badge["color"]))
-            self.vod_table.setItem(i, 1, plat_item)
+            self.vod_table.setItem(i, 2, plat_item)
             live = " [LIVE]" if v.is_live else ""
             title_item = QTableWidgetItem(f"{v.title}{live}")
             if v.is_live:
                 title_item.setForeground(QColor(CAT["green"]))
-            self.vod_table.setItem(i, 2, title_item)
+            self.vod_table.setItem(i, 3, title_item)
             date_item = QTableWidgetItem(v.date)
             date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 3, date_item)
+            self.vod_table.setItem(i, 4, date_item)
             dur_item = QTableWidgetItem(v.duration if v.duration else "Live")
             dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 4, dur_item)
+            self.vod_table.setItem(i, 5, dur_item)
             views_str = f"{v.viewers:,}" if v.viewers else "—"
             views_item = QTableWidgetItem(views_str)
             views_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.vod_table.setItem(i, 5, views_item)
+            self.vod_table.setItem(i, 6, views_item)
         self._refresh_vod_summary()
         if hasattr(self, "vod_load_more_btn"):
             self.vod_load_more_btn.setVisible(bool(next_cursor))

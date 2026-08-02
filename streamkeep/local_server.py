@@ -13,6 +13,7 @@ scopes. ``rotate_token()`` replaces it atomically;
 REST API endpoints (F37):
   GET  /api/status    — active downloads, queue, live channels  [status]
   GET  /api/jobs/{id} — inspect one durable queue job            [status]
+  POST /api/validate  — resolve a URL into safe picker metadata  [queue]
   POST /api/queue     — add a URL to the download queue         [queue]
   POST /api/jobs/cancel — durably cancel a queue job             [queue]
   GET  /api/library   — search/list recorded VODs               [status]
@@ -45,6 +46,7 @@ from .har import normalize_replay_headers
 
 PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
+    "POST /api/validate",
     "POST /api/queue",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
@@ -414,6 +416,7 @@ class LocalCompanionServer:
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
+        self.probe_submitter = None  # callable(dict) -> picker response
         self.queue_submitter = None  # callable(dict) -> durable job dict
         self.job_canceller = None    # callable(job_id) -> durable job dict
         self.failure_retrier = None  # callable(failure_id) -> durable job dict
@@ -469,6 +472,7 @@ class LocalCompanionServer:
             self._token_store,
             self._signals,
             self.state_provider,
+            probe_submitter=self.probe_submitter,
             queue_submitter=self.queue_submitter,
             job_canceller=self.job_canceller,
             failure_retrier=self.failure_retrier,
@@ -543,6 +547,7 @@ def _build_handler(
     signals,
     state_provider=None,
     *,
+    probe_submitter=None,
     queue_submitter=None,
     job_canceller=None,
     failure_retrier=None,
@@ -912,6 +917,9 @@ def _build_handler(
             elif path == "/send_url":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_send_url()
+            elif path == "/api/validate":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_validate()
             elif path == "/api/queue":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_queue()
@@ -1075,7 +1083,16 @@ def _build_handler(
                     "job": job,
                 })
             else:
-                if request_headers or source_context:
+                has_selection = any(
+                    data.get(key)
+                    for key in (
+                        "validation_id",
+                        "media_item_id",
+                        "media_item_ids",
+                        "background_audio_id",
+                    )
+                )
+                if request_headers or source_context or has_selection:
                     signals.handoff_received.emit(
                         {**data, "url": url}, action
                     )
@@ -1147,12 +1164,71 @@ def _build_handler(
                 return
             self._json_response(200, {"ok": True, "job_id": job_id, "job": job})
 
-        def _handle_api_queue(self):
-            data = self._read_body()
-            url = str(data.get("url") or "").strip()
-            if not url.startswith(("http://", "https://")):
-                self._json_response(400, {"ok": False, "err": "invalid url"})
+        def _handle_api_validate(self):
+            from .preflight import PreflightError, validate_probe_request
+
+            try:
+                data = validate_probe_request(self._read_body())
+            except PreflightError as error:
+                self._json_response(
+                    400, {"ok": False, "err": "invalid probe", "message": str(error)}
+                )
                 return
+            url = data["url"]
+            if self._ssrf_reject(url):
+                return
+            handoff = _normalize_handoff_payload(data)
+            if handoff is None:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "invalid handoff context",
+                })
+                return
+            request_headers, source_context = handoff
+            if "request_headers" in data:
+                data["request_headers"] = request_headers
+            else:
+                data.pop("request_headers", None)
+            if source_context:
+                data["source_context"] = source_context
+            else:
+                data.pop("source_context", None)
+            if not probe_submitter:
+                self._json_response(
+                    503,
+                    {"ok": False, "err": "validation unavailable"},
+                )
+                return
+            try:
+                response = probe_submitter(data)
+            except PreflightError as error:
+                self._json_response(
+                    400, {"ok": False, "err": "probe_failed", "message": str(error)}
+                )
+                return
+            except Exception as error:
+                self._json_response(
+                    500, {"ok": False, "err": "probe_failed", "message": str(error)}
+                )
+                return
+            if not isinstance(response, dict):
+                self._json_response(
+                    500, {"ok": False, "err": "probe_failed"}
+                )
+                return
+            self._json_response(200, {"ok": True, **response})
+
+        def _handle_api_queue(self):
+            from .preflight import PreflightError, validate_queue_payload
+
+            try:
+                data = validate_queue_payload(self._read_body())
+            except PreflightError as error:
+                self._json_response(
+                    400, {"ok": False, "err": str(error)}
+                )
+                return
+            url = data["url"]
             if self._ssrf_reject(url):
                 return
             handoff = _normalize_handoff_payload(data)
@@ -1172,7 +1248,16 @@ def _build_handler(
             else:
                 data.pop("source_context", None)
             if not queue_submitter:
-                if request_headers or source_context:
+                has_selection = any(
+                    data.get(key)
+                    for key in (
+                        "validation_id",
+                        "media_item_id",
+                        "media_item_ids",
+                        "background_audio_id",
+                    )
+                )
+                if request_headers or source_context or has_selection:
                     signals.handoff_received.emit(
                         {**data, "url": url}, "queue"
                     )

@@ -1780,17 +1780,37 @@ class DownloadSingleMixin:
         url = str(payload.get("url") or "").strip()
         if not url:
             return
+        selection = {}
+        if payload.get("validation_id"):
+            try:
+                from ...preflight import normalize_media_selection
+                cache = getattr(self, "_companion_probe_cache", None)
+                if cache is None:
+                    raise ValueError("the validation result is no longer available")
+                picker = cache.take(payload["validation_id"], url)
+                selection = normalize_media_selection(payload, picker)
+            except Exception as error:
+                self._log(f"[COMPANION] Picker selection rejected: {error}")
+                self._set_status(
+                    "The browser picker expired or changed. Probe the URL again.",
+                    "warning",
+                )
+                return
         self._on_companion_url(
             url,
             action,
             request_headers=normalize_replay_headers(
                 payload.get("request_headers")
             ),
+            selection=selection,
         )
 
-    def _on_companion_url(self, url, action, request_headers=None):
+    def _on_companion_url(
+        self, url, action, request_headers=None, selection=None
+    ):
         """The extension just POSTed a URL. Route it through the Fetch
         path or queue it immediately depending on action."""
+        selection = dict(selection or {})
         if request_headers is not None:
             self._companion_request_headers = dict(request_headers)
         self._log(f"[COMPANION] Received {action.upper()} for {url[:80]}")
@@ -1803,8 +1823,21 @@ class DownloadSingleMixin:
             try:
                 added = self._queue_add(
                     url,
-                    title="",
-                    platform="",
+                    title=selection.get("title", ""),
+                    platform=selection.get("platform", ""),
+                    quality=selection.get("quality", ""),
+                    media_item_id=selection.get("media_item_id", ""),
+                    media_item_type=selection.get("media_item_type", ""),
+                    background_audio_id=selection.get(
+                        "background_audio_id", ""
+                    ),
+                    vod_source=selection.get("vod_source", ""),
+                    vod_platform=selection.get("vod_platform", ""),
+                    vod_title=selection.get("vod_title", ""),
+                    vod_channel=selection.get("vod_channel", ""),
+                    feed_url=selection.get("feed_url", ""),
+                    source_id=selection.get("source_id", ""),
+                    webpage_url=selection.get("webpage_url", ""),
                     request_headers=getattr(
                         self, "_companion_request_headers", {}
                     ),
@@ -1817,7 +1850,15 @@ class DownloadSingleMixin:
                 self._log(f"[COMPANION] Queue failed: {e}")
             self._companion_request_headers = {}
         else:
-            self._on_fetch()
+            self._on_fetch(
+                vod_source=selection.get("vod_source", "") or None,
+                vod_platform=selection.get("vod_platform", "") or None,
+                vod_title=selection.get("vod_title", "") or None,
+                vod_channel=selection.get("vod_channel", "") or None,
+                feed_url=selection.get("feed_url", "") or None,
+                source_id=selection.get("source_id", "") or None,
+                webpage_url=selection.get("webpage_url", "") or None,
+            )
 
     def _on_companion_clip(self, url, start_secs, end_secs):
         """The extension sent validated clip bounds alongside a URL. Prefill the

@@ -875,6 +875,7 @@ def _run_server(args):
         config=cfg,
     )
     server.state_provider = service.state_snapshot
+    server.probe_submitter = service.probe
     server.queue_submitter = service.enqueue
     server.job_canceller = service.cancel
     server.failure_retrier = service.retry_failure

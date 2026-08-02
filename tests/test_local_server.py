@@ -616,6 +616,97 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(observed["job"]["status"], "queued")
         self.assertEqual(cancelled["job"]["status"], "cancelled")
 
+    def test_validation_probe_returns_picker_and_queue_binds_selection(self):
+        received = {}
+
+        def probe(data):
+            received["probe"] = dict(data)
+            return {
+                "validated": True,
+                "validation_id": "validation123",
+                "media_items": [
+                    {
+                        "id": "quality:0",
+                        "type": "video",
+                        "label": "1080p",
+                        "selected": True,
+                    }
+                ],
+                "picker": [
+                    {
+                        "id": "quality:0",
+                        "type": "video",
+                        "label": "1080p",
+                        "selected": True,
+                    }
+                ],
+                "background_audio": [
+                    {
+                        "id": "background-audio:0:0",
+                        "type": "audio",
+                        "label": "English",
+                        "selected": True,
+                    }
+                ],
+            }
+
+        def submit(data):
+            received["queue"] = dict(data)
+            return {
+                "job_id": "picker-job",
+                "url": data["url"],
+                "status": "queued",
+                "media_item_id": data["media_item_id"],
+            }
+
+        server = LocalCompanionServer()
+        server.probe_submitter = probe
+        server.queue_submitter = submit
+        server.start()
+        try:
+            picker, probe_status = self._open_json(
+                "/api/validate",
+                server=server,
+                token=server.token,
+                method="POST",
+                data={
+                    "url": "https://example.com/video",
+                    "request_headers": {
+                        "Referer": "https://example.com/watch",
+                        "Cookie": "session=secret",
+                        "X-Ignore": "drop",
+                    },
+                },
+            )
+            queued, queue_status = self._open_json(
+                "/api/queue",
+                server=server,
+                token=server.token,
+                method="POST",
+                data={
+                    "url": "https://example.com/video",
+                    "validation_id": picker["validation_id"],
+                    "media_item_id": "quality:0",
+                    "background_audio_id": "background-audio:0:0",
+                },
+            )
+        finally:
+            server.stop()
+
+        self.assertEqual(probe_status, 200)
+        self.assertTrue(picker["ok"])
+        self.assertEqual(received["probe"]["request_headers"], {
+            "Referer": "https://example.com/watch",
+            "Cookie": "session=secret",
+        })
+        self.assertEqual(queue_status, 202)
+        self.assertEqual(queued["job_id"], "picker-job")
+        self.assertEqual(received["queue"]["media_item_id"], "quality:0")
+        self.assertEqual(
+            received["queue"]["background_audio_id"],
+            "background-audio:0:0",
+        )
+
     def test_authenticated_ping_allows_localhost_origin(self):
         origin = f"http://localhost:{self.server.port}"
         with self._open(

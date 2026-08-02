@@ -15,6 +15,17 @@ from . import db
 from .config import write_log_line
 from .har import normalize_replay_headers
 from .models import default_media_tracks
+from .preflight import (
+    PreflightError,
+    ProbeCache,
+    build_picker_response,
+    collect_probe_result,
+    normalize_media_selection,
+    serialize_stream_picker,
+    serialize_vod_picker,
+    validate_probe_request,
+    validate_queue_payload,
+)
 from .retry import sanitize_failure_reason
 from .upgrade import (
     UpgradeSafetyError,
@@ -67,6 +78,15 @@ class HeadlessJobService(QObject):
         self._contexts: dict[str, dict[str, Any]] = {}
         self._request_headers: dict[str, dict[str, str]] = {}
         self._request_headers_lock = threading.Lock()
+        self._probe_cache = ProbeCache(
+            ttl_seconds=self.config.get("probe_ttl_seconds", 300),
+        )
+        try:
+            self._probe_timeout = max(
+                5.0, min(120.0, float(self.config.get("probe_timeout_seconds", 45)))
+            )
+        except (TypeError, ValueError):
+            self._probe_timeout = 45.0
         self._download_errors: set[str] = set()
         self._last_progress: dict[str, int] = {}
         self._started = False
@@ -196,12 +216,32 @@ class HeadlessJobService(QObject):
     def enqueue(self, data: dict[str, Any] | str) -> dict[str, Any]:
         """Persist one acknowledged job, then wake the Qt dispatcher."""
         item = {"url": data} if isinstance(data, str) else dict(data)
+        item = validate_queue_payload(item)
+        validation_id = str(item.get("validation_id", "") or "")
+        if validation_id:
+            picker = self._probe_cache.take(validation_id, item["url"])
+            selection = normalize_media_selection(item, picker)
+            selected_vod_source = str(selection.get("vod_source", "") or "")
+            explicit_vod_source = str(item.get("vod_source", "") or "")
+            if (
+                selected_vod_source
+                and explicit_vod_source
+                and selected_vod_source != explicit_vod_source
+            ):
+                raise PreflightError(
+                    "vod_source does not match the selected media item"
+                )
+            for key, value in selection.items():
+                if key == "quality" and item.get("quality") not in (None, ""):
+                    # An explicit queue preference remains authoritative after
+                    # the picker id has been verified.
+                    continue
+                item.setdefault(key, value)
+            item.pop("validation_id", None)
         request_headers = normalize_replay_headers(
             item.pop("request_headers", None)
         )
-        url = str(item.get("url", "")).strip()
-        if not url.startswith(("http://", "https://")):
-            raise ValueError("invalid url")
+        url = str(item["url"]).strip()
         # Smart Mode (V16) resolves the first matching URL profile before the
         # ordered rules engine. Both layers fill only missing fields, so an
         # explicit REST value remains authoritative and rules can still add
@@ -227,6 +267,40 @@ class HeadlessJobService(QObject):
                 self._request_headers[str(job.get("job_id", ""))] = request_headers
         self._wake_requested.emit()
         return job
+
+    def probe(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a URL into a safe, expiring picker response."""
+        item = validate_probe_request(data)
+        request_headers = normalize_replay_headers(
+            item.get("request_headers")
+        )
+        url = item["url"]
+
+        def worker_factory():
+            return FetchWorker(
+                url,
+                vod_source=item.get("vod_source") or None,
+                vod_platform=item.get("vod_platform") or None,
+                vod_title=item.get("vod_title") or None,
+                vod_channel=item.get("vod_channel") or None,
+                source_id=item.get("source_id") or None,
+                webpage_url=item.get("webpage_url") or None,
+                request_headers=request_headers,
+            )
+
+        kind, value = collect_probe_result(
+            worker_factory,
+            timeout_seconds=self._probe_timeout,
+        )
+        picker = (
+            serialize_vod_picker(value, url)
+            if kind == "vods"
+            else serialize_stream_picker(value, url)
+        )
+        if not picker.get("media_items"):
+            raise PreflightError("probe returned no playable media")
+        validation_id, expires_at = self._probe_cache.put(url, picker)
+        return build_picker_response(url, picker, validation_id, expires_at)
 
     def _request_headers_for(self, job_id: str) -> dict[str, str]:
         with self._request_headers_lock:

@@ -33,6 +33,7 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /api/jobs/{id}",
     "POST /pair",
     "POST /send_url",
+    "POST /api/validate",
     "POST /api/queue",
     "POST /api/jobs/cancel",
     "POST /api/failures/retry",
@@ -127,6 +128,24 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "url": {"type": "string", "format": "uri"},
                         "quality": {"type": "string"},
                         "action": {"type": "string", "enum": ["fetch", "queue"]},
+                        "validation_id": {
+                            "type": "string",
+                            "description": "One-use id returned by POST /api/validate.",
+                        },
+                        "media_item_id": {
+                            "type": "string",
+                            "description": "Picker item id selected for this queue job.",
+                        },
+                        "media_item_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 100,
+                            "description": "Exactly one id may be queued per request.",
+                        },
+                        "background_audio_id": {
+                            "type": "string",
+                            "description": "Optional background audio picker id.",
+                        },
                         "request_headers": {
                             "type": "object",
                             "description": (
@@ -360,6 +379,53 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "401": unauthorized,
                         "403": forbidden,
                         "500": {"description": "Queue submission failed.", "content": error_content},
+                    },
+                }
+            },
+            "/api/validate": {
+                "post": {
+                    "summary": "Resolve a URL into safe media picker metadata.",
+                    "description": (
+                        "The response contains bounded media metadata and an "
+                        "expiring validation id. Delivery URLs and credentials "
+                        "remain server-side; submit the selected ids to "
+                        "POST /api/queue."
+                    ),
+                    "tags": ["queue"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {
+                            "schema": {"$ref": "#/components/schemas/QueueRequest"}}},
+                    },
+                    "responses": {
+                        "200": json_ok("Picker metadata returned.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "validated": {"type": "boolean"},
+                                "validation_id": {"type": "string"},
+                                "expires_at": {"type": "integer"},
+                                "media_items": {
+                                    "type": "array",
+                                    "items": {"type": "object"},
+                                },
+                                "picker": {
+                                    "type": "array",
+                                    "items": {"type": "object"},
+                                },
+                                "background_audio": {
+                                    "type": "array",
+                                    "items": {"type": "object"},
+                                },
+                                "selection": {"type": "object"},
+                            },
+                        }),
+                        "400": {"description": "Invalid URL, handoff, or probe.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "500": {"description": "Probe failed.", "content": error_content},
+                        "503": {"description": "Probe service unavailable.", "content": error_content},
                     },
                 }
             },

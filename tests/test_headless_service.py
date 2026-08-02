@@ -7,7 +7,7 @@ from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
 from streamkeep import db
 from streamkeep.headless_service import HeadlessJobService
-from streamkeep.models import QualityInfo, StreamInfo
+from streamkeep.models import QualityInfo, StreamInfo, VODInfo
 
 
 class _FakeFetchWorker(QObject):
@@ -34,6 +34,58 @@ class _FakeFetchWorker(QObject):
             )],
             total_secs=60,
         ))
+        self._running = False
+
+    def isRunning(self):
+        return self._running
+
+    def wait(self, _timeout):
+        return True
+
+    def requestInterruption(self):
+        self._running = False
+
+
+class _FakePickerFetchWorker(QObject):
+    finished = pyqtSignal(object)
+    vods_found = pyqtSignal(list, str, object)
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
+
+    def __init__(self, url, **kwargs):
+        super().__init__()
+        self.url = url
+        self.vod_source = kwargs.get("vod_source")
+        self._running = False
+
+    def start(self):
+        self._running = True
+        if self.vod_source:
+            self.finished.emit(StreamInfo(
+                platform="Twitch",
+                title="Selected VOD",
+                url="https://media.example/selected.m3u8",
+                qualities=[QualityInfo(name="best", url="https://media.example/selected.m3u8")],
+            ))
+        else:
+            self.vods_found.emit(
+                [
+                    VODInfo(
+                        title="First VOD",
+                        source="100",
+                        platform="Twitch",
+                        source_id="100",
+                    ),
+                    VODInfo(
+                        title="Second VOD",
+                        source="200",
+                        platform="Twitch",
+                        source_id="200",
+                    ),
+                ],
+                "Twitch",
+                None,
+            )
         self._running = False
 
     def isRunning(self):
@@ -170,6 +222,32 @@ class HeadlessJobServiceTests(unittest.TestCase):
 
             self.assertEqual(cancelled["status"], "cancelled")
             self.assertEqual(state["queue"][0]["status"], "cancelled")
+
+    def test_probe_picker_selection_is_bound_to_the_requested_vod(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                mock.patch.object(db, "DB_PATH", Path(tmpdir) / "library.db"),
+                mock.patch(
+                    "streamkeep.headless_service.FetchWorker",
+                    _FakePickerFetchWorker,
+                ),
+            ):
+                db.init_db()
+                service = HeadlessJobService(output_dir=str(Path(tmpdir) / "output"))
+                response = service.probe({"url": "https://example.com/channel"})
+                second = response["media_items"][1]
+                queued = service.enqueue({
+                    "url": "https://example.com/channel",
+                    "validation_id": response["validation_id"],
+                    "media_item_id": second["id"],
+                })
+                item = db.load_queue_job(queued["job_id"])
+
+        self.assertEqual(response["status"], "picker")
+        self.assertEqual(len(response["media_items"]), 2)
+        self.assertEqual(item["vod_source"], "200")
+        self.assertEqual(item["source_id"], "200")
+        self.assertEqual(item["title"], "Second VOD")
 
     def test_second_executor_refuses_with_actionable_owner_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -29,8 +29,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P2 — Automation, lifecycle, and reach
 
-- [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
-  > 2026-07-27: cobalt's picker also carries per-item type (photo/video/gif) and a separate background-audio track; extend the picker payload accordingly. Dubbed-audio-language selection and a clean audio-strip `mute` mode are tracked separately as V40. (RESEARCH.md 2026-07-27)
 
 ### 1. Security and Reliability Hardening
 
