@@ -27,10 +27,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P1 — Breadth (new source classes)
 
-- [ ] V11 — User-guided extraction (leapfrog; Downie-class)
-  What: visible Playwright window; user navigates/logs in/plays; response sniffer surfaces manifests/media with variant picker; queue with captured request headers/cookies; refuse when EME/DRM session detected.
-  Effort: L
-
 - [ ] V12 — Extension network sniffer + header handoff
   What: MV3 webRequest capture of m3u8/mpd/media URLs + request headers on the active tab; one-click send-to-StreamKeep with full request context.
   Effort: M
