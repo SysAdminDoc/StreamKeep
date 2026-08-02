@@ -27,12 +27,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P1 — Breadth (new source classes)
 
-- [ ] V9 — Raw-protocol capture jobs (leapfrog)
-  What: job types for RTSP (cameras, transport tcp/udp), RTMP-listen (receive OBS pushes), SRT caller/listener (+passphrase), UDP/RTP multicast (IPTV), ICY internet radio with now-playing capture and per-track splitting; ffmpeg reconnect family; duration caps; version-gate ffmpeg 8 options.
-  Verify: real capture of a public RTSP/SRT test feed and an ICY radio stream with track split.
-  Effort: L
-  > 2026-07-27: yt-dlp removed RTSP/MMS support in 2026.07.04 — this lane must drive ffmpeg directly, never the yt-dlp path. FFmpeg 8 now verifies TLS peer certs by default, so RTMPS/RTSPS/SRT self-signed origins require a per-source "allow self-signed" toggle injecting `-tls_verify 0`. WHIP is publish-only in ffmpeg 8; do not promise WHEP capture. (RESEARCH.md 2026-07-27)
-
 - [ ] V11 — User-guided extraction (leapfrog; Downie-class)
   What: visible Playwright window; user navigates/logs in/plays; response sniffer surfaces manifests/media with variant picker; queue with captured request headers/cookies; refuse when EME/DRM session detected.
   Effort: L

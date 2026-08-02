@@ -44,6 +44,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   replacing style-only lambdas and semicolon-packed statements with explicit
   definitions.
 
+- Added validated raw-protocol capture jobs (V9) for RTSP, RTMP-listen, SRT,
+  UDP/RTP multicast, and ICY radio, with bounded FFmpeg commands, listener
+  modes, stdin-backed SRT passphrases, reconnect options, and ICY
+  now-playing track manifests.
+
 - Serialized startup schema migrations (V65) with SQLite `BEGIN IMMEDIATE`,
   re-reading the schema version under lock and preserving migration rollback
   behavior for concurrent GUI, service, and CLI starts.

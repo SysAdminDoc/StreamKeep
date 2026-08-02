@@ -37,6 +37,18 @@ FFMPEG_REMOTE_INPUT_SAFETY = [
 ]
 FFMPEG_REMOTE_SAFETY = ["-nostdin", *FFMPEG_REMOTE_INPUT_SAFETY]
 
+# Raw-protocol capture jobs intentionally support a wider, explicit FFmpeg
+# input set than remote HTTP manifests. These sources are operator-selected
+# camera/listener/radio endpoints, never URLs discovered inside untrusted
+# manifests; the list still excludes local-file and shell-like protocols.
+FFMPEG_RAW_CAPTURE_SAFETY = [
+    "-nostdin",
+    "-protocol_whitelist",
+    "http,https,httpproxy,rtsp,rtmp,rtmps,srt,udp,rtp,tcp,tls,crypto",
+    "-protocol_blacklist",
+    "file,pipe,concat,concatf,subfile,unix,data",
+]
+
 # ── Portable mode detection (F43) ──────────────────────────────────
 # Check for a ``portable.txt`` marker next to the exe/script.
 _exe_dir = Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.argv[0] or "."))).resolve()

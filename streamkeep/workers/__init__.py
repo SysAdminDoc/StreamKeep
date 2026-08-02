@@ -7,6 +7,7 @@ from .playlist import PlaylistExpandWorker
 from .page_scrape import PageScrapeWorker
 from .monitor_ops import SeedArchiveWorker, AutoRecordResolveWorker
 from .backup import ScheduledBackupWorker
+from .raw_capture import RawCaptureWorker
 
 __all__ = [
     "FetchWorker",
@@ -18,4 +19,5 @@ __all__ = [
     "SeedArchiveWorker",
     "AutoRecordResolveWorker",
     "ScheduledBackupWorker",
+    "RawCaptureWorker",
 ]

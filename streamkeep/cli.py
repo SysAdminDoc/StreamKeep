@@ -607,6 +607,65 @@ def _run_gallery(args):
     sys.exit(result.returncode)
 
 
+# ── raw-protocol capture jobs (V9) ─────────────────────────────────
+
+def _run_capture(args):
+    """Run one operator-selected raw-protocol capture without yt-dlp."""
+    from .raw_capture import RawCaptureError, RawCaptureSpec, run_raw_capture
+
+    passphrase = os.environ.get("STREAMKEEP_SRT_PASSPHRASE", "")
+    if getattr(args, "passphrase_stdin", False):
+        try:
+            passphrase = sys.stdin.readline().rstrip("\r\n")
+        except (AttributeError, OSError):
+            passphrase = ""
+    try:
+        spec = RawCaptureSpec(
+            protocol=args.protocol,
+            endpoint=args.endpoint,
+            output_path=args.output,
+            transport=args.transport,
+            duration_secs=args.duration,
+            max_duration_secs=args.max_duration,
+            split_tracks=args.split_tracks,
+            allow_self_signed=args.allow_self_signed,
+            passphrase=passphrase,
+        )
+        from .raw_capture import validate_raw_capture
+        validated = validate_raw_capture(spec)
+    except (RawCaptureError, ValueError) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+    public = validated.spec.to_public_dict()
+    _print_line(f"StreamKeep v{VERSION} (raw capture)")
+    _print_line(
+        f"Protocol: {validated.protocol} | Endpoint: {public['endpoint']}"
+    )
+    _print_line(f"Output: {validated.spec.output_path}")
+    _print_line(
+        f"Duration cap: {validated.spec.effective_duration_secs}s"
+    )
+    try:
+        result = run_raw_capture(
+            validated.spec,
+            on_line=lambda line: _print_line(f"[capture] {line}"),
+        )
+    except (RawCaptureError, CapabilityUnavailableError) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(1)
+    if result.success:
+        _print_line(f"Capture complete: {result.output_path}")
+        if result.tracks_manifest:
+            _print_line(f"Track manifest: {result.tracks_manifest}")
+        return
+    _print_line(
+        f"Capture failed (exit {result.exit_code}): "
+        f"{result.lines[-1] if result.lines else 'no diagnostic output'}"
+    )
+    sys.exit(1)
+
+
 # ── lux fallback engine for CN platforms (V25) ──────────────────────
 
 def _run_lux(args):
@@ -1326,6 +1385,53 @@ def build_parser():
     dl.add_argument("--config-dir", default=argparse.SUPPRESS,
                     help="Override the config/database directory")
 
+    # -- raw-protocol capture jobs (V9) --
+    capture_p = sub.add_parser(
+        "capture",
+        help="Capture a camera, listener, multicast, SRT, or ICY source",
+    )
+    capture_p.add_argument(
+        "protocol",
+        choices=[
+            "rtsp", "rtmp-listen", "srt-caller", "srt-listener",
+            "udp", "rtp", "icy",
+        ],
+        help="Raw input protocol/job type",
+    )
+    capture_p.add_argument("endpoint", help="Protocol endpoint or bind URI")
+    capture_p.add_argument(
+        "-o", "--output", required=True,
+        help="Output file (or base filename for --split-tracks)",
+    )
+    capture_p.add_argument(
+        "--transport", choices=["tcp", "udp"], default="tcp",
+        help="RTSP transport (default: tcp)",
+    )
+    capture_p.add_argument(
+        "--duration", type=int, default=0,
+        help="Capture duration in seconds (default: until stopped/cap)",
+    )
+    capture_p.add_argument(
+        "--max-duration", type=int, default=7 * 24 * 60 * 60,
+        help="Hard duration cap in seconds (default: 604800)",
+    )
+    capture_p.add_argument(
+        "--split-tracks", action="store_true",
+        help="For ICY radio, split files when StreamTitle changes",
+    )
+    capture_p.add_argument(
+        "--allow-self-signed", action="store_true",
+        help="For RTSPS/RTMPS, disable TLS peer verification (FFmpeg 8+)",
+    )
+    capture_p.add_argument(
+        "--passphrase-stdin", action="store_true",
+        help="Read an SRT passphrase from one line of stdin",
+    )
+    capture_p.add_argument(
+        "--config-dir", default=argparse.SUPPRESS,
+        help="Override the config/database directory",
+    )
+
     # -- server --
     srv = sub.add_parser("server", help="Start REST API / web remote UI")
     srv.add_argument("--port", type=int, default=0,
@@ -1643,6 +1749,8 @@ def run_cli(argv=None):
         _list_extractors()
     elif args.command == "gallery":
         _run_gallery(args)
+    elif args.command == "capture":
+        _run_capture(args)
     elif args.command == "lux":
         _run_lux(args)
     elif args.command == "db":
@@ -1679,7 +1787,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "gallery", "lux", "db",
+        "download", "dl", "capture", "server", "extractors", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "register-protocol",
         "unregister-protocol", "bookmarklet",

@@ -25,6 +25,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 | Audius | No | No | Native discovery API |
 | Podcast RSS | Yes | No | Feed enclosure parser |
 | Direct media URLs | No | No | HEAD/content-type sniffing |
+| RTSP / RTMP-listen / SRT / multicast / ICY | No | Yes | Validated FFmpeg raw-capture jobs |
 | YouTube and 1000+ sites | Varies | Varies | yt-dlp fallback |
 
 ## Core Workflows
@@ -113,6 +114,10 @@ python StreamKeep.py credentials
 python StreamKeep.py credentials twitch --json
 python StreamKeep.py youtube-health
 python StreamKeep.py download "https://www.youtube.com/watch?v=VIDEO" --youtube-client web_safari
+python StreamKeep.py capture rtsp "rtsp://camera.lan/live" --transport tcp --duration 3600 --output C:\Captures\camera.mkv
+python StreamKeep.py capture srt-listener "srt://0.0.0.0:9000" --passphrase-stdin --output C:\Captures\incoming.ts
+python StreamKeep.py capture udp "udp://@239.1.1.1:5000" --duration 1800 --output C:\Captures\iptv.ts
+python StreamKeep.py capture icy "https://radio.example/stream" --split-tracks --duration 7200 --output C:\Captures\radio.mp3
 python StreamKeep.py import-har capture.har --headers
 python StreamKeep.py import-har capture.har --json
 python StreamKeep.py register-protocol
@@ -128,6 +133,8 @@ python StreamKeep.py backup secrets-import C:\Backups\StreamKeep-secrets.sksback
 ```
 
 For sources resolved through yt-dlp direct mode, the desktop Advanced panel and `download` CLI also support verbatim `--format` specifications, custom or named format sorting, MP4/MKV/WebM/original containers, and best/MP3/M4A/Opus/FLAC/WAV audio extraction. Resolution-cap presets are available at 2160p, 1080p, and 720p. Resolved manual and automatic subtitle languages appear in a per-download multi-select; subtitles can be converted to SRT/VTT/ASS and embedded or retained as sidecars. SponsorBlock offers a 13-category mark/remove matrix, including mark-only enforcement for highlights and community chapters, plus an optional custom HTTPS API base. Fragment concurrency, retry counts and backoff, unavailable-fragment handling, throttling thresholds, start-from-beginning live capture, scheduled-stream polling, and chapter/metadata/thumbnail embedding can be set globally or per download. Settings also manages named, one-argument-per-line yt-dlp templates that can be attached to downloads, queued jobs, CLI runs, and monitor profiles; command/config delegation and executable boundaries are rejected. After a job is prepared, **Copy command** exports its standalone yt-dlp or FFmpeg invocation, including the selected cookie source and structured header arguments. Use `python StreamKeep.py download --help` for the complete option list. Native HLS/direct-media jobs continue to use their existing output path.
+
+Raw captures use FFmpeg directly and never route through yt-dlp. RTSP supports explicit TCP/UDP transport, RTMP-listen and SRT-listener jobs bind local listener endpoints, SRT caller/listener passphrases are read from stdin or `STREAMKEEP_SRT_PASSPHRASE`, multicast jobs require numeric multicast addresses, and ICY radio can preserve `StreamTitle` changes as a redacted track manifest plus per-track MP3 fragments. Every raw job has a hard maximum duration; the default is seven days and can be lowered with `--max-duration`. Self-signed TLS is opt-in for RTSPS/RTMPS and requires FFmpeg 8 or newer.
 
 Playlist/channel expansion can be narrowed in Advanced with yt-dlp item ranges, after/before dates, match filters, and a maximum download count. Incremental archive sync stores a private archive per source, stops expansion when it reaches previously downloaded entries, and is also applied automatically to monitor VOD subscriptions.
 
