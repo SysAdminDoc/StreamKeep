@@ -49,6 +49,34 @@ def _ready_runtime_registry(*, refresh=False):
     }
 
 
+def test_onboarding_exposes_high_contrast_and_applies_choice(qt_application):
+    import streamkeep.ui.onboarding as onboarding
+    from streamkeep.theme import CAT, apply_theme
+
+    config = {"existing": True}
+    with mock.patch.object(
+        onboarding,
+        "get_runtime_capabilities",
+        return_value=_ready_runtime_registry(),
+    ), mock.patch.object(
+        onboarding,
+        "ytdlp_runtime_status",
+        return_value={"state": "ready", "detail": "test runtime"},
+    ):
+        wizard = onboarding.OnboardingWizard(config=config)
+        try:
+            wizard._high_contrast_radio.setChecked(True)
+            assert wizard.chosen_theme == "high_contrast"
+            assert "security-ready" not in wizard._ffmpeg_title.text().lower()
+            wizard._finish()
+            assert config["theme"] == "high_contrast"
+            assert config["first_run_complete"] is True
+            assert CAT["base"] == "#000000"
+        finally:
+            wizard.close()
+            apply_theme("dark", app=qt_application)
+
+
 def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
     from streamkeep import accounts, notifications
     from streamkeep.i18n import available_languages, current_language, install_translator

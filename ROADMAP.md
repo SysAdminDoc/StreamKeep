@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V62 — First-run onboarding omits High Contrast theme and shows internal "security-ready" microcopy
-  Category: a11y
-  Where: `streamkeep/ui/onboarding.py:180-183` (theme radios) and `streamkeep/ui/onboarding.py:224` (`title = "FFmpeg is security-ready"`).
-  Problem: (a) The Appearance step offers only Dark / Light / Follow-system radios; the WCAG-AAA High Contrast theme — the app's one accessibility affordance, fully wired via `THEMES["high_contrast"]` and selectable in Settings — is undiscoverable during onboarding, so a user who needs it must hunt through Settings. (b) The first-run success banner title reads "FFmpeg is security-ready", surfacing an internal capability-registry concept ("security-ready") to a brand-new user who has no context for why security relates to a media encoder being present; the paired failure title "FFmpeg needs repair" is clearer.
-  Evidence: Read onboarding.py:180-183 — exactly three `QRadioButton`s (Dark/Light/Follow system), no high-contrast option; `_finish` writes the selected value to `config["theme"]` and passes it to `apply_visual_system`, which already accepts `"high_contrast"`. Read line 224 — `title = "FFmpeg is security-ready"` shown via the welcome-page status banner.
-  Fix: Add a fourth radio mapping to `"high_contrast"` in the theme step; change the banner title to plain phrasing such as "FFmpeg is ready" / "FFmpeg detected".
-  Acceptance: Onboarding shows a High Contrast option that, when chosen and finished, leaves `config["theme"] == "high_contrast"` and applies it; the success banner no longer contains the word "security-ready".
-  Confidence: Verified.
-  Effort: S
-
 - [ ] P3 — V63 — feed.py / gallery.py XML/HTML attribute escaping does not escape quotes (latent; harden with the gallery/RSS publishing item)
   Category: security
   Where: `streamkeep/feed.py:80` (`<enclosure url="{escape(media_url)}" …/>`) and `streamkeep/gallery.py:87` (`href="{base_url}/share/{sid}"`, `base_url` injected unescaped).

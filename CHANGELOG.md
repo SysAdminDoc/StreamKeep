@@ -34,6 +34,9 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   ChannelMonitor database save/load round-trip, so a future per-channel auth
   selector cannot silently lose its opaque profile ID.
 
+- Improved first-run onboarding (V62) with a High Contrast appearance option,
+  immediate theme application, and clearer "FFmpeg ready" status copy.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

@@ -283,7 +283,7 @@ Archive workstation</translation>
             <translation>320k</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="43" />
+            <location filename="streamkeep/ui/onboarding.py" line="44" />
             <source>4-step setup</source>
             <translation>4-step setup</translation>
         </message>
@@ -596,7 +596,7 @@ Archive workstation</translation>
             <translation>API URL:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="173" />
+            <location filename="streamkeep/ui/onboarding.py" line="174" />
             <location filename="streamkeep/ui/tabs/settings.py" line="326" />
             <location filename="streamkeep/ui/tabs/settings.py" line="383" />
             <source>Appearance</source>
@@ -838,7 +838,7 @@ Archive workstation</translation>
             <translation>Available VODs</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="79" />
+            <location filename="streamkeep/ui/onboarding.py" line="80" />
             <source>Back</source>
             <translation>Back</translation>
         </message>
@@ -1334,7 +1334,7 @@ Archive workstation</translation>
             <translation>Choose either a video container or audio extraction, not both.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="144" />
+            <location filename="streamkeep/ui/onboarding.py" line="145" />
             <source>Choose folder…</source>
             <translation>Choose folder…</translation>
         </message>
@@ -1354,7 +1354,7 @@ Archive workstation</translation>
             <translation>Choose source languages</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="173" />
+            <location filename="streamkeep/ui/onboarding.py" line="174" />
             <source>Choose the default look for the app. You can switch themes any time without restarting.</source>
             <translation>Choose the default look for the app. You can switch themes any time without restarting.</translation>
         </message>
@@ -1531,7 +1531,7 @@ Archive workstation</translation>
             <translation>Container:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="83" />
+            <location filename="streamkeep/ui/onboarding.py" line="84" />
             <source>Continue</source>
             <translation>Continue</translation>
         </message>
@@ -1725,7 +1725,7 @@ flac/pcm = lossless</translation>
             <translation>Dark</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="180" />
+            <location filename="streamkeep/ui/onboarding.py" line="181" />
             <source>Dark — richer contrast and a focused, cinematic workspace</source>
             <translation>Dark — richer contrast and a focused, cinematic workspace</translation>
         </message>
@@ -1768,7 +1768,7 @@ flac/pcm = lossless</translation>
             <translation>Default quality per platform</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="135" />
+            <location filename="streamkeep/ui/onboarding.py" line="136" />
             <source>Default recording folder</source>
             <translation>Default recording folder</translation>
         </message>
@@ -2635,7 +2635,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="43" />
+            <location filename="streamkeep/ui/onboarding.py" line="44" />
             <source>FIRST RUN</source>
             <translation>FIRST RUN</translation>
         </message>
@@ -2655,7 +2655,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Folder:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="183" />
+            <location filename="streamkeep/ui/onboarding.py" line="187" />
             <source>Follow system — stay in sync with your OS preference</source>
             <translation>Follow system — stay in sync with your OS preference</translation>
         </message>
@@ -2797,7 +2797,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Generic JSON POST endpoint</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="205" />
+            <location filename="streamkeep/ui/onboarding.py" line="214" />
             <source>Good next steps:
 • Paste a URL in Download to test your setup.
 • Open Monitor to track channels automatically.
@@ -2839,6 +2839,11 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <location filename="streamkeep/ui/tabs/settings.py" line="404" />
             <source>High Contrast</source>
             <translation>High Contrast</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/ui/onboarding.py" line="184" />
+            <source>High Contrast — maximum separation for easier readability</source>
+            <translation>High Contrast — maximum separation for easier readability</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/history.py" line="78" />
@@ -3239,7 +3244,7 @@ https://kick.com/channel
             <translation>Light</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="182" />
+            <location filename="streamkeep/ui/onboarding.py" line="183" />
             <source>Light — brighter surfaces and cleaner daytime readability</source>
             <translation>Light — brighter surfaces and cleaner daytime readability</translation>
         </message>
@@ -4363,7 +4368,7 @@ Saves your settings first.</translation>
             <translation>Pick the channel and the month you want to inspect. Use the exact Twitch channel name without the full URL.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="43" />
+            <location filename="streamkeep/ui/onboarding.py" line="44" />
             <source>Pick where recordings go, choose how the app should look, and confirm the essentials before you start downloading.</source>
             <translation>Pick where recordings go, choose how the app should look, and confirm the essentials before you start downloading.</translation>
         </message>
@@ -4838,7 +4843,7 @@ Saves your settings first.</translation>
             <translation>Ready to export a {export_mode}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="198" />
+            <location filename="streamkeep/ui/onboarding.py" line="207" />
             <source>Ready to start</source>
             <translation>Ready to start</translation>
         </message>
@@ -4900,7 +4905,7 @@ Saves your settings first.</translation>
             <translation>recordings per source channel</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="293" />
+            <location filename="streamkeep/ui/onboarding.py" line="306" />
             <source>Recordings will be saved here</source>
             <translation>Recordings will be saved here</translation>
         </message>
@@ -5676,7 +5681,7 @@ Saves your settings first.</translation>
             <translation>Set up provider</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="43" />
+            <location filename="streamkeep/ui/onboarding.py" line="44" />
             <source>Set up StreamKeep in a minute</source>
             <translation>Set up StreamKeep in a minute</translation>
         </message>
@@ -5697,7 +5702,7 @@ Saves your settings first.</translation>
             <translation>Settings saved and applied to future downloads.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="311" />
+            <location filename="streamkeep/ui/onboarding.py" line="324" />
             <source>Setup summary</source>
             <translation>Setup summary</translation>
         </message>
@@ -5770,7 +5775,7 @@ Saves your settings first.</translation>
             <translation>Skip</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="74" />
+            <location filename="streamkeep/ui/onboarding.py" line="75" />
             <source>Skip setup</source>
             <translation>Skip setup</translation>
         </message>
@@ -5942,7 +5947,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Status</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="323" />
+            <location filename="streamkeep/ui/onboarding.py" line="336" />
             <source>Step {idx + 1} of {total}</source>
             <translation>Step {idx + 1} of {total}</translation>
         </message>
@@ -6073,7 +6078,7 @@ Config file: {CONFIG_FILE}
 Supported platforms: {', '.join(Extractor.all_names())}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="100" />
+            <location filename="streamkeep/ui/onboarding.py" line="101" />
             <source>StreamKeep works best with ffmpeg available in PATH. If it is missing, the app can still open but downloads will not start yet.</source>
             <translation>StreamKeep works best with ffmpeg available in PATH. If it is missing, the app can still open but downloads will not start yet.</translation>
         </message>
@@ -6134,7 +6139,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>System</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="100" />
+            <location filename="streamkeep/ui/onboarding.py" line="101" />
             <source>System readiness</source>
             <translation>System readiness</translation>
         </message>
@@ -6229,12 +6234,12 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Theme default</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="311" />
+            <location filename="streamkeep/ui/onboarding.py" line="324" />
             <source>Theme: {self._theme} • Output folder: {self._output_dir}</source>
             <translation>Theme: {self._theme} • Output folder: {self._output_dir}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="110" />
+            <location filename="streamkeep/ui/onboarding.py" line="111" />
             <source>These defaults can all be changed later in Settings.</source>
             <translation>These defaults can all be changed later in Settings.</translation>
         </message>
@@ -6244,7 +6249,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>These output controls apply only to yt-dlp direct sources; choose a yt-dlp quality or reset them.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="135" />
+            <location filename="streamkeep/ui/onboarding.py" line="136" />
             <source>This becomes the starting point for downloads, monitoring, and saved metadata.</source>
             <translation>This becomes the starting point for downloads, monitoring, and saved metadata.</translation>
         </message>
@@ -6340,7 +6345,7 @@ Download again?</translation>
             <translation>Tip: click any entry to seek instantly, or save a bookmark at the current playback time.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="155" />
+            <location filename="streamkeep/ui/onboarding.py" line="156" />
             <source>Tip: keeping recordings under one root makes storage cleanup, history, and auto-record profiles much easier to manage.</source>
             <translation>Tip: keeping recordings under one root makes storage cleanup, history, and auto-record profiles much easier to manage.</translation>
         </message>
@@ -6625,7 +6630,7 @@ Download again?</translation>
             <translation>Use one range for a clean trim, or stack multiple ranges to export a highlight reel.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="148" />
+            <location filename="streamkeep/ui/onboarding.py" line="149" />
             <source>Use recommended folder</source>
             <translation>Use recommended folder</translation>
         </message>
@@ -6812,12 +6817,12 @@ Download again?</translation>
             <translation>Weekly stream schedule</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="32" />
+            <location filename="streamkeep/ui/onboarding.py" line="33" />
             <source>Welcome to StreamKeep</source>
             <translation>Welcome to StreamKeep</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="110" />
+            <location filename="streamkeep/ui/onboarding.py" line="111" />
             <source>What this setup covers</source>
             <translation>What this setup covers</translation>
         </message>
@@ -6902,7 +6907,7 @@ Download again?</translation>
             <translation>Year</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="198" />
+            <location filename="streamkeep/ui/onboarding.py" line="207" />
             <source>You can paste a stream URL right away, or set up monitor profiles for automatic recording later.</source>
             <translation>You can paste a stream URL right away, or set up monitor profiles for automatic recording later.</translation>
         </message>
@@ -7088,7 +7093,7 @@ Download again?</translation>
             <translation>{free_gb} GB free</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="327" />
+            <location filename="streamkeep/ui/onboarding.py" line="340" />
             <source>{idx + 1}/{total}</source>
             <translation>{idx + 1}/{total}</translation>
         </message>
@@ -7295,7 +7300,7 @@ Download again?</translation>
             <translation>—</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/onboarding.py" line="119" />
+            <location filename="streamkeep/ui/onboarding.py" line="120" />
             <source>• {line}</source>
             <translation>• {line}</translation>
         </message>

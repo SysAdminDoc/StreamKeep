@@ -2,12 +2,13 @@
 
 from PyQt6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QPushButton,
-    QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..capabilities import format_capability_problem, get_runtime_capabilities
 from ..i18n import TranslatableDialog
 from ..extractors.ytdlp import ytdlp_runtime_status
+from ..theme import apply_theme
 from ..utils import default_output_dir
 from .widgets import (
     make_dialog_hero,
@@ -32,7 +33,7 @@ class OnboardingWizard(TranslatableDialog):
         self.setWindowTitle("Welcome to StreamKeep")
         self.setFixedSize(640, 500)
         self.setModal(True)
-        self._config = config or {}
+        self._config = config if config is not None else {}
         self._output_dir = str(default_output_dir())
         self._theme = "dark"
 
@@ -113,7 +114,7 @@ class OnboardingWizard(TranslatableDialog):
         )
         for line in [
             "Choose a default recording folder.",
-            "Pick dark, light, or follow-system appearance.",
+            "Pick dark, light, high-contrast, or follow-system appearance.",
             "Start with safe, clean defaults and skip the rest for now.",
         ]:
             item = QLabel(f"• {line}")
@@ -180,8 +181,16 @@ class OnboardingWizard(TranslatableDialog):
         self._dark_radio = QRadioButton("Dark — richer contrast and a focused, cinematic workspace")
         self._dark_radio.setChecked(True)
         self._light_radio = QRadioButton("Light — brighter surfaces and cleaner daytime readability")
+        self._high_contrast_radio = QRadioButton(
+            "High Contrast — maximum separation for easier readability"
+        )
         self._system_radio = QRadioButton("Follow system — stay in sync with your OS preference")
-        for radio in (self._dark_radio, self._light_radio, self._system_radio):
+        for radio in (
+            self._dark_radio,
+            self._light_radio,
+            self._high_contrast_radio,
+            self._system_radio,
+        ):
             radio.toggled.connect(self._update_summary)
             content.addWidget(radio)
 
@@ -221,7 +230,7 @@ class OnboardingWizard(TranslatableDialog):
         ffmpeg = registry["ffmpeg"]
         if ffmpeg.get("supported"):
             tone = "success"
-            title = "FFmpeg is security-ready"
+            title = "FFmpeg ready"
             message = (
                 f"FFmpeg {ffmpeg['version']} from {ffmpeg['provenance']}: "
                 f"{ffmpeg['path']}"
@@ -280,6 +289,10 @@ class OnboardingWizard(TranslatableDialog):
             self._theme = "light"
             theme_title = "Light theme selected"
             theme_body = "Bright surfaces with softer contrast for daytime use."
+        elif self._high_contrast_radio.isChecked() if hasattr(self, "_high_contrast_radio") else False:
+            self._theme = "high_contrast"
+            theme_title = "High Contrast theme selected"
+            theme_body = "Maximum color separation for easier reading and focus."
         elif self._system_radio.isChecked() if hasattr(self, "_system_radio") else False:
             self._theme = "system"
             theme_title = "Following system theme"
@@ -351,6 +364,7 @@ class OnboardingWizard(TranslatableDialog):
         self._config["output_dir"] = self._output_dir
         self._config["theme"] = self._theme
         self._config["first_run_complete"] = True
+        apply_theme(self._theme, app=QApplication.instance())
         self.accept()
 
     @property
