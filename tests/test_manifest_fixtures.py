@@ -125,6 +125,29 @@ class DashDRMTests(unittest.TestCase):
 
 
 class DashManifestPolicyTests(unittest.TestCase):
+    XML_ENTITY_BOMB = """<!DOCTYPE bomb [
+      <!ENTITY a "1234567890">
+      <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+      <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+    ]><bomb>&c;</bomb>"""
+
+    def test_entity_expansion_is_rejected_before_manifest_processing(self):
+        messages = []
+        self.assertEqual(
+            parse_mpd_xml(
+                self.XML_ENTITY_BOMB,
+                "https://cdn.example.com/main.mpd",
+                messages.append,
+            ),
+            [],
+        )
+        self.assertTrue(any("parse error" in message.lower() for message in messages))
+        with self.assertRaises(RemoteURLPolicyError):
+            validate_dash_manifest(
+                self.XML_ENTITY_BOMB,
+                "https://origin.example.com/main.mpd",
+            )
+
     def test_base_template_list_initialization_and_cdn_changes_are_checked(self):
         manifest = """\
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">

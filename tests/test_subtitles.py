@@ -23,6 +23,15 @@ def test_parse_srt_and_vtt_produce_cues():
     assert vtt == [SubtitleCue(1.0, 2.0, "Hi there")]
 
 
+def test_ttml_entity_expansion_is_rejected():
+    xml_bomb = """<!DOCTYPE bomb [
+      <!ENTITY a "1234567890">
+      <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+      <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+    ]><bomb>&c;</bomb>"""
+    assert subtitles.ttml_to_srt(xml_bomb) == ""
+
+
 def test_merge_bilingual_anchors_on_primary_by_overlap():
     primary = [SubtitleCue(0.0, 2.0, "Hello"), SubtitleCue(2.0, 4.0, "World")]
     secondary = [

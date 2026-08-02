@@ -12,6 +12,9 @@ import os
 import re
 from dataclasses import dataclass
 
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
+
 
 # ── Format conversion ───────────────────────────────────────────────
 
@@ -60,10 +63,9 @@ def vtt_to_srt(vtt_text):
 
 def ttml_to_srt(ttml_text):
     """Convert TTML/DFXP XML to SRT format (basic conversion)."""
-    import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(ttml_text)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         return ""
 
     # Find all <p> elements (TTML paragraphs)

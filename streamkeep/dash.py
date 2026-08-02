@@ -12,7 +12,9 @@ detected and skipped with a warning.
 
 import re
 import urllib.parse
-import xml.etree.ElementTree as ET
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from .http import curl
 from .models import MediaTrackInfo, QualityInfo
@@ -49,7 +51,7 @@ def validate_dash_manifest(
     """Normalize and policy-check every remotely dereferenced DASH URI."""
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as error:
+    except (ET.ParseError, DefusedXmlException) as error:
         raise RemoteURLPolicyError(f"DASH manifest is malformed: {error}") from None
     root_url = validate_remote_url(
         base_url, allow_private_network=allow_private_network,
@@ -177,7 +179,7 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
     """Parse MPD XML text into ``QualityInfo`` entries."""
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
+    except (ET.ParseError, DefusedXmlException) as e:
         if log_fn:
             log_fn(f"[DASH] MPD parse error: {e}")
         return []

@@ -6,9 +6,11 @@ and invalid-feed reporting.
 """
 
 import re
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as _xml_escape
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 
 def export_opml(entries, *, title="StreamKeep Subscriptions"):
@@ -85,7 +87,7 @@ def import_opml(xml_text, *, existing_urls=None):
 
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
+    except (ET.ParseError, DefusedXmlException) as e:
         report["errors"].append(f"XML parse error: {e}")
         return entries, report
 

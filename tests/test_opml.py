@@ -102,6 +102,16 @@ class ImportTests(unittest.TestCase):
         self.assertTrue(len(report["errors"]) > 0)
         self.assertIn("XML parse error", report["errors"][0])
 
+    def test_import_rejects_entity_expansion(self):
+        xml_bomb = """<!DOCTYPE bomb [
+          <!ENTITY a "1234567890">
+          <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+          <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+        ]><bomb>&c;</bomb>"""
+        entries, report = import_opml(xml_bomb)
+        self.assertEqual(entries, [])
+        self.assertIn("XML parse error", report["errors"][0])
+
     def test_import_handles_empty_body(self):
         opml = '<?xml version="1.0"?><opml version="2.0"><head/></opml>'
         entries, report = import_opml(opml)

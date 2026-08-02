@@ -15,6 +15,9 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   state, so successful resumes emit finalization, clear their sidecar, and do
   not remain stuck as partial jobs.
 
+- Hardened DASH, TTML, and OPML XML parsing (V57) with `defusedxml`, rejecting
+  entity-expansion payloads before they can consume unbounded CPU or memory.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

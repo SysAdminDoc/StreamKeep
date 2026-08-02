@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P2 — V57 — XML entity-expansion (billion-laughs) DoS in DASH / TTML / OPML parsing
-  Category: security
-  Where: `streamkeep/dash.py:51` (`validate_dash_manifest`) and `streamkeep/dash.py:179` (`parse_mpd_xml`); `streamkeep/subtitles.py:65` (`ttml_to_srt`); `streamkeep/opml.py:87` (`import_opml`). No `defusedxml` dependency anywhere.
-  Problem: All four sites call raw `xml.etree.ElementTree.fromstring()` on externally-sourced XML. `parse_mpd_xml`/`validate_dash_manifest` parse a DASH MPD manifest fetched from a remote, attacker-controllable URL during normal quality resolution — before any download. `ttml_to_srt` parses `.ttml/.dfxp/.xml` subtitle content originating from the source platform. `import_opml` parses a user-imported OPML file (lower threat, but shareable subscription lists are a vector). CPython's ElementTree expands internal entity definitions, so a small nested-entity ("billion laughs") DTD OOMs/hangs the app.
-  Evidence: Empirically confirmed on this machine's `py -3.12`: a 3-level nested-entity document expands (`ET.fromstring` returned 1000 chars from a tiny bomb; deeper nesting scales exponentially). External-entity file disclosure (classic XXE) is BLOCKED here — a `SYSTEM "file://…"` entity raised `ParseError: undefined entity` — so this is a DoS, not a file-read. `grep` confirms no `defusedxml` in `requirements*.lock/txt/in` and no DTD-forbidding parser is configured at any of the four sites. The DASH path is the most reachable: `fetch_dash_manifest` → `parse_mpd_xml` runs for any DASH source during resolve.
-  Fix: Add `defusedxml` to requirements and replace the four `ET.fromstring(...)` calls with `defusedxml.ElementTree.fromstring(...)` (which forbids DTDs/entities by default); or configure an expat parser with `DefaultHandler`/entity limits and reject any document containing a DOCTYPE. Keep the existing `ParseError` handling.
-  Acceptance: A unit test feeds a billion-laughs DTD to each of `parse_mpd_xml`, `ttml_to_srt`, and `import_opml` and asserts it returns empty/raises a handled parse error quickly (bounded time/memory) instead of expanding; well-formed manifests/subtitles/OPML still parse correctly.
-  Confidence: Verified (expansion reproduced; sites confirmed unguarded).
-  Effort: S
-
 - [ ] P2 — V58 — Transcript / global search silently returns nothing for queries containing FTS5 special characters
   Category: ux
   Where: `streamkeep/search.py:251-280` (`search_transcripts`, the `WHERE transcript_fts MATCH ?` query and its `except sqlite3.Error: rows = []`); call sites `streamkeep/ui/main_window.py:2665` (global unified search bar) and `streamkeep/ui/tabs/history.py:481` (History transcript-search mode).
