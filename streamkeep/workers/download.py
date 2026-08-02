@@ -61,6 +61,7 @@ class DownloadWorker(QThread):
         self.ytdlp_container = "mp4"
         self.ytdlp_audio_format = ""
         self.ytdlp_audio_quality = ""
+        self.request_headers = {}
         self.cookies_browser = ""
         # Opaque site-bound authentication profile ID (V50). The worker
         # never holds cookie material or a credential path.
@@ -379,6 +380,8 @@ class DownloadWorker(QThread):
             browser=self.cookies_browser,
             cookie_file=cookies_file_path(),
         ))
+        from ..har import replay_header_argv
+        cmd.extend(replay_header_argv(self.request_headers))
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
         if transfer_options["concurrent_fragments"]:

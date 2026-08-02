@@ -877,6 +877,52 @@ class LocalServerTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(received, [("https://example.com/video", 30.0, 300.0)])
 
+    def test_media_handoff_emits_bounded_transient_context(self):
+        received = []
+        self.server.handoff_received.connect(
+            lambda payload, action: received.append((payload, action)),
+            Qt.ConnectionType.DirectConnection,
+        )
+        payload, status = self._open_json(
+            "/send_url",
+            token=self.server.token,
+            method="POST",
+            data={
+                "url": "https://example.com/master.m3u8",
+                "action": "fetch",
+                "request_headers": {
+                    "Referer": "https://player.example.com/watch",
+                    "Cookie": "session=abc123",
+                    "Authorization": "Bearer xyz",
+                    "Accept": "*/*",
+                    "X-Bad": "line\nbreak",
+                },
+                "source_context": {
+                    "tab_url": "https://player.example.com/watch",
+                    "tab_title": "Example Player",
+                    "kind": "manifest",
+                    "content_type": "application/vnd.apple.mpegurl",
+                    "ignored": "drop me",
+                },
+            },
+        )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(received), 1)
+        context, action = received[0]
+        self.assertEqual(action, "fetch")
+        self.assertEqual(context["request_headers"], {
+            "Referer": "https://player.example.com/watch",
+            "Cookie": "session=abc123",
+            "Authorization": "Bearer xyz",
+        })
+        self.assertEqual(context["source_context"], {
+            "tab_url": "https://player.example.com/watch",
+            "tab_title": "Example Player",
+            "kind": "manifest",
+            "content_type": "application/vnd.apple.mpegurl",
+        })
+
     def test_headless_server_with_fixed_token(self):
         """Smoke test: server with a fixed token works like service mode."""
         from streamkeep.local_server import ALL_SCOPES

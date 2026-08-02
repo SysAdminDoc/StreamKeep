@@ -153,7 +153,10 @@ def test_browser_extension_keeps_access_session_only_and_replay_protected():
     popup = (extension / "popup.js").read_text(encoding="utf-8")
     background = (extension / "background.js").read_text(encoding="utf-8")
 
-    assert manifest["host_permissions"] == ["http://127.0.0.1/*"]
+    assert set(manifest["host_permissions"]) == {
+        "<all_urls>", "http://127.0.0.1/*",
+    }
+    assert "webRequest" in manifest["permissions"]
     assert 'chrome.storage.local.set({ port })' in popup
     assert 'chrome.storage.session.set({ token: result.token })' in popup
     assert 'chrome.storage.local.set({ port, token' not in popup
@@ -162,6 +165,8 @@ def test_browser_extension_keeps_access_session_only_and_replay_protected():
         assert "chrome.storage.session.get" in source
         assert "X-StreamKeep-Timestamp" in source
         assert "X-StreamKeep-Nonce" in source
+    assert "onBeforeSendHeaders" in background
+    assert "request_headers" in popup
 
 
 def test_browser_extension_packages_deterministic_zip():

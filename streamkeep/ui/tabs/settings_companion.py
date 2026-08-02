@@ -426,6 +426,7 @@ class SettingsCompanionMixin:
                     allow_private_network=allow_private,
                 )
                 srv.state_provider = self._api_state_snapshot
+                srv.handoff_received.connect(self._on_companion_handoff)
                 srv.url_received.connect(self._on_companion_url)
                 srv.clip_received.connect(self._on_companion_clip)
                 srv.failed_job_retry_requested.connect(self._retry_failed_job)

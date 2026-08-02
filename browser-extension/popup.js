@@ -146,6 +146,132 @@ async function sendAllTabs() {
   }
 }
 
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !Number.isInteger(tab.id) || !/^https?:/.test(tab.url || "")) {
+    throw new Error("The active tab has no http(s) URL.");
+  }
+  return tab;
+}
+
+function captureMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (!response || !response.ok) {
+        reject(new Error(response?.message || "Capture request failed."));
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+function renderCandidates(state) {
+  const list = $("media-list");
+  list.textContent = "";
+  const candidates = state?.candidates || [];
+  if (!candidates.length) {
+    list.textContent = state?.armed
+      ? "Waiting for media requests…"
+      : "Start capture, then play the media in the tab.";
+    return;
+  }
+  for (const candidate of [...candidates].reverse()) {
+    const row = document.createElement("div");
+    row.className = "media-item";
+    const url = document.createElement("div");
+    url.className = "media-url";
+    url.textContent = candidate.url;
+    const meta = document.createElement("div");
+    meta.className = "media-meta";
+    meta.textContent = `${candidate.kind}${candidate.content_type ? ` · ${candidate.content_type}` : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "row";
+    for (const action of ["fetch", "queue"]) {
+      const button = document.createElement("button");
+      button.textContent = action === "fetch" ? "Send to Fetch" : "Queue";
+      if (action === "queue") button.className = "secondary";
+      button.addEventListener("click", () => sendCaptured(candidate, action));
+      actions.appendChild(button);
+    }
+    row.append(url, meta, actions);
+    list.appendChild(row);
+  }
+}
+
+async function refreshCapture() {
+  try {
+    const tab = await activeTab();
+    const state = await captureMessage({ type: "getCaptureState", tabId: tab.id });
+    renderCandidates(state);
+    $("capture-start").disabled = Boolean(state.armed);
+    $("capture-stop").disabled = !state.armed;
+  } catch (e) {
+    renderCandidates({ armed: false, candidates: [] });
+    $("capture-start").disabled = false;
+    $("capture-stop").disabled = true;
+  }
+}
+
+async function startCapture() {
+  try {
+    const tab = await activeTab();
+    await captureMessage({
+      type: "armCapture",
+      tabId: tab.id,
+      tabUrl: tab.url,
+      tabTitle: tab.title,
+    });
+    setStatus("Capturing media requests for this tab…", "ok");
+    await refreshCapture();
+  } catch (e) {
+    setStatus(`Capture failed: ${e.message}`, "err");
+  }
+}
+
+async function stopCapture() {
+  try {
+    const tab = await activeTab();
+    await captureMessage({ type: "stopCapture", tabId: tab.id });
+    setStatus("Media capture stopped.", "ok");
+    await refreshCapture();
+  } catch (e) {
+    setStatus(`Capture failed: ${e.message}`, "err");
+  }
+}
+
+async function clearCapture() {
+  try {
+    const tab = await activeTab();
+    await captureMessage({ type: "clearCapture", tabId: tab.id });
+    await refreshCapture();
+  } catch (e) {
+    setStatus(`Capture failed: ${e.message}`, "err");
+  }
+}
+
+async function sendCaptured(candidate, action) {
+  setStatus("Sending captured media…");
+  try {
+    await companionCall("/send_url", "POST", {
+      url: candidate.url,
+      action,
+      request_headers: candidate.request_headers || {},
+      source_context: {
+        tab_url: candidate.tab_url || "",
+        tab_title: candidate.tab_title || "",
+        kind: candidate.kind || "",
+        content_type: candidate.content_type || "",
+      },
+    });
+    setStatus(`Captured ${candidate.kind} sent to ${action}.`, "ok");
+  } catch (e) {
+    setStatus(`Send failed: ${e.message}`, "err");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   load();
   $("pair").addEventListener("click", async () => {
@@ -156,4 +282,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("send-fetch").addEventListener("click", () => sendUrl("fetch"));
   $("send-queue").addEventListener("click", () => sendUrl("queue"));
   $("send-all-tabs").addEventListener("click", sendAllTabs);
+  $("capture-start").addEventListener("click", startCapture);
+  $("capture-stop").addEventListener("click", stopCapture);
+  $("capture-clear").addEventListener("click", clearCapture);
+  refreshCapture();
+  window.setInterval(refreshCapture, 1000);
 });

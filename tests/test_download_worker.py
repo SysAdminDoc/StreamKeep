@@ -251,6 +251,27 @@ def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
     assert cmd[cmd.index("--remux-video") + 1] == "webm"
 
 
+def test_ytdlp_cmd_carries_transient_browser_replay_headers(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://cdn.example.com/master.m3u8"
+    worker.request_headers = {
+        "Referer": "https://player.example.com/watch",
+        "Cookie": "session=abc123",
+    }
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    values = [cmd[index + 1] for index, value in enumerate(cmd[:-1])
+              if value == "--add-header"]
+    assert values == [
+        "Referer: https://player.example.com/watch",
+        "Cookie: session=abc123",
+    ]
+
+
 def test_named_template_and_credentials_appear_in_standalone_export(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"

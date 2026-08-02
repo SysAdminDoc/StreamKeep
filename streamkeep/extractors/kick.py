@@ -268,10 +268,11 @@ class KickExtractor(Extractor):
 
     def _resolve_m3u8(
         self, url, log_fn=None, channel="", title="",
-        source_id="", webpage_url="",
+        source_id="", webpage_url="", headers=None,
     ):
         self._log(log_fn, f"Fetching playlist: {url}")
-        body = curl(url)
+        request_headers = dict(headers or {})
+        body = curl(url, headers=request_headers or None)
         if not body or not body.startswith("#EXTM3U"):
             return None
 
@@ -289,14 +290,17 @@ class KickExtractor(Extractor):
             base = url.rsplit("/", 1)[0]
             info.qualities = parse_hls_master(body, base)
             if info.qualities:
-                sub_body = curl(info.qualities[0].url)
+                sub_body = curl(
+                    info.qualities[0].url,
+                    headers=request_headers or None,
+                )
                 if sub_body:
                     info.total_secs, info.start_time, info.segment_count = parse_hls_duration(sub_body)
         else:
             info.total_secs, info.start_time, info.segment_count = parse_hls_duration(body)
             base = url.rsplit("/", 2)[0]
             master_url = f"{base}/master.m3u8"
-            master_body = curl(master_url)
+            master_body = curl(master_url, headers=request_headers or None)
             if master_body and master_body.startswith("#EXTM3U"):
                 mbase = master_url.rsplit("/", 1)[0]
                 info.qualities = parse_hls_master(master_body, mbase)

@@ -745,7 +745,7 @@ def scrape_media_links(page_url, log_fn=None, max_links=100,
     return found
 
 
-def detect_direct_media(url, log_fn=None):
+def detect_direct_media(url, log_fn=None, headers=None):
     """Sniff a URL via HEAD request. Returns StreamInfo if it's a direct
     media file, else None."""
     MEDIA_TYPES = {
@@ -807,7 +807,9 @@ def detect_direct_media(url, log_fn=None):
         return info
 
     try:
-        probe = http_probe(url, headers={"User-Agent": CURL_UA}, timeout=10)
+        request_headers = {"User-Agent": CURL_UA}
+        request_headers.update(dict(headers or {}))
+        probe = http_probe(url, headers=request_headers, timeout=10)
         ct = probe.get("content_type", "")
         final_url = probe.get("final_url") or url
         final_parsed = urllib.parse.urlparse(final_url)

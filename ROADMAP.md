@@ -27,10 +27,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P1 — Breadth (new source classes)
 
-- [ ] V12 — Extension network sniffer + header handoff
-  What: MV3 webRequest capture of m3u8/mpd/media URLs + request headers on the active tab; one-click send-to-StreamKeep with full request context.
-  Effort: M
-
 - [ ] V13 — streamlink live engine (optional)
   What: in-process streamlink for Twitch/Kick live: mandatory ad-filtering, low-latency mode, DVR rewind (--hls-start-offset/--hls-live-restart), stream-up polling for monitors.
   Effort: L

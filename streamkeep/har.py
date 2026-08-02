@@ -112,6 +112,34 @@ def _replay_headers(raw_headers):
     return headers
 
 
+def normalize_replay_headers(raw_headers):
+    """Return the bounded browser handoff header allowlist.
+
+    The extension sends ``webRequest``'s list-of-dicts shape while REST/HAR
+    callers commonly use a mapping.  Normalize both forms through the same
+    control-character and size checks used by HAR import.  Hop-by-hop,
+    pseudo, and browser-only headers are intentionally discarded: yt-dlp
+    only needs the site-bound replay context represented by
+    :data:`_REPLAY_HEADERS`.
+    """
+    if isinstance(raw_headers, dict):
+        raw_headers = [
+            {"name": name, "value": value}
+            for name, value in raw_headers.items()
+        ]
+    if not isinstance(raw_headers, list):
+        return {}
+    return _replay_headers(raw_headers)
+
+
+def replay_header_argv(headers):
+    """Return safe ``--add-header`` argv for a normalized handoff mapping."""
+    argv = []
+    for name, value in normalize_replay_headers(headers).items():
+        argv.extend(["--add-header", f"{name}: {value}"])
+    return argv
+
+
 def parse_har(data, *, include_segments=False):
     """Parse a HAR document into a deduplicated media/manifest link table.
 

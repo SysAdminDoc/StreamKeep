@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added V12 browser-companion media handoff: the MV3 extension can explicitly
+  capture active-tab manifests and media requests, surface them in the popup,
+  and send a bounded replay context to Fetch or Queue. StreamKeep keeps only
+  Referer, Origin, User-Agent, Cookie, and Authorization headers for the
+  active job; captured credentials are transient and excluded from durable
+  queue/spec/resume serialization.
+
 - Hardened parallel direct-MP4 downloads (V55): the worker now validates the
   source before starting parallel transfer, and both HEAD and range requests
   use the pinned loopback policy proxy with redirect and proxy-bypass guards.

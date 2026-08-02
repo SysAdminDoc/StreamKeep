@@ -293,7 +293,7 @@ Archive workstation</translation>
             <translation>5-minute code</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1444" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1450" />
             <source>5-sec avg ({len(recent)} samples)</source>
             <translation>5-sec avg ({len(recent)} samples)</translation>
         </message>
@@ -561,7 +561,7 @@ Archive workstation</translation>
             <translation>Allow LAN for this scan</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="731" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="733" />
             <source>Already Downloaded</source>
             <translation>Already Downloaded</translation>
         </message>
@@ -678,7 +678,7 @@ Archive workstation</translation>
             <translation>Archive storage</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1529" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1535" />
             <source>Archive sync is current; no new playlist entries were queued.</source>
             <translation>Archive sync is current; no new playlist entries were queued.</translation>
         </message>
@@ -723,7 +723,7 @@ Archive workstation</translation>
             <translation>Audio</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="900" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="902" />
             <source>Audio extraction cannot embed subtitles; choose Sidecar.</source>
             <translation>Audio extraction cannot embed subtitles; choose Sidecar.</translation>
         </message>
@@ -818,7 +818,7 @@ Archive workstation</translation>
             <translation>Automatic ffmpeg operations on each downloaded file. Originals are preserved.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2037" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2065" />
             <source>Automatic retry cancelled; the failure remains available.</source>
             <translation>Automatic retry cancelled; the failure remains available.</translation>
         </message>
@@ -944,7 +944,7 @@ Archive workstation</translation>
             <translation>Browse...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1715" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1747" />
             <source>Browser clip range prefilled; fetching the source.</source>
             <translation>Browser clip range prefilled; fetching the source.</translation>
         </message>
@@ -1079,7 +1079,7 @@ Archive workstation</translation>
             <translation>Cancel</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1523" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1551" />
             <source>Cancel automatic retry</source>
             <translation>Cancel automatic retry</translation>
         </message>
@@ -1141,7 +1141,7 @@ Archive workstation</translation>
             <translation>Category actions:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1510" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1538" />
             <source>Category: {category.replace('_', ' ').title()}</source>
             <translation>Category: {category.replace('_', ' ').title()}</translation>
         </message>
@@ -1329,7 +1329,7 @@ Archive workstation</translation>
             <translation>Choose an output path</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="797" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="799" />
             <source>Choose either a video container or audio extraction, not both.</source>
             <translation>Choose either a video container or audio extraction, not both.</translation>
         </message>
@@ -1400,7 +1400,7 @@ Archive workstation</translation>
             <translation>Clear the current search or try a broader title, platform, channel, folder, or transcript phrase.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="891" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="893" />
             <source>Clear-key recovery supports the default tracks from one HLS media playlist; load that playlist directly for custom tracks.</source>
             <translation>Clear-key recovery supports the default tracks from one HLS media playlist; load that playlist directly for custom tracks.</translation>
         </message>
@@ -1651,7 +1651,7 @@ flac/pcm = lossless</translation>
             <translation>Copy the exact standalone yt-dlp or FFmpeg command for the latest job</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="677" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="678" />
             <source>Could not arm the update step. See log.</source>
             <translation>Could not arm the update step. See log.</translation>
         </message>
@@ -1715,7 +1715,7 @@ flac/pcm = lossless</translation>
             <translation>Custom category actions</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1527" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1555" />
             <source>Daily</source>
             <translation>Daily</translation>
         </message>
@@ -1870,7 +1870,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Discard</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1524" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1552" />
             <source>Discard failure</source>
             <translation>Discard failure</translation>
         </message>
@@ -1895,7 +1895,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>distinct channels</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1462" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1468" />
             <source>Done</source>
             <translation>Done</translation>
         </message>
@@ -1912,8 +1912,8 @@ Produces a .nosilence copy — the original is preserved.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="228" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="608" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="643" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="609" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="644" />
             <source>Download &amp; install</source>
             <translation>Download &amp; install</translation>
         </message>
@@ -1931,17 +1931,17 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Download all checked</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1397" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1403" />
             <source>Download cancelled. You can adjust the selection and try again.</source>
             <translation>Download cancelled. You can adjust the selection and try again.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1273" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1279" />
             <source>Download complete. Saved {self._completed_segments} segment(s) to the selected folder.</source>
             <translation>Download complete. Saved {self._completed_segments} segment(s) to the selected folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1257" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1263" />
             <source>Download finished with one or more failed segments. Review the log before retrying.</source>
             <translation>Download finished with one or more failed segments. Review the log before retrying.</translation>
         </message>
@@ -1979,12 +1979,12 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Download settings</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="457" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="458" />
             <source>Download skipped — duplicate detected.</source>
             <translation>Download skipped — duplicate detected.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1167" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1173" />
             <source>Download stopped after failed segment(s). Resume sidecar was kept for retry.</source>
             <translation>Download stopped after failed segment(s). Resume sidecar was kept for retry.</translation>
         </message>
@@ -1999,7 +1999,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Download Twitch VOD chat replay (JSON + plain text)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1203" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1209" />
             <source>Downloaded {self._completed_segments} of {self._total_segments} segment(s).</source>
             <translation>Downloaded {self._completed_segments} of {self._total_segments} segment(s).</translation>
         </message>
@@ -2016,7 +2016,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Downloader ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1002" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1004" />
             <source>Downloading 0 of {len(segments)} segment(s) to {_path_label(out_dir)}.</source>
             <translation>Downloading 0 of {len(segments)} segment(s) to {_path_label(out_dir)}.</translation>
         </message>
@@ -2026,12 +2026,12 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Downloading VOD {self._batch_idx + 1} of {self._batch_total}.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1184" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1190" />
             <source>Downloading {self._completed_segments}/{self._total_segments}. Segment {idx + 1}: {status}</source>
             <translation>Downloading {self._completed_segments}/{self._total_segments}. Segment {idx + 1}: {status}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="617" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="618" />
             <source>Downloading...</source>
             <translation>Downloading...</translation>
         </message>
@@ -2328,13 +2328,13 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>estimated</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1472" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1478" />
             <source>Estimated time remaining</source>
             <translation>Estimated time remaining</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1418" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1460" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1424" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1466" />
             <source>Estimating...</source>
             <translation>Estimating...</translation>
         </message>
@@ -2483,7 +2483,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Extracted {len(links)} media/manifest URL(s) from HAR</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2015" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2043" />
             <source>Failed job has no retryable URL.</source>
             <translation>Failed job has no retryable URL.</translation>
         </message>
@@ -2498,17 +2498,17 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Failed to read file: {e}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2009" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2037" />
             <source>Failed-job record was not found or cannot be retried.</source>
             <translation>Failed-job record was not found or cannot be retried.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2057" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2085" />
             <source>Failed-job recovery item discarded.</source>
             <translation>Failed-job recovery item discarded.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1501" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1529" />
             <source>Failure #{failure_id}</source>
             <translation>Failure #{failure_id}</translation>
         </message>
@@ -2527,7 +2527,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Fetch a yt-dlp source to list its subtitle languages</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="505" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="507" />
             <source>Fetch failed: {err}</source>
             <translation>Fetch failed: {err}</translation>
         </message>
@@ -2615,7 +2615,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Finalizing {title}: {step_text}.{extra}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1463" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1469" />
             <source>Finalizing...</source>
             <translation>Finalizing...</translation>
         </message>
@@ -2692,7 +2692,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
 {details}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1611" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1617" />
             <source>Found {len(links)} link(s). Queued {added} new ({len(links) - added} already in queue).</source>
             <translation>Found {len(links)} link(s). Queued {added} new ({len(links) - added} already in queue).</translation>
         </message>
@@ -2813,8 +2813,8 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Height:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1275" />
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1285" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1303" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1313" />
             <source>Held {changed} pending queue job(s).</source>
             <translation>Held {changed} pending queue job(s).</translation>
         </message>
@@ -3022,7 +3022,7 @@ https://kick.com/channel
             <translation>Include automatic captions</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="608" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="610" />
             <source>Include segment {i + 1}</source>
             <translation>Include segment {i + 1}</translation>
         </message>
@@ -3052,12 +3052,12 @@ https://kick.com/channel
             <translation>Inspect disk use, integrity, and recoverable cleanup.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="586" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="587" />
             <source>Install blocked</source>
             <translation>Install blocked</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="670" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="671" />
             <source>Install now</source>
             <translation>Install now</translation>
         </message>
@@ -3260,12 +3260,12 @@ https://kick.com/channel
             <translation>Live auto-record + VOD subscription</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1268" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1274" />
             <source>Live capture finished and was saved to the selected folder.</source>
             <translation>Live capture finished and was saved to the selected folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="997" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="999" />
             <source>Live capture started. Recording to {_path_label(out_dir)} until you stop it.</source>
             <translation>Live capture started. Recording to {_path_label(out_dir)} until you stop it.</translation>
         </message>
@@ -3292,7 +3292,7 @@ https://kick.com/channel
             <translation>Live Now</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="460" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="461" />
             <source>Live source ready. Start recording and stop it when you have enough footage.</source>
             <translation>Live source ready. Start recording and stop it when you have enough footage.</translation>
         </message>
@@ -3631,7 +3631,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Newest events are shown first in the table below.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1515" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1543" />
             <source>Next attempt: {failure.get('next_attempt_at')}</source>
             <translation>Next attempt: {failure.get('next_attempt_at')}</translation>
         </message>
@@ -3760,7 +3760,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No media files found in that folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1601" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1607" />
             <source>No media links found. Try Fetch or Expand Playlist instead.</source>
             <translation>No media links found. Try Fetch or Expand Playlist instead.</translation>
         </message>
@@ -3787,7 +3787,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No playable media found in selected entries.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1534" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1540" />
             <source>No playlist entries found. This URL may be a single video — use Fetch instead.</source>
             <translation>No playlist entries found. This URL may be a single video — use Fetch instead.</translation>
         </message>
@@ -3812,7 +3812,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No proxies configured to test.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1653" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1659" />
             <source>No recent download folder to trim.</source>
             <translation>No recent download folder to trim.</translation>
         </message>
@@ -4054,7 +4054,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>One stream loaded</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1526" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1554" />
             <source>One-shot (no recurrence)</source>
             <translation>One-shot (no recurrence)</translation>
         </message>
@@ -4266,7 +4266,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
         <message>
             <location filename="streamkeep/ui/tabs/download_queue.py" line="175" />
             <location filename="streamkeep/ui/tabs/download_queue.py" line="217" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1481" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1487" />
             <source>Paste a URL first.</source>
             <translation>Paste a URL first.</translation>
         </message>
@@ -4281,7 +4281,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Paste a URL to begin.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1571" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1577" />
             <source>Paste a webpage URL first.</source>
             <translation>Paste a webpage URL first.</translation>
         </message>
@@ -4351,7 +4351,7 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Pick a folder; every video/audio file in it gets converted.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="772" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="774" />
             <source>Pick a quality before starting the download.</source>
             <translation>Pick a quality before starting the download.</translation>
         </message>
@@ -4460,7 +4460,7 @@ Saves your settings first.</translation>
             <translation>Playlist dates:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1552" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1558" />
             <source>Playlist expanded. Queued {added} new entries ({len(entries) - added} already in the queue).</source>
             <translation>Playlist expanded. Queued {added} new entries ({len(entries) - added} already in the queue).</translation>
         </message>
@@ -4475,7 +4475,7 @@ Saves your settings first.</translation>
             <translation>Playlist items:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1565" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1571" />
             <source>Playlist probe failed: {err}</source>
             <translation>Playlist probe failed: {err}</translation>
         </message>
@@ -4520,7 +4520,7 @@ Saves your settings first.</translation>
             <translation>Port {srv.port}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="428" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="429" />
             <source>Possible duplicate of "{dup.title}" ({dup.date}). Download anyway if intentional.</source>
             <translation>Possible duplicate of "{dup.title}" ({dup.date}). Download anyway if intentional.</translation>
         </message>
@@ -4617,7 +4617,7 @@ Saves your settings first.</translation>
             <translation>Primary</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1503" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1509" />
             <source>Probing for playlist/channel entries...</source>
             <translation>Probing for playlist/channel entries...</translation>
         </message>
@@ -4633,7 +4633,7 @@ Saves your settings first.</translation>
             <translation>Progress</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1215" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1243" />
             <source>Progress for {item.get('title', 'queue item')}</source>
             <translation>Progress for {item.get('title', 'queue item')}</translation>
         </message>
@@ -4710,22 +4710,22 @@ Saves your settings first.</translation>
             <translation>Queue is already empty.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1587" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1615" />
             <source>Queue item recurrence set to '{new_rec or 'one-shot'}'.</source>
             <translation>Queue item recurrence set to '{new_rec or 'one-shot'}'.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="513" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="523" />
             <source>Queue job changed in another StreamKeep process and was kept.</source>
             <translation>Queue job changed in another StreamKeep process and was kept.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1887" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1915" />
             <source>Queue job changed in another StreamKeep process; refreshed the durable state instead of overwriting it.</source>
             <translation>Queue job changed in another StreamKeep process; refreshed the durable state instead of overwriting it.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1853" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1881" />
             <source>Queue job could not be persisted.</source>
             <translation>Queue job could not be persisted.</translation>
         </message>
@@ -4740,12 +4740,12 @@ Saves your settings first.</translation>
             <translation>Queue the URL and start it at a future time</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1675" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1706" />
             <source>Queued via browser extension: {url[:80]}</source>
             <translation>Queued via browser extension: {url[:80]}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2000" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2028" />
             <source>Queued {count} automatic retr{'y' if count == 1 else 'ies'}.</source>
             <translation>Queued {count} automatic retr{'y' if count == 1 else 'ies'}.</translation>
         </message>
@@ -4848,7 +4848,7 @@ Saves your settings first.</translation>
             <translation>Ready to start</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1520" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1548" />
             <source>Reason: {reason[:100]}</source>
             <translation>Reason: {reason[:100]}</translation>
         </message>
@@ -4880,12 +4880,12 @@ Saves your settings first.</translation>
             <translation>Recording folder is missing.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1395" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1401" />
             <source>Recording stopped before any media was saved.</source>
             <translation>Recording stopped before any media was saved.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1393" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1399" />
             <source>Recording stopped. Any captured portion was kept on disk.</source>
             <translation>Recording stopped. Any captured portion was kept on disk.</translation>
         </message>
@@ -4935,7 +4935,7 @@ Saves your settings first.</translation>
             <translation>Recovery results ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1493" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1521" />
             <source>Recurrence: {current}</source>
             <translation>Recurrence: {current}</translation>
         </message>
@@ -5027,7 +5027,7 @@ Saves your settings first.</translation>
             <translation>Removed {removed} missing history entries.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1297" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1325" />
             <source>Removed {removed} queue job(s).</source>
             <translation>Removed {removed} queue job(s).</translation>
         </message>
@@ -5092,8 +5092,8 @@ Saves your settings first.</translation>
             <translation>Reset overrides</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="363" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="496" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="364" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="498" />
             <location filename="streamkeep/ui/tabs/download_vod.py" line="122" />
             <source>Resolve</source>
             <translation>Resolve</translation>
@@ -5164,12 +5164,12 @@ Saves your settings first.</translation>
             <translation>Retry</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1503" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1531" />
             <source>Retry failed job</source>
             <translation>Retry failed job</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2018" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2046" />
             <source>Retry queued: {queue_job.get('title', '')[:60]}</source>
             <translation>Retry queued: {queue_job.get('title', '')[:60]}</translation>
         </message>
@@ -5179,7 +5179,7 @@ Saves your settings first.</translation>
             <translation>Retry sleep:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1318" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1346" />
             <source>Retrying {retried} queue job(s).</source>
             <translation>Retrying {retried} queue job(s).</translation>
         </message>
@@ -5319,7 +5319,7 @@ Saves your settings first.</translation>
             <translation>Scale:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1624" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1630" />
             <source>Scan failed: {err}</source>
             <translation>Scan failed: {err}</translation>
         </message>
@@ -5334,7 +5334,7 @@ Saves your settings first.</translation>
             <translation>Scan page</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1574" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1580" />
             <source>Scan Page expects a full http(s) URL.</source>
             <translation>Scan Page expects a full http(s) URL.</translation>
         </message>
@@ -5350,7 +5350,7 @@ Saves your settings first.</translation>
             <translation>Scanning archive storage in the background.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1581" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1587" />
             <source>Scanning page for media links...</source>
             <translation>Scanning page for media links...</translation>
         </message>
@@ -5415,7 +5415,7 @@ Saves your settings first.</translation>
             <translation>Scheduled for {start_at.strftime('%Y-%m-%d %H:%M')}: {title or queue_url[:60]}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="2027" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="2055" />
             <source>Scheduled retry was not found.</source>
             <translation>Scheduled retry was not found.</translation>
         </message>
@@ -5525,12 +5525,12 @@ Saves your settings first.</translation>
             <translation>Segment</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="634" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="636" />
             <source>Segment {i + 1} download progress</source>
             <translation>Segment {i + 1} download progress</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1224" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1230" />
             <source>Segment {idx + 1} failed: {err}</source>
             <translation>Segment {idx + 1} failed: {err}</translation>
         </message>
@@ -5570,12 +5570,12 @@ Saves your settings first.</translation>
             <translation>Select at least one maintenance action to apply.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="964" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="966" />
             <source>Select at least one segment before downloading.</source>
             <translation>Select at least one segment before downloading.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="763" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="765" />
             <source>Select at least one video or audio track.</source>
             <translation>Select at least one video or audio track.</translation>
         </message>
@@ -5615,7 +5615,7 @@ Saves your settings first.</translation>
             <translation>Select one or more VODs to load for inspection or download in a batch.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1422" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1450" />
             <source>Select queue job {row + 1}: {item.get('title', '')}</source>
             <translation>Select queue job {row + 1}: {item.get('title', '')}</translation>
         </message>
@@ -5626,7 +5626,7 @@ Saves your settings first.</translation>
             <translation>Select VOD {i + 1}: {v.title}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1265" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1293" />
             <source>Selected queue jobs are ready to start.</source>
             <translation>Selected queue jobs are ready to start.</translation>
         </message>
@@ -5818,7 +5818,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Source media</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="462" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="463" />
             <source>Source ready. Review the segments and start the download when you are happy.</source>
             <translation>Source ready. Review the segments and start the download when you are happy.</translation>
         </message>
@@ -5891,7 +5891,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>srt</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="715" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="717" />
             <source>Standalone command copied. It may include cookie paths or headers.</source>
             <translation>Standalone command copied. It may include cookie paths or headers.</translation>
         </message>
@@ -5906,7 +5906,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Start (HH:MM:SS)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="709" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="711" />
             <source>Start a prepared download before copying its command.</source>
             <translation>Start a prepared download before copying its command.</translation>
         </message>
@@ -5936,7 +5936,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Starts a 127.0.0.1-only HTTP server on a random port. Clients must exchange a short-lived pairing code for an origin-bound token.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1469" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1475" />
             <source>Starts during download</source>
             <translation>Starts during download</translation>
         </message>
@@ -6168,7 +6168,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Test proxies</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1677" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1708" />
             <source>That browser handoff is already in the queue.</source>
             <translation>That browser handoff is already in the queue.</translation>
         </message>
@@ -6178,12 +6178,12 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>That month may already be purged from Twitch's CDN cache. Try a more recent month or confirm the channel name.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="506" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="516" />
             <source>The active queue job cannot be removed while it is running.</source>
             <translation>The active queue job cannot be removed while it is running.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1464" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1492" />
             <source>The active queue job cannot be reordered while it is running.</source>
             <translation>The active queue job cannot be reordered while it is running.</translation>
         </message>
@@ -6193,7 +6193,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>The app remains loopback-only. A locally managed reverse proxy must terminate trusted HTTPS and forward to the displayed listener port.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="876" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="878" />
             <source>The clear-key override applies only to non-DRM HLS sources.</source>
             <translation>The clear-key override applies only to non-DRM HLS sources.</translation>
         </message>
@@ -6244,7 +6244,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>These defaults can all be changed later in Settings.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="790" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="792" />
             <source>These output controls apply only to yt-dlp direct sources; choose a yt-dlp quality or reset them.</source>
             <translation>These output controls apply only to yt-dlp direct sources; choose a yt-dlp quality or reset them.</translation>
         </message>
@@ -6264,7 +6264,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>This profile inherits global defaults</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="731" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="733" />
             <source>This URL was downloaded on {prev.get('date', '?')}
 to: {prev.get('path', '?')[:80]}
 
@@ -6325,7 +6325,7 @@ Download again?</translation>
             <translation>Time range (optional)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="931" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="933" />
             <source>Time range end must be after start.</source>
             <translation>Time range end must be after start.</translation>
         </message>
@@ -6553,12 +6553,12 @@ Download again?</translation>
             <translation>Understand archive growth and capture patterns.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="614" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="615" />
             <source>Update available but no authenticated Windows asset was attached.</source>
             <translation>Update available but no authenticated Windows asset was attached.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="640" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="641" />
             <source>Update failed: {path_or_err}</source>
             <translation>Update failed: {path_or_err}</translation>
         </message>
@@ -6733,7 +6733,7 @@ Download again?</translation>
             <translation>Waiting</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1415" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1421" />
             <source>Waiting for data</source>
             <translation>Waiting for data</translation>
         </message>
@@ -6797,7 +6797,7 @@ Download again?</translation>
             <translation>WebM</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1529" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1557" />
             <source>Weekday mask... (mon,tue,fri)</source>
             <translation>Weekday mask... (mon,tue,fri)</translation>
         </message>
@@ -6807,7 +6807,7 @@ Download again?</translation>
             <translation>Weekend limit:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1528" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1556" />
             <source>Weekly</source>
             <translation>Weekly</translation>
         </message>
@@ -7063,7 +7063,7 @@ Download again?</translation>
             <translation>{density.title()} density • {accent_name} accent</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1456" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1462" />
             <source>{done}/{total} segments done</source>
             <translation>{done}/{total} segments done</translation>
         </message>
@@ -7098,7 +7098,7 @@ Download again?</translation>
             <translation>{idx + 1}/{total}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1377" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1405" />
             <source>{item['progress']}%</source>
             <translation>{item['progress']}%</translation>
         </message>
@@ -7160,7 +7160,7 @@ Download again?</translation>
             <translation>{len(sel_rows)} channel(s) selected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1241" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1269" />
             <source>{len(selected)} selected</source>
             <translation>{len(selected)} selected</translation>
         </message>
@@ -7230,7 +7230,7 @@ Download again?</translation>
             <translation>{profile.name} has no credentials imported.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1216" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1244" />
             <source>{progress.value()}%</source>
             <translation>{progress.value()}%</translation>
         </message>
@@ -7290,10 +7290,10 @@ Download again?</translation>
         <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="661" />
             <location filename="streamkeep/ui/main_window.py" line="2413" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1414" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1417" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1468" />
-            <location filename="streamkeep/ui/tabs/download_single.py" line="1471" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1420" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1423" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1474" />
+            <location filename="streamkeep/ui/tabs/download_single.py" line="1477" />
             <location filename="streamkeep/ui/tabs/history.py" line="101" />
             <location filename="streamkeep/ui/tabs/history.py" line="104" />
             <source>—</source>
@@ -7311,7 +7311,7 @@ Download again?</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="1359" />
-            <location filename="streamkeep/ui/tabs/download_queue.py" line="1193" />
+            <location filename="streamkeep/ui/tabs/download_queue.py" line="1221" />
             <source>●</source>
             <translation>●</translation>
         </message>

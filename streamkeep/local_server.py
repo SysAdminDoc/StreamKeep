@@ -41,6 +41,8 @@ from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from .har import normalize_replay_headers
+
 PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
     "POST /api/queue",
@@ -207,6 +209,7 @@ class ReplayStore:
 
 class _ServerSignals(QObject):
     url_received = pyqtSignal(str, str)   # url, action ("fetch" | "queue")
+    handoff_received = pyqtSignal(object, str)  # bounded context, action
     clip_received = pyqtSignal(str, float, float)  # url, start_secs, end_secs
     failed_job_retry_requested = pyqtSignal(int)
     failed_job_discard_requested = pyqtSignal(int)
@@ -219,6 +222,44 @@ class _CompanionHTTPServer(ThreadingHTTPServer):
 
 
 _LOCAL_HOSTS = frozenset(("", "127.0.0.1", "::1", "localhost"))
+_HANDOFF_CONTEXT_FIELDS = ("tab_url", "tab_title", "kind", "content_type")
+
+
+def _clean_handoff_text(value, max_len):
+    text = str(value or "").strip()
+    if len(text) > max_len or any(
+        ord(char) < 32 or ord(char) == 127 for char in text
+    ):
+        return ""
+    return text
+
+
+def _normalize_handoff_context(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        return None
+    context = {}
+    for field in _HANDOFF_CONTEXT_FIELDS:
+        text = _clean_handoff_text(value.get(field), 4096 if field == "tab_url" else 256)
+        if text:
+            context[field] = text
+    tab_url = context.get("tab_url", "")
+    if tab_url and not tab_url.startswith(("http://", "https://")):
+        context.pop("tab_url", None)
+    return context
+
+
+def _normalize_handoff_payload(data):
+    """Return ``(request_headers, source_context)`` for a handoff body."""
+    raw_headers = data.get("request_headers")
+    if raw_headers is not None and not isinstance(raw_headers, (dict, list)):
+        return None
+    headers = normalize_replay_headers(raw_headers)
+    context = _normalize_handoff_context(data.get("source_context"))
+    if context is None:
+        return None
+    return headers, context
 
 
 def _canonical_host(host):
@@ -368,6 +409,7 @@ class LocalCompanionServer:
         self._thread = None
         self._signals = _ServerSignals()
         self.url_received = self._signals.url_received
+        self.handoff_received = self._signals.handoff_received
         self.clip_received = self._signals.clip_received
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
@@ -991,6 +1033,22 @@ def _build_handler(
                 return
             if self._ssrf_reject(url):
                 return
+            handoff = _normalize_handoff_payload(data)
+            if handoff is None:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "invalid handoff context",
+                })
+                return
+            request_headers, source_context = handoff
+            if "request_headers" in data:
+                data["request_headers"] = request_headers
+            else:
+                data.pop("request_headers", None)
+            if source_context:
+                data["source_context"] = source_context
+            else:
+                data.pop("source_context", None)
             clip_start = _parse_timestamp(data.get("clip_start"))
             clip_end = _parse_timestamp(data.get("clip_end"))
             if clip_start is not None and clip_end is not None and clip_end <= clip_start:
@@ -1017,7 +1075,12 @@ def _build_handler(
                     "job": job,
                 })
             else:
-                signals.url_received.emit(url, action)
+                if request_headers or source_context:
+                    signals.handoff_received.emit(
+                        {**data, "url": url}, action
+                    )
+                else:
+                    signals.url_received.emit(url, action)
                 self._json_response(200, {"ok": True})
 
         # ── REST API handlers (F37) ────────────────────────────────
@@ -1092,8 +1155,29 @@ def _build_handler(
                 return
             if self._ssrf_reject(url):
                 return
+            handoff = _normalize_handoff_payload(data)
+            if handoff is None:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "invalid handoff context",
+                })
+                return
+            request_headers, source_context = handoff
+            if "request_headers" in data:
+                data["request_headers"] = request_headers
+            else:
+                data.pop("request_headers", None)
+            if source_context:
+                data["source_context"] = source_context
+            else:
+                data.pop("source_context", None)
             if not queue_submitter:
-                signals.url_received.emit(url, "queue")
+                if request_headers or source_context:
+                    signals.handoff_received.emit(
+                        {**data, "url": url}, "queue"
+                    )
+                else:
+                    signals.url_received.emit(url, "queue")
                 self._json_response(200, {"ok": True})
                 return
             try:

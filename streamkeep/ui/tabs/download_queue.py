@@ -448,6 +448,7 @@ class DownloadQueueMixin:
         upgrade_existing_path="",
         upgrade_existing_quality="",
         upgrade_min_quality="",
+        request_headers=None,
     ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
@@ -494,6 +495,15 @@ class DownloadQueueMixin:
             "upgrade_existing_quality": upgrade_existing_quality,
             "upgrade_min_quality": upgrade_min_quality,
         }))
+        if request_headers:
+            from ...har import normalize_replay_headers
+            safe_headers = normalize_replay_headers(request_headers)
+            if safe_headers:
+                handoffs = getattr(self, "_companion_handoff_headers", None)
+                if handoffs is None:
+                    handoffs = {}
+                    self._companion_handoff_headers = handoffs
+                handoffs[url] = safe_headers
         self._persist_config()
         if hasattr(self, "queue_table"):
             self._refresh_queue_table()
@@ -659,6 +669,10 @@ class DownloadQueueMixin:
             vod_channel=item.get("vod_channel") or None,
             source_id=item.get("source_id") or None,
             webpage_url=item.get("webpage_url") or None,
+            request_headers=(
+                getattr(self, "_companion_handoff_headers", {})
+                .get(str(item.get("url", "")), {})
+            ),
         )
         fetch.finished.connect(
             lambda info, it=item: self._on_queue_fetch_done(it, info)
@@ -934,6 +948,11 @@ class DownloadQueueMixin:
             selected_tracks=selected_tracks,
             ytdlp_source=ytdlp_source,
             ytdlp_format=ytdlp_format,
+            request_headers=tuple(
+                getattr(self, "_companion_handoff_headers", {})
+                .get(str(item.get("url", "")), {})
+                .items()
+            ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=rl,
             proxy=YtDlpExtractor.proxy,
@@ -996,6 +1015,9 @@ class DownloadQueueMixin:
 
     def _on_queue_fetch_error(self, item, err):
         """Handle fetch error for a concurrent queue item."""
+        getattr(self, "_companion_handoff_headers", {}).pop(
+            str(item.get("url", "")), None
+        )
         from ...retry import sanitize_failure_reason
         safe_error = sanitize_failure_reason(err)
         item_id = id(item)
@@ -1022,6 +1044,9 @@ class DownloadQueueMixin:
 
     def _on_queue_item_done(self, item, info, out_dir):
         """Handle download completion for a concurrent queue item."""
+        getattr(self, "_companion_handoff_headers", {}).pop(
+            str(item.get("url", "")), None
+        )
         item_id = id(item)
         ctx = self._queue_contexts.pop(item_id, {})
         worker = self._queue_workers.pop(item_id, None)
@@ -1080,6 +1105,9 @@ class DownloadQueueMixin:
 
     def _on_queue_item_error(self, item, err):
         """Handle download error for a concurrent queue item."""
+        getattr(self, "_companion_handoff_headers", {}).pop(
+            str(item.get("url", "")), None
+        )
         from ...retry import sanitize_failure_reason
         safe_error = sanitize_failure_reason(err)
         item_id = id(item)

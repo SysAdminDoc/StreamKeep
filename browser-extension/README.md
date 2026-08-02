@@ -1,6 +1,6 @@
 # StreamKeep Companion (browser extension)
 
-One-click "send current tab URL to StreamKeep desktop app."
+One-click URL and DRM-free media-request handoff to the StreamKeep desktop app.
 
 ## Install (Chrome / Edge — unpacked)
 
@@ -26,6 +26,18 @@ Open any supported page (Kick, Twitch, YouTube, Rumble, etc.), click the icon, t
 
 - **Send to Fetch** — StreamKeep jumps to the Download tab and fetches immediately.
 - **Send to Queue** — Queued silently; StreamKeep shows a status toast.
+
+## Capture a media request
+
+For a protected, DRM-free manifest or direct media request, open the extension
+popup and select **Capture this tab** before starting playback. Play the media,
+then choose a discovered `.m3u8`, `.mpd`, or media URL and send it to Fetch or
+Queue. Only the active tab is captured, candidates and replay headers remain in
+session storage, and the handoff allowlist carries the request's `Referer`,
+`Origin`, `User-Agent`, `Cookie`, and `Authorization` values when present.
+The desktop server drops all other browser headers and keeps the captured
+context transient rather than writing it to the queue database or resume files.
+Encrypted media extensions (EME/DRM) are outside this workflow.
 
 ## Security
 

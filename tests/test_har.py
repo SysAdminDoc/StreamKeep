@@ -5,7 +5,11 @@ from unittest import mock
 import pytest
 
 from streamkeep import cli
-from streamkeep.har import har_entry_ytdlp_headers, parse_har
+from streamkeep.har import (
+    har_entry_ytdlp_headers,
+    normalize_replay_headers,
+    parse_har,
+)
 
 
 def _entry(url, *, method="GET", mime="", headers=None):
@@ -156,6 +160,22 @@ def test_har_entry_ytdlp_headers_builds_add_header_argv():
         "--add-header", "Referer: https://x.example/w",
         "--add-header", "User-Agent: SK",
     ]
+
+
+def test_normalize_replay_headers_accepts_extension_shape_and_drops_noise():
+    assert normalize_replay_headers([
+        {"name": "Cookie", "value": "session=abc"},
+        {"name": "Authorization", "value": "Bearer xyz"},
+        {"name": "Accept", "value": "*/*"},
+        {"name": "X-Bad", "value": "line\nbreak"},
+    ]) == {
+        "Cookie": "session=abc",
+        "Authorization": "Bearer xyz",
+    }
+    assert normalize_replay_headers({
+        "Referer": "https://player.example/",
+        "Host": "cdn.example",
+    }) == {"Referer": "https://player.example/"}
 
 
 def test_cli_import_har_prints_urls(tmp_path):

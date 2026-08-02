@@ -127,6 +127,20 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "url": {"type": "string", "format": "uri"},
                         "quality": {"type": "string"},
                         "action": {"type": "string", "enum": ["fetch", "queue"]},
+                        "request_headers": {
+                            "type": "object",
+                            "description": (
+                                "Optional browser replay headers. The server "
+                                "keeps only Referer, Origin, User-Agent, Cookie, "
+                                "and Authorization for the active job."
+                            ),
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "source_context": {
+                            "type": "object",
+                            "description": "Non-secret active-tab context for a browser handoff.",
+                            "additionalProperties": {"type": "string"},
+                        },
                     },
                     "required": ["url"],
                 },

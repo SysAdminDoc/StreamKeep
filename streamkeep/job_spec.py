@@ -37,6 +37,9 @@ class DownloadJobSpec:
     ytdlp_container: str = "mp4"
     ytdlp_audio_format: str = ""
     ytdlp_audio_quality: str = ""
+    # Browser-captured replay headers live only for the active job.  They are
+    # deliberately omitted from serialized specs and resume sidecars.
+    request_headers: tuple[tuple[str, str], ...] = ()
 
     cookies_browser: str = ""
     # Opaque site-bound authentication profile ID (V50). Jobs never carry
@@ -113,6 +116,7 @@ class DownloadJobSpec:
         d["segments"] = [list(s) for s in self.segments]
         d["selected_tracks"] = list(self.selected_tracks)
         d["ytdlp_template_args"] = list(self.ytdlp_template_args)
+        d.pop("request_headers", None)
         d.pop("hls_key_override", None)
         d.pop("hls_key_iv", None)
         return d
@@ -161,6 +165,7 @@ class DownloadJobSpec:
         worker.ytdlp_container = self.ytdlp_container
         worker.ytdlp_audio_format = self.ytdlp_audio_format
         worker.ytdlp_audio_quality = self.ytdlp_audio_quality
+        worker.request_headers = dict(self.request_headers)
         worker.cookies_browser = self.cookies_browser
         worker.auth_profile_id = self.auth_profile_id
         worker.rate_limit = self.rate_limit
@@ -223,6 +228,10 @@ class DownloadJobSpec:
             ytdlp_container=worker.ytdlp_container or "mp4",
             ytdlp_audio_format=worker.ytdlp_audio_format or "",
             ytdlp_audio_quality=worker.ytdlp_audio_quality or "",
+            request_headers=tuple(
+                (str(name), str(value))
+                for name, value in getattr(worker, "request_headers", {}).items()
+            ),
             cookies_browser=worker.cookies_browser or "",
             auth_profile_id=getattr(worker, "auth_profile_id", "") or "",
             rate_limit=worker.rate_limit or "",

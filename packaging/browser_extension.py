@@ -24,8 +24,8 @@ REQUIRED_FILES = [
     "background.js",
 ]
 ICON_SIZES = [16, 32, 48, 128]
-REQUIRED_PERMISSIONS = {"activeTab", "storage", "contextMenus"}
-MAX_HOST_PERMISSIONS = {"http://127.0.0.1/*"}
+REQUIRED_PERMISSIONS = {"activeTab", "storage", "contextMenus", "webRequest"}
+MAX_HOST_PERMISSIONS = {"<all_urls>", "http://127.0.0.1/*"}
 
 
 def validate_extension(ext_dir=None):

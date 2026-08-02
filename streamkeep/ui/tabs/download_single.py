@@ -338,6 +338,7 @@ class DownloadSingleMixin:
             vod_channel=vod_channel,
             source_id=source_id,
             webpage_url=webpage_url,
+            request_headers=getattr(self, "_companion_request_headers", {}),
         )
         self._fetch_worker.log.connect(self._log)
         self._fetch_worker.finished.connect(self._on_fetch_done)
@@ -492,6 +493,7 @@ class DownloadSingleMixin:
         self._thumb_worker = None
 
     def _on_fetch_error(self, err):
+        self._companion_request_headers = {}
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Resolve")
         self._log(f"[ERROR] {err}")
@@ -1055,6 +1057,9 @@ class DownloadSingleMixin:
             ytdlp_container=ytdlp_options["container"],
             ytdlp_audio_format=ytdlp_options["audio_format"],
             ytdlp_audio_quality=ytdlp_options["audio_quality"],
+            request_headers=tuple(
+                getattr(self, "_companion_request_headers", {}).items()
+            ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=_dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit,
             proxy=YtDlpExtractor.proxy,
@@ -1152,6 +1157,7 @@ class DownloadSingleMixin:
             self._log(f"[OVERRIDE] Per-download overrides active: {', '.join(_dl_overrides.keys())}")
         _reset_adv_overrides(self)
         self.download_worker.start()
+        self._companion_request_headers = {}
         return True
 
     def _on_download_worker_finished(self):
@@ -1659,9 +1665,27 @@ class DownloadSingleMixin:
 
     # ── Browser companion ───────────────────────────────────────
 
-    def _on_companion_url(self, url, action):
+    def _on_companion_handoff(self, payload, action):
+        """Receive a media URL plus transient browser replay context."""
+        if not isinstance(payload, dict):
+            return
+        from ...har import normalize_replay_headers
+        url = str(payload.get("url") or "").strip()
+        if not url:
+            return
+        self._on_companion_url(
+            url,
+            action,
+            request_headers=normalize_replay_headers(
+                payload.get("request_headers")
+            ),
+        )
+
+    def _on_companion_url(self, url, action, request_headers=None):
         """The extension just POSTed a URL. Route it through the Fetch
         path or queue it immediately depending on action."""
+        if request_headers is not None:
+            self._companion_request_headers = dict(request_headers)
         self._log(f"[COMPANION] Received {action.upper()} for {url[:80]}")
         self._present_main_window(0)
         try:
@@ -1670,13 +1694,21 @@ class DownloadSingleMixin:
             pass
         if action == "queue":
             try:
-                added = self._queue_add(url, title="", platform="")
+                added = self._queue_add(
+                    url,
+                    title="",
+                    platform="",
+                    request_headers=getattr(
+                        self, "_companion_request_headers", {}
+                    ),
+                )
                 if added:
                     self._set_status(f"Queued via browser extension: {url[:80]}", "success")
                 else:
                     self._set_status("That browser handoff is already in the queue.", "warning")
             except Exception as e:
                 self._log(f"[COMPANION] Queue failed: {e}")
+            self._companion_request_headers = {}
         else:
             self._on_fetch()
 

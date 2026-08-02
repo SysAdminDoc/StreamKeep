@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 
 from . import db
 from .config import write_log_line
+from .har import normalize_replay_headers
 from .models import default_media_tracks
 from .retry import sanitize_failure_reason
 from .upgrade import (
@@ -63,6 +65,8 @@ class HeadlessJobService(QObject):
         self._downloads: dict[str, DownloadWorker] = {}
         self._finalizers: dict[str, FinalizeWorker] = {}
         self._contexts: dict[str, dict[str, Any]] = {}
+        self._request_headers: dict[str, dict[str, str]] = {}
+        self._request_headers_lock = threading.Lock()
         self._download_errors: set[str] = set()
         self._last_progress: dict[str, int] = {}
         self._started = False
@@ -137,6 +141,8 @@ class HeadlessJobService(QObject):
         self._downloads.clear()
         self._finalizers.clear()
         self._contexts.clear()
+        with self._request_headers_lock:
+            self._request_headers.clear()
         self._download_errors.clear()
         self._last_progress.clear()
 
@@ -190,6 +196,9 @@ class HeadlessJobService(QObject):
     def enqueue(self, data: dict[str, Any] | str) -> dict[str, Any]:
         """Persist one acknowledged job, then wake the Qt dispatcher."""
         item = {"url": data} if isinstance(data, str) else dict(data)
+        request_headers = normalize_replay_headers(
+            item.pop("request_headers", None)
+        )
         url = str(item.get("url", "")).strip()
         if not url.startswith(("http://", "https://")):
             raise ValueError("invalid url")
@@ -207,8 +216,19 @@ class HeadlessJobService(QObject):
             "source": str(item.get("source", "") or "headless-api"),
         })
         job = db.enqueue_queue_job(item)
+        if request_headers:
+            with self._request_headers_lock:
+                self._request_headers[str(job.get("job_id", ""))] = request_headers
         self._wake_requested.emit()
         return job
+
+    def _request_headers_for(self, job_id: str) -> dict[str, str]:
+        with self._request_headers_lock:
+            return dict(self._request_headers.get(str(job_id), {}))
+
+    def _forget_request_headers(self, job_id: str) -> None:
+        with self._request_headers_lock:
+            self._request_headers.pop(str(job_id), None)
 
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         """Persist cancellation and asynchronously stop an active worker."""
@@ -312,6 +332,7 @@ class HeadlessJobService(QObject):
             vod_channel=current.get("vod_channel") or None,
             source_id=current.get("source_id") or None,
             webpage_url=current.get("webpage_url") or None,
+            request_headers=self._request_headers_for(job_id),
         )
         self._bind_fetcher(job_id, worker)
         write_log_line(f"[SERVICE] Fetching job {job_id}: {current.get('url', '')}")
@@ -355,6 +376,7 @@ class HeadlessJobService(QObject):
             vod_channel=getattr(chosen, "channel", ""),
             source_id=getattr(chosen, "source_id", ""),
             webpage_url=getattr(chosen, "webpage_url", ""),
+            request_headers=self._request_headers_for(job_id),
         )
         self._bind_fetcher(job_id, worker)
         worker.start()
@@ -540,6 +562,9 @@ class HeadlessJobService(QObject):
             selected_tracks=tuple(default_media_tracks(quality) if quality else []),
             ytdlp_source=quality.ytdlp_source if quality else "",
             ytdlp_format=quality.ytdlp_format if quality else "",
+            request_headers=tuple(
+                self._request_headers_for(job_id).items()
+            ),
             parallel_connections=self.parallel_connections,
             cookies_browser=str(self.config.get("cookies_browser", "") or ""),
             rate_limit=str(self.config.get("rate_limit", "") or ""),
@@ -647,9 +672,11 @@ class HeadlessJobService(QObject):
             worker.wait(500)
         job = db.load_queue_job(job_id)
         if self._stopping or not job or job.get("status") == "cancelled":
+            self._forget_request_headers(job_id)
             self._dispatch()
             return
         self._fail_job(job_id, "fetch", error)
+        self._forget_request_headers(job_id)
 
     def _on_progress(self, job_id: str, percent: int, text: str) -> None:
         value = max(0, min(100, int(percent or 0)))
@@ -743,6 +770,7 @@ class HeadlessJobService(QObject):
 
     def _on_download_finished(self, job_id: str) -> None:
         self._downloads.pop(job_id, None)
+        self._forget_request_headers(job_id)
         if job_id not in self._finalizers:
             self._contexts.pop(job_id, None)
         self._download_errors.discard(job_id)
@@ -875,6 +903,7 @@ class HeadlessJobService(QObject):
         output_dir: str = "",
         dispatch: bool = True,
     ) -> None:
+        self._forget_request_headers(job_id)
         job = db.load_queue_job(job_id)
         if (
             not job

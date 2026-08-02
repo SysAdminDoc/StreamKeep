@@ -22,10 +22,15 @@ def test_spec_is_frozen():
 
 
 def test_to_dict_excludes_secrets():
-    spec = DownloadJobSpec(hls_key_override="DEADBEEF", hls_key_iv="0x01")
+    spec = DownloadJobSpec(
+        hls_key_override="DEADBEEF",
+        hls_key_iv="0x01",
+        request_headers=(("Cookie", "session=secret"),),
+    )
     d = spec.to_dict()
     assert "hls_key_override" not in d
     assert "hls_key_iv" not in d
+    assert "request_headers" not in d
 
 
 def test_to_dict_serializes_tuples_as_lists():
@@ -97,6 +102,7 @@ def test_apply_to_worker():
         rate_limit="5M",
         sponsorblock=True,
         ytdlp_concurrent_fragments=4,
+        request_headers=(("Referer", "https://player.example/"),),
     )
 
     class _Worker:
@@ -108,6 +114,7 @@ def test_apply_to_worker():
     assert w.rate_limit == "5M"
     assert w.sponsorblock is True
     assert w.ytdlp_concurrent_fragments == 4
+    assert w.request_headers == {"Referer": "https://player.example/"}
 
 
 def test_from_worker_captures_state():

@@ -486,12 +486,17 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
         cmd.extend(self._auth_args(url))
+        cmd.extend(self._request_header_args())
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         if impersonate:
             cmd.extend(ytdlp_impersonate_args())
         cmd.extend(["--", url])
         return cmd
+
+    def _request_header_args(self):
+        from ..har import replay_header_argv
+        return replay_header_argv(getattr(self, "request_headers", {}))
 
     # Phrases that genuinely indicate an authentication / cookie wall. Kept
     # specific on purpose: a bare "age" used to match the "age" inside
@@ -529,6 +534,9 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
+        # Browser fallback still needs the extension's page-bound context;
+        # append it before the URL so yt-dlp treats every value as one argv.
+        cmd[-2:-2] = self._request_header_args()
         try:
             result = run_capture_interruptible(cmd, timeout=self.resolve_timeout)
             if result.interrupted:
@@ -799,6 +807,7 @@ class YtDlpExtractor(Extractor):
                 self._log(log_fn, warning)
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(self._auth_args(url))
+        cmd.extend(self._request_header_args())
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         cmd.extend(["--", url])
@@ -859,6 +868,7 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
         cmd.extend(self._auth_args(url))
+        cmd.extend(self._request_header_args())
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         if impersonate:

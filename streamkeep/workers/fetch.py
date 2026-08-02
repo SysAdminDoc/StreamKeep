@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..extractors import Extractor
 from ..extractors.kick import KickExtractor
 from ..extractors.twitch import TwitchExtractor
+from ..har import normalize_replay_headers
 from ..http import http_interruptible
 from ..retry import classify_failure, sanitize_failure_reason
 from ..scrape import detect_direct_media
@@ -21,6 +22,7 @@ class FetchWorker(QThread):
     def __init__(
         self, url, vod_source=None, vod_platform=None, vod_title=None,
         vod_channel=None, source_id=None, webpage_url=None,
+        request_headers=None,
     ):
         super().__init__()
         self.url = url.strip()
@@ -30,6 +32,7 @@ class FetchWorker(QThread):
         self.vod_channel = str(vod_channel or "")
         self.source_id = str(source_id or "")
         self.webpage_url = str(webpage_url or "")
+        self.request_headers = normalize_replay_headers(request_headers)
         self._last_resolve_error = ""
 
     def _interrupted(self):
@@ -79,7 +82,9 @@ class FetchWorker(QThread):
         )
         from ..extractors.ytdlp import YtDlpExtractor
         try:
-            info = YtDlpExtractor().resolve(
+            fallback = YtDlpExtractor()
+            fallback.request_headers = dict(self.request_headers)
+            info = fallback.resolve(
                 url, log_fn=self._capture_resolve_log
             )
         except Exception as e:  # noqa: BLE001
@@ -116,7 +121,9 @@ class FetchWorker(QThread):
                 if not ext:
                     # Try direct media URL detection before giving up
                     direct = detect_direct_media(
-                        self.url, log_fn=self._capture_resolve_log
+                        self.url,
+                        log_fn=self._capture_resolve_log,
+                        headers=self.request_headers,
                     )
                     if self._interrupted():
                         return
@@ -128,8 +135,11 @@ class FetchWorker(QThread):
 
                 # If yt-dlp fallback matched, try direct media detection first
                 if ext.NAME == "yt-dlp":
+                    ext.request_headers = dict(self.request_headers)
                     direct = detect_direct_media(
-                        self.url, log_fn=self._capture_resolve_log
+                        self.url,
+                        log_fn=self._capture_resolve_log,
+                        headers=self.request_headers,
                     )
                     if self._interrupted():
                         return
@@ -138,6 +148,10 @@ class FetchWorker(QThread):
                         return
 
                 self.log.emit(f"Detected platform: {ext.NAME}")
+                try:
+                    ext.request_headers = dict(self.request_headers)
+                except Exception:
+                    pass
 
                 # A direct permalink (e.g. a VOD-by-UUID URL) resolves to a
                 # single item — skip live-check / channel-wide VOD listing,
@@ -257,7 +271,9 @@ class FetchWorker(QThread):
             )
         # Try as m3u8 URL — use Kick extractor's generic m3u8 resolver
         info = KickExtractor()._resolve_m3u8(
-            source, log_fn=self._capture_resolve_log
+            source,
+            log_fn=self._capture_resolve_log,
+            headers=self.request_headers,
         )
         return self._apply_vod_metadata(
             info,
