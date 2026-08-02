@@ -30,6 +30,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   values are rejected as empty request objects, producing clean validation
   responses on pairing and queue endpoints instead of dropped connections.
 
+- Preserved per-monitor authentication profile references (V61) through the
+  ChannelMonitor database save/load round-trip, so a future per-channel auth
+  selector cannot silently lose its opaque profile ID.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

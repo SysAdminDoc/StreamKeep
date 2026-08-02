@@ -6,10 +6,11 @@ substituted so the dispatch guards can be asserted deterministically.
 """
 
 import datetime
+import tempfile
 import unittest
 from unittest import mock
 
-from streamkeep import monitor as monitor_mod
+from streamkeep import db, monitor as monitor_mod
 from streamkeep.models import MonitorEntry
 from streamkeep.monitor import ChannelMonitor, entry_in_schedule_window
 
@@ -147,6 +148,21 @@ class ChannelMonitorDedupTests(unittest.TestCase):
                 mock.patch.object(self.monitor._pool, "start") as start:
             self.monitor._poll_tick()
             start.assert_not_called()
+
+    def test_db_roundtrip_preserves_auth_profile_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                self.assertTrue(self.monitor.add_channel("https://x/chan"))
+                self.monitor.entries[0].auth_profile_id = "ap_members"
+                self.monitor.save_to_db()
+
+                restored = ChannelMonitor()
+                restored.load_from_db()
+
+            self.assertEqual(len(restored.entries), 1)
+            self.assertEqual(restored.entries[0].auth_profile_id, "ap_members")
 
 
 if __name__ == "__main__":

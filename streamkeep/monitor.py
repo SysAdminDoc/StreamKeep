@@ -306,6 +306,7 @@ class ChannelMonitor(QObject):
             "filter_keywords": e.filter_keywords or "",
             "override_pp_preset": e.override_pp_preset or "",
             "ytdlp_template_name": e.ytdlp_template_name or "",
+            "auth_profile_id": e.auth_profile_id or "",
             "auto_upgrade": bool(e.auto_upgrade),
             "min_upgrade_quality": e.min_upgrade_quality or "",
         }
@@ -380,6 +381,7 @@ class ChannelMonitor(QObject):
                     e.ytdlp_template_name = str(
                         ch.get("ytdlp_template_name", "") or ""
                     )
+                    e.auth_profile_id = str(ch.get("auth_profile_id", "") or "")
                     e.auto_upgrade = bool(ch.get("auto_upgrade", False))
                     e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
                     break

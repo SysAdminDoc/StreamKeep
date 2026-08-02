@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V61 — Monitor `auth_profile_id` column is dropped by the ChannelMonitor save/load round-trip
-  Category: correctness
-  Where: `streamkeep/monitor.py` — `_entry_to_dict` (~292-311) and `_load_channel_dict` (~352-385); field defined at `streamkeep/models.py:246`; column written by `db.save_all_monitor_channels` (db.py ~1096) and `migrate_from_config` (db.py ~3233).
-  Problem: `auth_profile_id` (schema v11, the V50 per-monitor site-bound auth profile) is the one monitor field that `_entry_to_dict` omits and `_load_channel_dict` never rehydrates. `ChannelMonitor.save_to_db()` does a full `DELETE`+re-`INSERT` from in-memory entries, so it writes `auth_profile_id=''`, and `load_from_db()` never restores it. This is latent today (no live UI path populates a per-monitor auth profile), but the moment a per-monitor auth-profile control is wired up, the next monitor save silently wipes it.
-  Evidence: `grep -n auth_profile_id streamkeep/monitor.py` returns nothing (the field never appears in monitor.py), while it appears in db.py's save/migrate paths and in models.py:246. No `ui/**` code sets `entry.auth_profile_id`.
-  Fix: Add `"auth_profile_id": e.auth_profile_id or ""` to `_entry_to_dict` and load it in `_load_channel_dict`, mirroring the adjacent `auto_upgrade`/`min_upgrade_quality` handling.
-  Acceptance: A round-trip test sets `entry.auth_profile_id = "ap_…"`, calls `save_to_db()` then `load_from_db()`, and asserts the value survives.
-  Confidence: Verified (the drop is certain; impact is currently latent because no populating path exists yet).
-  Effort: S
-
 - [ ] P3 — V62 — First-run onboarding omits High Contrast theme and shows internal "security-ready" microcopy
   Category: a11y
   Where: `streamkeep/ui/onboarding.py:180-183` (theme radios) and `streamkeep/ui/onboarding.py:224` (`title = "FFmpeg is security-ready"`).
