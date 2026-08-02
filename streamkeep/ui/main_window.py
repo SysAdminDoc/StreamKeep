@@ -538,6 +538,7 @@ class StreamKeep(
         """Periodic check: start any queue items whose scheduled time has
         arrived, and update rate_limit based on bandwidth scheduler rules."""
         self._apply_bandwidth_schedule()
+        self._promote_due_failed_retries()
         # Check for ready scheduled items
         worker = getattr(self, "download_worker", None)
         if worker is not None and worker.isRunning():

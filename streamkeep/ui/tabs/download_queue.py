@@ -993,6 +993,8 @@ class DownloadQueueMixin:
 
     def _on_queue_fetch_error(self, item, err):
         """Handle fetch error for a concurrent queue item."""
+        from ...retry import sanitize_failure_reason
+        safe_error = sanitize_failure_reason(err)
         item_id = id(item)
         fw = self._queue_fetch_workers.pop(item_id, None)
         # Join the thread to prevent resource leaks (mirrors _on_queue_fetch_done)
@@ -1008,8 +1010,11 @@ class DownloadQueueMixin:
         )
         if job_id:
             item["failure_id"] = job_id
-        self._set_queue_item_status(item, "failed", str(err)[:120])
-        self._log(f"[QUEUE] Fetch error for {item.get('title', '')[:60]}: {err}")
+        self._set_queue_item_status(item, "failed", safe_error[:120])
+        self._log(
+            f"[QUEUE] Fetch error for "
+            f"{item.get('title', '')[:60]}: {safe_error}"
+        )
         self._advance_queue()
 
     def _on_queue_item_done(self, item, info, out_dir):
@@ -1072,6 +1077,8 @@ class DownloadQueueMixin:
 
     def _on_queue_item_error(self, item, err):
         """Handle download error for a concurrent queue item."""
+        from ...retry import sanitize_failure_reason
+        safe_error = sanitize_failure_reason(err)
         item_id = id(item)
         ctx = self._queue_contexts.pop(item_id, {})
         worker = self._queue_workers.pop(item_id, None)
@@ -1089,8 +1096,10 @@ class DownloadQueueMixin:
         )
         if job_id:
             item["failure_id"] = job_id
-        self._set_queue_item_status(item, "failed", str(err)[:120])
-        self._log(f"[QUEUE] Error: {item.get('title', '')[:60]} — {err}")
+        self._set_queue_item_status(item, "failed", safe_error[:120])
+        self._log(
+            f"[QUEUE] Error: {item.get('title', '')[:60]} — {safe_error}"
+        )
         self._advance_queue()
 
     @staticmethod
@@ -1482,12 +1491,33 @@ class DownloadQueueMixin:
         header.setEnabled(False)
         menu.addSeparator()
         retry_failure = None
+        cancel_retry = None
         discard_failure = None
         failure_id = int(item.get("failure_id", 0) or 0)
         if item.get("status") == "failed" and failure_id:
             failure_header = menu.addAction(f"Failure #{failure_id}")
             failure_header.setEnabled(False)
             retry_failure = menu.addAction("Retry failed job")
+            failure = _db.load_failed_job(failure_id)
+            if failure:
+                category = str(failure.get("category", "unknown") or "unknown")
+                reason = str(
+                    failure.get("last_reason") or failure.get("error") or ""
+                )
+                category_line = menu.addAction(
+                    f"Category: {category.replace('_', ' ').title()}"
+                )
+                category_line.setEnabled(False)
+                if failure.get("next_attempt_at"):
+                    due_line = menu.addAction(
+                        f"Next attempt: {failure.get('next_attempt_at')}"
+                    )
+                    due_line.setEnabled(False)
+                if reason:
+                    reason_line = menu.addAction(f"Reason: {reason[:100]}")
+                    reason_line.setEnabled(False)
+            if failure and failure.get("auto_retry"):
+                cancel_retry = menu.addAction("Cancel automatic retry")
             discard_failure = menu.addAction("Discard failure")
             menu.addSeparator()
         one_shot = menu.addAction("One-shot (no recurrence)")
@@ -1499,6 +1529,9 @@ class DownloadQueueMixin:
             return
         if retry_failure is not None and chosen == retry_failure:
             self._retry_failed_job(failure_id)
+            return
+        if cancel_retry is not None and chosen == cancel_retry:
+            self._cancel_failed_job_retry(failure_id)
             return
         if discard_failure is not None and chosen == discard_failure:
             self._discard_failed_job(failure_id)
@@ -1806,6 +1839,9 @@ class DownloadQueueMixin:
     def _set_queue_item_status(self, item, status, note="", **changes):
         if item is None:
             return False
+        if status == "failed":
+            from ...retry import sanitize_failure_reason
+            note = sanitize_failure_reason(note)
         job_id = str(item.get("job_id", "") or "")
         if not job_id:
             self._persist_config()
@@ -1920,40 +1956,85 @@ class DownloadQueueMixin:
             self._log(f"[RECOVERY] Could not save failed-job record: {e}")
             return 0
 
-    def _retry_failed_job(self, job_id):
-        job = _db.load_failed_job(job_id)
-        if job and job.get("status") != "retrying":
-            job = _db.mark_failed_job_retrying(job_id)
-        if not job:
-            self._set_status("Failed-job record was not found.", "warning")
-            return False
-        queue_data = dict(job.get("queue_data") or {})
-        queue_data["status"] = "queued"
-        queue_data["note"] = f"retry #{job.get('retry_count', 0)}"
-        queue_data["failure_id"] = int(job.get("id", 0) or 0)
-        if not queue_data.get("url"):
-            queue_data["url"] = job.get("url", "")
-        if not queue_data.get("title"):
-            queue_data["title"] = job.get("title", "") or job.get("url", "")
-        if not queue_data.get("platform"):
-            queue_data["platform"] = job.get("platform", "") or "?"
-        normalized = self._normalize_queue_item(queue_data)
+    def _ingest_promoted_retry(self, queue_job):
+        """Merge one transactionally promoted retry into the GUI queue."""
+        normalized = self._normalize_queue_item(dict(queue_job or {}))
         if normalized is None:
-            self._set_status("Failed job has no retryable URL.", "warning")
             return False
-        normalized["failure_id"] = int(job.get("id", 0) or 0)
         existing = None
         for q in self._download_queue:
-            if int(q.get("failure_id", 0) or 0) == normalized["failure_id"]:
+            if (
+                str(q.get("job_id", "")) == str(normalized.get("job_id", ""))
+                or (
+                    int(q.get("failure_id", 0) or 0)
+                    and int(q.get("failure_id", 0) or 0)
+                    == int(normalized.get("failure_id", 0) or 0)
+                )
+            ):
                 existing = q
                 break
         if existing is None:
             self._download_queue.append(normalized)
         else:
             existing.update(normalized)
+        return True
+
+    def _promote_due_failed_retries(self):
+        """Promote durable due rows only while this GUI owns execution."""
+        if not getattr(self, "_queue_execution_enabled", False):
+            return 0
+        promoted = _db.promote_due_failed_jobs(self._executor_owner_id)
+        count = 0
+        for queue_job in promoted:
+            if self._ingest_promoted_retry(queue_job):
+                count += 1
+                self._log(
+                    "[RETRY] Automatically queued "
+                    f"{queue_job.get('title', '')[:60]}"
+                )
+        if count:
+            self._queue_status_changed()
+            self._set_status(
+                f"Queued {count} automatic retr{'y' if count == 1 else 'ies'}.",
+                "success",
+            )
+        return count
+
+    def _retry_failed_job(self, job_id):
+        queue_job = _db.promote_failed_job_retry(job_id)
+        if not queue_job:
+            self._set_status(
+                "Failed-job record was not found or cannot be retried.",
+                "warning",
+            )
+            return False
+        if not self._ingest_promoted_retry(queue_job):
+            self._set_status("Failed job has no retryable URL.", "warning")
+            return False
         self._queue_status_changed()
-        self._set_status(f"Retry queued: {normalized.get('title', '')[:60]}", "success")
+        self._set_status(
+            f"Retry queued: {queue_job.get('title', '')[:60]}",
+            "success",
+        )
         self._advance_queue()
+        return True
+
+    def _cancel_failed_job_retry(self, job_id):
+        if not _db.cancel_failed_job_retry(job_id):
+            self._set_status("Scheduled retry was not found.", "warning")
+            return False
+        for item in self._download_queue:
+            if (
+                int(item.get("failure_id", 0) or 0) == int(job_id)
+                and item.get("status") == "queued"
+            ):
+                item["status"] = "cancelled"
+                item["note"] = "automatic retry cancelled"
+        self._queue_status_changed()
+        self._set_status(
+            "Automatic retry cancelled; the failure remains available.",
+            "success",
+        )
         return True
 
     def _discard_failed_job(self, job_id):

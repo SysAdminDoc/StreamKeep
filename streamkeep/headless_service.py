@@ -13,6 +13,7 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from . import db
 from .config import write_log_line
 from .models import default_media_tracks
+from .retry import sanitize_failure_reason
 from .upgrade import (
     UpgradeSafetyError,
     identity_matches,
@@ -174,31 +175,14 @@ class HeadlessJobService(QObject):
 
     def retry_failure(self, failure_id: int) -> dict[str, Any] | None:
         """Return a persisted failed job to the executable queue."""
-        failure = db.mark_failed_job_retrying(int(failure_id))
-        if not failure:
-            return None
-        data = dict(failure.get("queue_data") or {})
-        data.update({
-            "url": str(data.get("url") or failure.get("url") or ""),
-            "title": str(data.get("title") or failure.get("title") or ""),
-            "platform": str(data.get("platform") or failure.get("platform") or ""),
-            "output_dir": str(
-                data.get("output_dir") or failure.get("output_dir") or self.output_dir
-            ),
-            "failure_id": int(failure_id),
-            "status": "queued",
-            "error": "",
-        })
-        job_id = str(data.get("job_id", ""))
-        job = db.load_queue_job(job_id) if job_id else None
+        job = db.promote_failed_job_retry(int(failure_id))
         if job:
-            updates = dict(data)
-            updates.pop("job_id", None)
-            job = db.update_queue_job(job_id, **updates)
-        else:
-            job = db.enqueue_queue_job(data)
-        self._wake_requested.emit()
+            self._wake_requested.emit()
         return job
+
+    def cancel_failure_retry(self, failure_id: int) -> bool:
+        """Disable a scheduled retry without discarding its failure record."""
+        return db.cancel_failed_job_retry(int(failure_id))
 
     def discard_failure(self, failure_id: int) -> bool:
         failure = db.load_failed_job(int(failure_id))
@@ -217,7 +201,10 @@ class HeadlessJobService(QObject):
         return {
             "downloads": active,
             "queue": queue,
-            "failures": db.load_failed_jobs(),
+            "failures": [
+                db.failed_job_public_view(item) for item in db.load_failed_jobs()
+            ],
+            "retry_circuits": db.load_retry_circuits(),
             "history": db.query_history_page(limit=100),
             "history_total": db.history_count(),
             "monitor": db.load_monitor_channels(),
@@ -232,6 +219,12 @@ class HeadlessJobService(QObject):
     def _dispatch(self) -> None:
         if not self._started or self._stopping:
             return
+        promoted = db.promote_due_failed_jobs(self.owner_id)
+        for job in promoted:
+            write_log_line(
+                "[SERVICE] Scheduled automatic retry "
+                f"{job.get('job_id', '')} for {job.get('platform', '') or 'source'}"
+            )
         available = self.max_concurrent - len(self._fetchers) - len(self._downloads)
         if available <= 0:
             return
@@ -743,6 +736,7 @@ class HeadlessJobService(QObject):
         if result.get("is_upgrade") and not result.get("upgrade_activated"):
             failure = failure or "Upgrade activation did not complete"
         if failure:
+            safe_failure = sanitize_failure_reason(failure)
             failure_id = db.save_failed_job(
                 url=str(job.get("url", "")),
                 platform=str(
@@ -760,11 +754,13 @@ class HeadlessJobService(QObject):
                 self.owner_id,
                 expected_statuses="finalizing",
                 status="failed",
-                progress_text=failure[:240],
-                finalize_error=failure,
+                progress_text=safe_failure[:240],
+                finalize_error=safe_failure,
                 failure_id=int(failure_id or 0),
             )
-            write_log_line(f"[SERVICE] Finalization failed for {job_id}: {failure}")
+            write_log_line(
+                f"[SERVICE] Finalization failed for {job_id}: {safe_failure}"
+            )
             return
         size_label = str(result.get("size_label", "") or "")
         if not size_label:
@@ -845,6 +841,7 @@ class HeadlessJobService(QObject):
             return
         output_dir = str(output_dir or job.get("output_dir", "") or self.output_dir)
         resume_sidecar = os.path.join(output_dir, ".streamkeep_resume.json")
+        safe_error = sanitize_failure_reason(error or "Unknown error")
         failure_id = db.save_failed_job(
             url=str(job.get("url", "")),
             platform=str(getattr(info, "platform", "") or job.get("platform", "")),
@@ -861,11 +858,13 @@ class HeadlessJobService(QObject):
             expected_statuses={
                 "fetching", "downloading", "finalizing", "running", "cancelling",
             },
-            status="failed", error=str(error or "Unknown error"),
+            status="failed", error=safe_error,
             failure_id=failure_id, failed_at=datetime.now(timezone.utc).isoformat(),
         )
         if failed:
-            write_log_line(f"[SERVICE] Job {job_id} failed during {stage}: {error}")
+            write_log_line(
+                f"[SERVICE] Job {job_id} failed during {stage}: {safe_error}"
+            )
         if dispatch:
             self._dispatch()
 

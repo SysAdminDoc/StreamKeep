@@ -34,6 +34,7 @@ from ..postprocess.codecs import AUDIO_EXTS, VIDEO_EXTS
 from ..resume import (
     clear_resume_state, merge_completed, save_resume_state,
 )
+from ..retry import sanitize_failure_reason
 from ..utils import fmt_duration, fmt_size
 
 
@@ -126,6 +127,7 @@ class DownloadWorker(QThread):
         self._proc_lock = __import__("threading").Lock()
         self._guarded_proxy = None
         self._guarded_transport_ready = False
+        self._last_failure_reason = ""
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
         # (main_window) attach this via `attach_resume_state` just before
@@ -849,7 +851,12 @@ class DownloadWorker(QThread):
                     outfile, impersonate=attempted_impersonate
                 )
             except (TypeError, ValueError) as error:
-                self.log.emit(f"[ERROR] Invalid yt-dlp output options: {error}")
+                self._last_failure_reason = (
+                    f"Invalid configuration: yt-dlp output options: {error}"
+                )
+                self.log.emit(
+                    f"[ERROR] {sanitize_failure_reason(self._last_failure_reason)}"
+                )
                 return False
             outcome, output_lines = self._stream_ytdlp_download(
                 cmd, seg_idx, label, outfile, expected_outfile, is_live=is_live
@@ -869,7 +876,13 @@ class DownloadWorker(QThread):
                 )
                 continue
             err_tail = "\n".join(output_lines[-5:])
-            self.log.emit(f"[FAIL] {label}\n{err_tail}")
+            self._last_failure_reason = (
+                err_tail or "yt-dlp exited without diagnostic output"
+            )
+            self.log.emit(
+                f"[FAIL] {label}\n"
+                f"{sanitize_failure_reason(self._last_failure_reason)}"
+            )
             self._maybe_warn_sabr_pot(output_lines)
             return False
 
@@ -1013,11 +1026,15 @@ class DownloadWorker(QThread):
             return "fail", output_lines
 
         except FileNotFoundError:
-            self.log.emit(f"[ERROR] {label}: bundled yt-dlp could not be started")
-            return "fail", []
+            message = "Invalid configuration: bundled yt-dlp could not be started"
+            self.log.emit(f"[ERROR] {label}: {message}")
+            return "fail", [message]
         except Exception as e:
-            self.log.emit(f"[ERROR] {label}: {e}")
-            return "fail", []
+            message = str(e or "yt-dlp failed without diagnostic output")
+            self.log.emit(
+                f"[ERROR] {label}: {sanitize_failure_reason(message)}"
+            )
+            return "fail", [message]
 
     def _reconcile_output(self, outfile):
         """Rename a merged file yt-dlp wrote under a different container.
@@ -1216,6 +1233,7 @@ class DownloadWorker(QThread):
                     seg_idx
                 ):
                     return
+                self._last_failure_reason = ""
                 success = self._download_with_ytdlp(
                     seg_idx, label, outfile, expected_ytdlp_outfile,
                     is_live=is_live_capture,
@@ -1225,7 +1243,10 @@ class DownloadWorker(QThread):
                 if not success:
                     all_succeeded = False
                     logger.error("yt-dlp download failed for segment %d (%s)", seg_idx, label)
-                    self.error.emit(seg_idx, "yt-dlp download failed")
+                    self.error.emit(
+                        seg_idx,
+                        self._last_failure_reason or "yt-dlp download failed",
+                    )
                 continue
 
             # Multi-connection parallel download for direct MP4 URLs

@@ -289,13 +289,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P1 — Next
 
-- [ ] P1 — V49 — Add a persistent error-aware automatic retry scheduler
-  Why: StreamKeep records failures and supports manual retry, but transient outages still require supervision and worker-local retries do not survive restart.
-  Evidence: existing failed-job ledger and operations-view item; TubeSync gradual retries, Tartube issue #735, MeTube issue #767, Pinchflat source health patterns.
-  Touches: failed-job schema/migration, typed error classifier, headless/GUI scheduler, source circuit state, operations/API presentation, deterministic clock/network tests.
-  Acceptance: transient network, timeout, 429 and retryable 5xx failures persist attempt count, category, `next_attempt_at`, `Retry-After`, exponential backoff and jitter; authentication, DRM, missing-media, invalid-config, permission and disk failures stop for intervention; per-source circuit breaking prevents request storms; retries survive restart, can be canceled, and expose last reason/next attempt without leaking URLs or credentials.
-  Complexity: M
-
 - [ ] P1 — V50 — Add named, site-bound authentication profiles
   Why: One global cookie file cannot safely represent multiple accounts or let rules and monitors select the credentials a source requires.
   Evidence: `streamkeep/cookies.py`, `streamkeep/accounts.py`, `streamkeep/rules.py`; YTPTube PR #641 and ytarchive membership/PO-token workflows.

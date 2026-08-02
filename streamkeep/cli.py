@@ -723,6 +723,7 @@ def _run_server(args):
     server.queue_submitter = service.enqueue
     server.job_canceller = service.cancel
     server.failure_retrier = service.retry_failure
+    server.failure_retry_canceller = service.cancel_failure_retry
     server.failure_discarder = service.discard_failure
 
     server.url_received.connect(

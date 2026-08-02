@@ -36,6 +36,7 @@ DOCUMENTED_OPERATIONS = frozenset({
     "POST /api/queue",
     "POST /api/jobs/cancel",
     "POST /api/failures/retry",
+    "POST /api/failures/cancel-retry",
     "POST /api/failures/discard",
 })
 
@@ -411,6 +412,44 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "401": unauthorized,
                         "403": forbidden,
                         "500": {"description": "Discard failed.", "content": error_content},
+                    },
+                }
+            },
+            "/api/failures/cancel-retry": {
+                "post": {
+                    "summary": (
+                        "Cancel automatic retry while retaining the failure "
+                        "for manual intervention."
+                    ),
+                    "tags": ["recovery"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {
+                            "type": "object",
+                            "properties": {"id": {"type": "integer"}},
+                            "required": ["id"],
+                        }}},
+                    },
+                    "responses": {
+                        "200": json_ok(
+                            "Automatic retry cancelled.",
+                            {"type": "object"},
+                        ),
+                        "400": {
+                            "description": "Invalid failure id.",
+                            "content": error_content,
+                        },
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {
+                            "description": "Failure not found.",
+                            "content": error_content,
+                        },
+                        "500": {
+                            "description": "Cancellation failed.",
+                            "content": error_content,
+                        },
                     },
                 }
             },

@@ -6,6 +6,7 @@ from ..extractors import Extractor
 from ..extractors.kick import KickExtractor
 from ..extractors.twitch import TwitchExtractor
 from ..http import http_interruptible
+from ..retry import classify_failure, sanitize_failure_reason
 from ..scrape import detect_direct_media
 
 
@@ -29,9 +30,26 @@ class FetchWorker(QThread):
         self.vod_channel = str(vod_channel or "")
         self.source_id = str(source_id or "")
         self.webpage_url = str(webpage_url or "")
+        self._last_resolve_error = ""
 
     def _interrupted(self):
         return self.isInterruptionRequested()
+
+    def _capture_resolve_log(self, message):
+        """Forward extractor logs while retaining the last useful failure."""
+        text = str(message or "")
+        self.log.emit(sanitize_failure_reason(text))
+        decision = classify_failure(text)
+        lowered = text.casefold()
+        if (
+            decision.category != "unknown"
+            or " error" in lowered
+            or "failed" in lowered
+        ):
+            self._last_resolve_error = text
+
+    def _resolve_failure(self, fallback):
+        return self._last_resolve_error or str(fallback)
 
     def _resolve_or_fallback(self, ext, url):
         """Resolve *url* with the detected extractor, falling back to the
@@ -47,11 +65,11 @@ class FetchWorker(QThread):
         """
         info = None
         try:
-            info = ext.resolve(url, log_fn=self.log.emit)
+            info = ext.resolve(url, log_fn=self._capture_resolve_log)
         except Exception as e:  # noqa: BLE001 — any extractor failure is fallback-worthy
             if self._interrupted():
                 raise
-            self.log.emit(f"[{ext.NAME}] resolve error: {e}")
+            self._capture_resolve_log(f"[{ext.NAME}] resolve error: {e}")
         if info or self._interrupted():
             return info
         if ext.NAME == "yt-dlp":
@@ -61,11 +79,13 @@ class FetchWorker(QThread):
         )
         from ..extractors.ytdlp import YtDlpExtractor
         try:
-            info = YtDlpExtractor().resolve(url, log_fn=self.log.emit)
+            info = YtDlpExtractor().resolve(
+                url, log_fn=self._capture_resolve_log
+            )
         except Exception as e:  # noqa: BLE001
             if self._interrupted():
                 raise
-            self.log.emit(f"[FALLBACK] yt-dlp also failed: {e}")
+            self._capture_resolve_log(f"[FALLBACK] yt-dlp also failed: {e}")
             return None
         if info:
             self.log.emit("[FALLBACK] yt-dlp resolved the URL successfully.")
@@ -83,7 +103,11 @@ class FetchWorker(QThread):
                     if info:
                         self.finished.emit(info)
                     else:
-                        self.error.emit("Failed to resolve VOD source")
+                        self.error.emit(
+                            self._resolve_failure(
+                                "Failed to resolve VOD source"
+                            )
+                        )
                     return
 
                 ext = Extractor.detect(self.url)
@@ -91,7 +115,9 @@ class FetchWorker(QThread):
                     return
                 if not ext:
                     # Try direct media URL detection before giving up
-                    direct = detect_direct_media(self.url, log_fn=self.log.emit)
+                    direct = detect_direct_media(
+                        self.url, log_fn=self._capture_resolve_log
+                    )
                     if self._interrupted():
                         return
                     if direct:
@@ -102,7 +128,9 @@ class FetchWorker(QThread):
 
                 # If yt-dlp fallback matched, try direct media detection first
                 if ext.NAME == "yt-dlp":
-                    direct = detect_direct_media(self.url, log_fn=self.log.emit)
+                    direct = detect_direct_media(
+                        self.url, log_fn=self._capture_resolve_log
+                    )
                     if self._interrupted():
                         return
                     if direct:
@@ -121,7 +149,11 @@ class FetchWorker(QThread):
                     if info:
                         self.finished.emit(info)
                     else:
-                        self.error.emit("Failed to resolve stream URL")
+                        self.error.emit(
+                            self._resolve_failure(
+                                "Failed to resolve stream URL"
+                            )
+                        )
                     return
 
                 if ext.supports_live_check():
@@ -142,7 +174,9 @@ class FetchWorker(QThread):
                         self.log.emit("[LIVE CHECK] Live source detected but resolve failed; falling back to VOD lookup.")
 
                 if ext.supports_vod_listing():
-                    vods, next_cursor = ext.list_vods(self.url, log_fn=self.log.emit)
+                    vods, next_cursor = ext.list_vods(
+                        self.url, log_fn=self._capture_resolve_log
+                    )
                     if self._interrupted():
                         return
                     if len(vods) > 1:
@@ -165,13 +199,17 @@ class FetchWorker(QThread):
                 else:
                     # Maybe there were VODs but none to auto-select
                     if ext.supports_vod_listing():
-                        vods, next_cursor = ext.list_vods(self.url, log_fn=self.log.emit)
+                        vods, next_cursor = ext.list_vods(
+                            self.url, log_fn=self._capture_resolve_log
+                        )
                         if self._interrupted():
                             return
                         if vods:
                             self.vods_found.emit(vods, ext.NAME, next_cursor)
                             return
-                    self.error.emit("Failed to resolve stream URL")
+                    self.error.emit(
+                        self._resolve_failure("Failed to resolve stream URL")
+                    )
 
         except Exception as e:
             if not self._interrupted():
@@ -206,7 +244,9 @@ class FetchWorker(QThread):
         """Resolve a direct source URL (m3u8 or VOD ID)."""
         # Twitch VOD IDs are numeric strings
         if source.isdigit():
-            info = TwitchExtractor()._resolve_vod(source, log_fn=self.log.emit)
+            info = TwitchExtractor()._resolve_vod(
+                source, log_fn=self._capture_resolve_log
+            )
             return self._apply_vod_metadata(
                 info,
                 platform=self.vod_platform or "Twitch",
@@ -216,7 +256,9 @@ class FetchWorker(QThread):
                 webpage_url=self.webpage_url,
             )
         # Try as m3u8 URL — use Kick extractor's generic m3u8 resolver
-        info = KickExtractor()._resolve_m3u8(source, log_fn=self.log.emit)
+        info = KickExtractor()._resolve_m3u8(
+            source, log_fn=self._capture_resolve_log
+        )
         return self._apply_vod_metadata(
             info,
             platform=self.vod_platform,
@@ -229,11 +271,17 @@ class FetchWorker(QThread):
     def _resolve_source(self, vod, ext):
         """Resolve a VODInfo to StreamInfo."""
         if vod.platform == "Twitch" and vod.source.isdigit():
-            info = TwitchExtractor()._resolve_vod(vod.source, log_fn=self.log.emit)
+            info = TwitchExtractor()._resolve_vod(
+                vod.source, log_fn=self._capture_resolve_log
+            )
         elif ".m3u8" in vod.source or "stream.kick.com" in vod.source:
-            info = KickExtractor()._resolve_m3u8(vod.source, log_fn=self.log.emit)
+            info = KickExtractor()._resolve_m3u8(
+                vod.source, log_fn=self._capture_resolve_log
+            )
         else:
-            info = ext.resolve(vod.source, log_fn=self.log.emit)
+            info = ext.resolve(
+                vod.source, log_fn=self._capture_resolve_log
+            )
         return self._apply_vod_metadata(
             info,
             platform=getattr(vod, "platform", ""),

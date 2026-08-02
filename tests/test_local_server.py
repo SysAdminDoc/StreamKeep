@@ -765,6 +765,15 @@ class LocalServerTests(unittest.TestCase):
 
                     retried = db.load_failed_job(job_id)
 
+                    cancel_retry_payload, _ = self._open_json(
+                        "/api/failures/cancel-retry",
+                        server=recovery_server,
+                        token=recovery_server.token,
+                        method="POST",
+                        data={"id": job_id},
+                    )
+                    retry_cancelled = db.load_failed_job(job_id)
+
                     discard_payload, _ = self._open_json(
                         "/api/failures/discard",
                         server=recovery_server,
@@ -778,9 +787,15 @@ class LocalServerTests(unittest.TestCase):
                     recovery_server.stop()
 
             self.assertEqual(status_payload["failures"][0]["id"], job_id)
+            self.assertNotIn("url", status_payload["failures"][0])
+            self.assertNotIn("queue_data", status_payload["failures"][0])
+            self.assertIn("category", status_payload["failures"][0])
             self.assertTrue(retry_payload["ok"])
             self.assertEqual(retried["status"], "retrying")
             self.assertEqual(retried["retry_count"], 1)
+            self.assertTrue(cancel_retry_payload["ok"])
+            self.assertEqual(retry_cancelled["status"], "intervention")
+            self.assertFalse(retry_cancelled["auto_retry"])
             self.assertTrue(discard_payload["ok"])
             self.assertEqual(active_after_discard, [])
 

@@ -76,6 +76,33 @@ def test_ytdlp_cmd_forces_mp4_merge(tmp_path, monkeypatch):
     assert cmd[cmd.index("--remux-video") + 1] == "mp4"
 
 
+def test_ytdlp_failure_emits_diagnostic_for_persistent_retry_policy(
+    tmp_path, monkeypatch,
+):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    monkeypatch.setattr(worker, "_ensure_supported_ffmpeg", lambda: True)
+    monkeypatch.setattr(worker, "_ensure_supported_ytdlp", lambda: True)
+
+    def fail_with_rate_limit(*_args, **_kwargs):
+        worker._last_failure_reason = (
+            "ERROR: HTTP Error 429: Too Many Requests\nRetry-After: 120"
+        )
+        return False
+
+    monkeypatch.setattr(worker, "_download_with_ytdlp", fail_with_rate_limit)
+    errors = []
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+
+    worker.run()
+
+    assert errors == [(
+        0,
+        "ERROR: HTTP Error 429: Too Many Requests\nRetry-After: 120",
+    )]
+    assert worker._last_failure_reason.endswith("Retry-After: 120")
+
+
 def _live_worker(tmp_path):
     """A yt-dlp worker configured like an in-progress live capture."""
     worker = DownloadWorker(

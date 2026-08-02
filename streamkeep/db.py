@@ -28,7 +28,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _write_lock = threading.Lock()
 
@@ -70,6 +70,8 @@ def init_db() -> None:
                 _migrate_execution_v8(db)
             if 0 < v < 9:
                 _migrate_identity_v9(db)
+            if 0 < v < 10:
+                _migrate_retry_v10(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -235,12 +237,35 @@ def _apply_schema(db):
             context_json   TEXT    NOT NULL DEFAULT '{}',
             created_at     TEXT    NOT NULL DEFAULT '',
             updated_at     TEXT    NOT NULL DEFAULT '',
-            last_retry_at  TEXT    NOT NULL DEFAULT ''
+            last_retry_at  TEXT    NOT NULL DEFAULT '',
+            category       TEXT    NOT NULL DEFAULT 'unknown',
+            retryable      INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT   NOT NULL DEFAULT '',
+            retry_after_seconds INTEGER NOT NULL DEFAULT 0,
+            last_reason    TEXT    NOT NULL DEFAULT '',
+            source_key     TEXT    NOT NULL DEFAULT '',
+            source_label   TEXT    NOT NULL DEFAULT '',
+            auto_retry     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_failed_jobs_status
             ON failed_jobs(status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_failed_jobs_url
             ON failed_jobs(url);
+        CREATE INDEX IF NOT EXISTS idx_failed_jobs_due
+            ON failed_jobs(status, auto_retry, next_attempt_at);
+        CREATE INDEX IF NOT EXISTS idx_failed_jobs_source
+            ON failed_jobs(source_key, status);
+
+        CREATE TABLE IF NOT EXISTS retry_circuits (
+            source_key       TEXT PRIMARY KEY,
+            source_label     TEXT    NOT NULL DEFAULT '',
+            failure_count    INTEGER NOT NULL DEFAULT 0,
+            window_started_at REAL   NOT NULL DEFAULT 0,
+            opened_until     REAL    NOT NULL DEFAULT 0,
+            last_category    TEXT    NOT NULL DEFAULT '',
+            last_reason      TEXT    NOT NULL DEFAULT '',
+            updated_at       TEXT    NOT NULL DEFAULT ''
+        );
     """)
 
 
@@ -411,6 +436,96 @@ def _migrate_identity_v9(db):
                 "UPDATE history SET source_id=? WHERE id=?",
                 (identity, int(row[0])),
             )
+
+
+def _migrate_retry_v10(db):
+    """Add persistent error policy, due times, and per-source circuits."""
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(failed_jobs)").fetchall()
+    }
+    if not existing_cols:
+        return
+    new_cols = [
+        ("category", "TEXT NOT NULL DEFAULT 'unknown'"),
+        ("retryable", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_attempt_at", "TEXT NOT NULL DEFAULT ''"),
+        ("retry_after_seconds", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("source_key", "TEXT NOT NULL DEFAULT ''"),
+        ("source_label", "TEXT NOT NULL DEFAULT ''"),
+        ("auto_retry", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+    for col_name, col_def in new_cols:
+        if col_name not in existing_cols:
+            db.execute(
+                f"ALTER TABLE failed_jobs ADD COLUMN {col_name} {col_def}"
+            )
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS retry_circuits (
+            source_key       TEXT PRIMARY KEY,
+            source_label     TEXT    NOT NULL DEFAULT '',
+            failure_count    INTEGER NOT NULL DEFAULT 0,
+            window_started_at REAL   NOT NULL DEFAULT 0,
+            opened_until     REAL    NOT NULL DEFAULT 0,
+            last_category    TEXT    NOT NULL DEFAULT '',
+            last_reason      TEXT    NOT NULL DEFAULT '',
+            updated_at       TEXT    NOT NULL DEFAULT ''
+        )
+    """)
+
+    from .retry import (
+        classify_failure,
+        retry_delay_seconds,
+        retry_source,
+        utc_iso,
+    )
+    current_time = time.time()
+    rows = db.execute(
+        "SELECT id, url, platform, error, retry_count, status, queue_data "
+        "FROM failed_jobs"
+    ).fetchall()
+    for row in rows:
+        try:
+            queue_data = json.loads(row[6]) if row[6] else {}
+        except (json.JSONDecodeError, TypeError):
+            queue_data = {}
+        decision = classify_failure(row[3], now=current_time)
+        source_key, source_label = retry_source(
+            row[1],
+            row[2],
+            queue_data.get("source_id", "") if isinstance(queue_data, dict) else "",
+        )
+        status = str(row[5] or "")
+        auto_retry = int(decision.retryable and status == "retryable")
+        next_attempt_at = ""
+        if auto_retry:
+            delay = retry_delay_seconds(
+                int(row[4] or 0) + 1,
+                source_key,
+                retry_after_seconds=decision.retry_after_seconds,
+            )
+            next_attempt_at = utc_iso(current_time + delay)
+        elif status == "retryable":
+            status = "intervention"
+        db.execute("""
+            UPDATE failed_jobs
+               SET category=?, retryable=?, next_attempt_at=?,
+                   retry_after_seconds=?, last_reason=?, source_key=?,
+                   source_label=?, auto_retry=?, status=?, error=?
+             WHERE id=?
+        """, (
+            decision.category,
+            int(decision.retryable),
+            next_attempt_at,
+            decision.retry_after_seconds,
+            decision.reason,
+            source_key,
+            source_label,
+            auto_retry,
+            status,
+            decision.reason,
+            int(row[0]),
+        ))
 
 
 # ── History CRUD ────────────────────────────────────────────────────
@@ -1824,83 +1939,208 @@ def save_failed_job(
     resume_sidecar: str = "",
     queue_data: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
-    status: str = "retryable",
+    status: str = "",
+    auto_retry: bool | None = None,
+    now: float | None = None,
 ) -> int:
-    """Insert or update a retryable failed-job ledger row.
+    """Insert or update a classified failed-job ledger row.
 
     Active rows are deduplicated by URL, stage, and output directory so a
     flapping network failure does not flood the recovery list.
     """
+    from .retry import (
+        CIRCUIT_FAILURE_THRESHOLD,
+        CIRCUIT_OPEN_SECONDS,
+        CIRCUIT_WINDOW_SECONDS,
+        classify_failure,
+        retry_delay_seconds,
+        retry_source,
+        utc_iso,
+    )
+
     url = str(url or "").strip()
     stage = str(stage or "").strip() or "unknown"
     if not url and not output_dir:
         return 0
-    now = _utc_now_iso()
-    queue_payload = json.dumps(queue_data or {}, ensure_ascii=False, sort_keys=True)
+    current_time = float(time.time() if now is None else now)
+    now_iso = utc_iso(current_time)
+    queue_dict = dict(queue_data or {})
+    queue_payload = json.dumps(queue_dict, ensure_ascii=False, sort_keys=True)
     context_payload = json.dumps(context or {}, ensure_ascii=False, sort_keys=True)
+    decision = classify_failure(error, now=current_time)
+    source_key, source_label = retry_source(
+        url,
+        platform,
+        queue_dict.get("source_id", ""),
+    )
     with _write_lock:
-        db = _connect()
+        conn = _connect()
         try:
-            row = db.execute("""
-                SELECT id, retry_count
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("""
+                SELECT id, retry_count, auto_retry
                   FROM failed_jobs
                  WHERE url=? AND stage=? AND output_dir=?
-                   AND status IN ('retryable', 'retrying')
+                   AND status IN ('retryable', 'retrying', 'intervention')
                  ORDER BY id DESC
                  LIMIT 1
             """, (url, stage, str(output_dir or ""))).fetchone()
+            retry_count = int(row["retry_count"] or 0) if row else 0
+            same_failure_retry = bool(
+                row
+                and int(queue_dict.get("failure_id", 0) or 0)
+                == int(row["id"])
+            )
+            wants_auto_retry = (
+                bool(auto_retry)
+                if auto_retry is not None
+                else bool(row["auto_retry"]) if same_failure_retry else True
+            )
+            effective_auto_retry = bool(decision.retryable and wants_auto_retry)
+            effective_status = (
+                "retryable" if effective_auto_retry else "intervention"
+            )
+            requested_status = str(status or "").strip()
+            if requested_status in {"discarded", "resolved"}:
+                effective_status = requested_status
+                effective_auto_retry = False
+
+            circuit = conn.execute(
+                "SELECT failure_count, window_started_at, opened_until "
+                "FROM retry_circuits WHERE source_key=?",
+                (source_key,),
+            ).fetchone()
+            opened_until = 0.0
+            if decision.retryable:
+                if (
+                    circuit is None
+                    or current_time - float(circuit["window_started_at"] or 0)
+                    > CIRCUIT_WINDOW_SECONDS
+                ):
+                    failure_count = 1
+                    window_started_at = current_time
+                else:
+                    failure_count = int(circuit["failure_count"] or 0) + 1
+                    window_started_at = float(
+                        circuit["window_started_at"] or current_time
+                    )
+                opened_until = (
+                    float(circuit["opened_until"] or 0) if circuit else 0.0
+                )
+                if failure_count >= CIRCUIT_FAILURE_THRESHOLD:
+                    opened_until = max(
+                        opened_until,
+                        current_time + CIRCUIT_OPEN_SECONDS,
+                    )
+                conn.execute("""
+                    INSERT INTO retry_circuits
+                        (source_key, source_label, failure_count,
+                         window_started_at, opened_until, last_category,
+                         last_reason, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(source_key) DO UPDATE SET
+                        source_label=excluded.source_label,
+                        failure_count=excluded.failure_count,
+                        window_started_at=excluded.window_started_at,
+                        opened_until=excluded.opened_until,
+                        last_category=excluded.last_category,
+                        last_reason=excluded.last_reason,
+                        updated_at=excluded.updated_at
+                """, (
+                    source_key,
+                    source_label,
+                    failure_count,
+                    window_started_at,
+                    opened_until,
+                    decision.category,
+                    decision.reason,
+                    now_iso,
+                ))
+
+            next_attempt_at = ""
+            if effective_auto_retry:
+                delay = retry_delay_seconds(
+                    retry_count + 1,
+                    source_key,
+                    retry_after_seconds=decision.retry_after_seconds,
+                )
+                next_attempt_at = utc_iso(
+                    max(current_time + delay, opened_until)
+                )
             if row:
                 job_id = int(row["id"])
-                db.execute("""
+                conn.execute("""
                     UPDATE failed_jobs
                        SET platform=?, title=?, error=?, resume_sidecar=?,
                            status=?, queue_data=?, context_json=?,
-                           updated_at=?
+                           updated_at=?, category=?, retryable=?,
+                           next_attempt_at=?, retry_after_seconds=?,
+                           last_reason=?, source_key=?, source_label=?,
+                           auto_retry=?
                      WHERE id=?
                 """, (
                     str(platform or ""),
                     str(title or ""),
-                    str(error or ""),
+                    decision.reason,
                     str(resume_sidecar or ""),
-                    str(status or "retryable"),
+                    effective_status,
                     queue_payload,
                     context_payload,
-                    now,
+                    now_iso,
+                    decision.category,
+                    int(decision.retryable),
+                    next_attempt_at,
+                    decision.retry_after_seconds,
+                    decision.reason,
+                    source_key,
+                    source_label,
+                    int(effective_auto_retry),
                     job_id,
                 ))
-                db.commit()
+                conn.commit()
                 return job_id
-            cur = db.execute("""
+            cur = conn.execute("""
                 INSERT INTO failed_jobs
                     (url, platform, title, stage, error, output_dir,
                      resume_sidecar, retry_count, status, queue_data,
-                     context_json, created_at, updated_at, last_retry_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     context_json, created_at, updated_at, last_retry_at,
+                     category, retryable, next_attempt_at,
+                     retry_after_seconds, last_reason, source_key,
+                     source_label, auto_retry)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 url,
                 str(platform or ""),
                 str(title or ""),
                 stage,
-                str(error or ""),
+                decision.reason,
                 str(output_dir or ""),
                 str(resume_sidecar or ""),
                 0,
-                str(status or "retryable"),
+                effective_status,
                 queue_payload,
                 context_payload,
-                now,
-                now,
+                now_iso,
+                now_iso,
                 "",
+                decision.category,
+                int(decision.retryable),
+                next_attempt_at,
+                decision.retry_after_seconds,
+                decision.reason,
+                source_key,
+                source_label,
+                int(effective_auto_retry),
             ))
-            db.commit()
+            conn.commit()
             return int(cur.lastrowid or 0)
         finally:
-            db.close()
+            conn.close()
 
 
 def load_failed_jobs(
     *,
-    statuses: tuple[str, ...] = ("retryable", "retrying"),
+    statuses: tuple[str, ...] = ("retryable", "retrying", "intervention"),
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Return failed jobs ordered newest-first."""
@@ -1948,18 +2188,19 @@ def mark_failed_job_retrying(job_id: int) -> dict[str, Any] | None:
     with _write_lock:
         db = _connect()
         try:
-            db.execute("""
+            result = db.execute("""
                 UPDATE failed_jobs
                    SET status='retrying',
                        retry_count=retry_count + 1,
                        last_retry_at=?,
+                       next_attempt_at='',
                        updated_at=?
-                 WHERE id=?
+                 WHERE id=? AND status NOT IN ('resolved','discarded')
             """, (now, now, int(job_id)))
             db.commit()
         finally:
             db.close()
-    return load_failed_job(job_id)
+    return load_failed_job(job_id) if result.rowcount == 1 else None
 
 
 def mark_failed_job_discarded(job_id: int) -> None:
@@ -1970,8 +2211,8 @@ def mark_failed_job_discarded(job_id: int) -> None:
         db = _connect()
         try:
             db.execute("""
-                UPDATE failed_jobs
-                   SET status='discarded', updated_at=?
+                UPDATE failed_jobs SET status='discarded', auto_retry=0,
+                       next_attempt_at='', updated_at=?
                  WHERE id=?
             """, (_utc_now_iso(), int(job_id)))
             db.commit()
@@ -1986,11 +2227,20 @@ def mark_failed_job_resolved(job_id: int) -> None:
     with _write_lock:
         db = _connect()
         try:
+            row = db.execute(
+                "SELECT source_key FROM failed_jobs WHERE id=?",
+                (int(job_id),),
+            ).fetchone()
             db.execute("""
-                UPDATE failed_jobs
-                   SET status='resolved', updated_at=?
+                UPDATE failed_jobs SET status='resolved', auto_retry=0,
+                       next_attempt_at='', updated_at=?
                  WHERE id=?
             """, (_utc_now_iso(), int(job_id)))
+            if row and row["source_key"]:
+                db.execute(
+                    "DELETE FROM retry_circuits WHERE source_key=?",
+                    (str(row["source_key"]),),
+                )
             db.commit()
         finally:
             db.close()
@@ -2004,15 +2254,360 @@ def mark_failed_jobs_resolved_for_url(url: str) -> None:
     with _write_lock:
         db = _connect()
         try:
+            source_rows = db.execute(
+                "SELECT DISTINCT source_key FROM failed_jobs "
+                "WHERE url=? AND source_key<>''",
+                (url,),
+            ).fetchall()
             db.execute("""
                 UPDATE failed_jobs
-                   SET status='resolved', updated_at=?
+                   SET status='resolved', auto_retry=0,
+                       next_attempt_at='', updated_at=?
                  WHERE url=?
-                   AND status IN ('retryable', 'retrying')
+                   AND status IN ('retryable', 'retrying', 'intervention')
             """, (_utc_now_iso(), url))
+            for row in source_rows:
+                db.execute(
+                    "DELETE FROM retry_circuits WHERE source_key=?",
+                    (str(row["source_key"]),),
+                )
             db.commit()
         finally:
             db.close()
+
+
+def load_due_failed_jobs(
+    *,
+    now: float | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return automatically retryable failures whose durable delay elapsed."""
+    from .retry import utc_iso
+
+    due_at = utc_iso(time.time() if now is None else float(now))
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute("""
+            SELECT *
+              FROM failed_jobs
+             WHERE status='retryable' AND retryable=1 AND auto_retry=1
+               AND next_attempt_at<>'' AND next_attempt_at<=?
+             ORDER BY next_attempt_at ASC, id ASC
+             LIMIT ?
+        """, (due_at, max(1, int(limit or 50)))).fetchall()
+        return [_row_to_failed_job_dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def promote_failed_job_retry(
+    job_id: int,
+    *,
+    automatic: bool = False,
+    owner_id: str = "",
+    now: float | None = None,
+) -> dict[str, Any] | None:
+    """Atomically claim a failure and return it to the durable queue."""
+    from .retry import iso_timestamp, utc_iso
+
+    failure_id = int(job_id or 0)
+    if failure_id <= 0:
+        return None
+    current_time = float(time.time() if now is None else now)
+    now_iso = utc_iso(current_time)
+    queued_job_id = ""
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            failure = conn.execute(
+                "SELECT * FROM failed_jobs WHERE id=?",
+                (failure_id,),
+            ).fetchone()
+            if failure is None or str(failure["status"]) in {
+                "resolved", "discarded",
+            }:
+                conn.rollback()
+                return None
+            if automatic:
+                lease = conn.execute(
+                    "SELECT owner_id, expires_at FROM executor_leases "
+                    "WHERE profile_id='default'"
+                ).fetchone()
+                if (
+                    not owner_id
+                    or lease is None
+                    or str(lease["owner_id"]) != str(owner_id)
+                    or float(lease["expires_at"] or 0) <= current_time
+                    or str(failure["status"]) != "retryable"
+                    or not bool(failure["retryable"])
+                    or not bool(failure["auto_retry"])
+                ):
+                    conn.rollback()
+                    return None
+                due_at = iso_timestamp(failure["next_attempt_at"])
+                if not due_at or due_at > current_time:
+                    conn.rollback()
+                    return None
+                circuit = conn.execute(
+                    "SELECT opened_until FROM retry_circuits WHERE source_key=?",
+                    (str(failure["source_key"] or ""),),
+                ).fetchone()
+                opened_until = float(circuit["opened_until"] or 0) if circuit else 0
+                if opened_until > current_time:
+                    conn.execute(
+                        "UPDATE failed_jobs SET next_attempt_at=?, updated_at=? "
+                        "WHERE id=? AND status='retryable'",
+                        (utc_iso(opened_until), now_iso, failure_id),
+                    )
+                    conn.commit()
+                    return None
+
+            try:
+                data = json.loads(failure["queue_data"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data.update({
+                "url": str(data.get("url") or failure["url"] or ""),
+                "title": str(data.get("title") or failure["title"] or ""),
+                "platform": str(data.get("platform") or failure["platform"] or ""),
+                "output_dir": str(
+                    data.get("output_dir") or failure["output_dir"] or ""
+                ),
+                "failure_id": failure_id,
+                "status": "queued",
+                "error": "",
+            })
+            if not data["url"]:
+                conn.execute(
+                    "UPDATE failed_jobs SET status='intervention', auto_retry=0, "
+                    "next_attempt_at='', updated_at=? WHERE id=?",
+                    (now_iso, failure_id),
+                )
+                conn.commit()
+                return None
+
+            existing = None
+            candidate_job_id = str(data.get("job_id", "") or "").strip()
+            if candidate_job_id:
+                existing = conn.execute(
+                    "SELECT job_id, status FROM download_queue WHERE job_id=?",
+                    (candidate_job_id,),
+                ).fetchone()
+            if existing is None:
+                existing = conn.execute(
+                    "SELECT job_id, status FROM download_queue "
+                    "WHERE failure_id=? AND status IN "
+                    "('queued','fetching','downloading','finalizing','running',"
+                    "'cancelling') ORDER BY id DESC LIMIT 1",
+                    (failure_id,),
+                ).fetchone()
+
+            already_retrying = str(failure["status"]) == "retrying"
+            if (
+                already_retrying
+                and existing is not None
+                and str(existing["status"]) in {
+                    "queued", "fetching", "downloading", "finalizing",
+                    "running", "cancelling",
+                }
+            ):
+                queued_job_id = str(existing["job_id"])
+                conn.commit()
+            else:
+                if not already_retrying:
+                    expected_status = "retryable" if automatic else str(failure["status"])
+                    result = conn.execute("""
+                        UPDATE failed_jobs
+                           SET status='retrying',
+                               retry_count=retry_count + 1,
+                               last_retry_at=?, next_attempt_at='', updated_at=?
+                         WHERE id=? AND status=?
+                    """, (now_iso, now_iso, failure_id, expected_status))
+                    if result.rowcount != 1:
+                        conn.rollback()
+                        return None
+                    retry_count = int(failure["retry_count"] or 0) + 1
+                else:
+                    retry_count = int(failure["retry_count"] or 0)
+                data["note"] = (
+                    f"automatic retry #{retry_count}"
+                    if automatic else f"retry #{retry_count}"
+                )
+                data.pop("execution_owner", None)
+                data.pop("revision", None)
+
+                reusable = (
+                    existing is not None
+                    and str(existing["status"]) in {"failed", "cancelled"}
+                )
+                if reusable:
+                    queued_job_id = str(existing["job_id"])
+                    data["job_id"] = queued_job_id
+                    conn.execute("""
+                        UPDATE download_queue
+                           SET url=?, title=?, platform=?, quality=?,
+                               status='queued', recurrence=?, failure_id=?,
+                               updated_at=?, data=?, execution_owner='',
+                               revision=revision+1
+                         WHERE job_id=?
+                    """, (
+                        data["url"],
+                        data["title"],
+                        data["platform"],
+                        str(data.get("quality", "")),
+                        str(data.get("recurrence", "")),
+                        failure_id,
+                        now_iso,
+                        json.dumps(data, ensure_ascii=False),
+                        queued_job_id,
+                    ))
+                else:
+                    queued_job_id = uuid.uuid4().hex
+                    data["job_id"] = queued_job_id
+                    position = int(conn.execute(
+                        "SELECT COALESCE(MAX(position), -1) + 1 "
+                        "FROM download_queue"
+                    ).fetchone()[0])
+                    conn.execute("""
+                        INSERT INTO download_queue
+                            (job_id, position, url, title, platform, quality,
+                             status, recurrence, failure_id, created_at,
+                             updated_at, data, execution_owner, revision)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        queued_job_id,
+                        position,
+                        data["url"],
+                        data["title"],
+                        data["platform"],
+                        str(data.get("quality", "")),
+                        "queued",
+                        str(data.get("recurrence", "")),
+                        failure_id,
+                        now_iso,
+                        now_iso,
+                        json.dumps(data, ensure_ascii=False),
+                        "",
+                        0,
+                    ))
+                conn.commit()
+        finally:
+            conn.close()
+    return load_queue_job(queued_job_id) if queued_job_id else None
+
+
+def promote_due_failed_jobs(
+    owner_id: str,
+    *,
+    now: float | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Promote due failures while the caller owns the execution lease."""
+    due = load_due_failed_jobs(now=now, limit=limit)
+    promoted = []
+    for failure in due:
+        job = promote_failed_job_retry(
+            int(failure["id"]),
+            automatic=True,
+            owner_id=owner_id,
+            now=now,
+        )
+        if job:
+            promoted.append(job)
+    return promoted
+
+
+def cancel_failed_job_retry(job_id: int) -> bool:
+    """Disable automatic retry and cancel an unclaimed promoted queue row."""
+    failure_id = int(job_id or 0)
+    if failure_id <= 0:
+        return False
+    now = _utc_now_iso()
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            result = conn.execute("""
+                UPDATE failed_jobs
+                   SET status='intervention', auto_retry=0,
+                       next_attempt_at='', updated_at=?
+                 WHERE id=? AND status NOT IN ('resolved','discarded')
+            """, (now, failure_id))
+            if result.rowcount != 1:
+                conn.rollback()
+                return False
+            rows = conn.execute(
+                "SELECT job_id, data FROM download_queue "
+                "WHERE failure_id=? AND status='queued'",
+                (failure_id,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    data = json.loads(row["data"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    data = {}
+                if not isinstance(data, dict):
+                    data = {}
+                data.update({
+                    "status": "cancelled",
+                    "note": "automatic retry cancelled",
+                })
+                conn.execute(
+                    "UPDATE download_queue SET status='cancelled', updated_at=?, "
+                    "data=?, revision=revision+1 WHERE job_id=? AND status='queued'",
+                    (now, json.dumps(data, ensure_ascii=False), row["job_id"]),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def load_retry_circuits() -> list[dict[str, Any]]:
+    """Return persisted source circuit health without source URLs."""
+    db = _connect(readonly=True)
+    try:
+        rows = db.execute(
+            "SELECT source_key, source_label, failure_count, opened_until, "
+            "last_category, last_reason, updated_at "
+            "FROM retry_circuits ORDER BY updated_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a failure into the credential-free operations API shape."""
+    from .retry import sanitize_failure_reason
+
+    return {
+        "id": int(row.get("id", 0) or 0),
+        "title": sanitize_failure_reason(row.get("title", ""), limit=300),
+        "platform": sanitize_failure_reason(row.get("platform", ""), limit=120),
+        "source_label": sanitize_failure_reason(
+            row.get("source_label", ""), limit=120
+        ),
+        "stage": str(row.get("stage", "") or ""),
+        "category": str(row.get("category", "unknown") or "unknown"),
+        "status": str(row.get("status", "") or ""),
+        "retryable": bool(row.get("retryable", False)),
+        "auto_retry": bool(row.get("auto_retry", False)),
+        "retry_count": int(row.get("retry_count", 0) or 0),
+        "retry_after_seconds": int(row.get("retry_after_seconds", 0) or 0),
+        "next_attempt_at": str(row.get("next_attempt_at", "") or ""),
+        "last_retry_at": str(row.get("last_retry_at", "") or ""),
+        "updated_at": str(row.get("updated_at", "") or ""),
+        "last_reason": sanitize_failure_reason(
+            row.get("last_reason") or row.get("error", "")
+        ),
+        "resume_available": bool(
+            row.get("resume_available", False) or row.get("resume_sidecar", "")
+        ),
+    }
 
 
 def _row_to_history_dict(row):
@@ -2030,6 +2625,9 @@ def _row_to_history_dict(row):
 def _row_to_failed_job_dict(row):
     d = dict(row)
     d["retry_count"] = int(d.get("retry_count", 0) or 0)
+    d["retry_after_seconds"] = int(d.get("retry_after_seconds", 0) or 0)
+    d["retryable"] = bool(d.get("retryable", 0))
+    d["auto_retry"] = bool(d.get("auto_retry", 0))
     for key in ("queue_data", "context_json"):
         try:
             d[key] = json.loads(d.get(key, "{}") or "{}")
@@ -2179,8 +2777,8 @@ def db_diagnostics() -> dict[str, Any]:
 
         counts = {}
         for table in ("history", "monitor_channels", "download_queue",
-                      "archive_manifests", "failed_jobs", "bandwidth_daily",
-                      "channel_polls"):
+                      "archive_manifests", "failed_jobs", "retry_circuits",
+                      "bandwidth_daily", "channel_polls"):
             try:
                 counts[table] = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             except sqlite3.Error:

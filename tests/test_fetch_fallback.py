@@ -61,6 +61,25 @@ def test_ytdlp_extractor_not_retried_against_itself(monkeypatch):
     assert ext.calls == 1
 
 
+def test_resolve_failure_retains_http_diagnostic_for_scheduler():
+    class _RateLimitedExt(_FakeExt):
+        def resolve(self, url, log_fn=None):
+            self.calls += 1
+            log_fn(
+                "yt-dlp error: HTTP Error 429: Too Many Requests; "
+                "Retry-After: 120"
+            )
+            return None
+
+    fw = FetchWorker("https://example.com/x")
+    ext = _RateLimitedExt("yt-dlp")
+
+    assert fw._resolve_or_fallback(ext, fw.url) is None
+    message = fw._resolve_failure("Failed to resolve stream URL")
+    assert "HTTP Error 429" in message
+    assert "Retry-After: 120" in message
+
+
 # ── auth-error detection ────────────────────────────────────────────────
 
 def test_download_webpage_error_is_not_auth():

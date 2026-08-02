@@ -18,6 +18,7 @@ REST API endpoints (F37):
   GET  /api/library   — search/list recorded VODs               [status]
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
+  POST /api/failures/cancel-retry — stop an automatic retry     [recovery]
   POST /api/failures/discard  — discard a persisted failed job  [recovery]
   GET  /api/spec       — OpenAPI 3.1 specification (unauthenticated)
   GET  /               — serves the single-page web remote UI
@@ -44,6 +45,7 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
     "POST /api/queue",
     "POST /api/failures/retry",
+    "POST /api/failures/cancel-retry",
 })
 
 SCOPE_STATUS = "status"
@@ -373,6 +375,7 @@ class LocalCompanionServer:
         self.queue_submitter = None  # callable(dict) -> durable job dict
         self.job_canceller = None    # callable(job_id) -> durable job dict
         self.failure_retrier = None  # callable(failure_id) -> durable job dict
+        self.failure_retry_canceller = None  # callable(failure_id) -> bool
         self.failure_discarder = None  # callable(failure_id) -> bool
         self._bind_lan = bool(bind_lan)
         self.external_origin = (
@@ -427,6 +430,7 @@ class LocalCompanionServer:
             queue_submitter=self.queue_submitter,
             job_canceller=self.job_canceller,
             failure_retrier=self.failure_retrier,
+            failure_retry_canceller=self.failure_retry_canceller,
             failure_discarder=self.failure_discarder,
             allowed_hosts=self._allowed_hosts,
             pairing_store=self._pairing_store,
@@ -500,6 +504,7 @@ def _build_handler(
     queue_submitter=None,
     job_canceller=None,
     failure_retrier=None,
+    failure_retry_canceller=None,
     failure_discarder=None,
     allowed_hosts=None,
     pairing_store=None,
@@ -873,6 +878,9 @@ def _build_handler(
             elif path == "/api/failures/retry":
                 if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_failure_retry()
+            elif path == "/api/failures/cancel-retry":
+                if self._require_auth(SCOPE_RECOVERY, mutating=True):
+                    self._handle_api_failure_cancel_retry()
             elif path == "/api/failures/discard":
                 if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_failure_discard()
@@ -1027,11 +1035,18 @@ def _build_handler(
 
         def _handle_api_status(self):
             state = self._get_state()
+            from . import db as _db
+            failures = [
+                _db.failed_job_public_view(item)
+                for item in state.get("failures", [])
+                if isinstance(item, dict)
+            ]
             self._json_response(200, {
                 "ok": True,
                 "downloads": state.get("downloads", []),
                 "queue": state.get("queue", []),
-                "failures": state.get("failures", []),
+                "failures": failures,
+                "retry_circuits": state.get("retry_circuits", []),
                 "live_channels": state.get("live_channels", []),
                 "active_workers": state.get("active_workers", []),
                 "resumable": state.get("resumable", []),
@@ -1147,6 +1162,30 @@ def _build_handler(
             else:
                 signals.failed_job_retry_requested.emit(job_id)
                 self._json_response(200, {"ok": True, "failure": failure})
+
+        def _handle_api_failure_cancel_retry(self):
+            job_id = self._read_failure_id()
+            if not job_id:
+                return
+            try:
+                if failure_retry_canceller:
+                    found = failure_retry_canceller(job_id)
+                else:
+                    from . import db as _db
+                    found = _db.cancel_failed_job_retry(job_id)
+            except Exception as e:
+                self._json_response(500, {"ok": False, "err": str(e)})
+                return
+            if not found:
+                self._json_response(
+                    404, {"ok": False, "err": "failure not found"}
+                )
+                return
+            self._json_response(200, {
+                "ok": True,
+                "failure_id": job_id,
+                "status": "intervention",
+            })
 
         def _handle_api_failure_discard(self):
             job_id = self._read_failure_id()
@@ -1338,6 +1377,10 @@ function retryFailure(id){
   api('/api/failures/retry',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id})}).then(()=>refresh());
 }
+function cancelFailureRetry(id){
+  api('/api/failures/cancel-retry',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
 function discardFailure(id){
   api('/api/failures/discard',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id})}).then(()=>refresh());
@@ -1360,14 +1403,16 @@ function refresh(){
     renderItems(document.getElementById('resume-list'),d.resumable||[],'No resumable downloads.',
       i=>'<div class="item"><div class="title">'+esc(i.title||i.url||'Download')+'</div>'+
         '<div class="meta">'+esc(String(i.remaining||0))+' segments remaining</div></div>');
-    renderItems(document.getElementById('failure-list'),d.failures,'No retryable failures.',
+    renderItems(document.getElementById('failure-list'),d.failures,'No failures requiring action.',
       i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||'failed').toUpperCase())+'</span>'+
-        '<span class="title">'+esc(i.title||i.url||'Failed job')+'</span>'+
+        '<span class="title">'+esc(i.title||'Failed job')+'</span>'+
         '<div class="meta">'+esc(i.platform||'')+' &middot; retry '+esc(String(i.retry_count||0))+
-        ' &middot; '+esc(i.error||'')+
-        (i.resume_sidecar?' &middot; <span style="color:#a6e3a1">resume available</span>':'')+
+        ' &middot; '+esc(i.category||'unknown')+' &middot; '+esc(i.last_reason||'')+
+        (i.next_attempt_at?' &middot; next '+esc(i.next_attempt_at):'')+
+        (i.resume_available?' &middot; <span style="color:#a6e3a1">resume available</span>':'')+
         '</div>'+
         '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">Retry</button>'+
+        (i.auto_retry?'<button onclick="cancelFailureRetry('+Number(i.id||0)+')">Cancel auto retry</button>':'')+
         '<button onclick="discardFailure('+Number(i.id||0)+')">Discard</button></div></div>');
   }).catch(()=>{});
   api('/api/library').then(d=>{

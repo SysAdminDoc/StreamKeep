@@ -478,19 +478,7 @@ class SettingsCompanionMixin:
         failures = []
         try:
             for row in _db.load_failed_jobs(limit=25):
-                failures.append({
-                    "id": row.get("id", 0),
-                    "url": row.get("url", ""),
-                    "title": row.get("title", ""),
-                    "platform": row.get("platform", ""),
-                    "stage": row.get("stage", ""),
-                    "error": row.get("error", ""),
-                    "output_dir": row.get("output_dir", ""),
-                    "resume_sidecar": row.get("resume_sidecar", ""),
-                    "retry_count": row.get("retry_count", 0),
-                    "status": row.get("status", ""),
-                    "updated_at": row.get("updated_at", ""),
-                })
+                failures.append(_db.failed_job_public_view(row))
         except Exception:
             pass
         history = []
@@ -550,6 +538,7 @@ class SettingsCompanionMixin:
             "downloads": downloads,
             "queue": queue_items,
             "failures": failures,
+            "retry_circuits": _db.load_retry_circuits(),
             "history": history,
             "monitor": monitor,
             "live_channels": live_channels,
