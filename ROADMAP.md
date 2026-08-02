@@ -200,14 +200,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P1 — Next
 
-- [ ] P1 — V35 — Windows distribution: PyInstaller onedir + installer (retire 520 MB onefile)
-  Why: the onefile exe re-extracts its full ~520 MB payload to a temp dir on every launch (slow cold start), maximizes AV false-positive surface (unsigned), and races the `_MEIxxxx` temp dir on double-launch. Onedir removes all three.
-  Evidence: `StreamKeep.spec` (single `EXE`, no `COLLECT`); https://www.pythonguis.com/faq/problems-with-antivirus-software-and-pyinstaller/; https://github.com/pyinstaller/pyinstaller/issues/6754; RESEARCH.md 2026-07-27 open question on installer format.
-  Touches: `StreamKeep.spec` (add `COLLECT`), `packaging/build.py`, an Inno/NSIS script (unsigned), `updater.py` self-replace flow (must swap a directory/installer, not a single exe), release artifact + smoke test.
-  Acceptance: `packaging/build.py` produces a onedir tree plus an unsigned installer; cold start is measurably faster than the onefile; the self-update path swaps the installed onedir/installer without leaving orphans; artifact smoke passes headless; double-launch no longer races temp extraction.
-  Complexity: M
-  > 2026-07-29: No signing is permitted. Remove/disable the Authenticode/PFX-only updater path for unsigned builds; use explicit manual/package-manager updating with published hashes, replace the stale WinGet 4.38.0 placeholder hash, and keep Windows scope separate from V53. (RESEARCH.md 2026-07-29)
-
 #### P2 — Later
 
 - [ ] P2 — V34 — Optional yt-dlp-ytse SABR fallback engine for YouTube

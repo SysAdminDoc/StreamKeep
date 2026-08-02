@@ -186,14 +186,19 @@ def stage_artifact_smoke() -> tuple[bool, str]:
 
 
 def built_artifact() -> Path | None:
-    """Return the freshly built executable, or ``None`` when there is none."""
-    candidates = [
-        path for path in (ROOT / "dist").glob("StreamKeep*")
-        if path.is_file() and path.suffix.lower() in (".exe", "")
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.stat().st_mtime)
+    """Return the freshly built application executable, or ``None``.
+
+    Explicitly named rather than globbed: ``dist/`` also holds the installer
+    (``StreamKeep-<version>-setup.exe``), and smoking the installer instead of
+    the application would be both meaningless and a live installation attempt.
+    """
+    for candidate in (
+        ROOT / "dist" / "StreamKeep" / "StreamKeep.exe",   # onedir (default)
+        ROOT / "dist" / "StreamKeep.exe",                  # legacy onefile
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 STAGES = (

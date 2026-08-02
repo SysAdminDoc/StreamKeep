@@ -2,10 +2,15 @@
 #
 # Submit to microsoft/winget-pkgs by copying this directory into
 # manifests/s/SysAdminDoc/StreamKeep/<version>/ and opening a PR.
-# Update the version, URLs, and SHA-256 hash on each release.
+# packaging/versioning.py stamps PackageVersion and InstallerUrl; the hash is
+# release-specific and must be filled in from the published artifact:
+#     python packaging/winget_hash.py dist/StreamKeep-<version>-setup.exe
+#
+# The installer is UNSIGNED by policy. WinGet does not require a signature
+# for a hash-verified download; the SHA-256 below is what proves integrity.
 
 PackageIdentifier: SysAdminDoc.StreamKeep
-PackageVersion: 4.38.0
+PackageVersion: 4.43.5
 PackageName: StreamKeep
 Publisher: SysAdminDoc
 License: MIT
@@ -23,12 +28,14 @@ Tags:
 MinimumOSVersion: 10.0.17763.0
 Installers:
   - Architecture: x64
-    InstallerType: portable
-    InstallerUrl: https://github.com/SysAdminDoc/StreamKeep/releases/download/v4.38.0/StreamKeep.exe
-    # Replace with the actual SHA-256 of the release artifact:
-    InstallerSha256: PLACEHOLDER_SHA256_HASH
-    Commands:
-      - StreamKeep
+    InstallerType: inno
+    InstallerUrl: https://github.com/SysAdminDoc/StreamKeep/releases/download/v4.43.5/StreamKeep-4.43.5-setup.exe
+    # Filled in per release from the published artifact hash.
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSwitches:
+      Silent: /VERYSILENT /NORESTART
+      SilentWithProgress: /SILENT /NORESTART
+    UpgradeBehavior: install
 PackageLocale: en-US
 ManifestType: singleton
 ManifestVersion: 1.6.0

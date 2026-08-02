@@ -46,6 +46,19 @@ def _targets(version: str, root: Path) -> tuple[tuple[Path, re.Pattern[str], str
             rf"\g<1>{version}\g<2>",
         ),
         (
+            root / "packaging" / "winget" / "SysAdminDoc.StreamKeep.yaml",
+            re.compile(r"(?m)(^PackageVersion: )[0-9]+(?:\.[0-9]+){2}$"),
+            rf"\g<1>{version}",
+        ),
+        (
+            root / "packaging" / "winget" / "SysAdminDoc.StreamKeep.yaml",
+            re.compile(
+                r"(InstallerUrl: https://github\.com/SysAdminDoc/StreamKeep/"
+                r"releases/download/v)[0-9.]+(/StreamKeep-)[0-9.]+(-setup\.exe)"
+            ),
+            rf"\g<1>{version}\g<2>{version}\g<3>",
+        ),
+        (
             root / "ROADMAP.md",
             re.compile(r"(?m)(^- Current package version: v)[0-9]+(?:\.[0-9]+){2}(\.$)"),
             rf"\g<1>{version}\g<2>",
@@ -78,7 +91,10 @@ def stamp_versions(root: Path = ROOT) -> list[Path]:
             raise ValueError(f"Expected one version marker in {path}, found {count}")
         if updated != source:
             path.write_text(updated, encoding="utf-8", newline="\n")
-            changed.append(path)
+            # A file can carry more than one version marker (the WinGet
+            # manifest has both a version and a download URL); report it once.
+            if path not in changed:
+                changed.append(path)
     return changed
 
 

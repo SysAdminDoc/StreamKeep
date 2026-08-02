@@ -208,14 +208,15 @@ Credential values are stored outside `config.json` in the operating-system crede
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- Reproducible PyInstaller single-file builds for Windows with `py -3.12 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep.exe`. `streamkeep/__init__.py::VERSION` is the release version source; the portable and MSIX builders stamp the README, MSIX manifest, Flatpak metainfo, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
+- Reproducible PyInstaller **onedir** builds for Windows with `py -3.12 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep/`. Onedir replaced the legacy one-file executable: the single file re-extracted its whole ~500 MB payload to a temp directory on every launch (measured 11.9s cold start versus 0.24s for onedir), maximised the unsigned-binary AV surface, and let simultaneous launches each create their own `_MEIxxxx` extraction (four concurrent launches: four temp directories for onefile, zero for onedir). Build the legacy shape with `packaging/build.py --onefile` if you need it. `streamkeep/__init__.py::VERSION` is the release version source; the portable and MSIX builders stamp the README, MSIX manifest, Flatpak metainfo, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
+- An unsigned Inno Setup installer from `packaging/build.py --installer` (`packaging/installer/streamkeep.iss`). It installs the whole onedir tree, supports `/VERYSILENT` for package managers, and leaves the user profile untouched on uninstall so a library, history, or queue is never destroyed.
 - MSIX packaging through `packaging/msix/build_msix.py` after a PyInstaller build.
 - Flatpak packaging under `packaging/flatpak/`, using the KDE/PyQt 6.10 base and a separate hash-checked Linux dependency lock plus generated offline source manifest.
 - Browser companion extension packaging from `browser-extension/`.
 
 **Releases are unsigned.** No Authenticode certificate, notarization, or store signing identity is used, and none is required to build. Windows SmartScreen will warn on first run of a downloaded build; choose "More info" then "Run anyway", or verify the published SHA-256 hash yourself before running it. The MSIX and Flatpak builders can attach a signature when an operator supplies their own certificate through the environment, but that is entirely optional and no release performs it.
 
-**Updating is manual or package-managed.** Because releases are unsigned, the in-app self-replacement path stays disabled: it only accepts a signed update manifest, and there is no publisher key to produce one. Update by downloading the new release and verifying its published SHA-256 hash, or through whichever package manager installed StreamKeep. `packaging/update_manifest.py` remains available for operators who maintain their own signing identity and want to serve signed updates from a private release channel; it is not part of any StreamKeep release.
+**Updating is manual or package-managed.** Because releases are unsigned, the in-app self-replacement path stays disabled. A directory install is refused outright — swapping one executable inside a tree cannot produce a consistent installation — and even for a single file the path it only accepts a signed update manifest, and there is no publisher key to produce one. Update by downloading the new release and verifying its published SHA-256 hash, or through whichever package manager installed StreamKeep. `packaging/update_manifest.py` remains available for operators who maintain their own signing identity and want to serve signed updates from a private release channel; it is not part of any StreamKeep release.
 
 Release packages must include:
 
@@ -224,7 +225,8 @@ Release packages must include:
 - `LICENSE`.
 - `icon.ico`, `icon.png`, and `assets/`.
 - `browser-extension/` and `browser-extension/icons/`.
-- `packaging/` manifests when building MSIX or Flatpak artifacts.
+- `packaging/` manifests when building the installer, MSIX, or Flatpak artifacts.
+- The WinGet manifest hash for the published installer, filled in with `python packaging/winget_hash.py dist/StreamKeep-<version>-setup.exe`.
 - Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, mpv/libmpv, and platform signing tools.
 - Published SHA-256 hashes for every artifact, so an unsigned download can be verified before it is run. An update manifest is optional and only meaningful for operators running their own signing identity; the updater refuses unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and size/digest mismatches, which is precisely why the self-update path is inert for unsigned public releases.
 

@@ -28,13 +28,19 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
             '<releases><release version="0.0.0" date="2026-01-01" /></releases>\n'
         ),
         "ROADMAP.md": "- Current package version: v0.0.0.\n",
+        "packaging/winget/SysAdminDoc.StreamKeep.yaml": (
+            "PackageVersion: 0.0.0\n"
+            "Installers:\n"
+            "  - InstallerUrl: https://github.com/SysAdminDoc/StreamKeep/"
+            "releases/download/v0.0.0/StreamKeep-0.0.0-setup.exe\n"
+        ),
     }
     for relative, source in files.items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
 
-    assert len(stamp_versions(tmp_path)) == 4
+    assert len(stamp_versions(tmp_path)) == 5
     assert version_drift(tmp_path) == []
     assert "version-5.2.1-blue" in (tmp_path / "README.md").read_text(encoding="utf-8")
     assert 'Version="5.2.1.0"' in (
@@ -44,6 +50,11 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
         tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
     ).read_text(encoding="utf-8")
     assert "v5.2.1." in (tmp_path / "ROADMAP.md").read_text(encoding="utf-8")
+    winget = (
+        tmp_path / "packaging/winget/SysAdminDoc.StreamKeep.yaml"
+    ).read_text(encoding="utf-8")
+    assert "PackageVersion: 5.2.1" in winget
+    assert "/v5.2.1/StreamKeep-5.2.1-setup.exe" in winget
     assert stamp_versions(tmp_path) == []
 
 

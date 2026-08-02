@@ -386,13 +386,48 @@ class DownloadUpdateWorker(QThread):
         self.done.emit(True, str(staged))
 
 
+def is_directory_install(executable=None):
+    """Return whether this build is a onedir/package-managed installation.
+
+    A onedir install is a *tree* — the executable next to an ``_internal``
+    directory — so swapping one file would leave the runtime it was built
+    against behind and produce a half-updated install. Those builds are
+    updated by reinstalling or through a package manager instead (V35).
+    """
+    target = Path(executable or sys.executable).resolve()
+    try:
+        return (target.parent / "_internal").is_dir()
+    except OSError:
+        return False
+
+
+def self_replace_unavailable_reason(executable=None):
+    """Explain why in-app self-replacement is not offered, or '' when it is."""
+    if not bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")):
+        return "Self-update applies to frozen builds only."
+    if is_directory_install(executable):
+        return (
+            "This is a directory install. Update by downloading the new "
+            "release and verifying its published SHA-256 hash, or through the "
+            "package manager that installed StreamKeep."
+        )
+    return ""
+
+
 def arm_self_replace(new_exe_path, release_payload):
-    """Start a detached last-known-good watchdog and return immediately."""
+    """Start a detached last-known-good watchdog and return immediately.
+
+    Refuses outright for a onedir/package-managed install: replacing the single
+    executable inside a tree cannot produce a consistent installation, and
+    unsigned public releases have no publisher key to authorize one anyway.
+    """
     target = Path(sys.executable).resolve()
     staged = Path(new_exe_path).resolve()
     helper = Path(f"{target}.update-helper.exe")
     frozen = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
     if not frozen or staged != Path(f"{target}.new") or not staged.is_file():
+        return False
+    if is_directory_install(target):
         return False
     transaction = None
     try:

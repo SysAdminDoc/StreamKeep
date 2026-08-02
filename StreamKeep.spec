@@ -95,12 +95,20 @@ if sqlite_override:
     a.binaries.append(('sqlite3.dll', sqlite_override, 'BINARY'))
 pyz = PYZ(a.pure)
 
+# Onedir is the default distribution shape (V35). The onefile build
+# re-extracts its whole ~500 MB payload to a temp directory on every launch,
+# which is slow, maximises the unsigned-binary AV surface, and lets two
+# simultaneous launches race the same _MEIxxxx directory. Set
+# STREAMKEEP_ONEFILE=1 to build the legacy single file instead.
+onedir = os.environ.get('STREAMKEEP_ONEFILE', '').strip() not in ('1', 'true', 'yes')
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [] if onedir else a.binaries,
+    [] if onedir else a.datas,
     [],
+    exclude_binaries=onedir,
     name='StreamKeep',
     debug=False,
     bootloader_ignore_signals=False,
@@ -116,3 +124,14 @@ exe = EXE(
     entitlements_file=None,
     icon=['assets\\icon.ico'],
 )
+
+if onedir:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='StreamKeep',
+    )

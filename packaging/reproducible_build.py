@@ -32,6 +32,24 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def tree_sha256(root):
+    """Return one digest over an entire onedir tree.
+
+    Relative paths are normalized and sorted so the digest depends on content
+    and layout, never on filesystem enumeration order.
+    """
+    root = Path(root)
+    digest = hashlib.sha256()
+    for path in sorted(
+        (p for p in root.rglob("*") if p.is_file()),
+        key=lambda p: p.relative_to(root).as_posix(),
+    ):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(bytes.fromhex(sha256(path)))
+    return digest.hexdigest()
+
+
 def _run(command, *, env=None, capture=False):
     return subprocess.run(
         [str(value) for value in command],
@@ -106,10 +124,11 @@ def _build(python, label, work_root, environment, sqlite_dll):
         "--dist-path", dist_path,
         "--work-path", work_path,
     ], env=environment)
-    artifact = dist_path / "StreamKeep.exe"
+    tree = dist_path / "StreamKeep"
+    artifact = tree / "StreamKeep.exe"
     if not artifact.is_file():
         raise RuntimeError(f"PyInstaller did not produce {artifact}")
-    return artifact
+    return tree
 
 
 def _smoke(artifact, work_root):
@@ -176,6 +195,10 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     parser.add_argument("--verify-reproducible", action="store_true")
     parser.add_argument("--skip-smoke", action="store_true")
+    parser.add_argument(
+        "--skip-installer", action="store_true",
+        help="Do not build the unsigned installer from the onedir tree",
+    )
     args = parser.parse_args(argv)
 
     if sys.version_info[:2] != (3, 12):
@@ -200,7 +223,7 @@ def main(argv=None):
     artifact_a = _build(python, "build-a", work_root, environment, sqlite_dll)
     if args.verify_reproducible:
         artifact_b = _build(python, "build-b", work_root, environment, sqlite_dll)
-        digest_a, digest_b = sha256(artifact_a), sha256(artifact_b)
+        digest_a, digest_b = tree_sha256(artifact_a), tree_sha256(artifact_b)
         if digest_a != digest_b:
             raise RuntimeError(
                 "Reproducibility check failed: "
@@ -209,8 +232,11 @@ def main(argv=None):
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    artifact = output_dir / "StreamKeep.exe"
-    shutil.copy2(artifact_a, artifact)
+    tree = output_dir / "StreamKeep"
+    if tree.exists():
+        shutil.rmtree(tree)
+    shutil.copytree(artifact_a, tree)
+    artifact = tree / "StreamKeep.exe"
     _run([
         python, ROOT / "packaging" / "sbom.py",
         "--lock", RUNTIME_LOCK,
@@ -221,8 +247,22 @@ def main(argv=None):
     if not args.skip_smoke:
         smoke = _smoke(artifact, work_root)
     manifest = _write_release_manifest(output_dir, artifact, epoch, smoke, sqlite_dll)
-    print(f"Artifact: {artifact}")
-    print(f"SHA-256: {sha256(artifact)}")
+    installer = None
+    if not args.skip_installer:
+        from build import build_installer
+        if build_installer(tree, output_dir) == 0:
+            from streamkeep import VERSION
+            candidate = output_dir / f"StreamKeep-{VERSION}-setup.exe"
+            installer = candidate if candidate.is_file() else None
+
+    print(f"Artifact: {tree}")
+    print(f"Tree SHA-256: {tree_sha256(tree)}")
+    print(f"Executable SHA-256: {sha256(artifact)}")
+    if installer is not None:
+        # Releases are unsigned; the published hash is how a download is
+        # verified before it is run.
+        print(f"Installer: {installer}")
+        print(f"Installer SHA-256: {sha256(installer)}")
     print(f"Manifest: {manifest}")
     return 0
 
