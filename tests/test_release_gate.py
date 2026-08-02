@@ -176,11 +176,16 @@ class CapabilityClaimStageTests(unittest.TestCase):
         self.assertTrue(paths)
         self.assertTrue(paths[0].test_nodeid.startswith("tests/"))
 
-    def test_unreachable_capabilities_stay_experimental(self):
+    def test_reachable_capabilities_are_shipped_and_unreachable_stay_experimental(self):
         from streamkeep.capabilities import get_product_capability_claims
 
+        shipped = {
+            claim.id: claim
+            for claim in get_product_capability_claims(status="shipped")
+        }
         experimental = {
             claim.id for claim in get_product_capability_claims(status="experimental")
         }
-        self.assertIn("upload-delivery", experimental)
+        self.assertIn("upload-delivery", shipped)
+        self.assertTrue(shipped["upload-delivery"].paths)
         self.assertIn("plugin-adapters", experimental)
