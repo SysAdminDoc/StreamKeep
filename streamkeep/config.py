@@ -89,6 +89,8 @@ _STRING_CONFIG_KEYS = frozenset({
     "streamlink_hls_start_offset",
     "queue_complete_action",
     "youtube_pot_base_url", "youtube_pot_server_command",
+    "youtube_remote_backend_url", "youtube_remote_backend_mode",
+    "youtube_remote_backend_id",
     "pp_convert_video_format", "pp_convert_video_codec",
     "pp_convert_video_scale", "pp_convert_video_fps",
     "pp_convert_audio_format", "pp_convert_audio_codec",

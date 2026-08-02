@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added an optional manifest-v2 `youtube_backend` plugin contract for remote
+  cipher/PO-token helpers. Settings and `youtube-health` expose redacted mode,
+  endpoint, plugin, capability, and reachability state; yt-dlp resolve,
+  playlist, browser-fallback, and download commands consume only validated
+  YouTube extractor-argument pairs. Missing plugins, failed probes, and
+  malformed responses fail open to the existing local path.
+
 - Added a durable Operations view over queue, monitor, and failure state. The
   desktop, CLI, and authenticated local API share bounded paging, state/source/
   stage filters, aggregate size/duration and retry health, selected retry or

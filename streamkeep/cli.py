@@ -1357,7 +1357,7 @@ def _run_auth(args, parser):
 
 
 def _run_youtube_health(args):
-    """Report the local YouTube capability picture (runtime, PO-token, client).
+    """Report the YouTube capability picture (runtime, providers, client).
 
     Exit code 1 when the runtime is not ready (yt-dlp/JS runtime missing or
     blocked); a missing PO-token provider is advisory and keeps exit code 0.
@@ -1374,7 +1374,7 @@ def _run_youtube_health(args):
             sys.exit(1)
 
     preset = str(config.get("youtube_player_client", "") or "")
-    report = youtube_health_report(player_client=preset)
+    report = youtube_health_report(player_client=preset, config=config)
 
     if getattr(args, "json", False):
         _print_line(json.dumps(report, indent=2))
@@ -1393,6 +1393,13 @@ def _run_youtube_health(args):
         )
         if endpoint.get("base_url"):
             _print_line(f"  PO-token URL   : {endpoint['base_url']}")
+        remote = report.get("remote_backend") or {}
+        remote_label = "disabled"
+        if remote.get("configured"):
+            remote_label = "reachable" if remote.get("reachable") else "unreachable"
+        _print_line(f"  Remote backend : {remote_label}")
+        if remote.get("plugin_id"):
+            _print_line(f"  Backend plugin : {remote['plugin_id']}")
         for warning in report["warnings"]:
             _print_line(f"  ! {warning}")
         pot_setup = report.get("pot_setup") or {}

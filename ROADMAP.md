@@ -110,14 +110,6 @@ Note: The 2026-07-18 pass's security/dependency items are verified CLOSED in v4.
 
 #### P2 — Later
 
-- [ ] P2 — V32 — Pluggable remote-cipher / PO-token backend for JS-challenge churn
-  Why: YouTube's rotating nsig/signature challenges break pure in-process solving during multi-day windows; the market answer is offloading challenge-solving to a helper service. StreamKeep's plugin system can host this without a hard dependency.
-  Evidence: TubeSync `yt-dlp-remote-cipher` plugin (0.17.0); yt-dlp #15751 live regressions; existing `streamkeep/plugins.py`; overlaps V26 (share the provider-config surface).
-  Touches: plugin contract for a cipher/token backend, extractor-args wiring, config for backend URL/mode, health surfacing in `youtube_health_report()`, sample backend + contract test.
-  Acceptance: With a remote-cipher/token backend configured, YouTube resolves that fail in-process succeed via the backend; the backend is optional and declared through the plugin manifest; health report shows backend reachability; a sample backend passes a contract test; absence degrades to current behavior.
-  Complexity: L
-  > 2026-07-27: Complementary to V33 (local bgutil PO-token sidecar + JS-runtime version gate) and V34 (yt-dlp-ytse SABR fallback). V32 is the *remote* offload path; V33/V34 are the *local* paths. Share one provider/health-config surface across all three. (RESEARCH.md 2026-07-27)
-
 #### P3 — Under Consideration
 
 - [ ] P3 — Auto-translate embedded metadata & chapters to the app language

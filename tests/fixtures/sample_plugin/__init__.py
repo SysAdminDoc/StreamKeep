@@ -51,3 +51,30 @@ class SampleUploader:
         if progress_cb is not None:
             progress_cb(1.0)
         return {"uploaded": True, "file_path": str(file_path), "metadata": metadata or {}}
+
+
+class SampleYoutubeBackend:
+    """Deterministic remote-cipher/token backend used by the contract tests."""
+
+    def health(self, request, context=None):
+        if context is not None:
+            context.require("network")
+        return {
+            "reachable": bool(request.get("backend_url")),
+            "provider": "sample",
+            "capabilities": ["cipher", "po-token"],
+            "detail": "Sample backend is reachable.",
+        }
+
+    def solve(self, request, context=None):
+        if context is not None:
+            context.require("network")
+        if "youtube.com" not in str(request.get("url", "")):
+            return {"extractor_args": []}
+        return {
+            "extractor_args": [
+                "--extractor-args",
+                "youtube:po_token=sample-contract-token",
+            ],
+            "provider": "sample",
+        }

@@ -236,6 +236,18 @@ def youtube_pot_args(url=None):
     return active_extractor_args(url)
 
 
+def youtube_remote_backend_args(
+    url=None, *, reason="download", player_client="", log_fn=None,
+):
+    """Return optional plugin-backed cipher/PO-token args for YouTube."""
+    if not _is_youtube_url(url):
+        return []
+    from ..youtube_backend import resolve_extractor_args
+    return resolve_extractor_args(
+        url, reason=reason, player_client=player_client, log_fn=log_fn,
+    )
+
+
 # Known yt-dlp PO-token provider plugin packages. A provider supplies the
 # proof-of-origin tokens some YouTube formats now require; without one,
 # certain qualities and age-gated videos fail even with a JS runtime.
@@ -337,12 +349,12 @@ def youtube_pot_setup_guidance():
     }
 
 
-def youtube_health_report(player_client=""):
+def youtube_health_report(player_client="", config=None):
     """Aggregate the YouTube capability picture into one report.
 
     Combines the yt-dlp/EJS/JS-runtime readiness, the active player_client
-    strategy, and PO-token provider presence, plus a list of plain-language
-    warnings. Purely local — safe to run headless and offline.
+    strategy, local PO-token provider presence, and the optional remote
+    backend reachability, plus a list of plain-language warnings.
     """
     runtime = ytdlp_runtime_status()
     pot = youtube_pot_provider_status()
@@ -358,7 +370,7 @@ def youtube_health_report(player_client=""):
     # identical to a working one from an import check alone.
     try:
         from ..pot_provider import cached_status
-        provider = cached_status()
+        provider = cached_status(config)
     except Exception:
         provider = {}
     if pot["available"] and provider and not provider.get("reachable"):
@@ -366,6 +378,10 @@ def youtube_health_report(player_client=""):
             provider.get("detail")
             or "A PO-token provider plugin is installed but nothing is answering."
         )
+    from ..youtube_backend import backend_status
+    remote_backend = backend_status(config)
+    if remote_backend["configured"] and not remote_backend["reachable"]:
+        warnings.append(remote_backend["detail"])
     healthy = runtime.get("state") == "ready"
     return {
         "healthy": healthy,
@@ -378,6 +394,7 @@ def youtube_health_report(player_client=""):
         "pot_provider": pot,
         "pot_setup": youtube_pot_setup_guidance(),
         "pot_endpoint": provider,
+        "remote_backend": remote_backend,
         "warnings": warnings,
     }
 
@@ -485,6 +502,9 @@ class YtDlpExtractor(Extractor):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
+        cmd.extend(youtube_remote_backend_args(
+            url, reason="resolve", player_client=self.youtube_player_client,
+        ))
         cmd.extend(self._auth_args(url))
         cmd.extend(self._request_header_args())
         if self.proxy:
@@ -533,6 +553,9 @@ class YtDlpExtractor(Extractor):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
+        cmd.extend(youtube_remote_backend_args(
+            url, reason="resolve-browser", player_client=self.youtube_player_client,
+        ))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
         # Browser fallback still needs the extension's page-bound context;
         # append it before the URL so yt-dlp treats every value as one argv.
@@ -806,6 +829,12 @@ class YtDlpExtractor(Extractor):
             if warning:
                 self._log(log_fn, warning)
             cmd.extend(ytdlp_runtime_args(runtime_status))
+        cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
+        cmd.extend(youtube_pot_args(url))
+        cmd.extend(youtube_remote_backend_args(
+            url, reason="playlist", player_client=self.youtube_player_client,
+            log_fn=log_fn,
+        ))
         cmd.extend(self._auth_args(url))
         cmd.extend(self._request_header_args())
         if self.proxy:
@@ -867,6 +896,9 @@ class YtDlpExtractor(Extractor):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
         cmd.extend(youtube_pot_args(url))
+        cmd.extend(youtube_remote_backend_args(
+            url, reason="resolve-fast", player_client=self.youtube_player_client,
+        ))
         cmd.extend(self._auth_args(url))
         cmd.extend(self._request_header_args())
         if self.proxy:

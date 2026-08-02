@@ -18,6 +18,11 @@ one or more adapter contracts explicitly::
         ]
     }
 
+``youtube_backend`` adapters implement ``solve(request)`` and
+``health(request)``.  The host supplies only a YouTube URL, selected mode,
+backend URL, and player-client label; the solve result is validated before it
+can become yt-dlp extractor arguments.
+
 The loader keeps imports package-scoped through ``ModuleSpec`` search
 locations; it never appends a plugin directory to the process-wide
 ``sys.path``.  Trusted plugins still run in-process, so trust is explicit and
@@ -49,7 +54,9 @@ from .paths import CONFIG_DIR
 CURRENT_MANIFEST_VERSION = 2
 SUPPORTED_MANIFEST_VERSIONS = frozenset({1, 2})
 ADAPTER_INTERFACE_VERSION = 1
-ADAPTER_TYPES = frozenset({"extractor", "postprocess", "upload"})
+ADAPTER_TYPES = frozenset({
+    "extractor", "postprocess", "upload", "youtube_backend",
+})
 ADAPTER_PERMISSIONS = frozenset({
     "credentials",
     "filesystem_read",
@@ -643,6 +650,16 @@ def _validate_adapter_target(spec: PluginAdapterSpec, target: Any) -> None:
                 f"{spec.entrypoint} is not an Extractor subclass"
             )
         return
+    if spec.adapter_type == "youtube_backend":
+        valid = all(
+            callable(getattr(target, method_name, None))
+            for method_name in ("solve", "health")
+        )
+        if not valid:
+            raise PluginCompatibilityError(
+                f"{spec.entrypoint} does not implement solve() and health()"
+            )
+        return
     method_name = "process" if spec.adapter_type == "postprocess" else "upload"
     if inspect.isclass(target):
         valid = callable(getattr(target, method_name, None))
@@ -755,6 +772,7 @@ def _call_adapter_target(
         "extractor": "resolve",
         "postprocess": "process",
         "upload": "upload",
+        "youtube_backend": "solve",
     }[handle.spec.adapter_type]
     method = getattr(target, operation or default_operation, None)
     if method is None and callable(target):

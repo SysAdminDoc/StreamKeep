@@ -3,7 +3,7 @@
   "name": "Sample Extractor Plugin",
   "version": "1.0.0",
   "author": "StreamKeep SDK",
-  "description": "Demonstrates extractor, post-process, and upload adapter contracts.",
+  "description": "Demonstrates extractor, post-process, upload, and YouTube backend adapter contracts.",
   "manifest_version": 2,
   "min_app_version": "4.0.0",
   "enabled": true,
@@ -28,6 +28,14 @@
     {
       "type": "upload",
       "entrypoint": "SampleUploader",
+      "interface_version": 1,
+      "permissions": ["network"],
+      "dependencies": [],
+      "timeout_seconds": 5
+    },
+    {
+      "type": "youtube_backend",
+      "entrypoint": "SampleYoutubeBackend",
       "interface_version": 1,
       "permissions": ["network"],
       "dependencies": [],

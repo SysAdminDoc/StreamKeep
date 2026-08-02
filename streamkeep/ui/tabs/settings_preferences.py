@@ -111,6 +111,52 @@ class SettingsPreferencesMixin:
         else:
             label.setText("No PO-token provider is installed.")
 
+    def _remote_backend_form_config(self):
+        """Return the YouTube remote-backend controls as a config snapshot."""
+        from ...youtube_backend import (
+            REMOTE_BACKEND_MODE_KEY,
+            REMOTE_BACKEND_URL_KEY,
+        )
+        config = dict(self._config)
+        mode_combo = getattr(self, "remote_backend_mode_combo", None)
+        url_input = getattr(self, "remote_backend_url_input", None)
+        if mode_combo is not None:
+            config[REMOTE_BACKEND_MODE_KEY] = str(mode_combo.currentData() or "off")
+        if url_input is not None:
+            config[REMOTE_BACKEND_URL_KEY] = url_input.text().strip()
+        return config
+
+    def _on_test_remote_backend(self):
+        """Probe the configured trusted YouTube backend without a download."""
+        from ...youtube_backend import backend_status
+
+        status = backend_status(self._remote_backend_form_config())
+        label = getattr(self, "remote_backend_status_label", None)
+        if label is not None:
+            if status["reachable"]:
+                label.setText(
+                    f"{status['plugin_id']} is reachable at "
+                    f"{status['backend_url'] or 'the configured endpoint'}."
+                )
+            else:
+                label.setText(status["detail"])
+        lines = [
+            f"Status: {'reachable' if status['reachable'] else status['detail']}",
+            f"Mode: {status['mode']}",
+            f"Endpoint: {status['backend_url'] or 'not configured'}",
+        ]
+        if status["plugin_id"]:
+            lines.append(f"Plugin: {status['plugin_id']}")
+        if status["capabilities"]:
+            lines.append("Capabilities: " + ", ".join(status["capabilities"]))
+        show_premium_message(
+            self,
+            title="YouTube remote backend",
+            body="\n".join(lines),
+            eyebrow="YT-DLP",
+            tone="success" if status["reachable"] else "warning",
+        )
+
     def _media_server_form_config(self):
         """Read the media-server controls without mutating persisted config."""
         from ...integrations.media_server import SERVER_TYPES
@@ -284,6 +330,13 @@ class SettingsPreferencesMixin:
             "PO-token provider: "
             + ("detected" if report['pot_provider']['available'] else "not detected"),
         ]
+        remote = report.get("remote_backend") or {}
+        remote_label = "disabled"
+        if remote.get("configured"):
+            remote_label = "reachable" if remote.get("reachable") else "unreachable"
+        lines.append(f"Remote backend: {remote_label}")
+        if remote.get("plugin_id"):
+            lines.append(f"Remote plugin: {remote['plugin_id']}")
         pot_setup = report.get("pot_setup") or {}
         if not pot_setup.get("provider_present", True):
             lines.append("")
@@ -825,6 +878,30 @@ class SettingsPreferencesMixin:
                 )
                 invalidate_status_cache()
                 self._refresh_pot_status()
+        if hasattr(self, "remote_backend_mode_combo"):
+            from ...youtube_backend import (
+                REMOTE_BACKEND_MODE_KEY,
+                REMOTE_BACKEND_URL_KEY,
+                normalize_backend_mode,
+                normalize_backend_url,
+            )
+            raw_backend_url = self.remote_backend_url_input.text().strip()
+            backend_mode = normalize_backend_mode(
+                self.remote_backend_mode_combo.currentData()
+            )
+            if raw_backend_url and not normalize_backend_url(raw_backend_url):
+                self._set_status(
+                    "The remote backend URL must be a valid HTTP(S) endpoint.",
+                    "warning",
+                )
+            self._config[REMOTE_BACKEND_MODE_KEY] = backend_mode
+            self._config[REMOTE_BACKEND_URL_KEY] = raw_backend_url
+            label = getattr(self, "remote_backend_status_label", None)
+            if label is not None:
+                label.setText(
+                    "Saved. Use Test capability to probe the configured backend."
+                    if backend_mode != "off" else "Remote backend is disabled."
+                )
         # Apply the optional from-start live engine fallback (V36)
         if hasattr(self, "live_engine_fallback_check"):
             self._config["live_engine_fallback"] = (

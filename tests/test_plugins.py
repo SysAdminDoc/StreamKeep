@@ -229,7 +229,7 @@ class PluginTests(unittest.TestCase):
 
         self.assertEqual(
             {handle.spec.adapter_type for handle in handles},
-            {"extractor", "postprocess", "upload"},
+            {"extractor", "postprocess", "upload", "youtube_backend"},
         )
         by_type = {handle.spec.adapter_type: handle for handle in handles}
         extractor = plugins.execute_plugin_adapter(
@@ -239,11 +239,29 @@ class PluginTests(unittest.TestCase):
         upload = plugins.execute_plugin_adapter(
             by_type["upload"], "clip.mp4", metadata={"title": "Sample"},
         )
+        backend_health = plugins.execute_plugin_adapter(
+            by_type["youtube_backend"],
+            {"backend_url": "https://helper.example.invalid"},
+            operation="health",
+            required_permissions=("network",),
+        )
+        backend_solve = plugins.execute_plugin_adapter(
+            by_type["youtube_backend"],
+            {"url": "https://www.youtube.com/watch?v=sample"},
+            operation="solve",
+            required_permissions=("network",),
+        )
         self.assertTrue(extractor.ok)
         self.assertEqual(extractor.code, "ok")
         self.assertTrue(postprocess.ok)
         self.assertTrue(upload.ok)
         self.assertEqual(upload.value["metadata"]["title"], "Sample")
+        self.assertTrue(backend_health.ok)
+        self.assertTrue(backend_health.value["reachable"])
+        self.assertTrue(backend_solve.ok)
+        self.assertEqual(
+            backend_solve.value["extractor_args"][0], "--extractor-args"
+        )
 
     def test_adapter_outcomes_enforce_permissions_timeout_and_cancellation(self):
         class SlowAdapter:

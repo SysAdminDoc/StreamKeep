@@ -1790,6 +1790,72 @@ def build_settings_tab(win):
     win.pot_status_label.setWordWrap(True)
     yt_lay.addWidget(win.pot_status_label)
 
+    # Optional remote cipher/PO-token backend (V32). A trusted plugin owns
+    # the remote protocol; the host only validates the extractor args it
+    # returns and continues locally when the plugin is absent or unavailable.
+    from ...youtube_backend import (
+        REMOTE_BACKEND_MODE_KEY,
+        REMOTE_BACKEND_URL_KEY,
+        normalize_backend_mode,
+    )
+    remote_mode_row = QHBoxLayout()
+    remote_mode_row.setSpacing(8)
+    remote_mode_label = QLabel("Remote backend:")
+    remote_mode_label.setFixedWidth(100)
+    remote_mode_row.addWidget(remote_mode_label)
+    win.remote_backend_mode_combo = QComboBox()
+    win.remote_backend_mode_combo.addItem("Off (local only)", userData="off")
+    win.remote_backend_mode_combo.addItem("Auto (optional)", userData="auto")
+    win.remote_backend_mode_combo.addItem(
+        "Required (warn if unavailable)", userData="required"
+    )
+    saved_backend_mode = normalize_backend_mode(
+        win._config.get(REMOTE_BACKEND_MODE_KEY, "off")
+    )
+    saved_backend_index = win.remote_backend_mode_combo.findData(saved_backend_mode)
+    if saved_backend_index >= 0:
+        win.remote_backend_mode_combo.setCurrentIndex(saved_backend_index)
+    win.remote_backend_mode_combo.setToolTip(
+        "Use a trusted youtube_backend plugin to ask a remote helper for "
+        "cipher or PO-token extractor arguments. Missing helpers fail open."
+    )
+    remote_mode_row.addWidget(win.remote_backend_mode_combo, 1)
+    win.remote_backend_test_btn = QPushButton("Test")
+    win.remote_backend_test_btn.setObjectName("secondary")
+    win.remote_backend_test_btn.setToolTip(
+        "Probe the configured remote backend and show its redacted health status."
+    )
+    win.remote_backend_test_btn.clicked.connect(win._on_test_remote_backend)
+    remote_mode_row.addWidget(win.remote_backend_test_btn)
+    yt_lay.addLayout(remote_mode_row)
+
+    remote_url_row = QHBoxLayout()
+    remote_url_row.setSpacing(8)
+    remote_url_label = QLabel("Backend URL:")
+    remote_url_label.setFixedWidth(100)
+    remote_url_row.addWidget(remote_url_label)
+    win.remote_backend_url_input = QLineEdit(
+        str(win._config.get(REMOTE_BACKEND_URL_KEY, "") or "")
+    )
+    win.remote_backend_url_input.setPlaceholderText(
+        "https://helper.example.invalid/solve"
+    )
+    win.remote_backend_url_input.setToolTip(
+        "The endpoint passed to the trusted youtube_backend plugin. Credentials "
+        "and cookies are never sent by StreamKeep."
+    )
+    remote_url_row.addWidget(win.remote_backend_url_input, 1)
+    yt_lay.addLayout(remote_url_row)
+
+    win.remote_backend_status_label = QLabel(
+        "Remote backend is disabled."
+        if saved_backend_mode == "off"
+        else "Not tested. Use Test capability to probe the configured backend."
+    )
+    win.remote_backend_status_label.setObjectName("subtleText")
+    win.remote_backend_status_label.setWordWrap(True)
+    yt_lay.addWidget(win.remote_backend_status_label)
+
     card_lay.addWidget(yt_block)
 
     # ── Filename templates ─────────────────────────────────────────
