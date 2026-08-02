@@ -12,6 +12,7 @@ referenced by ``http._build_curl_cmd()`` and ``DownloadWorker`` (yt-dlp
 import os
 import sys
 import time
+from pathlib import Path
 
 from .paths import CONFIG_DIR
 
@@ -48,14 +49,18 @@ def cookies_file_age_secs():
         return -1
 
 
-def import_from_browser(browser_name):
-    """Extract cookies from *browser_name* and write cookies.txt.
+def import_from_browser(browser_name, *, domains=None, target=None):
+    """Extract cookies from *browser_name* and write a Netscape jar.
 
     *browser_name* is one of the yt-dlp-style names: chrome, firefox,
-    edge, brave, chromium, vivaldi, opera.
+    edge, brave, chromium, vivaldi, opera. *domains* narrows the cookie
+    filter (defaults to the built-in platform set) and *target* writes to
+    a specific jar instead of the shared file, which is how site-bound
+    authentication profiles keep their material separate.
 
     Returns ``(ok, message)`` tuple.
     """
+    wanted = set(domains) if domains else set(PLATFORM_DOMAINS)
     cj = None
 
     # Prefer rookiepy — lighter, better maintained
@@ -63,7 +68,7 @@ def import_from_browser(browser_name):
         import rookiepy
         load_fn = getattr(rookiepy, browser_name, None)
         if load_fn is not None:
-            cj = load_fn(domains=list(PLATFORM_DOMAINS))
+            cj = load_fn(domains=list(wanted))
     except Exception:
         cj = None
 
@@ -85,7 +90,7 @@ def import_from_browser(browser_name):
                         "http_only": c.has_nonstandard_attr("httponly") if hasattr(c, "has_nonstandard_attr") else False,
                     }
                     for c in jar
-                    if any(c.domain.endswith(d) or d.endswith(c.domain) for d in PLATFORM_DOMAINS)
+                    if any(c.domain.endswith(d) or d.endswith(c.domain) for d in wanted)
                 ]
         except Exception as e:
             return False, f"Failed to load cookies from {browser_name}: {e}"
@@ -96,7 +101,7 @@ def import_from_browser(browser_name):
             "Install rookiepy (`pip install rookiepy`) or browser_cookie3."
         )
 
-    return _write_cookies(cj, browser_name)
+    return _write_cookies(cj, browser_name, target=target)
 
 
 def import_from_file(source_path):
@@ -133,8 +138,8 @@ def clear_cookies():
         return False, f"Failed to clear cookies: {e}"
 
 
-def _write_cookies(cookie_list, source):
-    """Write a list of cookie dicts to Netscape cookies.txt."""
+def _write_cookies(cookie_list, source, *, target=None):
+    """Write a list of cookie dicts to a Netscape cookie jar."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     lines = ["# Netscape HTTP Cookie File",
              f"# Exported by StreamKeep from {source}",
@@ -209,12 +214,13 @@ def restore_cookie_text(content):
         return False, f"Failed to restore cookies: {error}"
 
 
-def _write_cookie_text_atomic(content):
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = COOKIES_FILE.with_suffix(".txt.tmp")
+def _write_cookie_text_atomic(content, *, target=None):
+    destination = Path(target) if target else COOKIES_FILE
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tmp = destination.with_suffix(".txt.tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(tmp, COOKIES_FILE)
-    _restrict_file_permissions(COOKIES_FILE)
+    os.replace(tmp, destination)
+    _restrict_file_permissions(destination)

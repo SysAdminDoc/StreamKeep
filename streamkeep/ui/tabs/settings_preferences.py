@@ -175,6 +175,161 @@ class SettingsPreferencesMixin:
             self._set_status(msg, "error")
             self._log(f"[COOKIES] Error: {msg}")
 
+    # ── Authentication profiles (V50) ─────────────────────────────
+
+    def _refresh_auth_profiles(self, select_id=""):
+        """Repopulate the profile picker without exposing any material."""
+        from ... import auth_profiles as ap
+
+        combo = getattr(self, "auth_profile_list", None)
+        if combo is None:
+            return
+        wanted = str(
+            select_id or combo.currentData() or self._config.get("auth_profile_id", "")
+        )
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("No profile (resolve by site)", "")
+        for profile in ap.list_profiles():
+            combo.addItem(f"{profile.name}", profile.profile_id)
+        index = combo.findData(wanted)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+        self._on_auth_profile_selected()
+
+    def _selected_auth_profile(self):
+        from ... import auth_profiles as ap
+
+        combo = getattr(self, "auth_profile_list", None)
+        if combo is None:
+            return None
+        return ap.get_profile(str(combo.currentData() or ""))
+
+    def _on_auth_profile_selected(self):
+        from ... import auth_profiles as ap
+
+        label = getattr(self, "auth_profile_detail", None)
+        if label is None:
+            return
+        profile = self._selected_auth_profile()
+        if profile is None:
+            label.setText(
+                "Downloads use whichever profile declares the site they target."
+            )
+            return
+        view = ap.public_view(profile)
+        scope = ", ".join(view["hosts"] + view["platforms"]) or "no scope"
+        state = (
+            "credentials stored" if view["has_credentials"]
+            else "no credentials imported yet"
+        )
+        source = view["browser"] or view["source"] or "unset"
+        label.setText(f"Scope: {scope}. Source: {source}. {state}.")
+
+    def _on_auth_profile_new(self):
+        """Create a profile from a name plus its declared site scope."""
+        from PyQt6.QtWidgets import QInputDialog
+        from ... import auth_profiles as ap
+
+        name, ok = QInputDialog.getText(
+            self, "New Authentication Profile", "Profile name:",
+        )
+        if not ok or not name.strip():
+            return
+        scope, ok = QInputDialog.getText(
+            self, "Allowed Sites",
+            "Hosts this profile may authenticate (comma-separated).\n"
+            "Subdomains are included; nothing outside this list is ever sent.",
+        )
+        if not ok or not scope.strip():
+            self._set_status("A profile must declare at least one site.", "warning")
+            return
+        try:
+            profile = ap.create_profile(name.strip(), hosts=scope)
+        except ap.AuthProfileError as error:
+            self._set_status(str(error), "error")
+            return
+        self._refresh_auth_profiles(profile.profile_id)
+        self._log(f"[AUTH] Created profile {profile.name} ({profile.profile_id})")
+        self._set_status(f"Created profile {profile.name}.", "success")
+
+    def _on_auth_profile_import(self):
+        """Load cookies into the selected profile, filtered to its scope."""
+        from ... import auth_profiles as ap
+
+        profile = self._selected_auth_profile()
+        if profile is None:
+            self._set_status("Select a profile first.", "warning")
+            return
+        browser_data = self.cookies_combo.currentData()
+        if browser_data:
+            ok, message = ap.import_from_browser(
+                profile.profile_id, str(browser_data),
+            )
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import cookies.txt", str(Path.home()),
+                "Cookie files (*.txt);;All files (*)",
+            )
+            if not path:
+                return
+            ok, message = ap.import_from_file(profile.profile_id, path)
+        self._refresh_auth_profiles(profile.profile_id)
+        self._log(f"[AUTH] {profile.name}: {message}")
+        self._set_status(message, "success" if ok else "error")
+
+    def _on_auth_profile_check(self):
+        """Validate one profile's stored cookies locally (no request)."""
+        from ... import auth_profiles as ap
+        from ...credential_check import probe_cookies
+
+        profile = self._selected_auth_profile()
+        if profile is None:
+            self._set_status("Select a profile first.", "warning")
+            return
+        path = ap.cookies_path(profile.profile_id)
+        if not path:
+            self._set_status(
+                f"{profile.name} has no credentials imported.", "warning",
+            )
+            return
+        result = probe_cookies(path=path)
+        detail = f"{profile.name}: {result.label}"
+        if result.detail:
+            detail = f"{detail} - {result.detail}"
+        self._log(f"[AUTH] {detail}")
+        self._set_status(detail, "info")
+
+    def _on_auth_profile_delete(self):
+        """Remove a profile and shred its material after confirmation."""
+        from ... import auth_profiles as ap
+
+        profile = self._selected_auth_profile()
+        if profile is None:
+            self._set_status("Select a profile first.", "warning")
+            return
+        if not ask_premium_confirmation(
+            self,
+            title=f"Delete profile {profile.name}?",
+            body=(
+                "The profile and its stored cookies are removed. Jobs, rules, "
+                "and monitors that reference it will fall back to resolving a "
+                "profile by site."
+            ),
+            eyebrow="AUTHENTICATION",
+            badge_text="Cannot be undone",
+            tone="warning",
+            primary_label="Delete profile",
+            secondary_label="Cancel",
+            default_action="secondary",
+        ):
+            return
+        ap.delete_profile(profile.profile_id)
+        if str(self._config.get("auth_profile_id", "")) == profile.profile_id:
+            self._config["auth_profile_id"] = ""
+        self._refresh_auth_profiles("")
+        self._set_status(f"Deleted profile {profile.name}.", "success")
+
     def _on_clear_cookies(self):
         """Delete the cookies.txt file (F47)."""
         from ...cookies import clear_cookies, cookies_file_path
@@ -405,6 +560,12 @@ class SettingsPreferencesMixin:
         cookies_file = self.cookies_file_input.text().strip()
         YtDlpExtractor.cookies_file = cookies_file
         self._config["cookies_file"] = cookies_file
+        # Apply the default site-bound authentication profile (V50). Only the
+        # opaque ID is persisted; scope still decides whether it is used.
+        if hasattr(self, "auth_profile_list"):
+            profile_id = str(self.auth_profile_list.currentData() or "")
+            YtDlpExtractor.auth_profile_id = profile_id
+            self._config["auth_profile_id"] = profile_id
         # Apply rate limit
         rate_limit = self.rate_limit_input.text().strip()
         YtDlpExtractor.rate_limit = rate_limit

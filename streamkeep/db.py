@@ -73,6 +73,8 @@ def init_db() -> None:
                 _migrate_identity_v9(db)
             if 0 < v < 10:
                 _migrate_retry_v10(db)
+            if 0 < v < 11:
+                _migrate_auth_profiles_v11(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -170,7 +172,8 @@ def _apply_schema(db):
             override_pp_preset          TEXT    NOT NULL DEFAULT '',
             ytdlp_template_name         TEXT    NOT NULL DEFAULT '',
             auto_upgrade                INTEGER NOT NULL DEFAULT 0,
-            min_upgrade_quality         TEXT    NOT NULL DEFAULT ''
+            min_upgrade_quality         TEXT    NOT NULL DEFAULT '',
+            auth_profile_id             TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS download_queue (
@@ -416,6 +419,22 @@ def _migrate_monitor_v6(db):
         db.execute(
             "ALTER TABLE monitor_channels ADD COLUMN "
             "ytdlp_template_name TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _migrate_auth_profiles_v11(db):
+    """Give monitors an opaque site-bound authentication profile reference."""
+    existing_cols = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(monitor_channels)"
+        ).fetchall()
+    }
+    if not existing_cols:
+        return
+    if "auth_profile_id" not in existing_cols:
+        db.execute(
+            "ALTER TABLE monitor_channels ADD COLUMN "
+            "auth_profile_id TEXT NOT NULL DEFAULT ''"
         )
 
 
@@ -1004,8 +1023,9 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                      override_filename_template,
                      schedule_start_hhmm, schedule_end_hhmm, schedule_days_mask,
                      retention_keep_last, filter_keywords, override_pp_preset,
-                     ytdlp_template_name, auto_upgrade, min_upgrade_quality)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     ytdlp_template_name, auto_upgrade, min_upgrade_quality,
+                     auth_profile_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("url", "")),
                 str(entry_dict.get("platform", "")),
@@ -1026,6 +1046,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                 str(entry_dict.get("ytdlp_template_name", "") or ""),
                 int(bool(entry_dict.get("auto_upgrade", False))),
                 str(entry_dict.get("min_upgrade_quality", "") or ""),
+                str(entry_dict.get("auth_profile_id", "") or ""),
             ))
             db.commit()
             return cur.lastrowid
@@ -1049,8 +1070,9 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                          schedule_start_hhmm, schedule_end_hhmm,
                          schedule_days_mask, retention_keep_last,
                          filter_keywords, override_pp_preset,
-                         ytdlp_template_name, auto_upgrade, min_upgrade_quality)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ytdlp_template_name, auto_upgrade, min_upgrade_quality,
+                         auth_profile_id)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     str(d.get("url", "")),
                     str(d.get("platform", "")),
@@ -1071,6 +1093,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                     str(d.get("ytdlp_template_name", "") or ""),
                     int(bool(d.get("auto_upgrade", False))),
                     str(d.get("min_upgrade_quality", "") or ""),
+                    str(d.get("auth_profile_id", "") or ""),
                 ))
             db.commit()
         finally:
@@ -3207,6 +3230,7 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                 "ytdlp_template_name": ch.get("ytdlp_template_name", ""),
                 "auto_upgrade": ch.get("auto_upgrade", False),
                 "min_upgrade_quality": ch.get("min_upgrade_quality", ""),
+                "auth_profile_id": ch.get("auth_profile_id", ""),
             })
         if entries:
             save_all_monitor_channels(entries)

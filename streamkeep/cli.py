@@ -131,6 +131,8 @@ def _record_cli_failure(url, stage, error, output_dir="", info=None):
 
 def _run_download(args):
     """Resolve *args.url* and download it."""
+    from .auth_profiles import ensure_migrated
+    ensure_migrated()
     if not _check_ffmpeg():
         try:
             require_capability("ffmpeg")
@@ -349,6 +351,27 @@ def _run_download(args):
         label = safe_filename(info.title or info.channel or "stream")
         segments = [(0, label, 0, info.total_secs)]
 
+        # Resolve the named profile against this URL up front so a scope
+        # mismatch is reported instead of silently sending no credentials.
+        from . import auth_profiles as _ap
+        auth_profile_id = ""
+        requested_profile = str(getattr(args, "auth_profile", "") or "").strip()
+        if requested_profile:
+            profile = _ap.resolve_profile(
+                info.webpage_url or args.url,
+                info.platform or "",
+                profile_id=requested_profile,
+            )
+            if profile is None:
+                _print_line(
+                    f"Error: authentication profile {requested_profile!r} is "
+                    "unknown or is not allowed for this site."
+                )
+                state["exit_code"] = 2
+                app.quit()
+                return
+            auth_profile_id = profile.profile_id
+
         from .job_spec import DownloadJobSpec
         spec = DownloadJobSpec(
             source_platform=info.platform or "",
@@ -397,6 +420,7 @@ def _run_download(args):
             ytdlp_template_name=getattr(args, "arg_template", "") or "",
             ytdlp_template_args=tuple(ytdlp_template_args),
             rate_limit=args.rate_limit or "",
+            auth_profile_id=auth_profile_id,
         )
         dw = DownloadWorker.from_spec(spec)
         state["dw"] = dw  # prevent GC while event loop runs
@@ -971,6 +995,76 @@ def _run_credentials_check(args):
         sys.exit(1)
 
 
+def _run_auth(args, parser):
+    """Manage site-bound authentication profiles without printing secrets."""
+    from . import auth_profiles as ap
+
+    command = getattr(args, "auth_command", "") or "list"
+    as_json = bool(getattr(args, "json", False))
+
+    if command == "list":
+        views = [ap.public_view(profile) for profile in ap.list_profiles()]
+        if as_json:
+            _print_line(json.dumps(views, indent=2))
+        elif not views:
+            _print_line("No authentication profiles configured.")
+        else:
+            for view in views:
+                scope = ", ".join(view["hosts"] + view["platforms"]) or "(none)"
+                state = "credentials" if view["has_credentials"] else "empty"
+                _print_line(
+                    f"  {view['name']:<20s} {view['profile_id']}  "
+                    f"[{state}]  {scope}"
+                )
+        return
+
+    if command == "create":
+        try:
+            profile = ap.create_profile(
+                args.name, hosts=args.host, platforms=args.platform,
+            )
+        except ap.AuthProfileError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        _print_line(f"Created profile {profile.name} ({profile.profile_id})")
+        return
+
+    if command in ("import", "check", "delete"):
+        profile = ap.find_profile(args.profile)
+        if profile is None:
+            _print_line(f"Error: no authentication profile named {args.profile!r}")
+            sys.exit(2)
+        if command == "import":
+            if args.browser:
+                ok, message = ap.import_from_browser(profile.profile_id, args.browser)
+            elif args.file:
+                ok, message = ap.import_from_file(profile.profile_id, args.file)
+            else:
+                _print_line("Error: pass --browser or --file")
+                sys.exit(2)
+            _print_line(message)
+            sys.exit(0 if ok else 1)
+        if command == "check":
+            from . import credential_check as cc
+            path = ap.cookies_path(profile.profile_id)
+            if not path:
+                _print_line(f"{profile.name}: no credential material stored")
+                sys.exit(1)
+            result = cc.probe_cookies(path=path)
+            if as_json:
+                _print_line(json.dumps(result.as_dict(), indent=2))
+            else:
+                detail = f" - {result.detail}" if result.detail else ""
+                _print_line(f"  {profile.name:<20s} {result.label}{detail}")
+            hard_fail = {cc.INVALID, cc.EXPIRED, cc.INSUFFICIENT_SCOPE}
+            sys.exit(1 if result.status in hard_fail else 0)
+        ap.delete_profile(profile.profile_id)
+        _print_line(f"Deleted profile {profile.name}")
+        return
+
+    parser.parse_args(["auth", "--help"])
+
+
 def _run_youtube_health(args):
     """Report the local YouTube capability picture (runtime, PO-token, client).
 
@@ -1054,6 +1148,13 @@ def build_parser():
                     help="Output directory (default: config or ~/Videos/StreamKeep)")
     dl.add_argument("--rate-limit", default="",
                     help="Bandwidth limit (e.g. 5M, 500K)")
+    dl.add_argument(
+        "--auth-profile", dest="auth_profile", default="",
+        help=(
+            "Named site-bound authentication profile to use. Ignored when "
+            "the profile does not cover this URL."
+        ),
+    )
     dl.add_argument(
         "--youtube-client", dest="youtube_client", default="",
         choices=["", "web_safari", "android_vr", "tv", "ios", "mweb", "resilient"],
@@ -1351,6 +1452,43 @@ def build_parser():
     cred_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
 
+    auth_p = sub.add_parser(
+        "auth",
+        help="Manage named, site-bound authentication profiles",
+    )
+    auth_sub = auth_p.add_subparsers(dest="auth_command")
+    auth_sub.add_parser("list", help="List profiles and their declared scope")
+    auth_create = auth_sub.add_parser("create", help="Create an empty profile")
+    auth_create.add_argument("name", help="Operator label for the profile")
+    auth_create.add_argument(
+        "--host", action="append", default=[],
+        help="Allowed host (repeatable); subdomains are included",
+    )
+    auth_create.add_argument(
+        "--platform", action="append", default=[],
+        help="Allowed platform name (repeatable)",
+    )
+    auth_import = auth_sub.add_parser(
+        "import", help="Load credential material into a profile",
+    )
+    auth_import.add_argument("profile", help="Profile name or opaque ID")
+    auth_import.add_argument("--browser", default="",
+                             help="Import cookies from an installed browser")
+    auth_import.add_argument("--file", default="",
+                             help="Import an existing Netscape cookies.txt")
+    auth_check = auth_sub.add_parser(
+        "check", help="Validate one profile's stored cookies locally",
+    )
+    auth_check.add_argument("profile", help="Profile name or opaque ID")
+    auth_delete = auth_sub.add_parser(
+        "delete", help="Remove a profile and shred its material",
+    )
+    auth_delete.add_argument("profile", help="Profile name or opaque ID")
+    auth_p.add_argument("--json", action="store_true",
+                        help="Emit redacted results as JSON")
+    auth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                        help="Override the config/database directory")
+
     # -- packaged startup contract --
     startup_p = sub.add_parser(
         "startup-check",
@@ -1475,6 +1613,8 @@ def run_cli(argv=None):
         _run_podcast_sidecars(args)
     elif args.command == "credentials":
         _run_credentials_check(args)
+    elif args.command == "auth":
+        _run_auth(args, p)
     elif args.command == "youtube-health":
         _run_youtube_health(args)
     elif args.command == "register-protocol":
@@ -1497,7 +1637,7 @@ def has_cli_args():
     cli_triggers = {
         "download", "dl", "server", "extractors", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
-        "credentials", "youtube-health", "register-protocol",
+        "credentials", "auth", "youtube-health", "register-protocol",
         "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

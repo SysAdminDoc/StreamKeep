@@ -62,6 +62,9 @@ class DownloadWorker(QThread):
         self.ytdlp_audio_format = ""
         self.ytdlp_audio_quality = ""
         self.cookies_browser = ""
+        # Opaque site-bound authentication profile ID (V50). The worker
+        # never holds cookie material or a credential path.
+        self.auth_profile_id = ""
         self.rate_limit = ""
         self.proxy = ""
         self.download_subs = False
@@ -361,14 +364,17 @@ class DownloadWorker(QThread):
                 "--merge-output-format", options["container"],
                 "--remux-video", options["container"],
             ])
-        if self.cookies_browser:
-            cmd.extend(["--cookies-from-browser", self.cookies_browser])
-        # Inject cookies.txt for authenticated downloads (F47)
-        if not self.cookies_browser:
-            from ..cookies import cookies_file_path
-            cpath = cookies_file_path()
-            if cpath:
-                cmd.extend(["--cookies", cpath])
+        # Site-bound authentication profile (V50) decides first; without a
+        # covering profile no credential is attached at all.
+        from ..cookies import cookies_file_path
+        from ..extractors.ytdlp import ytdlp_auth_args
+        cmd.extend(ytdlp_auth_args(
+            self.ytdlp_source or self.webpage_url,
+            platform=self.source_platform,
+            profile_id=self.auth_profile_id,
+            browser=self.cookies_browser,
+            cookie_file=cookies_file_path(),
+        ))
         if self.rate_limit:
             cmd.extend(["--limit-rate", self.rate_limit])
         if transfer_options["concurrent_fragments"]:

@@ -199,7 +199,7 @@ def _build_curl_cmd(url: str, headers: dict[str, str] | None = None, method: str
     _proxy = _resolve_proxy(url)
     if _proxy:
         cmd.extend(["-x", _proxy])
-    _append_cookie_args(cmd)
+    _append_cookie_args(cmd, url)
     if method and method.upper() != "GET":
         cmd.extend(["-X", method.upper()])
     if body is not None:
@@ -224,11 +224,18 @@ def _resolve_proxy(url):
     return _resolve_proxy_for_url(url) or NATIVE_PROXY
 
 
-def _append_cookie_args(cmd):
-    """Add cookies.txt to a curl command if one is available."""
+def _append_cookie_args(cmd, url=""):
+    """Add the cookie jar this request is allowed to use, if any.
+
+    A site-bound authentication profile (V50) wins; its scope decides whether
+    any credential is attached at all, so a jar bound to one site is never sent
+    to another. The legacy shared cookies.txt is only consulted for profiles
+    that predate the migration.
+    """
+    from .auth_profiles import resolve_cookies_path
     from .cookies import cookies_file_path
 
-    cpath = cookies_file_path()
+    cpath = resolve_cookies_path(url) or cookies_file_path()
     if cpath:
         cmd.extend(["--cookie", cpath])
 
@@ -289,7 +296,7 @@ def guarded_curl(
         "--proxy", proxy_url,
         "--noproxy", "",
     ]
-    _append_cookie_args(cmd)
+    _append_cookie_args(cmd, url)
     cmd.append(str(url))
     result = run_capture_interruptible(cmd, timeout=max_time + 2)
     if result.returncode != 0 or result.timed_out or result.interrupted:
@@ -368,7 +375,7 @@ def http_head_details(url, timeout=20):
         _proxy = _resolve_proxy(url)
         if _proxy:
             cmd.extend(["-x", _proxy])
-        _append_cookie_args(cmd)
+        _append_cookie_args(cmd, url)
         cmd.append(url)
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
         if result.returncode != 0:
@@ -654,7 +661,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
             cmd.extend(["-H", f"If-Range: {resume_metadata['validator']}"])
         if proxy_url:
             cmd.extend(["-x", proxy_url])
-        _append_cookie_args(cmd)
+        _append_cookie_args(cmd, url)
         cmd.append(url)
         proc = None
         try:

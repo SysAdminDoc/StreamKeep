@@ -76,7 +76,8 @@ _IMPORT_CAPABILITY_INFO = {
 
 _STRING_CONFIG_KEYS = frozenset({
     "output_dir", "folder_template", "file_template", "webhook_url",
-    "rate_limit", "proxy", "cookies_browser", "cookies_file", "theme",
+    "rate_limit", "proxy", "cookies_browser", "cookies_file",
+    "auth_profile_id", "theme",
     "visual_density", "visual_accent",
     "language", "whisper_model", "hf_token", "dismissed_update_tag",
     "companion_proxy_origin", "subtitle_languages", "subtitle_convert",
@@ -544,14 +545,16 @@ def _quarantine_import_capabilities(config):
         result["proxy"] = ""
         result["proxy_pool"] = []
 
-    cookie_paths = [
-        (key,) for key in ("cookies_browser", "cookies_file") if key in config
-    ]
-    cookie_active = bool(config.get("cookies_browser") or config.get("cookies_file"))
+    cookie_keys = ("cookies_browser", "cookies_file", "auth_profile_id")
+    cookie_paths = [(key,) for key in cookie_keys if key in config]
+    cookie_active = any(config.get(key) for key in cookie_keys)
     hold("cookie_sources", cookie_paths, active=cookie_active)
     if cookie_active:
+        # An imported profile ID would point at credential material that
+        # does not exist on the importing machine.
         result["cookies_browser"] = ""
         result["cookies_file"] = ""
+        result["auth_profile_id"] = ""
 
     media_server = config.get("media_server", {})
     media_active = bool(media_server.get("enabled")) if isinstance(media_server, dict) else False
@@ -640,7 +643,7 @@ def _build_config_diff(before, after, *, limit=100):
 def _summarize_import_value(value, path):
     sensitive_roots = {
         "hooks", "webhook_url", "proxy", "proxy_pool", "cookies_browser",
-        "cookies_file", "hf_token", "media_server",
+        "cookies_file", "auth_profile_id", "hf_token", "media_server",
     }
     if path and path[0] in sensitive_roots:
         if value in (None, "", [], {}):

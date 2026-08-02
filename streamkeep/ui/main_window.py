@@ -911,7 +911,22 @@ class StreamKeep(
             self.pp_lrc_lang.setText(PostProcessor.lrc_lang or "en")
         # ── SQLite library init + migration (F41) ──
         _db.init_db()
+        # One-time move of the shared cookie jar into an explicit,
+        # site-bound authentication profile (V50).
+        from streamkeep.auth_profiles import migrate_global_cookies
+        moved = migrate_global_cookies(cfg)
+        if moved is not None:
+            self._log(
+                "[AUTH] Moved the shared cookie file into profile "
+                f"{moved.name}; it now applies only to "
+                f"{', '.join(moved.hosts) or 'its declared platforms'}."
+            )
         migrated = _db.migrate_from_config(cfg)
+        if moved is not None:
+            migrated = True
+        # The Settings picker may already be built; show the migrated profile.
+        if hasattr(self, "auth_profile_list"):
+            self._refresh_auth_profiles(cfg.get("auth_profile_id", ""))
         if migrated:
             _save_config(cfg)
             self._log("[DB] Migrated history/monitor/queue from config.json to library.db")
@@ -2080,6 +2095,13 @@ class StreamKeep(
 
     def _switch_tab(self, idx, *, focus_page=False):
         self._stack.setCurrentIndex(idx)
+        # Settings shows live authentication/backup state; refresh on entry so
+        # profiles created elsewhere (CLI, another window) are visible.
+        if self._tab_names[idx:idx + 1] == ["Settings"]:
+            if hasattr(self, "auth_profile_list"):
+                self._refresh_auth_profiles()
+            if hasattr(self, "auto_backup_status_label"):
+                self._refresh_backup_status()
         page_descriptions = (
             "Capture and queue streams, VODs, and media for local archiving.",
             "Watch channels and automate reliable live capture.",

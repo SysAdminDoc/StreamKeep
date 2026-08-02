@@ -356,6 +356,27 @@ def youtube_health_report(player_client=""):
     }
 
 
+
+def ytdlp_auth_args(url="", platform="", profile_id="", *, browser="", cookie_file=""):
+    """Return the cookie arguments one yt-dlp request is allowed to use.
+
+    A site-bound authentication profile (V50) decides first: if no profile
+    covers this URL, no credential is attached at all, so a jar bound to one
+    site can never follow a request to another. The legacy shared cookie
+    file/browser is only consulted for profiles that predate the migration.
+    """
+    from ..auth_profiles import resolve_cookies_path
+
+    path = resolve_cookies_path(url, platform, profile_id=profile_id)
+    if path:
+        return ["--cookies", path]
+    if cookie_file and os.path.isfile(cookie_file):
+        return ["--cookies", cookie_file]
+    if browser:
+        return ["--cookies-from-browser", browser]
+    return []
+
+
 class YtDlpExtractor(Extractor):
     NAME = "yt-dlp"
     ICON = "Y"
@@ -366,6 +387,9 @@ class YtDlpExtractor(Extractor):
     # Set by Settings tab
     cookies_browser = ""
     cookies_file = ""
+    # Opaque site-bound authentication profile ID (V50); empty means
+    # "resolve by URL scope".
+    auth_profile_id = ""
     rate_limit = ""
     proxy = ""
     # Seconds allowed for a single `--dump-json` resolve. 60s was too short for
@@ -434,10 +458,7 @@ class YtDlpExtractor(Extractor):
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
-        if self.cookies_file and os.path.isfile(self.cookies_file):
-            cmd.extend(["--cookies", self.cookies_file])
-        elif self.cookies_browser:
-            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        cmd.extend(self._auth_args(url))
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         if impersonate:
@@ -749,8 +770,7 @@ class YtDlpExtractor(Extractor):
             if warning:
                 self._log(log_fn, warning)
             cmd.extend(ytdlp_runtime_args(runtime_status))
-        if self.cookies_browser:
-            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        cmd.extend(self._auth_args(url))
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         cmd.extend(["--", url])
@@ -809,10 +829,7 @@ class YtDlpExtractor(Extractor):
         if _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
-        if self.cookies_file and os.path.isfile(self.cookies_file):
-            cmd.extend(["--cookies", self.cookies_file])
-        elif self.cookies_browser:
-            cmd.extend(["--cookies-from-browser", self.cookies_browser])
+        cmd.extend(self._auth_args(url))
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
         if impersonate:
@@ -913,6 +930,29 @@ class YtDlpExtractor(Extractor):
             self._log(log_fn, "yt-dlp timed out")
             return None
 
+    def _auth_args(self, url):
+        """Cookie arguments scoped to this request's site."""
+        return ytdlp_auth_args(
+            url,
+            platform=getattr(self, "NAME", ""),
+            profile_id=self.auth_profile_id,
+            browser=self.cookies_browser,
+            cookie_file=self.cookies_file,
+        )
+
+    def _auth_label(self, url):
+        """Return a credential-free label for whatever this request will use."""
+        from ..auth_profiles import resolve_profile
+
+        profile = resolve_profile(
+            url, getattr(self, "NAME", ""), profile_id=self.auth_profile_id,
+        )
+        if profile is not None:
+            return f"profile {profile.name}"
+        if self.cookies_file and os.path.isfile(self.cookies_file):
+            return "the shared cookies file"
+        return self.cookies_browser or ""
+
     def resolve(self, url, log_fn=None):
         has_ytdlp = self._has_ytdlp()
         if http_interrupted():
@@ -929,8 +969,9 @@ class YtDlpExtractor(Extractor):
             if warning:
                 self._log(log_fn, warning)
 
-        if self.cookies_browser:
-            self._log(log_fn, f"Using cookies from: {self.cookies_browser}")
+        auth_label = self._auth_label(url)
+        if auth_label:
+            self._log(log_fn, f"Using cookies from: {auth_label}")
 
         # Fast path: a field-projected ``--print`` gets the same metadata as
         # ``--dump-json`` in ~1s because it never requests per-format

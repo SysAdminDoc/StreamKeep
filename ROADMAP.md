@@ -289,13 +289,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P1 — Next
 
-- [ ] P1 — V50 — Add named, site-bound authentication profiles
-  Why: One global cookie file cannot safely represent multiple accounts or let rules and monitors select the credentials a source requires.
-  Evidence: `streamkeep/cookies.py`, `streamkeep/accounts.py`, `streamkeep/rules.py`; YTPTube PR #641 and ytarchive membership/PO-token workflows.
-  Touches: profile schema/secure storage, job spec, rules, monitors, CLI/Settings selectors, credential probes, diagnostics/export redaction and migration.
-  Acceptance: jobs/rules/monitors persist only an opaque profile ID; each profile declares allowed hosts/platforms and refuses cross-site fallback; cookie/token material remains in permission-restricted files or OS secure storage; validation is per profile; logs, hooks, backups, diagnostics and exports reveal neither secret material nor sensitive paths; the current global cookie setting migrates to an explicit default profile without duplicating its contents.
-  Complexity: M
-
 - [ ] P1 — V52 — Add one unsigned local release gate with machine-checked product claims
   Why: reproducible build smoke is strong but skips source/tests/translations/advisories, while README, capability registry, Flatpak metadata, updater policy, and Spanish completeness currently disagree with reachable behavior.
   Evidence: `packaging/reproducible_build.py`, `packaging/sbom.py` (`--audit` is unused by the builder), `streamkeep/capabilities.py:186-208`, `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml:18-19`, `README.md:90`, `:154`, and `:216-227`; Spanish catalog 139/1,325 translated on 2026-07-29.

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,9 @@ class DownloadJobSpec:
     ytdlp_audio_quality: str = ""
 
     cookies_browser: str = ""
+    # Opaque site-bound authentication profile ID (V50). Jobs never carry
+    # cookie material or credential paths - only this reference.
+    auth_profile_id: str = ""
     rate_limit: str = ""
     proxy: str = ""
 
@@ -156,6 +159,7 @@ class DownloadJobSpec:
         worker.ytdlp_audio_format = self.ytdlp_audio_format
         worker.ytdlp_audio_quality = self.ytdlp_audio_quality
         worker.cookies_browser = self.cookies_browser
+        worker.auth_profile_id = self.auth_profile_id
         worker.rate_limit = self.rate_limit
         worker.proxy = self.proxy
         worker.download_subs = self.download_subs
@@ -216,6 +220,7 @@ class DownloadJobSpec:
             ytdlp_audio_format=worker.ytdlp_audio_format or "",
             ytdlp_audio_quality=worker.ytdlp_audio_quality or "",
             cookies_browser=worker.cookies_browser or "",
+            auth_profile_id=getattr(worker, "auth_profile_id", "") or "",
             rate_limit=worker.rate_limit or "",
             proxy=worker.proxy or "",
             download_subs=bool(worker.download_subs),

@@ -13,6 +13,7 @@ Actions steer how the job is handled:
     pp_preset           — named post-processing preset
     quality             — quality preference ("best"/"1080p"/"audio"/...)
     proxy               — per-job proxy URL
+    auth_profile        — named site-bound authentication profile (V50)
     priority            — integer; higher sorts earlier in the queue
     auto_start          — begin immediately vs. hold in queue
 
@@ -35,12 +36,14 @@ ACTION_KEYS = (
     "pp_preset",
     "quality",
     "proxy",
+    "auth_profile",
     "priority",
     "auto_start",
 )
 
 _STRING_ACTIONS = frozenset({
     "output_dir", "filename_template", "pp_preset", "quality", "proxy",
+    "auth_profile",
 })
 
 _MATCH_MODES = ("all", "any")
@@ -266,6 +269,7 @@ def apply_rules_to_job(job, config):
     _fill("arg_template", "filename_template")
     _fill("override_pp_preset", "pp_preset")
     _fill("proxy", "proxy")
+    _fill("auth_profile_id", "auth_profile")
     if "priority" in actions and "priority" not in result:
         result["priority"] = actions["priority"]
     if "auto_start" in actions and "auto_start" not in result:

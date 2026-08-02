@@ -593,6 +593,45 @@ def build_settings_tab(win):
     cookies_lay.addWidget(win.cookies_status_label)
     card_lay.addWidget(cookies_block)
 
+    # ── Authentication Profiles (V50) ─────────────────────────────
+    auth_block, auth_lay = make_field_block(
+        "Authentication Profiles",
+        "Named credentials bound to the sites they are allowed to "
+        "authenticate. A profile is never sent to a site outside its scope.",
+    )
+    win.auth_profile_list = QComboBox()
+    win.auth_profile_list.setSizeAdjustPolicy(
+        QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    win.auth_profile_list.setMinimumContentsLength(24)
+    win.auth_profile_list.currentIndexChanged.connect(
+        win._on_auth_profile_selected
+    )
+    auth_lay.addWidget(win.auth_profile_list)
+
+    win.auth_profile_detail = QLabel("")
+    win.auth_profile_detail.setObjectName("subtleText")
+    win.auth_profile_detail.setWordWrap(True)
+    auth_lay.addWidget(win.auth_profile_detail)
+
+    auth_row = QHBoxLayout()
+    auth_row.setSpacing(8)
+    for label, slot, width in (
+        ("New profile…", "_on_auth_profile_new", 130),
+        ("Import cookies", "_on_auth_profile_import", 130),
+        ("Check", "_on_auth_profile_check", 78),
+        ("Delete", "_on_auth_profile_delete", 78),
+    ):
+        button = QPushButton(label)
+        button.setObjectName("secondary")
+        button.setFixedWidth(width)
+        button.clicked.connect(getattr(win, slot))
+        auth_row.addWidget(button)
+    auth_row.addStretch(1)
+    auth_lay.addLayout(auth_row)
+    card_lay.addWidget(auth_block)
+    win._refresh_auth_profiles()
+
     saved_browser = win._config.get("cookies_browser", "")
     saved_file = win._config.get("cookies_file", "")
     if saved_file:
@@ -604,6 +643,9 @@ def build_settings_tab(win):
         if idx >= 0:
             win.cookies_combo.setCurrentIndex(idx)
         YtDlpExtractor.cookies_browser = saved_browser
+    YtDlpExtractor.auth_profile_id = str(
+        win._config.get("auth_profile_id", "") or ""
+    )
     # Update cookies.txt status indicator (F47)
     if hasattr(win, "_update_cookies_status"):
         win._update_cookies_status()

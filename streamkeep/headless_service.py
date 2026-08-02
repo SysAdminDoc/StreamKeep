@@ -87,6 +87,8 @@ class HeadlessJobService(QObject):
     def start(self) -> int:
         """Recover interrupted work and begin dispatching eligible jobs."""
         db.init_db()
+        from .auth_profiles import ensure_migrated
+        ensure_migrated()
         lease = db.acquire_executor_lease(
             self.owner_id, owner_kind="headless server",
         )
