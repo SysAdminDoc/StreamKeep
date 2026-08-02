@@ -44,6 +44,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   replacing style-only lambdas and semicolon-packed statements with explicit
   definitions.
 
+- Serialized startup schema migrations (V65) with SQLite `BEGIN IMMEDIATE`,
+  re-reading the schema version under lock and preserving migration rollback
+  behavior for concurrent GUI, service, and CLI starts.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

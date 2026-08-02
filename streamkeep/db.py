@@ -59,6 +59,7 @@ def init_db() -> None:
         pass
     db = _connect()
     try:
+        db.execute("BEGIN IMMEDIATE")
         v = db.execute("PRAGMA user_version").fetchone()[0]
         if v < SCHEMA_VERSION:
             if v >= 1 and v < 4:
@@ -92,13 +93,16 @@ def init_db() -> None:
                 "ON download_queue(job_id) WHERE job_id <> ''"
             )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
 
 def _apply_schema(db):
-    db.executescript("""
+    script = """
         CREATE TABLE IF NOT EXISTS history (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             date                TEXT NOT NULL DEFAULT '',
@@ -286,7 +290,16 @@ def _apply_schema(db):
             last_reason      TEXT    NOT NULL DEFAULT '',
             updated_at       TEXT    NOT NULL DEFAULT ''
         );
-    """)
+    """
+    statement = []
+    for line in script.splitlines(keepends=True):
+        statement.append(line)
+        sql = "".join(statement)
+        if sqlite3.complete_statement(sql):
+            db.execute(sql)
+            statement = []
+    if statement and "".join(statement).strip():
+        db.execute("".join(statement))
 
 
 def _migrate_queue_v4(db):

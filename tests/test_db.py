@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 import multiprocessing
 from pathlib import Path
@@ -27,6 +28,67 @@ def _claim_queue_job_process(
 
 
 class DbMigrationTests(unittest.TestCase):
+    def test_concurrent_v10_initialization_serializes_schema_migration(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.execute("ALTER TABLE monitor_channels DROP COLUMN auth_profile_id")
+                conn.execute("PRAGMA user_version = 10")
+                conn.commit()
+            finally:
+                conn.close()
+
+            original_connect = db._connect
+            connected = threading.Barrier(2)
+            errors = []
+
+            def synchronized_connect(*args, **kwargs):
+                connection = original_connect(*args, **kwargs)
+                try:
+                    connected.wait(timeout=10)
+                except BaseException:
+                    connection.close()
+                    raise
+                return connection
+
+            def initialize():
+                try:
+                    db.init_db()
+                except BaseException as error:
+                    errors.append(error)
+
+            with mock.patch.object(db, "DB_PATH", db_path), mock.patch.object(
+                db, "_connect", side_effect=synchronized_connect,
+            ):
+                threads = [threading.Thread(target=initialize) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=15)
+
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            self.assertEqual(errors, [])
+            conn = sqlite3.connect(str(db_path))
+            try:
+                columns = {
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(monitor_channels)"
+                    ).fetchall()
+                }
+                version = conn.execute(
+                    "PRAGMA user_version"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            self.assertIn("auth_profile_id", columns)
+            self.assertEqual(version, db.SCHEMA_VERSION)
+
     def test_v8_history_identity_is_backfilled_and_exactly_queryable(self):
         import sqlite3
         with tempfile.TemporaryDirectory() as tmpdir:

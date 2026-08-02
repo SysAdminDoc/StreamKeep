@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V65 — `init_db()` schema migration has no cross-process serialization; concurrent first-start after an upgrade can crash on duplicate `ALTER TABLE`
-  Category: reliability
-  Where: `streamkeep/db.py:51-97` (`init_db`) and the migration helpers it calls (`_migrate_queue_v4/v5`, `_migrate_monitor_v6`, `_migrate_execution_v8`, `_migrate_identity_v9`, `_migrate_retry_v10`, `_migrate_auth_profiles_v11`).
-  Problem: `init_db` reads `PRAGMA user_version`, runs the migration chain, and sets the new version with no `BEGIN IMMEDIATE` and no `_write_lock`; each `ALTER TABLE ADD COLUMN` autocommits individually. The GUI (`main_window.py`), headless service (`headless_service.py`), and CLI all call `init_db` at startup, and the GUI + headless service are designed to run simultaneously on the same profile (the executor-lease model), with `init_db` executing before any lease is acquired. If both processes start together right after an app upgrade that bumps `SCHEMA_VERSION`, both read the pre-migration columns via `PRAGMA table_info` (the `if col not in existing_cols` guard is evaluated on each process's own snapshot before either ALTERs), both attempt the same `ALTER TABLE`, and the loser raises `sqlite3.OperationalError: duplicate column name` out of `init_db`, failing that process's startup. Data stays consistent (fails closed), but it is a one-time visible crash on the exact launch users hit after updating.
-  Evidence: Read `init_db` (db.py:51-97) — the migration calls at lines 64-80 and the `PRAGMA user_version` write at line 94 run with no transaction until the trailing `db.commit()` at line 95; only the two index-creation statements have `try/except`, and the `ADD COLUMN` migrations do not (SQLite has no `ADD COLUMN IF NOT EXISTS`). No lock file or `BEGIN IMMEDIATE` appears anywhere in the function.
-  Fix: Wrap the version check + migration chain in `BEGIN IMMEDIATE … COMMIT`, re-reading `user_version` after the reserved lock is held and early-returning if another process already migrated; or catch `duplicate column name` from the `ADD COLUMN` migrations as benign and continue.
-  Acceptance: A test runs `init_db` from two threads on separate connections against a v10 database with a barrier; both return without exception and the DB lands at v11.
-  Confidence: Verified (code path confirmed; the race window itself was not reproduced).
-  Effort: S
-
 - [ ] P3 — V66 — A dead process's in-progress backup claim reports "running" in the ops view until the next cadence-due claim
   Category: correctness
   Where: `streamkeep/db.py:2700-2727` (`claim_due_backup`, the not-due branch) and `streamkeep/db.py` `backup_state_public_view` (~2892-2913).
