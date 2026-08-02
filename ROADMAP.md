@@ -223,13 +223,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Acceptance: muted VOD segments are detected and, where an unmuted CDN URL resolves, substituted so the recording has original audio; when no unmuted source exists it logs and keeps the muted segment; opt-in toggle; unit test covers detect + substitute + no-source fallback.
   Complexity: M
 
-- [ ] P2 — V39 — Expose output filename-template in CLI/config + fix ffmpeg-path `.mp4` hardcode
-  Why: the GUI (`adv_file_tpl_input`/`adv_folder_tpl_input`) and monitor-channel overrides (`models.py:213 override_filename_template`) support templating, but the CLI takes only `-o DIR` and the ffmpeg-native path hardcodes `.mp4` at `workers/download.py:988`, so headless/scripted users cannot control naming and non-mp4 ffmpeg captures get a wrong extension.
-  Evidence: `streamkeep/cli.py` (only `-o/--output`), `streamkeep/workers/download.py:988`, `streamkeep/ui/tabs/download_controls.py`; MeTube per-channel `OUTPUT_TEMPLATE` (https://github.com/alexta69/metube/releases/tag/2026.07.10).
-  Touches: `cli.py` args, one shared template resolver, `workers/download.py` ffmpeg output path (honor container), config default key, README, tests.
-  Acceptance: CLI accepts a filename/folder template and a global config default applies to GUI+CLI+monitor jobs; the ffmpeg-native path names output by the chosen container, not always `.mp4`; template resolution has one code path with a unit test.
-  Complexity: S
-
 - [ ] P2 — V40 — Dubbed-audio-language selection + clean `mute` (audio-strip) output mode
   Why: cobalt exposes `youtubeDubLang` and a `mute` mode; StreamKeep's per-download overrides cannot pick a dubbed audio track or produce a video-only output cleanly.
   Evidence: https://github.com/imputnet/cobalt/blob/main/docs/api.md; `streamkeep/ui/tabs/download_controls.py`, `streamkeep/download_options.py`. Extends V20.

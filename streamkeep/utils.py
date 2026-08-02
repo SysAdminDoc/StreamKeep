@@ -179,6 +179,52 @@ def render_template(template, context):
     return result
 
 
+def resolve_output_paths(
+    stream_info,
+    output_root,
+    *,
+    vod_info=None,
+    folder_template="",
+    file_template="",
+    config=None,
+):
+    """Resolve one download's folder and base filename from the templates.
+
+    The single template code path shared by the GUI, the CLI, and monitor
+    jobs (V39). Precedence is explicit override, then the configured global
+    default, then the built-in default, so a headless run and a desktop run
+    with the same configuration name a file identically.
+
+    Returns ``(output_dir, base_name)``; *base_name* carries no extension.
+    """
+    config = config or {}
+    folder = str(
+        folder_template
+        or config.get("folder_template", "")
+        or DEFAULT_FOLDER_TEMPLATE
+    )
+    filename = str(
+        file_template
+        or config.get("file_template", "")
+        or DEFAULT_FILE_TEMPLATE
+    )
+    context = build_template_context(stream_info, vod_info)
+    folder_parts = render_template(folder, context)
+    file_parts = render_template(filename, context)
+
+    base = file_parts[-1] if file_parts else ""
+    if not base:
+        title = (stream_info.title if stream_info else "") or ""
+        platform = (stream_info.platform if stream_info else "") or "media"
+        base = safe_filename(title) or f"{platform}_download"
+
+    # A file template may itself contain directories ("{channel}/{title}");
+    # everything before the last component belongs to the folder path.
+    parts = list(folder_parts) + list(file_parts[:-1])
+    output_dir = os.path.join(str(output_root), *parts) if parts else str(output_root)
+    return output_dir, base
+
+
 def build_template_context(stream_info, vod_info=None):
     """Build the variable dict for template rendering.
     Variables: {title}, {channel}, {platform}, {date}, {year}, {month},

@@ -682,7 +682,10 @@ class DownloadWorker(QThread):
             and self.format_type != "ytdlp_direct"
         )
         if chunk_mode:
-            base = os.path.splitext(outfile)[0] + "_part%03d.mp4"
+            base = (
+                os.path.splitext(outfile)[0]
+                + f"_part%03d.{self._native_container()}"
+            )
             return [
                 executable, *FFMPEG_REMOTE_SAFETY,
                 "-hide_banner", "-loglevel", "info",
@@ -811,7 +814,10 @@ class DownloadWorker(QThread):
         if duration > 0:
             cmd.extend(["-t", str(duration)])
         if duration <= 0 and self.chunk_length_secs > 0:
-            base = os.path.splitext(outfile)[0] + "_part%03d.mp4"
+            base = (
+                os.path.splitext(outfile)[0]
+                + f"_part%03d.{self._native_container()}"
+            )
             cmd.extend([
                 "-f", "segment", "-segment_time", str(int(self.chunk_length_secs)),
                 "-reset_timestamps", "1", "-strftime", "0", "-y", base,
@@ -830,7 +836,9 @@ class DownloadWorker(QThread):
         if is_ytdlp:
             outfile, _expected = self._ytdlp_output_paths(label)
             return self._build_ytdlp_download_cmd(outfile, export=True)
-        outfile = os.path.join(self.output_dir, f"{label}.mp4")
+        outfile = os.path.join(
+            self.output_dir, f"{label}.{self._native_container()}"
+        )
         return self._build_ffmpeg_download_cmd(
             outfile, start, duration, executable="ffmpeg",
         )
@@ -1257,6 +1265,19 @@ class DownloadWorker(QThread):
             return template, base + "." + container
         return template, ""
 
+    def _native_container(self):
+        """Return the container the ffmpeg-native path should write (V39).
+
+        The ffmpeg path used to hardcode ``.mp4``, so a job configured for mkv
+        or webm produced a file whose extension lied about its contents. The
+        configured container now decides, with mp4 as the fallback for
+        "original" (ffmpeg needs a concrete muxer).
+        """
+        container = str(self.ytdlp_container or "mp4").strip().lower()
+        if not container or container == "original":
+            return "mp4"
+        return container.lstrip(".")
+
     def _mark_segment_done(self, seg_idx):
         """Merge the segment into the resume sidecar and persist it."""
         if self._resume_state is None:
@@ -1309,7 +1330,9 @@ class DownloadWorker(QThread):
                 else:
                     existing_output = self._find_ytdlp_output(outfile)
             else:
-                outfile = os.path.join(self.output_dir, f"{label}.mp4")
+                outfile = os.path.join(
+                    self.output_dir, f"{label}.{self._native_container()}"
+                )
                 existing_output = outfile if os.path.exists(outfile) else ""
             is_live_capture = duration <= 0
             if existing_output:

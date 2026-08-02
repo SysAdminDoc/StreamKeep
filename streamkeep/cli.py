@@ -347,8 +347,16 @@ def _run_download(args):
         # Build a single whole-stream segment. The DownloadWorker downloads
         # each (seg_idx, label, start, duration) tuple with ffmpeg, so one
         # segment spanning the full duration yields a single output file.
-        from .utils import safe_filename
-        label = safe_filename(info.title or info.channel or "stream")
+        # One shared template resolver across GUI, CLI, and monitor jobs
+        # (V39) so headless naming matches the desktop app exactly.
+        from .utils import resolve_output_paths
+        job_output_dir, label = resolve_output_paths(
+            info,
+            output_dir,
+            folder_template=getattr(args, "folder_template", ""),
+            file_template=getattr(args, "file_template", ""),
+            config=cfg,
+        )
         segments = [(0, label, 0, info.total_secs)]
 
         # Resolve the named profile against this URL up front so a scope
@@ -379,7 +387,7 @@ def _run_download(args):
             webpage_url=getattr(info, "webpage_url", "") or "",
             playlist_url=qi.url,
             segments=tuple(tuple(s) for s in [segments[0]]),
-            output_dir=output_dir,
+            output_dir=job_output_dir,
             format_type=qi.format_type,
             audio_url=qi.audio_url,
             selected_tracks=tuple(default_media_tracks(qi)),
@@ -1163,6 +1171,20 @@ def build_parser():
                     help="Output directory (default: config or ~/Videos/StreamKeep)")
     dl.add_argument("--rate-limit", default="",
                     help="Bandwidth limit (e.g. 5M, 500K)")
+    dl.add_argument(
+        "--filename-template", dest="file_template", default="",
+        help=(
+            "Filename template, e.g. \"{channel} - {title}\". Falls back to "
+            "the configured global default."
+        ),
+    )
+    dl.add_argument(
+        "--folder-template", dest="folder_template", default="",
+        help=(
+            "Folder template under the output directory, e.g. "
+            "\"{channel}/{date}\". Falls back to the configured default."
+        ),
+    )
     dl.add_argument(
         "--auth-profile", dest="auth_profile", default="",
         help=(
