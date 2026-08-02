@@ -70,6 +70,7 @@ class UploadAdapterTests(unittest.TestCase):
                     "port": "21",
                     "username": "alice",
                     "password": "secret",
+                    "allow_insecure_ftp": True,
                     "remote_dir": r"\\nested//clips\\",
                 }
             )
@@ -98,7 +99,8 @@ class UploadAdapterTests(unittest.TestCase):
             fake_ftp = _FakeFTP()
             dest = FTPDestination({
                 "host": "ftp.example.com", "port": "21",
-                "username": "a", "password": "b", "remote_dir": "/",
+                "username": "a", "password": "b",
+                "allow_insecure_ftp": True, "remote_dir": "/",
             })
             with mock.patch(
                 "streamkeep.upload.ftp.ftplib.FTP", return_value=fake_ftp
@@ -172,12 +174,11 @@ class TestSFTPHostKeyVerification(unittest.TestCase):
         client.connect.assert_called_once()
 
     @mock.patch.dict("sys.modules", {"paramiko": mock.MagicMock()})
-    def test_sftp_tofu_uses_auto_add_policy(self):
+    def test_sftp_tofu_flag_cannot_disable_host_key_verification(self):
         import sys
         paramiko = sys.modules["paramiko"]
         paramiko.SSHClient.return_value = mock.MagicMock()
         paramiko.RejectPolicy.return_value = "reject"
-        paramiko.AutoAddPolicy.return_value = "auto"
 
         dest = FTPDestination({
             "use_sftp": True, "host": "h", "username": "u", "password": "p",
@@ -186,7 +187,7 @@ class TestSFTPHostKeyVerification(unittest.TestCase):
         client = dest._connect_sftp_client({
             "host": "h", "port": 22, "username": "u", "password": "p",
         })
-        client.set_missing_host_key_policy.assert_called_once_with("auto")
+        client.set_missing_host_key_policy.assert_called_once_with("reject")
 
 
 if __name__ == "__main__":

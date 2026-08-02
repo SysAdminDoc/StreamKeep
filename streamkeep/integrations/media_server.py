@@ -7,7 +7,8 @@ are small, token-redacting adapters layered on top of those pure plans.
 Config keys (under ``config["media_server"]``):
     enabled, server_type (plex|jellyfin|emby|kodi), url, token,
     library_path, library_id, layout_mode (seasoned|flat), portable_m3u,
-    native_playlist, playlist_name, watched_user_id, watched_user_name.
+    native_playlist, playlist_name, sidecar_profile, upload_profile_id,
+    upload_after_import, watched_user_id, watched_user_name.
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Iterable
 
-from ..metadata import MetadataSaver
 
 # Supported server types. Kodi is file-based: NFO files and M3U playlists are
 # native to a Kodi library, while the other three types also support a remote
@@ -33,6 +33,7 @@ SERVER_TYPES = ["plex", "jellyfin", "emby", "kodi"]
 LAYOUT_MODES = ["seasoned", "flat"]
 DEFAULT_LAYOUT_MODE = "seasoned"
 DEFAULT_PLAYLIST_NAME = "StreamKeep"
+SIDECAR_PROFILES = ["jellyfin", "plex", "archive", "full", "none"]
 _MEDIA_EXTS = (
     ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
     ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
@@ -84,6 +85,9 @@ def normalize_media_server_config(config: dict[str, Any] | None) -> dict[str, An
         "layout_mode": layout_mode,
         "portable_m3u": bool(raw.get("portable_m3u", False)),
         "native_playlist": bool(raw.get("native_playlist", False)),
+        "sidecar_profile": str(raw.get("sidecar_profile", "") or "").strip().lower(),
+        "upload_profile_id": str(raw.get("upload_profile_id", "") or "").strip(),
+        "upload_after_import": bool(raw.get("upload_after_import", False)),
         "playlist_name": str(
             raw.get("playlist_name", DEFAULT_PLAYLIST_NAME) or DEFAULT_PLAYLIST_NAME
         ).strip() or DEFAULT_PLAYLIST_NAME,
@@ -203,6 +207,213 @@ def plan_media_import(
         episode=episode,
         layout_mode=layout_mode,
     )
+
+
+def _sidecar_profile(config: dict[str, Any]) -> str:
+    """Choose a deterministic sidecar profile for a media-server export."""
+    requested = str(config.get("sidecar_profile", "") or "").strip().lower()
+    if requested in SIDECAR_PROFILES:
+        return requested
+    server_type = str(config.get("server_type", "plex") or "plex").lower()
+    return {
+        "jellyfin": "jellyfin",
+        "emby": "jellyfin",
+        "plex": "plex",
+        "kodi": "full",
+    }.get(server_type, "full")
+
+
+def preview_media_import(
+    config: dict[str, Any],
+    out_dir: str | os.PathLike[str],
+    info: object | None = None,
+) -> dict[str, Any]:
+    """Return a side-effect-free media-server layout preview."""
+    cfg = normalize_media_server_config(config)
+    plan = plan_media_import(cfg, out_dir, info)
+    if plan is None:
+        return {
+            "ok": False,
+            "server_type": cfg["server_type"],
+            "layout_mode": cfg["layout_mode"],
+            "error": "No media file or library path is available",
+            "files": [],
+        }
+    from .sidecar_profiles import BUILTIN_PROFILES
+
+    profile = _sidecar_profile(cfg)
+    profile_cfg = BUILTIN_PROFILES[profile]
+    stem = os.path.splitext(os.path.basename(plan.destination))[0]
+    target_dir = os.path.dirname(plan.destination)
+    files = [{
+        "kind": "media",
+        "path": plan.destination,
+        "relative_path": plan.relative_path,
+        "bytes": os.path.getsize(plan.media_path),
+    }]
+    if profile_cfg.get("nfo"):
+        files.append({
+            "kind": "nfo",
+            "path": os.path.join(target_dir, f"{stem}.nfo"),
+            "relative_path": os.path.relpath(
+                os.path.join(target_dir, f"{stem}.nfo"), plan.library_path,
+            ).replace(os.sep, "/"),
+            "bytes": 0,
+        })
+    if profile_cfg.get("metadata_json"):
+        files.append({
+            "kind": "metadata",
+            "path": os.path.join(target_dir, "metadata.json"),
+            "relative_path": os.path.relpath(
+                os.path.join(target_dir, "metadata.json"), plan.library_path,
+            ).replace(os.sep, "/"),
+            "bytes": 0,
+        })
+    if profile_cfg.get("thumbnail"):
+        files.append({
+            "kind": "thumbnail",
+            "path": os.path.join(target_dir, "thumbnail.jpg"),
+            "relative_path": os.path.relpath(
+                os.path.join(target_dir, "thumbnail.jpg"), plan.library_path,
+            ).replace(os.sep, "/"),
+            "bytes": 0,
+        })
+    if cfg.get("portable_m3u") or (
+        cfg["server_type"] == "kodi" and cfg.get("native_playlist")
+    ):
+        playlist = os.path.join(
+            plan.library_path, _safe_playlist_name(cfg["playlist_name"]),
+        )
+        files.append({
+            "kind": "playlist",
+            "path": playlist,
+            "relative_path": os.path.basename(playlist),
+            "bytes": 0,
+        })
+    return {
+        "ok": True,
+        "server_type": cfg["server_type"],
+        "layout_mode": plan.layout_mode,
+        "sidecar_profile": profile,
+        "library_path": plan.library_path,
+        "destination": plan.destination,
+        "relative_media_path": plan.relative_path,
+        "files": files,
+        "total_bytes": sum(int(item["bytes"] or 0) for item in files),
+        "plan": plan,
+    }
+
+
+def materialize_media_import(
+    config: dict[str, Any],
+    out_dir: str | os.PathLike[str],
+    info: object | None = None,
+    *,
+    log_fn=None,
+) -> dict[str, Any]:
+    """Commit a previously previewable layout and return generated files."""
+    preview = preview_media_import(config, out_dir, info)
+    if not preview.get("ok"):
+        return preview
+    plan = preview["plan"]
+    if os.path.lexists(plan.destination):
+        raise FileExistsError(
+            f"Media-server destination already exists: {plan.relative_path}"
+        )
+    os.makedirs(os.path.dirname(plan.destination), exist_ok=True)
+    try:
+        os.link(plan.media_path, plan.destination)
+        action = "Hardlinked"
+    except OSError:
+        shutil.copy2(plan.media_path, plan.destination)
+        action = "Copied"
+    if log_fn:
+        log_fn(f"[MEDIA-SERVER] {action} → {plan.destination}")
+
+    from .sidecar_profiles import generate_sidecars
+
+    cfg = normalize_media_server_config(config)
+    sidecar_results = generate_sidecars(
+        os.path.dirname(plan.destination), info,
+        profile=_sidecar_profile(cfg),
+        file_base=os.path.splitext(os.path.basename(plan.destination))[0],
+        log_fn=log_fn,
+    ) if info else {}
+    if cfg.get("portable_m3u") or (
+        cfg["server_type"] == "kodi" and cfg.get("native_playlist")
+    ):
+        playlist_path = write_portable_m3u(
+            cfg["library_path"], cfg["playlist_name"],
+        )
+        sidecar_results["playlist"] = playlist_path
+        if log_fn:
+            log_fn(f"[MEDIA-SERVER] Portable playlist updated → {playlist_path}")
+
+    files = []
+    for item in preview["files"]:
+        candidate = item["path"]
+        if os.path.isfile(candidate):
+            files.append({
+                **item,
+                "bytes": os.path.getsize(candidate),
+            })
+    for key, value in sidecar_results.items():
+        if value and os.path.isfile(value) and not any(
+            item["path"] == os.path.abspath(value) for item in files
+        ):
+            path = os.path.abspath(value)
+            files.append({
+                "kind": key,
+                "path": path,
+                "relative_path": os.path.relpath(
+                    path, plan.library_path,
+                ).replace(os.sep, "/"),
+                "bytes": os.path.getsize(path),
+            })
+    return {
+        **preview,
+        "plan": plan,
+        "files": files,
+        "total_bytes": sum(int(item["bytes"] or 0) for item in files),
+        "sidecars": sidecar_results,
+    }
+
+
+def queue_media_server_export(
+    config: dict[str, Any],
+    out_dir: str | os.PathLike[str],
+    info: object | None,
+    profile_id: str,
+    *,
+    log_fn=None,
+) -> dict[str, Any]:
+    """Materialize a layout and enqueue each generated file for upload."""
+    from ..upload.runtime import get_runtime, public_job, resolve_profile
+
+    runtime = get_runtime()
+    if resolve_profile(profile_id) is None:
+        raise ValueError("Upload profile was not found")
+    exported = materialize_media_import(config, out_dir, info, log_fn=log_fn)
+    if not exported.get("ok"):
+        return exported
+    jobs = []
+    for item in exported.get("files", []):
+        relative = str(item.get("relative_path", "") or "")
+        remote_dir = os.path.dirname(relative).replace(os.sep, "/")
+        job = runtime.enqueue(
+            profile_id, item["path"],
+            metadata={
+                "kind": item.get("kind", ""),
+                "title": getattr(info, "title", "") if info else "",
+                "remote_dir": remote_dir,
+            },
+        )
+        jobs.append(public_job(job))
+    return {
+        **exported,
+        "upload_profile_id": str(profile_id or ""),
+        "upload_jobs": jobs,
+    }
 
 
 def _within_directory(path: str | os.PathLike[str], directory: str | os.PathLike[str]) -> bool:
@@ -734,42 +945,40 @@ def import_to_media_server(config, out_dir, info=None, log_fn=None, monitor_entr
 
 
 def _do_import(config, out_dir, info, log_fn):
-    plan = plan_media_import(config, out_dir, info)
-    if plan is None:
+    exported = materialize_media_import(config, out_dir, info, log_fn=log_fn)
+    if not exported.get("ok"):
         if log_fn:
-            log_fn("[MEDIA-SERVER] No media file or library path found — skipping import.")
-        return
-    os.makedirs(os.path.dirname(plan.destination), exist_ok=True)
-    try:
-        os.link(plan.media_path, plan.destination)
-        if log_fn:
-            log_fn(f"[MEDIA-SERVER] Hardlinked → {plan.destination}")
-    except OSError:
-        shutil.copy2(plan.media_path, plan.destination)
-        if log_fn:
-            log_fn(f"[MEDIA-SERVER] Copied → {plan.destination}")
-
-    if info:
-        MetadataSaver.write_nfo(
-            os.path.dirname(plan.destination), info,
-            file_base=os.path.splitext(os.path.basename(plan.destination))[0],
-        )
-
-    cfg = normalize_media_server_config(config)
-    write_playlist = bool(
-        cfg.get("portable_m3u")
-        or (cfg.get("server_type") == "kodi" and cfg.get("native_playlist"))
-    )
-    if write_playlist:
-        try:
-            playlist_path = write_portable_m3u(
-                cfg["library_path"], cfg["playlist_name"],
+            log_fn(
+                "[MEDIA-SERVER] "
+                f"{exported.get('error', 'No media file or library path found')}"
+                " — skipping import."
             )
+        return
+    cfg = normalize_media_server_config(config)
+    plan = exported["plan"]
+    if cfg.get("upload_after_import") and cfg.get("upload_profile_id"):
+        try:
+            from ..upload.runtime import get_runtime
+
+            runtime = get_runtime()
+            for item in exported.get("files", []):
+                relative = str(item.get("relative_path", "") or "")
+                runtime.enqueue(
+                    cfg["upload_profile_id"], item["path"],
+                    metadata={
+                        "kind": item.get("kind", ""),
+                        "title": getattr(info, "title", "") if info else "",
+                        "remote_dir": os.path.dirname(relative).replace(os.sep, "/"),
+                    },
+                )
             if log_fn:
-                log_fn(f"[MEDIA-SERVER] Portable playlist updated → {playlist_path}")
-        except OSError as error:
+                log_fn(
+                    f"[UPLOAD] Queued {len(exported.get('files', []))} "
+                    "media-server file(s)."
+                )
+        except Exception as error:
             if log_fn:
-                log_fn(f"[MEDIA-SERVER] Portable playlist failed: {error}")
+                log_fn(f"[UPLOAD] Media-server export queue failed: {error}")
 
     url = cfg["url"]
     token = cfg["token"]

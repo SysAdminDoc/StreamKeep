@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added secure upload and media-server export delivery. Authenticated REST
+  clients can save redacted destination profiles, preview and materialize
+  Plex/Jellyfin/Emby/Kodi layouts with sidecars, and queue durable per-file
+  transfers with persisted progress, retries, cancellation, and restart
+  recovery. SFTP now rejects unknown host keys, FTPS validates certificates,
+  and plain FTP/HTTP WebDAV require explicit insecure opt-in.
+
 - Added authenticated gallery and RSS publishing. History can publish or revoke
   selected recordings and channel/all-recording feeds; durable random ids survive
   restart, while gallery/media/feed routes enforce bearer access, canonical media

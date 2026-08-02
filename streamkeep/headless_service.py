@@ -985,6 +985,19 @@ class HeadlessJobService(QObject):
             finalize_error="", failure_id=0,
         )
         if completed:
+            media_config = self.config.get("media_server", {})
+            if isinstance(media_config, dict) and media_config.get("enabled"):
+                try:
+                    from .integrations.media_server import import_to_media_server
+
+                    import_to_media_server(
+                        media_config, output_dir, info=result.get("info"),
+                        log_fn=write_log_line,
+                    )
+                except Exception as error:
+                    write_log_line(
+                        f"[MEDIA-SERVER] Auto-import could not start: {error}"
+                    )
             write_log_line(f"[SERVICE] Completed job {job_id}")
 
     def _on_finalize_finished(self, job_id: str) -> None:

@@ -476,6 +476,7 @@ def _validate_media_server_schema(value):
     allowed = {
         "enabled", "server_type", "url", "token", "library_id", "library_path",
         "layout_mode", "portable_m3u", "native_playlist", "playlist_name",
+        "sidecar_profile", "upload_profile_id", "upload_after_import",
         "watched_user_id", "watched_user_name",
     }
     unknown = set(value) - allowed
@@ -483,10 +484,12 @@ def _validate_media_server_schema(value):
         raise ConfigImportError(
             "media_server has unsupported fields: " + ", ".join(sorted(unknown))
         )
-    for key in ("enabled", "portable_m3u", "native_playlist"):
+    for key in ("enabled", "portable_m3u", "native_playlist", "upload_after_import"):
         if key in value and not isinstance(value[key], bool):
             raise ConfigImportError(f"media_server.{key} must be boolean")
-    for key in allowed - {"enabled", "portable_m3u", "native_playlist"}:
+    for key in allowed - {
+        "enabled", "portable_m3u", "native_playlist", "upload_after_import",
+    }:
         if key in value and not isinstance(value[key], str):
             raise ConfigImportError(f"media_server.{key} must be a string")
     if value.get("server_type", "plex") not in {"plex", "jellyfin", "emby", "kodi"}:
@@ -496,6 +499,12 @@ def _validate_media_server_schema(value):
     if value.get("layout_mode", "seasoned") not in {"seasoned", "flat"}:
         raise ConfigImportError(
             "media_server.layout_mode must be seasoned or flat"
+        )
+    if value.get("sidecar_profile", "") not in {
+        "", "jellyfin", "plex", "archive", "full", "none",
+    }:
+        raise ConfigImportError(
+            "media_server.sidecar_profile must be jellyfin, plex, archive, full, or none"
         )
 
 

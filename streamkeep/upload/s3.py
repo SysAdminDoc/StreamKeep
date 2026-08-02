@@ -7,6 +7,7 @@ Config keys: endpoint_url, bucket, access_key, secret_key, prefix, region.
 """
 
 import os
+import urllib.parse
 
 from .base import UploadDestination
 
@@ -40,7 +41,7 @@ class S3Destination(UploadDestination):
             s3.upload_file(file_path, cfg["bucket"], key, Callback=cb)
             return True, f"Uploaded to s3://{cfg['bucket']}/{key}"
         except Exception as e:
-            return False, f"S3 upload failed: {e}"
+            return False, self.safe_message(f"S3 upload failed: {e}")
 
     def test_connection(self):
         cfg, err = self._validate_config()
@@ -56,7 +57,7 @@ class S3Destination(UploadDestination):
             s3.head_bucket(Bucket=cfg["bucket"])
             return True, "Connection OK"
         except Exception as e:
-            return False, f"Connection failed: {e}"
+            return False, self.safe_message(f"Connection failed: {e}")
 
     def _validate_config(self, file_path=None):
         cfg = self.config or {}
@@ -75,6 +76,19 @@ class S3Destination(UploadDestination):
             return None, "S3 secret key not configured"
         if file_path and not os.path.isfile(file_path):
             return None, "File not found"
+        if endpoint:
+            parsed = urllib.parse.urlsplit(endpoint)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                return None, "S3 endpoint URL is invalid"
+            if parsed.username or parsed.password or parsed.fragment:
+                return None, "S3 endpoint URL cannot contain credentials or a fragment"
+            if parsed.scheme == "http" and not bool(
+                cfg.get("allow_insecure_http", False)
+            ):
+                return None, (
+                    "Plain HTTP S3 endpoints are disabled by default; use HTTPS "
+                    "or explicitly enable allow_insecure_http."
+                )
         return {
             "bucket": bucket,
             "access_key": access_key,

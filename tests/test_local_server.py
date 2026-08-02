@@ -1175,6 +1175,124 @@ class LocalServerTests(unittest.TestCase):
                     f"/feed/{feed_id}.xml", 404, token=self.server.token,
                 )
 
+    def test_authenticated_upload_profiles_and_media_server_export(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "library.db"
+            recording_dir = root / "recording"
+            recording_dir.mkdir()
+            (recording_dir / "episode.mp4").write_bytes(b"episode")
+            library = root / "library"
+            library.mkdir()
+            server = LocalCompanionServer()
+            with mock.patch.object(db, "DB_PATH", db_path), \
+                 mock.patch(
+                     "streamkeep.upload.runtime.set_secret_value",
+                     return_value="secretref:upload-profile:dav",
+                 ), mock.patch("streamkeep.upload.runtime.delete_secret_value"), \
+                 mock.patch(
+                     "streamkeep.upload.runtime.UploadRuntime.enqueue",
+                     side_effect=lambda profile_id, source_path, metadata=None:
+                     db.create_upload_job(
+                         profile_id, "WebDAV", source_path, metadata=metadata,
+                     ),
+                 ):
+                db.init_db()
+                server.start()
+                try:
+                    profile, status = self._open_json(
+                        "/api/uploads/profiles",
+                        server=server,
+                        token=server.token,
+                        method="POST",
+                        data={
+                            "profile_id": "dav",
+                            "label": "DAV",
+                            "adapter": "WebDAV",
+                            "config": {
+                                "url": "https://dav.example/root",
+                                "username": "alice",
+                                "password": "never-in-json",
+                            },
+                        },
+                    )
+                    profiles, _ = self._open_json(
+                        "/api/uploads/profiles",
+                        server=server,
+                        token=server.token,
+                    )
+                    upload_job, upload_status = self._open_json(
+                        "/api/uploads",
+                        server=server,
+                        token=server.token,
+                        method="POST",
+                        data={
+                            "profile_id": "dav",
+                            "source_path": str(recording_dir / "episode.mp4"),
+                            "metadata": {"kind": "media"},
+                        },
+                    )
+                    preview, preview_status = self._open_json(
+                        "/api/media-server/preview",
+                        server=server,
+                        token=server.token,
+                        method="POST",
+                        data={
+                            "config": {
+                                "server_type": "jellyfin",
+                                "library_path": str(library),
+                                "sidecar_profile": "jellyfin",
+                            },
+                            "out_dir": str(recording_dir),
+                            "info": {
+                                "platform": "Podcast",
+                                "channel": "Show",
+                                "title": "Episode",
+                                "source_id": "episode-1",
+                                "start_time": "2026-08-02T12:00:00Z",
+                            },
+                        },
+                    )
+                    exported, export_status = self._open_json(
+                        "/api/media-server/export",
+                        server=server,
+                        token=server.token,
+                        method="POST",
+                        data={
+                            "config": {
+                                "server_type": "jellyfin",
+                                "library_path": str(library),
+                                "sidecar_profile": "jellyfin",
+                            },
+                            "out_dir": str(recording_dir),
+                            "upload_profile_id": "dav",
+                            "info": {
+                                "platform": "Podcast",
+                                "channel": "Show",
+                                "title": "Episode",
+                                "source_id": "episode-1",
+                                "start_time": "2026-08-02T12:00:00Z",
+                            },
+                        },
+                    )
+                finally:
+                    server.stop()
+
+        self.assertEqual(status, 201)
+        self.assertEqual(
+            profile["profile"]["config"], {"url": "https://dav.example/root"}
+        )
+        self.assertNotIn("never-in-json", json.dumps(profile))
+        self.assertEqual(len(profiles["profiles"]), 1)
+        self.assertEqual(upload_status, 202)
+        self.assertEqual(upload_job["job"]["status"], "queued")
+        self.assertEqual(preview_status, 200)
+        self.assertTrue(preview["ok"])
+        self.assertEqual(export_status, 202)
+        self.assertTrue(exported["ok"])
+        self.assertTrue(any(item["kind"] == "media" for item in exported["files"]))
+        self.assertTrue(exported["upload_jobs"])
+
 
 if __name__ == "__main__":
     unittest.main()

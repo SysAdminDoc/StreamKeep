@@ -35,6 +35,8 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /media/{id}",
     "GET /feed/{id}.xml",
     "GET /api/shares",
+    "GET /api/uploads",
+    "GET /api/uploads/profiles",
     "GET /api/jobs/{id}",
     "POST /pair",
     "POST /send_url",
@@ -44,6 +46,12 @@ DOCUMENTED_OPERATIONS = frozenset({
     "POST /api/shares/recording/revoke",
     "POST /api/shares/feed",
     "POST /api/shares/feed/revoke",
+    "POST /api/uploads",
+    "POST /api/uploads/profiles",
+    "POST /api/uploads/retry",
+    "POST /api/uploads/cancel",
+    "POST /api/media-server/preview",
+    "POST /api/media-server/export",
     "POST /api/jobs/cancel",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
@@ -197,6 +205,38 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "title": {"type": "string"},
                     },
                     "required": ["channel"],
+                },
+                "UploadProfileRequest": {
+                    "type": "object",
+                    "properties": {
+                        "profile_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                        "label": {"type": "string"},
+                        "adapter": {"type": "string"},
+                        "config": {
+                            "type": "object",
+                            "description": "Destination settings; secret fields are stored outside SQLite.",
+                        },
+                    },
+                    "required": ["profile_id", "adapter", "config"],
+                },
+                "UploadRequest": {
+                    "type": "object",
+                    "properties": {
+                        "profile_id": {"type": "string"},
+                        "source_path": {"type": "string"},
+                        "metadata": {"type": "object"},
+                    },
+                    "required": ["profile_id", "source_path"],
+                },
+                "MediaServerExportRequest": {
+                    "type": "object",
+                    "properties": {
+                        "config": {"type": "object"},
+                        "out_dir": {"type": "string"},
+                        "info": {"type": "object"},
+                        "upload_profile_id": {"type": "string"},
+                    },
+                    "required": ["config", "out_dir"],
                 },
             },
         },
@@ -384,6 +424,129 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "403": forbidden,
                     },
                 }
+            },
+            "/api/uploads": {
+                "get": {
+                    "summary": "List persisted upload progress and retry state.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Upload jobs.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "uploads": {"type": "array", "items": {"type": "object"}},
+                            },
+                        }),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+                "post": {
+                    "summary": "Queue one completed file for upload delivery.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/UploadRequest"}}
+                    }},
+                    "responses": {
+                        "202": json_ok("Upload queued.", {"type": "object"}),
+                        "400": {"description": "Invalid upload job.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/uploads/profiles": {
+                "get": {
+                    "summary": "List redacted upload destination profiles.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Upload profiles.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+                "post": {
+                    "summary": "Save a secure upload destination profile.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/UploadProfileRequest"}}
+                    }},
+                    "responses": {
+                        "201": json_ok("Profile saved.", {"type": "object"}),
+                        "400": {"description": "Invalid profile.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/uploads/retry": {
+                "post": {
+                    "summary": "Retry a persisted upload job.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "object", "required": ["upload_id"]}}
+                    }},
+                    "responses": {
+                        "202": json_ok("Upload retry queued.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Upload is not retryable.", "content": error_content},
+                    },
+                },
+            },
+            "/api/uploads/cancel": {
+                "post": {
+                    "summary": "Cancel a queued or active upload job.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "object", "required": ["upload_id"]}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Upload cancelled.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Upload is not cancellable.", "content": error_content},
+                    },
+                },
+            },
+            "/api/media-server/preview": {
+                "post": {
+                    "summary": "Preview a deterministic media-server layout.",
+                    "tags": ["media-server"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/MediaServerExportRequest"}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Layout preview.", {"type": "object"}),
+                        "400": {"description": "Preview failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/media-server/export": {
+                "post": {
+                    "summary": "Materialize a layout and optionally queue its files for upload.",
+                    "tags": ["media-server"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/MediaServerExportRequest"}}
+                    }},
+                    "responses": {
+                        "201": json_ok("Layout materialized.", {"type": "object"}),
+                        "202": json_ok("Layout materialized and upload queued.", {"type": "object"}),
+                        "400": {"description": "Export failed.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
             },
             "/api/jobs/{id}": {
                 "get": {

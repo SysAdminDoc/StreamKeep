@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from .base import UploadDestination
+from .base import UploadDestination, sanitize_upload_message
 
 
 class UploadWorker(QThread):
@@ -28,13 +28,18 @@ class UploadWorker(QThread):
 
         try:
             dest = cls(self._config)
-            self.log.emit(f"[UPLOAD] Starting {self._adapter_name}: {self._file_path}")
+            self.log.emit(
+                f"[UPLOAD] Starting {self._adapter_name}: {self._file_path}"
+            )
 
             def _progress(sent, total):
                 self.progress.emit(sent, total)
 
-            ok, msg = dest.upload(self._file_path, self._metadata, progress_cb=_progress)
+            ok, msg = dest.upload(
+                self._file_path, self._metadata, progress_cb=_progress,
+            )
         except Exception as e:
             ok, msg = False, f"{self._adapter_name} upload crashed: {e}"
-        self.log.emit(f"[UPLOAD] {'OK' if ok else 'FAIL'}: {msg}")
-        self.done.emit(ok, msg)
+        safe_msg = sanitize_upload_message(msg, self._config)
+        self.log.emit(f"[UPLOAD] {'OK' if ok else 'FAIL'}: {safe_msg}")
+        self.done.emit(ok, safe_msg)

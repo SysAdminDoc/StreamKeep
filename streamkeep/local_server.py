@@ -22,6 +22,12 @@ REST API endpoints (F37):
   GET  /media/{id}    — authenticated Range media stream         [status]
   GET  /feed/{id}.xml — authenticated published RSS feed         [status]
   GET  /api/shares    — published recordings/feed definitions     [status]
+  GET  /api/uploads   — persisted upload progress and retry state  [status]
+  GET  /api/uploads/profiles — redacted upload profiles           [status]
+  POST /api/uploads   — queue one completed file for delivery      [queue]
+  POST /api/uploads/profiles — save a secure destination profile   [queue]
+  POST /api/media-server/preview — preview a library layout        [status]
+  POST /api/media-server/export — materialize and optionally upload [queue]
   GET  /api/monitor   — channel monitor statuses                [status]
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
   POST /api/failures/cancel-retry — stop an automatic retry     [recovery]
@@ -59,6 +65,14 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /api/shares/recording/revoke",
     "POST /api/shares/feed",
     "POST /api/shares/feed/revoke",
+    "GET /api/uploads",
+    "GET /api/uploads/profiles",
+    "POST /api/uploads",
+    "POST /api/uploads/profiles",
+    "POST /api/uploads/retry",
+    "POST /api/uploads/cancel",
+    "POST /api/media-server/preview",
+    "POST /api/media-server/export",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
 })
@@ -967,6 +981,12 @@ def _build_handler(
             elif path == "/api/shares":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_shares()
+            elif path == "/api/uploads":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_uploads()
+            elif path == "/api/uploads/profiles":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_upload_profiles()
             elif path == "/api/monitor":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_monitor()
@@ -1003,6 +1023,24 @@ def _build_handler(
             elif path == "/api/shares/feed/revoke":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_share_feed_revoke()
+            elif path == "/api/uploads/profiles":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_upload_profile_save()
+            elif path == "/api/uploads":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_upload_create()
+            elif path == "/api/uploads/retry":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_upload_retry()
+            elif path == "/api/uploads/cancel":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_upload_cancel()
+            elif path == "/api/media-server/preview":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_media_server_preview()
+            elif path == "/api/media-server/export":
+                if self._require_auth(SCOPE_QUEUE, mutating=True):
+                    self._handle_api_media_server_export()
             elif path == "/api/queue":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_queue()
@@ -1358,6 +1396,197 @@ def _build_handler(
                 "recordings": recordings,
                 "feeds": feeds,
             })
+
+        def _handle_api_uploads(self):
+            from .upload.runtime import get_runtime, public_job
+
+            runtime = get_runtime()
+            runtime.start_due()
+            from . import db as _db
+            self._json_response(200, {
+                "ok": True,
+                "uploads": [
+                    public_job(row) for row in _db.load_upload_jobs(limit=100)
+                ],
+            })
+
+        def _handle_api_upload_profiles(self):
+            from .upload.runtime import list_profiles
+
+            self._json_response(200, {"ok": True, "profiles": list_profiles()})
+
+        def _handle_api_upload_profile_save(self):
+            from .upload.runtime import save_profile
+
+            data = self._read_body()
+            profile_id = str(data.get("profile_id") or data.get("id") or "").strip()
+            adapter = str(data.get("adapter") or "").strip()
+            config = data.get("config", {})
+            if not profile_id or not adapter or not isinstance(config, dict):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "profile_id, adapter, and object config are required",
+                })
+                return
+            try:
+                profile = save_profile(
+                    profile_id, adapter, config,
+                    label=str(data.get("label") or "").strip(),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "upload_profile_invalid",
+                    "message": str(error),
+                })
+                return
+            self._json_response(201, {"ok": True, "profile": profile})
+
+        def _handle_api_upload_create(self):
+            from .upload.runtime import get_runtime, public_job
+
+            data = self._read_body()
+            profile_id = str(data.get("profile_id") or "").strip()
+            source_path = str(data.get("source_path") or data.get("path") or "").strip()
+            metadata = data.get("metadata", {})
+            if not profile_id or not source_path or not isinstance(metadata, dict):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "profile_id, source_path, and object metadata are required",
+                })
+                return
+            try:
+                job = get_runtime().enqueue(
+                    profile_id, source_path, metadata=metadata,
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "upload_job_invalid",
+                    "message": str(error),
+                })
+                return
+            self._json_response(202, {"ok": True, "job": public_job(job)})
+
+        def _handle_api_upload_retry(self):
+            from .upload.runtime import get_runtime, public_job
+
+            data = self._read_body()
+            upload_id = str(data.get("upload_id") or data.get("id") or "").strip()
+            runtime = get_runtime()
+            if not runtime.retry(upload_id):
+                self._json_response(404, {"ok": False, "err": "upload_not_retryable"})
+                return
+            from . import db as _db
+            self._json_response(202, {
+                "ok": True,
+                "job": public_job(_db.load_upload_job(upload_id)),
+            })
+
+        def _handle_api_upload_cancel(self):
+            from .upload.runtime import get_runtime, public_job
+
+            data = self._read_body()
+            upload_id = str(data.get("upload_id") or data.get("id") or "").strip()
+            runtime = get_runtime()
+            if not runtime.cancel(upload_id):
+                self._json_response(404, {"ok": False, "err": "upload_not_cancellable"})
+                return
+            from . import db as _db
+            self._json_response(200, {
+                "ok": True,
+                "job": public_job(_db.load_upload_job(upload_id)),
+            })
+
+        @staticmethod
+        def _media_server_info(data):
+            from types import SimpleNamespace
+
+            raw = data.get("info", {})
+            if raw is None:
+                return None
+            if not isinstance(raw, dict):
+                raise ValueError("info must be an object")
+            if not raw:
+                return None
+            allowed = {
+                "platform", "channel", "title", "source_id", "start_time",
+                "thumbnail_url", "total_secs", "duration_str", "url",
+                "feed_url", "is_live", "chapters", "qualities",
+            }
+            return SimpleNamespace(**{
+                key: raw[key] for key in allowed if key in raw
+            })
+
+        @staticmethod
+        def _public_media_export(result):
+            if not isinstance(result, dict):
+                return {"ok": False, "error": "invalid export result"}
+            payload = {
+                key: value for key, value in result.items() if key != "plan"
+            }
+            payload["files"] = [
+                {
+                    key: item.get(key)
+                    for key in ("kind", "path", "relative_path", "bytes")
+                    if key in item
+                }
+                for item in result.get("files", [])
+                if isinstance(item, dict)
+            ]
+            return payload
+
+        def _handle_api_media_server_preview(self):
+            from .integrations.media_server import preview_media_import
+
+            data = self._read_body()
+            config = data.get("config", {})
+            if not isinstance(config, dict):
+                self._json_response(400, {"ok": False, "err": "config must be an object"})
+                return
+            try:
+                result = preview_media_import(
+                    config, str(data.get("out_dir") or data.get("source_dir") or ""),
+                    self._media_server_info(data),
+                )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "media_server_preview_failed", "message": str(error),
+                })
+                return
+            self._json_response(200, self._public_media_export(result))
+
+        def _handle_api_media_server_export(self):
+            from .integrations import media_server
+
+            data = self._read_body()
+            config = data.get("config", {})
+            if not isinstance(config, dict):
+                self._json_response(400, {"ok": False, "err": "config must be an object"})
+                return
+            out_dir = str(data.get("out_dir") or data.get("source_dir") or "")
+            profile_id = str(
+                data.get("upload_profile_id")
+                or config.get("upload_profile_id", "")
+                or ""
+            ).strip()
+            try:
+                info = self._media_server_info(data)
+                if profile_id:
+                    result = media_server.queue_media_server_export(
+                        config, out_dir, info, profile_id,
+                    )
+                else:
+                    result = media_server.materialize_media_import(
+                        config, out_dir, info,
+                    )
+            except Exception as error:
+                self._json_response(400, {
+                    "ok": False, "err": "media_server_export_failed", "message": str(error),
+                })
+                return
+            status = 202 if profile_id else 201
+            self._json_response(status, self._public_media_export(result))
 
         def _handle_api_share_recording(self):
             from . import db as _db

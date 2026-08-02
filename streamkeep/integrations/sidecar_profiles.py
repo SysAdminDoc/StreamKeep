@@ -45,7 +45,7 @@ BUILTIN_PROFILES = {
 
 
 def generate_sidecars(output_dir, stream_info, vod_info=None, *, profile="full",
-                      overwrite=False, log_fn=None):
+                      overwrite=False, log_fn=None, file_base=""):
     """Generate sidecars according to a named profile.
 
     Returns a dict of ``{sidecar_name: path_or_None}``.
@@ -84,6 +84,7 @@ def generate_sidecars(output_dir, stream_info, vod_info=None, *, profile="full",
             try:
                 results["nfo"] = MetadataSaver.write_nfo(
                     output_dir, stream_info, vod_info,
+                    file_base=file_base,
                 )
             except MetadataWriteError as error:
                 results["nfo"] = None
@@ -127,9 +128,9 @@ def _find_nfo(output_dir):
 
 
 def refresh_sidecars(output_dir, stream_info, vod_info=None, *, profile="full",
-                     log_fn=None):
+                     log_fn=None, file_base=""):
     """Regenerate sidecars, overwriting existing ones."""
     return generate_sidecars(
         output_dir, stream_info, vod_info,
-        profile=profile, overwrite=True, log_fn=log_fn,
+        profile=profile, overwrite=True, log_fn=log_fn, file_base=file_base,
     )

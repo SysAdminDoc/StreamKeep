@@ -30,7 +30,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 _PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _PUBLISHING_TEXT_LIMIT = 256
@@ -84,6 +84,8 @@ def init_db() -> None:
                 _migrate_media_layout_v12(db)
             if 0 < v < 13:
                 _migrate_publishing_v13(db)
+            if 0 < v < 14:
+                _migrate_upload_v14(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -310,6 +312,7 @@ def _apply_schema(db):
     if statement and "".join(statement).strip():
         db.execute("".join(statement))
     _apply_publishing_schema(db)
+    _apply_upload_schema(db)
 
 
 def _apply_publishing_schema(db):
@@ -337,6 +340,54 @@ def _apply_publishing_schema(db):
         "ON published_feeds(channel COLLATE NOCASE)",
     ):
         db.execute(statement)
+
+
+def _apply_upload_schema(db):
+    """Create the credential-free upload profile/job ledger."""
+    for statement in (
+        """
+        CREATE TABLE IF NOT EXISTS upload_profiles (
+            profile_id  TEXT PRIMARY KEY,
+            label       TEXT NOT NULL DEFAULT '',
+            adapter     TEXT NOT NULL DEFAULT '',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            secret_ref  TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT '',
+            updated_at  TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS upload_jobs (
+            upload_id       TEXT PRIMARY KEY,
+            profile_id      TEXT NOT NULL,
+            adapter         TEXT NOT NULL DEFAULT '',
+            source_path     TEXT NOT NULL DEFAULT '',
+            metadata_json   TEXT NOT NULL DEFAULT '{}',
+            status          TEXT NOT NULL DEFAULT 'queued',
+            bytes_sent      INTEGER NOT NULL DEFAULT 0,
+            total_bytes     INTEGER NOT NULL DEFAULT 0,
+            attempts        INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at REAL NOT NULL DEFAULT 0,
+            last_error      TEXT NOT NULL DEFAULT '',
+            remote_uri      TEXT NOT NULL DEFAULT '',
+            created_at      TEXT NOT NULL DEFAULT '',
+            updated_at      TEXT NOT NULL DEFAULT '',
+            completed_at    TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY(profile_id) REFERENCES upload_profiles(profile_id)
+                ON DELETE RESTRICT
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_upload_jobs_status "
+        "ON upload_jobs(status, next_attempt_at, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_upload_jobs_profile "
+        "ON upload_jobs(profile_id, updated_at)",
+    ):
+        db.execute(statement)
+
+
+def _migrate_upload_v14(db):
+    """Install the durable upload profile and transfer ledger."""
+    _apply_upload_schema(db)
 
 
 def _migrate_queue_v4(db):
@@ -2315,6 +2366,376 @@ def archive_manifest_count() -> int:
         return db.execute("SELECT COUNT(*) FROM archive_manifests").fetchone()[0]
     finally:
         db.close()
+
+
+# ── Upload profiles and durable transfer jobs ───────────────────────
+
+def save_upload_profile(
+    profile_id: str,
+    adapter: str,
+    config: dict[str, Any],
+    *,
+    label: str = "",
+    secret_ref: str = "",
+) -> dict[str, Any]:
+    """Persist a non-secret upload profile and return its public row."""
+    profile_id = str(profile_id or "").strip()
+    adapter = str(adapter or "").strip()
+    if not profile_id or not adapter:
+        raise ValueError("upload profile id and adapter are required")
+    payload = json.dumps(dict(config or {}), ensure_ascii=False, sort_keys=True)
+    now = _utc_now_iso()
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO upload_profiles
+                    (profile_id, label, adapter, config_json, secret_ref,
+                     created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT(profile_id) DO UPDATE SET
+                    label=excluded.label,
+                    adapter=excluded.adapter,
+                    config_json=excluded.config_json,
+                    secret_ref=excluded.secret_ref,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    profile_id, str(label or ""), adapter, payload,
+                    str(secret_ref or ""), now, now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_upload_profile(profile_id) or {
+        "profile_id": profile_id,
+        "label": str(label or ""),
+        "adapter": adapter,
+        "config": dict(config or {}),
+        "secret_ref": str(secret_ref or ""),
+    }
+
+
+def _decode_upload_profile(row) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        config = json.loads(row["config_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    return {
+        "profile_id": str(row["profile_id"] or ""),
+        "label": str(row["label"] or ""),
+        "adapter": str(row["adapter"] or ""),
+        "config": config,
+        "secret_ref": str(row["secret_ref"] or ""),
+        "created_at": str(row["created_at"] or ""),
+        "updated_at": str(row["updated_at"] or ""),
+    }
+
+
+def load_upload_profile(profile_id: str) -> dict[str, Any] | None:
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM upload_profiles WHERE profile_id=?",
+            (str(profile_id or ""),),
+        ).fetchone()
+        return _decode_upload_profile(row)
+    finally:
+        db.close()
+
+
+def load_upload_profiles() -> list[dict[str, Any]]:
+    db = _connect(readonly=True)
+    try:
+        return [
+            item
+            for item in (
+                _decode_upload_profile(row)
+                for row in db.execute(
+                    "SELECT * FROM upload_profiles ORDER BY label COLLATE NOCASE, profile_id"
+                ).fetchall()
+            )
+            if item is not None
+        ]
+    finally:
+        db.close()
+
+
+def delete_upload_profile(profile_id: str) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "DELETE FROM upload_profiles WHERE profile_id=?",
+                (str(profile_id or ""),),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def _decode_upload_job(row) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        metadata = json.loads(row["metadata_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    result = dict(row)
+    result.pop("metadata_json", None)
+    result["metadata"] = metadata
+    for key in ("bytes_sent", "total_bytes", "attempts"):
+        result[key] = int(result.get(key, 0) or 0)
+    return result
+
+
+def create_upload_job(
+    profile_id: str,
+    adapter: str,
+    source_path: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    upload_id: str = "",
+) -> dict[str, Any]:
+    """Create a queued upload row without storing credential material."""
+    source_path = os.path.abspath(str(source_path or ""))
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(source_path)
+    profile_id = str(profile_id or "").strip()
+    adapter = str(adapter or "").strip()
+    if not profile_id or not adapter:
+        raise ValueError("upload profile and adapter are required")
+    upload_id = str(upload_id or uuid.uuid4().hex).strip()
+    now = _utc_now_iso()
+    total_bytes = os.path.getsize(source_path)
+    safe_metadata = dict(metadata or {})
+    payload = json.dumps(safe_metadata, ensure_ascii=False, sort_keys=True)
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO upload_jobs
+                    (upload_id, profile_id, adapter, source_path, metadata_json,
+                     status, bytes_sent, total_bytes, attempts, next_attempt_at,
+                     last_error, remote_uri, created_at, updated_at, completed_at)
+                VALUES (?,?,?,?,?,'queued',0,?,0,0,'','',?,?, '')
+                """,
+                (
+                    upload_id, profile_id, adapter, source_path, payload,
+                    int(total_bytes), now, now,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_upload_job(upload_id) or {}
+
+
+def load_upload_job(upload_id: str) -> dict[str, Any] | None:
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM upload_jobs WHERE upload_id=?",
+            (str(upload_id or ""),),
+        ).fetchone()
+        return _decode_upload_job(row)
+    finally:
+        db.close()
+
+
+def load_upload_jobs(limit: int = 100) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 100), 1000))
+    db = _connect(readonly=True)
+    try:
+        return [
+            item
+            for item in (
+                _decode_upload_job(row)
+                for row in db.execute(
+                    "SELECT * FROM upload_jobs "
+                    "ORDER BY CASE status WHEN 'uploading' THEN 0 "
+                    "WHEN 'retryable' THEN 1 ELSE 2 END, updated_at DESC "
+                    "LIMIT ?", (limit,)
+                ).fetchall()
+            )
+            if item is not None
+        ]
+    finally:
+        db.close()
+
+
+def load_due_upload_jobs(now: float | None = None) -> list[dict[str, Any]]:
+    current = float(time.time() if now is None else now)
+    db = _connect(readonly=True)
+    try:
+        return [
+            item
+            for item in (
+                _decode_upload_job(row)
+                for row in db.execute(
+                    "SELECT * FROM upload_jobs "
+                    "WHERE status IN ('queued','retryable') "
+                    "AND next_attempt_at <= ? ORDER BY created_at LIMIT 100",
+                    (current,),
+                ).fetchall()
+            )
+            if item is not None
+        ]
+    finally:
+        db.close()
+
+
+def start_upload_job(upload_id: str, now: float | None = None) -> dict[str, Any] | None:
+    current = float(time.time() if now is None else now)
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET status='uploading', attempts=attempts+1,
+                       next_attempt_at=0, last_error='', updated_at=?
+                 WHERE upload_id=? AND status IN ('queued','retryable')
+                   AND next_attempt_at <= ?
+                """,
+                (_utc_now_iso(), str(upload_id or ""), current),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_upload_job(upload_id)
+
+
+def update_upload_progress(upload_id: str, bytes_sent: int, total_bytes: int) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET bytes_sent=?, total_bytes=MAX(total_bytes, ?), updated_at=?
+                 WHERE upload_id=? AND status='uploading'
+                """,
+                (
+                    max(0, int(bytes_sent or 0)), max(0, int(total_bytes or 0)),
+                    _utc_now_iso(), str(upload_id or ""),
+                ),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def finish_upload_job(
+    upload_id: str,
+    *,
+    success: bool,
+    message: str = "",
+    remote_uri: str = "",
+    retry_delay: float = 30.0,
+) -> dict[str, Any] | None:
+    now = _utc_now_iso()
+    if success:
+        status = "completed"
+        next_attempt = 0.0
+        completed_at = now
+    else:
+        status = "retryable"
+        next_attempt = time.time() + max(1.0, min(float(retry_delay), 86400.0))
+        completed_at = ""
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET status=?, next_attempt_at=?, last_error=?, remote_uri=?,
+                       updated_at=?, completed_at=?
+                 WHERE upload_id=? AND status='uploading'
+                """,
+                (
+                    status, next_attempt, str(message or ""),
+                    str(remote_uri or ""), now, completed_at,
+                    str(upload_id or ""),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return load_upload_job(upload_id)
+
+
+def recover_upload_jobs() -> int:
+    """Return interrupted transfers to a visible retryable state."""
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET status='retryable', next_attempt_at=0,
+                       last_error='Transfer interrupted; retry required',
+                       updated_at=?
+                 WHERE status='uploading'
+                """,
+                (_utc_now_iso(),),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
+
+
+def retry_upload_job(upload_id: str) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET status='queued', next_attempt_at=0, last_error='',
+                       updated_at=?
+                 WHERE upload_id=? AND status IN ('retryable','cancelled')
+                """,
+                (_utc_now_iso(), str(upload_id or "")),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def cancel_upload_job(upload_id: str) -> bool:
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE upload_jobs
+                   SET status='cancelled', next_attempt_at=0,
+                       updated_at=?
+                 WHERE upload_id=? AND status IN ('queued','retryable','uploading')
+                """,
+                (_utc_now_iso(), str(upload_id or "")),
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
 
 
 def save_failed_job(

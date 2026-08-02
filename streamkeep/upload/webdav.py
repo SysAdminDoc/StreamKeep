@@ -19,7 +19,9 @@ class WebDAVDestination(UploadDestination):
 
     def upload(self, file_path, metadata=None, progress_cb=None):
         cfg = self.config
-        base_url = cfg.get("url", "").rstrip("/")
+        base_url, url_err = self._base_url()
+        if url_err:
+            return False, url_err
         user = cfg.get("username", "")
         passwd = cfg.get("password", "")
         remote_dir = cfg.get("remote_dir", "").strip("/")
@@ -40,8 +42,6 @@ class WebDAVDestination(UploadDestination):
         try:
             file_size = os.path.getsize(file_path)
             parsed = urllib.parse.urlsplit(target)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                return False, "Invalid WebDAV URL"
             path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
             conn = _open_http_connection(parsed, timeout=300)
             try:
@@ -77,11 +77,13 @@ class WebDAVDestination(UploadDestination):
             finally:
                 conn.close()
         except Exception as e:
-            return False, f"WebDAV upload failed: {e}"
+            return False, self.safe_message(f"WebDAV upload failed: {e}")
 
     def test_connection(self):
         cfg = self.config
-        base_url = cfg.get("url", "").rstrip("/")
+        base_url, url_err = self._base_url()
+        if url_err:
+            return False, url_err
         user = cfg.get("username", "")
         passwd = cfg.get("password", "")
         if not base_url:
@@ -99,7 +101,27 @@ class WebDAVDestination(UploadDestination):
                     return True, "WebDAV connection OK"
                 return False, f"Status {resp.status}"
         except Exception as e:
-            return False, f"WebDAV failed: {e}"
+            return False, self.safe_message(f"WebDAV failed: {e}")
+
+    def _base_url(self):
+        raw = str((self.config or {}).get("url", "") or "").strip().rstrip("/")
+        if not raw:
+            return "", "WebDAV URL not configured"
+        parsed = urllib.parse.urlsplit(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return "", "Invalid WebDAV URL"
+        if parsed.username or parsed.password:
+            return "", "WebDAV URL cannot contain embedded credentials"
+        if parsed.fragment:
+            return "", "WebDAV URL cannot contain a fragment"
+        if parsed.scheme == "http" and not bool(
+            (self.config or {}).get("allow_insecure_http", False)
+        ):
+            return "", (
+                "Plain HTTP WebDAV is disabled by default; use HTTPS or "
+                "explicitly enable allow_insecure_http."
+            )
+        return raw, ""
 
 
 def _open_http_connection(parsed, timeout):

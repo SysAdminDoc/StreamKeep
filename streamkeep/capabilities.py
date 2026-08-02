@@ -187,8 +187,12 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
-        "upload-delivery", "Secure upload and media-server delivery", "experimental",
-        "Upload delivery", reason="Adapters exist but no supported caller starts UploadWorker.",
+        "upload-delivery", "Secure upload and media-server delivery", "shipped",
+        "Upload delivery",
+        (ReachableProductPath(
+            "rest", "POST /api/uploads",
+            "tests/test_local_server.py::LocalServerTests::test_authenticated_upload_profiles_and_media_server_export",
+        ),),
     ),
     ProductCapabilityClaim(
         "plugin-adapters", "Third-party plugin adapters", "experimental",

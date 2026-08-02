@@ -52,6 +52,12 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Preview watched-state matches for one explicitly selected Plex/Jellyfin/Emby
   user before applying local watched/progress metadata; ambiguous matches are
   skipped and the import never deletes local media or enables lifecycle cleanup.
+- **Upload delivery** is shipped through the authenticated REST surface:
+  destination profiles keep credentials in the OS secure store, SFTP rejects
+  unknown host keys, FTPS validates certificates, and plain FTP/HTTP WebDAV
+  are disabled by default. Completed media-server layouts can be previewed,
+  materialized with sidecars, and queued as durable per-file transfers with
+  progress, retry, cancellation, and restart recovery.
 - Escalate polling around scheduled streams and avoid duplicate in-flight checks.
 
 ### Library, Storage, and Search
@@ -90,7 +96,6 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 The source tree contains early engines and unit-tested helpers that are not yet wired to a supported GUI, CLI, or REST caller. They are excluded from the shipped-capability registry until the corresponding roadmap item adds a reachable integration path:
 
-- **Upload delivery** — S3-compatible, FTP/SFTP, and WebDAV adapters exist, but no supported surface starts an upload job.
 - **Plugin adapters** — manifest discovery and trust validation exist, but approved plugins are not loaded by application startup.
 - **LLM summaries** and **Smart thumbnails** — intelligence workers exist without user-reachable controls or commands.
 - **Recording notes** — note storage exists without a GUI, CLI, or REST editor.
@@ -168,6 +173,8 @@ LAN access is opt-in and only operates through an explicitly configured HTTPS re
 In server mode, `POST /api/validate` probes a URL and returns bounded media picker metadata plus a short-lived, one-use validation id; delivery URLs stay server-side. Submit the chosen `media_item_id` and optional `background_audio_id` to `POST /api/queue`, which writes a durable SQLite job before returning `202` with a `job_id`. Use `GET /api/jobs/{job_id}` or `/api/status` to observe fetch, download, finalization, and terminal state; `POST /api/jobs/cancel` persists cancellation. Eligible interrupted jobs resume on restart, completed jobs appear in `/api/library`, and `/api/failures/retry` creates an observable retry job with its own durable acknowledgement.
 
 **Gallery/RSS publishing** is shipped: History context actions can publish selected recordings or a channel/all-recordings RSS feed. Publishing creates a random, durable share/feed id; revoke removes it immediately. The authenticated `GET /gallery`, `GET /share/{id}`, `GET /media/{id}`, and `GET /feed/{id}.xml` routes resolve only the canonical media file inside the published history directory, reject stale or traversing paths, and support Range playback. REST clients can use `GET /api/shares`, `POST /api/shares/recording`, `POST /api/shares/recording/revoke`, `POST /api/shares/feed`, and `POST /api/shares/feed/revoke`; all publishing and delivery routes require the scoped bearer session.
+
+**Secure upload and media-server export** is also reachable from the authenticated REST server. Use `POST /api/uploads/profiles` to save an SFTP, FTPS, S3-compatible, or HTTPS WebDAV destination (secret fields are stored outside SQLite), `POST /api/media-server/preview` to review a Plex/Jellyfin/Emby/Kodi layout, and `POST /api/media-server/export` to materialize it with sidecars. Use `POST /api/uploads` and `GET /api/uploads` for durable per-file progress, retry, cancellation, and restart recovery.
 
 The full REST contract is published as an OpenAPI 3.1 document at `GET /api/spec` (unauthenticated — it exposes only the API shape, no data). Point Swagger UI, Redoc, or a generated client at that URL for automation. A consistency test keeps the spec in lock-step with the server's route table, so the document never drifts from the implementation.
 

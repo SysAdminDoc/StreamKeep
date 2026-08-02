@@ -4,6 +4,26 @@ Each adapter subclasses ``UploadDestination`` and implements ``upload()``
 and ``test_connection()``.  Subclasses auto-register via ``__init_subclass__``.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
+
+def sanitize_upload_message(message: object, config: dict[str, Any] | None = None) -> str:
+    """Redact credentials and credential-bearing URLs from adapter output."""
+    from ..diagnostics import redact_text
+
+    text = redact_text(str(message or ""))
+    for key, value in dict(config or {}).items():
+        if not isinstance(value, str) or len(value) < 3:
+            continue
+        if any(token in str(key).lower() for token in (
+            "password", "secret", "token", "access_key", "api_key",
+            "private_key", "passphrase",
+        )):
+            text = text.replace(value, "<redacted>")
+    return text
+
 class UploadDestination:
     """Abstract base for upload adapters."""
 
@@ -34,6 +54,10 @@ class UploadDestination:
         Returns ``(ok, message)``.
         """
         raise NotImplementedError
+
+    def safe_message(self, message):
+        """Return an adapter message safe for logs and API responses."""
+        return sanitize_upload_message(message, self.config)
 
     @classmethod
     def all_adapters(cls):
