@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P2 — V58 — Transcript / global search silently returns nothing for queries containing FTS5 special characters
-  Category: ux
-  Where: `streamkeep/search.py:251-280` (`search_transcripts`, the `WHERE transcript_fts MATCH ?` query and its `except sqlite3.Error: rows = []`); call sites `streamkeep/ui/main_window.py:2665` (global unified search bar) and `streamkeep/ui/tabs/history.py:481` (History transcript-search mode).
-  Problem: The raw user query is passed straight into FTS5 `MATCH`, whose query grammar interprets `+ : " ( ) * - ^` and the bare keywords `AND/OR/NOT/NEAR`. Any query using those characters raises `sqlite3.OperationalError`, which is swallowed to an empty result set — so searching for very common literal strings (`C++`, `3:00`, `AT&T`, a stray double-quote, a trailing `AND`) returns zero hits with no error shown. Users conclude the archive doesn't contain the term.
-  Evidence: Confirmed against a live in-memory FTS5 table on `py -3.12`: `'C++'` → `fts5: syntax error near "+"`; `'foo:bar'` → `no such column: foo`; `'"unbalanced'` → `unterminated string`; `'a AND'` → `syntax error`; plain `'love'` → 1 hit. Read both call sites (main_window.py:2664-2665, history.py:479-481): neither sanitizes or quotes the query before passing it to `search_transcripts`; the `except sqlite3.Error` at search.py:273 turns the error into `[]`.
-  Fix: Sanitize the query into a safe FTS5 form before `MATCH` — tokenize on whitespace and wrap each token as a double-quoted string (escaping embedded `"` as `""`), producing an implicit-AND phrase query (e.g. `"C++" "syntax"`); optionally append `*` to the final token for prefix search. This makes punctuation literal instead of operative.
-  Acceptance: A unit test asserts `search_transcripts('C++')`, `search_transcripts('foo:bar')`, and `search_transcripts('"quote')` return the matching indexed rows (not `[]`) and never raise; existing multi-word searches still behave as implicit-AND.
-  Confidence: Verified.
-  Effort: S
-
 - [ ] P2 — V59 — Clip/Trim dialog paints with hardcoded stale palette literals — broken in Light and High Contrast themes and ignores the accent picker
   Category: visual
   Where: `streamkeep/ui/clip_dialog.py` — the custom-painted `ScrubberView` (filmstrip, `self.scrubber`) and `WaveformWidget` (`paintEvent`) plus the crop-preview overlay. Literal sites include lines 138-139, 147, 151, 156-157, 161-162, 175, 193-198, 497, 502, 510-511, 525, 527, 1075, 1081.

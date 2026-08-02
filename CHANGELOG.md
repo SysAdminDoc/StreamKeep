@@ -18,6 +18,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 - Hardened DASH, TTML, and OPML XML parsing (V57) with `defusedxml`, rejecting
   entity-expansion payloads before they can consume unbounded CPU or memory.
 
+- Fixed transcript search for FTS5 punctuation (V58): user terms are quoted,
+  embedded quotes are escaped, and matching is restricted to transcript text
+  so strings such as `C++`, `foo:bar`, and quoted terms return their hits.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

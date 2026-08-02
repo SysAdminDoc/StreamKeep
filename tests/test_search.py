@@ -7,6 +7,34 @@ from streamkeep import search
 
 
 class SearchTests(unittest.TestCase):
+    def test_search_transcripts_quotes_fts5_special_characters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            db_path = tmp / "search.db"
+            recording_dir = tmp / "recording"
+            recording_dir.mkdir()
+            (recording_dir / "captions.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nC++ syntax\n\n"
+                "2\n00:00:02,000 --> 00:00:03,000\nfoo:bar endpoint\n\n"
+                "3\n00:00:04,000 --> 00:00:05,000\nA \"quote\" here\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(search, "DB_PATH", db_path):
+                search.index_recording(str(recording_dir))
+                self.assertEqual(
+                    [hit["text"] for hit in search.search_transcripts("C++")],
+                    ["C++ syntax"],
+                )
+                self.assertEqual(
+                    [hit["text"] for hit in search.search_transcripts("foo:bar")],
+                    ["foo:bar endpoint"],
+                )
+                self.assertEqual(
+                    [hit["text"] for hit in search.search_transcripts('"quote')],
+                    ['A "quote" here'],
+                )
+
     def test_index_recording_removes_stale_entries_when_transcripts_disappear(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

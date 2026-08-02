@@ -248,12 +248,28 @@ def index_recording(recording_path):
     return len(all_segments)
 
 
+def _quote_fts5_term(term):
+    return '"' + str(term).replace('"', '""') + '"'
+
+
+def _fts5_literal_query(query):
+    """Quote terms and restrict FTS5 matching to transcript text."""
+    terms = [
+        _quote_fts5_term(term)
+        for term in str(query or "").strip().split()
+    ]
+    return f"text : ({' '.join(terms)})" if terms else ""
+
+
 def search_transcripts(query, limit=100):
     """Search indexed transcripts. Returns list of dicts:
     ``[{recording_path, text, start_sec, end_sec}]``
     """
     query = str(query or "").strip()
     if not query:
+        return []
+    fts_query = _fts5_literal_query(query)
+    if not fts_query:
         return []
     try:
         limit = max(1, int(limit or 100))
@@ -268,7 +284,7 @@ def search_transcripts(query, limit=100):
             "WHERE transcript_fts MATCH ? "
             "ORDER BY bm25(transcript_fts), s.rowid "
             "LIMIT ?",
-            (query, limit),
+            (fts_query, limit),
         ).fetchall()
     except sqlite3.Error:
         rows = []
