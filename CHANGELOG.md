@@ -4,6 +4,14 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added versioned plugin adapter contracts for extractors, post-processors, and
+  upload destinations. Manifest v2 declarations now include interface versions,
+  permissions, dependencies, and bounded timeouts; compatibility diagnostics
+  fail closed, package-scoped imports avoid global `sys.path` mutation, and the
+  broker returns typed success, permission, cancellation, timeout, and error
+  outcomes. `plugins --json` reports the contract and `--load-trusted` provides
+  an explicit headless load path.
+
 - Added reachable local-first intelligence workflows. History can preview the
   exact transcript payload and queue summaries or resource-bounded smart
   thumbnails; the CLI and authenticated REST API expose the same durable,

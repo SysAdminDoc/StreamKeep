@@ -85,6 +85,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Use GPU encoders when available: NVENC, Intel Quick Sync, AMD AMF, and VideoToolbox.
 - Generate contact sheets, chapters, subtitle files, transcripts, highlights, and silence-removed cuts. **Smart thumbnails** are resource-bounded and preserve source artwork. **LLM summaries** are local-first through History, CLI, and the authenticated local API; cloud requests require an exact transcript preview and one-use consent, with optional redaction.
 - Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
+- **Plugin adapters** cover versioned extractor, post-process, and upload contracts through `plugins --json`; enabled trusted adapters can be loaded explicitly with `plugins --load-trusted`. Manifest permissions, dependencies, compatibility, timeouts, and typed outcomes are enforced by the adapter broker.
 
 ### Backup and Recovery
 
@@ -96,7 +97,6 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 The source tree contains early engines and unit-tested helpers that are not yet wired to a supported GUI, CLI, or REST caller. They are excluded from the shipped-capability registry until the corresponding roadmap item adds a reachable integration path:
 
-- **Plugin adapters** — manifest discovery and trust validation exist, but approved plugins are not loaded by application startup.
 - **Recording notes** — note storage exists without a GUI, CLI, or REST editor.
 
 **Native notifications** are shipped: notable events (download complete, channel live, automatic backup, update available) raise a native OS toast through the platform backend, falling back to the tray icon when no native backend is installed. Toasts are suppressed while the StreamKeep window is focused so they never interrupt a user already watching the in-app notification bell.
@@ -107,6 +107,8 @@ The source tree contains early engines and unit-tested helpers that are not yet 
 python StreamKeep.py --help
 python StreamKeep.py --version
 python StreamKeep.py extractors
+python StreamKeep.py plugins --json
+python StreamKeep.py plugins --load-trusted
 python StreamKeep.py gallery "https://x.com/user" --output C:\Galleries
 python StreamKeep.py lux "https://www.bilibili.com/video/BV1xx" --info
 python StreamKeep.py db info

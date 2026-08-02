@@ -1,6 +1,8 @@
 import json
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -34,8 +36,7 @@ class PluginTests(unittest.TestCase):
                 encoding="utf-8",
             )
             # Record sys.path from inside the plugin so we can prove the plugin
-            # runs with its own directory importable but the global path is
-            # restored afterward.
+            # never receives a process-wide import-path mutation.
             (plugin_dir / "__init__.py").write_text(
                 "import sys\nPATH_DURING = list(sys.path)\nLOADED = True\n",
                 encoding="utf-8",
@@ -55,12 +56,11 @@ class PluginTests(unittest.TestCase):
                 self.assertEqual(sys.path, original_sys_path)
                 self.assertNotIn(str(base), sys.path)
                 self.assertNotIn(str(plugin_dir), sys.path)
-                # The plugin's own directory was importable during execution,
-                # appended at the end so it cannot shadow stdlib/app modules.
+                # The plugin is package-scoped through its module spec; its
+                # directory is never appended to the global path.
                 mod = sys.modules["sk_plugin_example_plugin"]
-                self.assertEqual(mod.PATH_DURING[-1], str(plugin_dir))
                 self.assertEqual(
-                    mod.PATH_DURING[:len(original_sys_path)], original_sys_path
+                    mod.PATH_DURING, original_sys_path
                 )
             finally:
                 sys.path[:] = original_sys_path
@@ -125,6 +125,45 @@ class PluginTests(unittest.TestCase):
         )
         self.assertTrue(any("Unsupported manifest_version" in e for e in errors))
 
+    def test_validate_manifest_rejects_old_and_unversioned_adapter_contracts(self):
+        old_errors = plugins.validate_manifest({
+            "id": "x", "name": "X", "version": "1.0.0", "manifest_version": 0,
+        })
+        self.assertTrue(any("Unsupported manifest_version" in e for e in old_errors))
+        adapter_errors = plugins.validate_manifest({
+            "id": "x", "name": "X", "version": "1.0.0", "manifest_version": 2,
+            "adapters": [{"type": "extractor", "entrypoint": "X"}],
+        })
+        self.assertTrue(any("interface_version" in e for e in adapter_errors))
+
+    def test_validate_manifest_rejects_unknown_adapter_and_permission(self):
+        errors = plugins.validate_manifest({
+            "id": "x", "name": "X", "version": "1.0.0", "manifest_version": 2,
+            "adapters": [{
+                "type": "unknown", "entrypoint": "X", "interface_version": 1,
+                "permissions": ["admin"], "dependencies": [], "timeout_seconds": 5,
+            }],
+        })
+        self.assertTrue(any("unsupported type" in e for e in errors))
+        self.assertTrue(any("unsupported permission" in e for e in errors))
+
+    def test_diagnostics_report_missing_adapter_dependency(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "dependency_plugin"
+            plugin_dir.mkdir()
+            (plugin_dir / "plugin.json").write_text(json.dumps({
+                "id": "dependency", "name": "Dependency", "version": "1.0.0",
+                "manifest_version": 2, "adapters": [{
+                    "type": "postprocess", "entrypoint": "run", "interface_version": 1,
+                    "permissions": [], "dependencies": ["module_that_does_not_exist"],
+                    "timeout_seconds": 5,
+                }],
+            }), encoding="utf-8")
+            with mock.patch.object(plugins, "PLUGINS_DIR", Path(tmpdir)):
+                found = plugins.discover_plugins()
+        self.assertFalse(found[0]["enabled"])
+        self.assertIn("Missing dependency", found[0]["error"])
+
     def test_validate_manifest_rejects_app_version_too_old(self):
         errors = plugins.validate_manifest(
             {"id": "x", "name": "X", "version": "1.0.0",
@@ -179,6 +218,55 @@ class PluginTests(unittest.TestCase):
         with mock.patch.object(plugins, "PLUGINS_DIR", fixture_dir):
             loaded, errors = plugins.load_all_plugins(log_events.append)
         self.assertEqual(loaded, 0)
+
+    def test_sample_plugin_registers_all_adapter_types_and_executes_typed_contracts(self):
+        fixture_dir = Path(__file__).parent / "fixtures"
+        with mock.patch.object(plugins, "PLUGINS_DIR", fixture_dir):
+            found = plugins.discover_plugins()
+            sample = next(plugin for plugin in found if plugin["id"] == "sample-extractor")
+            sample["trusted"] = True
+            handles = plugins.load_plugin_adapters(sample)
+
+        self.assertEqual(
+            {handle.spec.adapter_type for handle in handles},
+            {"extractor", "postprocess", "upload"},
+        )
+        by_type = {handle.spec.adapter_type: handle for handle in handles}
+        extractor = plugins.execute_plugin_adapter(
+            by_type["extractor"], "https://sample-streaming.example.com/video",
+        )
+        postprocess = plugins.execute_plugin_adapter(by_type["postprocess"], "clip.mp4")
+        upload = plugins.execute_plugin_adapter(
+            by_type["upload"], "clip.mp4", metadata={"title": "Sample"},
+        )
+        self.assertTrue(extractor.ok)
+        self.assertEqual(extractor.code, "ok")
+        self.assertTrue(postprocess.ok)
+        self.assertTrue(upload.ok)
+        self.assertEqual(upload.value["metadata"]["title"], "Sample")
+
+    def test_adapter_outcomes_enforce_permissions_timeout_and_cancellation(self):
+        class SlowAdapter:
+            def process(self, context=None):
+                while True:
+                    context.check_cancelled()
+                    time.sleep(0.01)
+
+        spec = plugins.PluginAdapterSpec(
+            "test", "postprocess", "SlowAdapter", 1, (), (), 0.05, 2,
+        )
+        handle = plugins.PluginAdapterHandle(spec, sys.modules[__name__], SlowAdapter, {})
+        denied = plugins.execute_plugin_adapter(
+            handle, required_permissions=("filesystem_read",),
+        )
+        self.assertEqual(denied.code, "permission_denied")
+        timed_out = plugins.execute_plugin_adapter(handle)
+        self.assertEqual(timed_out.code, "timeout")
+
+        cancelled = threading.Event()
+        cancelled.set()
+        result = plugins.execute_plugin_adapter(handle, cancel_event=cancelled)
+        self.assertEqual(result.code, "cancelled")
 
 
 if __name__ == "__main__":

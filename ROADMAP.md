@@ -61,14 +61,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 ### P2 — Later
 
-- [ ] P2 — Define tested plugin adapters beyond extractor discovery
-  Why: Documentation claims extractor, post-process, and upload extension points, but only extractor subclass loading has a demonstrated contract.
-  Evidence: `streamkeep/plugins.py`, plugin example/tests, Streamlink plugin contracts; depends on the existing plugin namespace-isolation item.
-  Touches: plugin manifest/schema, extractor/post-process/upload adapter interfaces, lifecycle/capability broker, diagnostics, sample plugins and contract tests.
-  Acceptance: Each adapter type has a versioned interface, declared permissions/dependencies, timeouts/cancellation, typed outcomes, compatibility diagnostics, and a minimal sample test; unsupported manifest versions fail closed; no plugin directory is appended globally to `sys.path`.
-  Complexity: L
-
-
 ### P3 — Under Consideration
 
 - [ ] P3 — Add optional local semantic moment search after pagination lands

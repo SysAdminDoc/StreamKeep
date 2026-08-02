@@ -183,9 +183,7 @@ class CapabilityClaimStageTests(unittest.TestCase):
             claim.id: claim
             for claim in get_product_capability_claims(status="shipped")
         }
-        experimental = {
-            claim.id for claim in get_product_capability_claims(status="experimental")
-        }
         self.assertIn("upload-delivery", shipped)
         self.assertTrue(shipped["upload-delivery"].paths)
-        self.assertIn("plugin-adapters", experimental)
+        self.assertIn("plugin-adapters", shipped)
+        self.assertTrue(shipped["plugin-adapters"].paths)

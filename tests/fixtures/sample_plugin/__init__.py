@@ -1,4 +1,4 @@
-"""Sample StreamKeep extractor plugin.
+"""Sample StreamKeep adapter plugin.
 
 This demonstrates the plugin SDK contract. To install: copy this folder
 into ``%APPDATA%/StreamKeep/plugins/`` and mark it trusted in Settings.
@@ -31,3 +31,23 @@ class SampleExtractor(Extractor):
 
     def extract_channel_id(self, url):
         return "sample-channel"
+
+
+class SamplePostProcessor:
+    """Minimal post-process adapter used by the contract test."""
+
+    def process(self, file_path, context=None):
+        if context is not None:
+            context.require("filesystem_read")
+        return {"processed": True, "file_path": str(file_path)}
+
+
+class SampleUploader:
+    """Minimal upload adapter used by the contract test."""
+
+    def upload(self, file_path, metadata=None, progress_cb=None, context=None):
+        if context is not None:
+            context.require("network")
+        if progress_cb is not None:
+            progress_cb(1.0)
+        return {"uploaded": True, "file_path": str(file_path), "metadata": metadata or {}}

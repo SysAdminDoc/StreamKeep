@@ -44,3 +44,12 @@ def test_extractor_cli_reaches_listing_dispatch():
         cli.run_cli(["extractors"])
 
     list_extractors.assert_called_once_with()
+
+
+def test_plugins_cli_reaches_diagnostics_dispatch():
+    with mock.patch("streamkeep.crash_log.setup_crash_logging"), mock.patch.object(
+        cli, "_run_plugins"
+    ) as run_plugins:
+        cli.run_cli(["plugins"])
+
+    run_plugins.assert_called_once()

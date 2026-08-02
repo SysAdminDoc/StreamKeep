@@ -195,8 +195,12 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
-        "plugin-adapters", "Third-party plugin adapters", "experimental",
-        "Plugin adapters", reason="Discovery exists but startup never loads approved plugins.",
+        "plugin-adapters", "Third-party plugin adapters", "shipped",
+        "Plugin adapters",
+        paths=(ReachableProductPath(
+            "cli", "plugins",
+            "tests/test_capability_reachability.py::test_plugins_cli_reaches_diagnostics_dispatch",
+        ),),
     ),
     ProductCapabilityClaim(
         "llm-summaries", "Consent-aware local or cloud LLM summaries", "shipped",

@@ -1,6 +1,6 @@
 """CLI / headless mode for StreamKeep (F42).
 
-Provides ``--url``, ``--server``, and ``--list-extractors`` subcommands.
+Provides ``--url``, ``--server``, ``--list-extractors``, and plugin diagnostics.
 Uses QCoreApplication (no display server required) so existing QThread-based
 workers and pyqtSignal infrastructure work without modification.
 
@@ -9,6 +9,7 @@ Usage::
     python StreamKeep.py --url URL [--quality best|1080p|720p|...] [--output DIR]
     python StreamKeep.py --server [--port PORT] [--trusted-proxy-origin HTTPS_ORIGIN]
     python StreamKeep.py --list-extractors
+    python StreamKeep.py plugins --json
 """
 
 import argparse
@@ -935,6 +936,61 @@ def _list_extractors():
     _print_line(f"\n  ({len(_ExtBase._registry)} extractors registered)")
 
 
+def _run_plugins(args):
+    """Report plugin adapter compatibility and optionally load trusted plugins."""
+    from .plugins import discover_plugins, diagnose_plugin, load_all_plugins
+
+    found = discover_plugins()
+    diagnostics = []
+    for plugin in found:
+        report = diagnose_plugin(plugin)
+        report.update({
+            "enabled": bool(plugin.get("enabled", False)),
+            "trusted": bool(plugin.get("trusted", False)),
+            "path": plugin.get("path", ""),
+            "error": plugin.get("error", ""),
+        })
+        diagnostics.append(report)
+
+    if getattr(args, "load_trusted", False):
+        events = []
+        loaded, errors = load_all_plugins(events.append)
+        if getattr(args, "json", False):
+            payload = {
+                "plugins": diagnostics,
+                "load": {"loaded": loaded, "errors": errors, "events": events},
+            }
+            _print_line(json.dumps(payload, indent=2, sort_keys=True))
+            return
+        _print_line(f"Trusted plugins loaded: {loaded}; errors: {errors}")
+        for event in events:
+            _print_line(event)
+
+    if getattr(args, "json", False):
+        _print_line(json.dumps({"plugins": diagnostics}, indent=2, sort_keys=True))
+        return
+    _print_line(f"StreamKeep v{VERSION} - plugin adapter diagnostics:")
+    if not diagnostics:
+        _print_line("  No plugins discovered.")
+        return
+    for plugin in diagnostics:
+        state = "compatible" if plugin["compatible"] else "incompatible"
+        _print_line(
+            f"  {plugin['id']} v{plugin['version']} - {state} "
+            f"({'trusted' if plugin['trusted'] else 'untrusted'})"
+        )
+        for adapter in plugin["adapters"]:
+            _print_line(
+                f"    {adapter['type']}:{adapter['entrypoint']} "
+                f"(interface {adapter['interface_version']}, "
+                f"timeout {adapter['timeout_seconds']:g}s)"
+            )
+        for error in plugin["errors"]:
+            _print_line(f"    ERROR: {error}")
+        for warning in plugin["warnings"]:
+            _print_line(f"    WARNING: {warning}")
+
+
 def _run_snapshot(args):
     """Export a privacy-redacted diagnostic snapshot."""
     from .diagnostics import create_diagnostic_snapshot
@@ -1724,6 +1780,16 @@ def build_parser():
 
     # -- list-extractors --
     ext_p = sub.add_parser("extractors", help="List supported platforms")
+
+    # -- plugins --
+    plugin_p = sub.add_parser(
+        "plugins", help="Inspect versioned plugin adapter contracts",
+    )
+    plugin_p.add_argument(
+        "--load-trusted", action="store_true",
+        help="Load enabled plugins explicitly marked trusted",
+    )
+    plugin_p.add_argument("--json", action="store_true", help="Emit JSON diagnostics")
     ext_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
@@ -2140,6 +2206,8 @@ def run_cli(argv=None):
         _run_server(args)
     elif args.command == "extractors":
         _list_extractors()
+    elif args.command == "plugins":
+        _run_plugins(args)
     elif args.command == "gallery":
         _run_gallery(args)
     elif args.command == "capture":
@@ -2184,7 +2252,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "capture", "server", "extractors", "gallery", "lux", "db",
+        "download", "dl", "capture", "server", "extractors", "plugins", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",
