@@ -128,15 +128,26 @@ def generate_sbom(output_path=None, *, lock_path=None, license_output=None):
     return True, str(output_path)
 
 
-def run_advisory_audit():
-    """Run pip-audit and return (ok, findings_text).
+def run_advisory_audit(requirements=None):
+    """Run pip-audit over StreamKeep's locked runtime requirements.
 
-    Returns (True, "") if no vulnerabilities found.
+    Audits the project's own hash-pinned lock rather than whatever happens to
+    be installed in the ambient interpreter: an unrelated package in a
+    developer's environment must not fail the release gate, and a vulnerable
+    shipped dependency must not be hidden by one that is merely present.
+
+    Returns ``(ok, findings_text)``; ``(True, "")`` when nothing was found.
     """
+    lock = Path(requirements) if requirements else ROOT / "requirements.lock"
+    command = [
+        sys.executable, "-m", "pip_audit",
+        "--format=json", "--progress-spinner=off",
+    ]
+    if lock.is_file():
+        command += ["--requirement", str(lock), "--no-deps"]
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "--format=json", "--progress-spinner=off"],
-            capture_output=True, text=True, timeout=120,
+            command, capture_output=True, text=True, timeout=300,
         )
     except FileNotFoundError:
         return False, "pip-audit not installed (pip install pip-audit)"

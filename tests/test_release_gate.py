@@ -1,0 +1,186 @@
+"""The local unsigned release gate (V52).
+
+These tests exercise the gate's own logic — stage ordering, failure reporting,
+and the release-claim checks — without paying for a PyInstaller build.
+"""
+
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "packaging") not in sys.path:
+    sys.path.insert(0, str(ROOT / "packaging"))
+
+import release_gate as gate  # noqa: E402
+
+
+class StageDriverTests(unittest.TestCase):
+    def test_every_stage_is_named_and_ordered_cheapest_first(self):
+        names = [name for name, _func in gate.STAGES]
+        self.assertEqual(names[0], "compileall")
+        # The expensive build stages must come after the cheap checks so a
+        # trivial failure never costs a full PyInstaller run.
+        for build_stage in gate.BUILD_STAGES:
+            self.assertIn(build_stage, names)
+            self.assertGreater(names.index(build_stage), names.index("tests"))
+
+    def test_the_gate_stops_at_and_names_the_first_failure(self):
+        with mock.patch.object(gate, "STAGES", (
+            ("first", lambda: (True, "")),
+            ("second", lambda: (False, "exploded")),
+            ("third", lambda: (True, "")),
+        )):
+            result = gate.run_gate(echo=None)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.failed_stage, "second")
+        self.assertEqual([s.name for s in result.stages], ["first", "second"])
+        self.assertEqual(result.stages[-1].detail, "exploded")
+
+    def test_a_clean_run_reports_ok_with_no_failed_stage(self):
+        with mock.patch.object(gate, "STAGES", (
+            ("first", lambda: (True, "")),
+            ("second", lambda: (True, "")),
+        )):
+            result = gate.run_gate(echo=None)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.failed_stage, "")
+
+    def test_fast_mode_skips_only_the_build_stages(self):
+        ran = []
+
+        def track(name):
+            def stage():
+                ran.append(name)
+                return True, ""
+            return stage
+
+        with mock.patch.object(gate, "STAGES", (
+            ("tests", track("tests")),
+            ("reproducible-build", track("reproducible-build")),
+            ("artifact-smoke", track("artifact-smoke")),
+        )):
+            result = gate.run_gate(fast=True, echo=None)
+        self.assertEqual(ran, ["tests"])
+        self.assertTrue(result.ok)
+        skipped = {s.name for s in result.stages if s.skipped}
+        self.assertEqual(skipped, {"reproducible-build", "artifact-smoke"})
+
+    def test_only_selects_a_single_stage(self):
+        with mock.patch.object(gate, "STAGES", (
+            ("first", lambda: (True, "")),
+            ("second", lambda: (True, "")),
+        )):
+            result = gate.run_gate(only=["second"], echo=None)
+        self.assertEqual([s.name for s in result.stages], ["second"])
+
+    def test_the_json_shape_names_the_failed_stage(self):
+        with mock.patch.object(gate, "STAGES", (
+            ("first", lambda: (False, "bad")),
+        )):
+            payload = gate.run_gate(echo=None).to_dict()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["failed_stage"], "first")
+        self.assertEqual(payload["stages"][0]["detail"], "bad")
+
+    def test_an_unknown_stage_name_is_rejected(self):
+        self.assertEqual(gate.main(["--only", "not-a-stage"]), 2)
+
+    def test_listing_stages_exits_cleanly(self):
+        self.assertEqual(gate.main(["--list"]), 0)
+
+    def test_no_stage_introduces_signing_or_ci(self):
+        # The gate is local and unsigned by policy; nothing in it may shell out
+        # to a signing tool or a CI runner.
+        source = (ROOT / "packaging" / "release_gate.py").read_text(encoding="utf-8")
+        for forbidden in ("signtool", "codesign", "notarytool", "gh workflow"):
+            self.assertNotIn(forbidden, source.casefold())
+        self.assertFalse((ROOT / ".github" / "workflows").exists())
+
+
+class ReleaseClaimTests(unittest.TestCase):
+    def test_the_shipped_tree_passes_its_own_claim_check(self):
+        self.assertEqual(gate.validate_release_claims(ROOT), [])
+
+    def test_a_signing_promise_is_reported(self):
+        with mock.patch.object(Path, "read_text", autospec=True) as read_text:
+            def fake(self, *a, **kw):
+                if self.name == "README.md":
+                    return (
+                        "Releases are unsigned. Spanish is beta.\n"
+                        "The command requires `STREAMKEEP_SIGN_PFX`, so sign it.\n"
+                    )
+                raise OSError("not needed")
+            read_text.side_effect = fake
+            problems = gate.validate_release_claims(ROOT)
+        self.assertTrue(
+            any("signing step" in problem for problem in problems), problems,
+        )
+
+    def test_omitting_the_unsigned_statement_is_reported(self):
+        with mock.patch.object(Path, "read_text", autospec=True) as read_text:
+            def fake(self, *a, **kw):
+                if self.name == "README.md":
+                    return "StreamKeep downloads streams. Spanish is beta.\n"
+                raise OSError("not needed")
+            read_text.side_effect = fake
+            problems = gate.validate_release_claims(ROOT)
+        self.assertTrue(
+            any("unsigned" in problem for problem in problems), problems,
+        )
+
+    def test_a_partial_spanish_catalog_must_be_labelled_beta(self):
+        with mock.patch.object(gate, "spanish_coverage", return_value=(195, 1427)):
+            with mock.patch.object(Path, "read_text", autospec=True) as read_text:
+                def fake(self, *a, **kw):
+                    if self.name == "README.md":
+                        return "Releases are unsigned. Full Spanish support.\n"
+                    raise OSError("not needed")
+                read_text.side_effect = fake
+                problems = gate.validate_release_claims(ROOT)
+        self.assertTrue(
+            any("beta" in problem for problem in problems), problems,
+        )
+
+    def test_a_fully_translated_catalog_needs_no_beta_label(self):
+        with mock.patch.object(gate, "spanish_coverage", return_value=(1427, 1427)):
+            with mock.patch.object(Path, "read_text", autospec=True) as read_text:
+                def fake(self, *a, **kw):
+                    if self.name == "README.md":
+                        return "Releases are unsigned. Spanish is complete.\n"
+                    raise OSError("not needed")
+                read_text.side_effect = fake
+                problems = gate.validate_release_claims(ROOT)
+        self.assertFalse(
+            any("beta" in problem for problem in problems), problems,
+        )
+
+    def test_spanish_coverage_reads_the_real_catalog(self):
+        translated, total = gate.spanish_coverage(ROOT)
+        self.assertGreater(total, 1000)
+        self.assertGreaterEqual(translated, 0)
+        self.assertLessEqual(translated, total)
+
+
+class CapabilityClaimStageTests(unittest.TestCase):
+    def test_native_notifications_is_a_shipped_claim_with_a_tested_path(self):
+        from streamkeep.capabilities import get_product_capability_claims
+
+        shipped = {
+            claim.id: claim
+            for claim in get_product_capability_claims(status="shipped")
+        }
+        self.assertIn("native-notifications", shipped)
+        paths = shipped["native-notifications"].paths
+        self.assertTrue(paths)
+        self.assertTrue(paths[0].test_nodeid.startswith("tests/"))
+
+    def test_unreachable_capabilities_stay_experimental(self):
+        from streamkeep.capabilities import get_product_capability_claims
+
+        experimental = {
+            claim.id for claim in get_product_capability_claims(status="experimental")
+        }
+        self.assertIn("upload-delivery", experimental)
+        self.assertIn("plugin-adapters", experimental)

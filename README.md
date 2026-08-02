@@ -87,7 +87,9 @@ The source tree contains early engines and unit-tested helpers that are not yet 
 - **Upload delivery** — S3-compatible, FTP/SFTP, and WebDAV adapters exist, but no supported surface starts an upload job.
 - **Plugin adapters** — manifest discovery and trust validation exist, but approved plugins are not loaded by application startup.
 - **LLM summaries** and **Smart thumbnails** — intelligence workers exist without user-reachable controls or commands.
-- **Native notifications** and **Recording notes** — storage/adapters exist without a supported lifecycle hook or editor.
+- **Recording notes** — note storage exists without a GUI, CLI, or REST editor.
+
+**Native notifications** are shipped: notable events (download complete, channel live, automatic backup, update available) raise a native OS toast through the platform backend, falling back to the tray icon when no native backend is installed. Toasts are suppressed while the StreamKeep window is focused so they never interrupt a user already watching the in-app notification bell.
 
 ### CLI and Server Mode
 
@@ -151,7 +153,7 @@ All primary controls and tables participate in keyboard focus and expose explici
 
 ### Desktop Languages
 
-Choose English or Spanish under Settings → Appearance; the open shell, dialogs, table headings, status messages, and embedded player surfaces update immediately without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`, and `python -m streamkeep.i18n.compile_translations` refreshes the catalogs before compiling the matching QM assets included in frozen builds.
+Choose English or Spanish under Settings → Appearance. **Spanish is beta:** the core shell, navigation, dialogs, and status messages are translated, and any string that is not yet covered falls back to English rather than showing a placeholder. Switching language updates the open shell, dialogs, table headings, status messages, and embedded player surfaces immediately, without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`, and `python -m streamkeep.i18n.compile_translations` refreshes the catalogs before compiling the matching QM assets included in frozen builds.
 
 ### Desktop Appearance
 
@@ -211,9 +213,9 @@ Source checkouts run directly with `python StreamKeep.py`. Release packaging cur
 - Flatpak packaging under `packaging/flatpak/`, using the KDE/PyQt 6.10 base and a separate hash-checked Linux dependency lock plus generated offline source manifest.
 - Browser companion extension packaging from `browser-extension/`.
 
-MSIX signing is automatic when `signtool.exe` is available and one of `STREAMKEEP_SIGN=1`, `STREAMKEEP_SIGN_PFX`, or `STREAMKEEP_SIGN_CERT_SUBJECT` is set.
+**Releases are unsigned.** No Authenticode certificate, notarization, or store signing identity is used, and none is required to build. Windows SmartScreen will warn on first run of a downloaded build; choose "More info" then "Run anyway", or verify the published SHA-256 hash yourself before running it. The MSIX and Flatpak builders can attach a signature when an operator supplies their own certificate through the environment, but that is entirely optional and no release performs it.
 
-In-app updates require `StreamKeep.exe`, `StreamKeep-update.json`, and `StreamKeep-update.json.sig` on the same stable GitHub release. Generate them with `python packaging/update_manifest.py --version X.Y.Z --sequence N --asset dist/StreamKeep.exe` (add the MSIX with another `--asset` when published). The command requires `STREAMKEEP_SIGN_PFX`, signs each asset by default, and signs the canonical manifest with the same publisher key. The MSIX builder signs its contained executable before packaging so installed builds retain the updater trust anchor. Release sequences must increase monotonically.
+**Updating is manual or package-managed.** Because releases are unsigned, the in-app self-replacement path stays disabled: it only accepts a signed update manifest, and there is no publisher key to produce one. Update by downloading the new release and verifying its published SHA-256 hash, or through whichever package manager installed StreamKeep. `packaging/update_manifest.py` remains available for operators who maintain their own signing identity and want to serve signed updates from a private release channel; it is not part of any StreamKeep release.
 
 Release packages must include:
 
@@ -224,11 +226,29 @@ Release packages must include:
 - `browser-extension/` and `browser-extension/icons/`.
 - `packaging/` manifests when building MSIX or Flatpak artifacts.
 - Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, mpv/libmpv, and platform signing tools.
-- An offline-signed update manifest and detached signature produced by `packaging/update_manifest.py`; the updater rejects unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and signed size/digest mismatches.
+- Published SHA-256 hashes for every artifact, so an unsigned download can be verified before it is run. An update manifest is optional and only meaningful for operators running their own signing identity; the updater refuses unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and size/digest mismatches, which is precisely why the self-update path is inert for unsigned public releases.
 
 ## Validation
 
-Run the lightweight validation bundle before release:
+One command runs the whole local release gate. It is unsigned and local by
+design: no signing step, no notarization, and no CI workflow is involved.
+
+```powershell
+python packaging/release_gate.py           # every stage
+python packaging/release_gate.py --fast    # skip the build/SBOM/artifact stages
+python packaging/release_gate.py --list    # show the stages
+```
+
+Stages run cheapest-first and stop at the first failure, which the gate names
+explicitly: `compileall`, `pyflakes`, `translations` (deterministic extraction
+plus catalog compilation), `tests`, `capability-claims` (every shipped claim
+has a reachable, tested path and a matching README token), `release-claims`
+(documentation must not promise a signing story this project does not have,
+and must label partial translations), `advisories` (pip-audit over the
+project's own hash-pinned `requirements.lock`, not the ambient environment),
+`reproducible-build`, `sbom`, and `artifact-smoke`.
+
+The individual commands behind those stages remain available:
 
 ```powershell
 python -m compileall StreamKeep.py streamkeep tests

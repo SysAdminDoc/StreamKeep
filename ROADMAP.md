@@ -273,13 +273,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P1 — Next
 
-- [ ] P1 — V52 — Add one unsigned local release gate with machine-checked product claims
-  Why: reproducible build smoke is strong but skips source/tests/translations/advisories, while README, capability registry, Flatpak metadata, updater policy, and Spanish completeness currently disagree with reachable behavior.
-  Evidence: `packaging/reproducible_build.py`, `packaging/sbom.py` (`--audit` is unused by the builder), `streamkeep/capabilities.py:186-208`, `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml:18-19`, `README.md:90`, `:154`, and `:216-227`; Spanish catalog 139/1,325 translated on 2026-07-29.
-  Touches: a local release-gate command, translation extraction/compilation checks, capability contract tests, README/metainfo/locale labels, advisory scan, V35 build/SBOM/artifact smoke.
-  Acceptance: one command runs compileall, deterministic translation extraction/compile validation, pytest, pyflakes, capability/claim consistency, dependency advisory audit, reproducible unsigned build, SBOM/license generation and artifact startup smoke; it identifies the exact failed stage; native notifications are labeled shipped, upload/plugins experimental, Spanish core/beta, and unsigned updates manual/package-managed; no signing step or GitHub Actions workflow is introduced.
-  Complexity: M
-
 #### P2 — Later
 
 - [ ] P2 — V53 — Produce and smoke-test unsigned macOS and portable Linux artifacts

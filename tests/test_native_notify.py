@@ -93,3 +93,49 @@ def test_native_notifications_is_import_validated():
     from streamkeep.config import _BOOL_CONFIG_KEYS
 
     assert "native_notifications" in _BOOL_CONFIG_KEYS
+
+
+def test_desktop_lifecycle_raises_a_native_toast(qt_application, monkeypatch):
+    """The desktop notification path must reach the native adapter (V52).
+
+    This is the reachability proof behind the ``native-notifications`` shipped
+    capability claim: without a call site the adapter is dead code, and the
+    release gate should say so.
+    """
+    from streamkeep.ui.main_window import StreamKeep
+
+    seen = {}
+
+    def fake_notify(title, message, level="info", tray_icon=None):
+        seen.update({"title": title, "message": message, "level": level})
+        return True
+
+    monkeypatch.setattr("streamkeep.native_notify.notify", fake_notify)
+
+    window = StreamKeep.__new__(StreamKeep)
+    window._tray_icon = None
+    monkeypatch.setattr(
+        type(window), "isActiveWindow", lambda self: False, raising=False,
+    )
+    window._fire_native_toast("Download complete", level="success")
+
+    assert seen["title"] == "StreamKeep"
+    assert seen["message"] == "Download complete"
+    assert seen["level"] == "success"
+
+
+def test_a_focused_window_suppresses_the_native_toast(qt_application, monkeypatch):
+    from streamkeep.ui.main_window import StreamKeep
+
+    calls = []
+    monkeypatch.setattr(
+        "streamkeep.native_notify.notify",
+        lambda *a, **k: calls.append(a) or True,
+    )
+    window = StreamKeep.__new__(StreamKeep)
+    window._tray_icon = None
+    monkeypatch.setattr(
+        type(window), "isActiveWindow", lambda self: True, raising=False,
+    )
+    window._fire_native_toast("Download complete")
+    assert calls == []

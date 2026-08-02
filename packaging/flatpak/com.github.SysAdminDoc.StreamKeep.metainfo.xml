@@ -14,9 +14,11 @@
     </p>
     <p>
       Includes channel monitoring with auto-recording, download queue with
-      bandwidth scheduling, embedded media player, post-processing (convert,
-      trim, silence removal, transcription), upload destinations (S3, FTP,
-      WebDAV), and a plugin SDK for community extensions.
+      bandwidth scheduling, embedded media player, and post-processing
+      (convert, trim, silence removal, transcription). Experimental: upload
+      destinations (S3, FTP, WebDAV) and a plugin SDK for community
+      extensions are present but not yet reachable from a supported
+      workflow.
     </p>
   </description>
   <url type="homepage">https://github.com/SysAdminDoc/StreamKeep</url>

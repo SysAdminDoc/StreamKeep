@@ -203,8 +203,12 @@ PRODUCT_CAPABILITY_CLAIMS = (
         "Gallery/RSS publishing", reason="Feed generation is not wired to a supported caller.",
     ),
     ProductCapabilityClaim(
-        "native-notifications", "Native desktop notification adapter", "experimental",
-        "Native notifications", reason="The adapter is not invoked by the desktop lifecycle.",
+        "native-notifications", "Native desktop notification adapter", "shipped",
+        "Native notifications",
+        (ReachableProductPath(
+            "gui", "Notification events",
+            "tests/test_native_notify.py::test_desktop_lifecycle_raises_a_native_toast",
+        ),),
     ),
     ProductCapabilityClaim(
         "recording-notes", "Recording note authoring", "experimental",

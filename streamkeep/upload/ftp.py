@@ -10,6 +10,21 @@ import os
 from .base import UploadDestination
 
 
+
+def _paramiko_available():
+    """Return whether paramiko can be imported, without binding the name.
+
+    An unbound ``import paramiko`` inside a function is dead to pyflakes; the
+    module is only ever used through ``_connect_sftp_client``.
+    """
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("paramiko") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 class FTPDestination(UploadDestination):
     NAME = "FTP / SFTP"
 
@@ -62,9 +77,7 @@ class FTPDestination(UploadDestination):
         settings, err = self._resolve_settings(default_port=22, label="SFTP", file_path=file_path)
         if err:
             return False, err
-        try:
-            import paramiko
-        except ImportError:
+        if not _paramiko_available():
             return False, "paramiko not installed for SFTP. Run: pip install paramiko"
 
         client = None
@@ -107,12 +120,11 @@ class FTPDestination(UploadDestination):
             if err:
                 return False, err
             client = None
+            if not _paramiko_available():
+                return False, "paramiko not installed"
             try:
-                import paramiko  # noqa: F811
                 client = self._connect_sftp_client(settings)
                 return True, "SFTP connection OK"
-            except ImportError:
-                return False, "paramiko not installed"
             except Exception as e:
                 return False, f"SFTP failed: {e}"
             finally:

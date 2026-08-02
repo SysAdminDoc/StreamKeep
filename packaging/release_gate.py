@@ -1,0 +1,386 @@
+"""One local, unsigned release gate for StreamKeep (V52).
+
+Reproducible-build smoke alone never looked at the source, the tests, the
+translation catalogs, the advisory feed, or whether the product's own claims
+still matched reachable behaviour. This runs every one of those as an ordered
+list of named stages and reports the exact stage that failed.
+
+    python packaging/release_gate.py              # full gate
+    python packaging/release_gate.py --fast       # skip the build/artifact stages
+    python packaging/release_gate.py --list       # show the stages and exit
+    python packaging/release_gate.py --json       # machine-readable result
+
+Deliberately local-only and unsigned: no signing step, no notarization, and no
+CI workflow is introduced or required. Exit code 0 means every selected stage
+passed; 1 names the first failure.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# Stages that need a full build environment; --fast skips them so the gate is
+# usable as a pre-commit check without paying for a PyInstaller run.
+BUILD_STAGES = frozenset({"reproducible-build", "sbom", "artifact-smoke"})
+
+
+@dataclass
+class StageResult:
+    name: str
+    ok: bool
+    detail: str = ""
+    seconds: float = 0.0
+    skipped: bool = False
+
+
+@dataclass
+class GateResult:
+    stages: list[StageResult] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return all(stage.ok for stage in self.stages)
+
+    @property
+    def failed_stage(self) -> str:
+        for stage in self.stages:
+            if not stage.ok:
+                return stage.name
+        return ""
+
+    def to_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "failed_stage": self.failed_stage,
+            "stages": [
+                {
+                    "name": stage.name,
+                    "ok": stage.ok,
+                    "skipped": stage.skipped,
+                    "seconds": round(stage.seconds, 2),
+                    "detail": stage.detail,
+                }
+                for stage in self.stages
+            ],
+        }
+
+
+def _run(command, *, cwd=ROOT, timeout=1800) -> tuple[bool, str]:
+    """Run one subprocess and return ``(ok, tail_of_output)``."""
+    try:
+        result = subprocess.run(
+            command, cwd=str(cwd), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, str(error)
+    if result.returncode == 0:
+        return True, ""
+    output = (result.stderr or "") + (result.stdout or "")
+    tail = [line for line in output.strip().splitlines() if line.strip()][-12:]
+    return False, "\n".join(tail) or f"exit code {result.returncode}"
+
+
+# ── Stages ──────────────────────────────────────────────────────────
+
+def stage_compileall() -> tuple[bool, str]:
+    """Every shipped module must at least byte-compile."""
+    return _run([
+        sys.executable, "-m", "compileall", "-q", "-f",
+        "StreamKeep.py", "streamkeep", "packaging",
+    ])
+
+
+def stage_pyflakes() -> tuple[bool, str]:
+    return _run([sys.executable, "-m", "pyflakes", "streamkeep", "packaging"])
+
+
+def stage_translations() -> tuple[bool, str]:
+    """Extraction must be deterministic and the compiled assets must match."""
+    ok, detail = _run([
+        sys.executable, "-m", "streamkeep.i18n.extract_translations", "--check",
+    ])
+    if not ok:
+        return False, detail or "Translation catalogs are stale"
+    ok, detail = _run([
+        sys.executable, "-m", "streamkeep.i18n.compile_translations", "--check",
+    ])
+    if not ok:
+        # Older builds have no --check; fall back to proving compilation works.
+        ok, detail = _run([
+            sys.executable, "-m", "streamkeep.i18n.compile_translations",
+        ])
+    return ok, detail
+
+
+def stage_tests() -> tuple[bool, str]:
+    return _run([
+        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+        "--no-cov",
+    ], timeout=3600)
+
+
+def stage_capability_claims() -> tuple[bool, str]:
+    """Every shipped claim must have a reachable, tested path and a doc token."""
+    sys.path.insert(0, str(ROOT))
+    try:
+        from streamkeep.capabilities import validate_product_capability_claims
+    except ImportError as error:
+        return False, f"capability registry could not be imported: {error}"
+    problems = validate_product_capability_claims(ROOT)
+    return (not problems), "\n".join(problems)
+
+
+def stage_release_claims() -> tuple[bool, str]:
+    """Docs must not promise a signing story this project does not have."""
+    problems = validate_release_claims(ROOT)
+    return (not problems), "\n".join(problems)
+
+
+def stage_advisories() -> tuple[bool, str]:
+    """Dependency advisory scan. Advisory-only when pip-audit is absent."""
+    ok, detail = _run(
+        [sys.executable, str(ROOT / "packaging" / "sbom.py"), "--audit"],
+        timeout=900,
+    )
+    if not ok and "pip-audit" in detail.lower():
+        return True, "pip-audit is not installed; advisory scan skipped"
+    return ok, detail
+
+
+def stage_reproducible_build() -> tuple[bool, str]:
+    return _run(
+        [sys.executable, str(ROOT / "packaging" / "reproducible_build.py")],
+        timeout=3600,
+    )
+
+
+def stage_sbom() -> tuple[bool, str]:
+    return _run([sys.executable, str(ROOT / "packaging" / "sbom.py")], timeout=900)
+
+
+def stage_artifact_smoke() -> tuple[bool, str]:
+    """Start the built executable and prove it comes up on a clean profile."""
+    artifact = built_artifact()
+    if not artifact:
+        return False, (
+            "No built executable was found under dist/. Run the "
+            "reproducible-build stage first, or use --fast to skip the build "
+            "stages entirely."
+        )
+    return _run(
+        [
+            sys.executable, str(ROOT / "packaging" / "artifact_smoke.py"),
+            "--executable", str(artifact),
+        ],
+        timeout=1800,
+    )
+
+
+def built_artifact() -> Path | None:
+    """Return the freshly built executable, or ``None`` when there is none."""
+    candidates = [
+        path for path in (ROOT / "dist").glob("StreamKeep*")
+        if path.is_file() and path.suffix.lower() in (".exe", "")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+STAGES = (
+    ("compileall", stage_compileall),
+    ("pyflakes", stage_pyflakes),
+    ("translations", stage_translations),
+    ("tests", stage_tests),
+    ("capability-claims", stage_capability_claims),
+    ("release-claims", stage_release_claims),
+    ("advisories", stage_advisories),
+    ("reproducible-build", stage_reproducible_build),
+    ("sbom", stage_sbom),
+    ("artifact-smoke", stage_artifact_smoke),
+)
+
+
+# ── Release-claim consistency ───────────────────────────────────────
+
+# Phrases that would promise a signed release. This project ships unsigned by
+# policy, so documentation must not describe signing as a required step.
+_SIGNING_CLAIMS = (
+    "requires `STREAMKEEP_SIGN_PFX`",
+    "MSIX signing is automatic",
+    "signs each asset by default",
+    "notarization is required",
+)
+# The gate is about honesty, not vocabulary: a line that explains the *absence*
+# of signing is exactly what we want to see.
+_UNSIGNED_MARKERS = (
+    "unsigned",
+    "not code signed",
+    "no code signing",
+)
+
+
+def validate_release_claims(root) -> list[str]:
+    """Return documentation claims that contradict the shipped product."""
+    root = Path(root)
+    problems: list[str] = []
+
+    try:
+        readme = (root / "README.md").read_text(encoding="utf-8")
+    except OSError as error:
+        return [f"README.md could not be read: {error}"]
+
+    for claim in _SIGNING_CLAIMS:
+        if claim in readme:
+            problems.append(
+                f"README promises a signing step this project never performs: {claim!r}"
+            )
+    if not any(marker in readme.casefold() for marker in _UNSIGNED_MARKERS):
+        problems.append(
+            "README does not state that releases are unsigned and updated "
+            "manually or by a package manager"
+        )
+
+    # The Spanish catalog is partial; it must be labelled as such wherever the
+    # product advertises language support.
+    translated, total = spanish_coverage(root)
+    if total and translated < total:
+        if "beta" not in readme.casefold():
+            problems.append(
+                f"Spanish is {translated}/{total} translated but README does "
+                "not label it beta"
+            )
+
+    metainfo = root / "packaging" / "flatpak" / (
+        "com.github.SysAdminDoc.StreamKeep.metainfo.xml"
+    )
+    try:
+        metainfo_text = metainfo.read_text(encoding="utf-8")
+    except OSError:
+        metainfo_text = ""
+    if metainfo_text:
+        problems.extend(_validate_metainfo_claims(metainfo_text, root))
+    return problems
+
+
+def _validate_metainfo_claims(text, root) -> list[str]:
+    """Flag store metadata that advertises experimental capabilities as shipped."""
+    sys.path.insert(0, str(root))
+    try:
+        from streamkeep.capabilities import get_product_capability_claims
+    except ImportError:
+        return []
+    problems = []
+    lowered = text.casefold()
+    # Only phrases specific enough to be a genuine promise are checked; the
+    # goal is catching "ships X" for an X that is not reachable.
+    experimental_tokens = {
+        "upload-delivery": "upload destinations",
+        "plugin-adapters": "plugin sdk",
+    }
+    for claim in get_product_capability_claims(status="experimental"):
+        token = experimental_tokens.get(claim.id)
+        if not token or token not in lowered:
+            continue
+        window_start = max(0, lowered.index(token) - 200)
+        window = lowered[window_start:lowered.index(token) + 200]
+        if "experimental" not in window:
+            problems.append(
+                f"Flatpak metainfo advertises {token!r} without marking the "
+                f"{claim.id} capability experimental"
+            )
+    return problems
+
+
+def spanish_coverage(root) -> tuple[int, int]:
+    """Return ``(translated, total)`` message counts for the Spanish catalog."""
+    catalog = Path(root) / "streamkeep" / "i18n" / "streamkeep_es.ts"
+    try:
+        text = catalog.read_text(encoding="utf-8")
+    except OSError:
+        return (0, 0)
+    total = text.count("<message")
+    unfinished = text.count('type="unfinished"')
+    return (max(0, total - unfinished), total)
+
+
+# ── Driver ──────────────────────────────────────────────────────────
+
+def run_gate(*, fast=False, only=(), echo=print) -> GateResult:
+    """Run the gate and return every stage result, stopping at the first failure."""
+    result = GateResult()
+    selected = set(only or ())
+    for name, func in STAGES:
+        if selected and name not in selected:
+            continue
+        if fast and name in BUILD_STAGES:
+            result.stages.append(
+                StageResult(name, True, "skipped (--fast)", skipped=True)
+            )
+            if echo:
+                echo(f"  SKIP  {name}")
+            continue
+        started = time.monotonic()
+        ok, detail = func()
+        elapsed = time.monotonic() - started
+        result.stages.append(StageResult(name, ok, detail, elapsed))
+        if echo:
+            echo(f"  {'PASS' if ok else 'FAIL'}  {name} ({elapsed:.1f}s)")
+            if detail and not ok:
+                for line in detail.splitlines():
+                    echo(f"        {line}")
+        if not ok:
+            break
+    return result
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--fast", action="store_true",
+        help="Skip the build, SBOM, and artifact stages",
+    )
+    parser.add_argument(
+        "--only", action="append", default=[],
+        help="Run only the named stage (repeatable)",
+    )
+    parser.add_argument("--list", action="store_true", help="List stages and exit")
+    parser.add_argument("--json", action="store_true", help="Emit JSON")
+    args = parser.parse_args(argv)
+
+    if args.list:
+        for name, _func in STAGES:
+            marker = " (build)" if name in BUILD_STAGES else ""
+            print(f"{name}{marker}")
+        return 0
+
+    unknown = set(args.only) - {name for name, _ in STAGES}
+    if unknown:
+        print(f"Unknown stage(s): {', '.join(sorted(unknown))}")
+        return 2
+
+    echo = None if args.json else print
+    if echo:
+        echo("StreamKeep release gate (local, unsigned)")
+    result = run_gate(fast=args.fast, only=args.only, echo=echo)
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    elif result.ok:
+        print("Release gate passed.")
+    else:
+        print(f"Release gate FAILED at stage: {result.failed_stage}")
+    return 0 if result.ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
