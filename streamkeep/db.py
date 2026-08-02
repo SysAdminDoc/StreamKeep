@@ -2729,14 +2729,27 @@ def claim_due_backup(
                 anchor = _iso_epoch(state["last_success_at"])
                 next_run_at = (anchor + interval) if anchor else current
             if current < next_run_at:
+                stale_claim = bool(
+                    running_owner
+                    and current - state["running_since"]
+                    >= BACKUP_CLAIM_STALE_SECONDS
+                )
+                persisted_owner = "" if stale_claim else running_owner
+                persisted_since = 0.0 if stale_claim else state["running_since"]
                 db.execute(
-                    "INSERT INTO backup_runs (profile_id, next_run_at, "
-                    "cadence_seconds, updated_at) VALUES (?, ?, ?, ?) "
+                    "INSERT INTO backup_runs (profile_id, running_owner, "
+                    "running_since, next_run_at, cadence_seconds, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(profile_id) DO UPDATE SET "
+                    "running_owner=excluded.running_owner, "
+                    "running_since=excluded.running_since, "
                     "next_run_at=excluded.next_run_at, "
                     "cadence_seconds=excluded.cadence_seconds, "
                     "updated_at=excluded.updated_at",
-                    (str(profile_id), next_run_at, interval, _utc_now_iso()),
+                    (
+                        str(profile_id), persisted_owner, persisted_since,
+                        next_run_at, interval, _utc_now_iso(),
+                    ),
                 )
                 db.commit()
                 return None

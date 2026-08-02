@@ -192,6 +192,30 @@ class BackupScheduleStateTests(unittest.TestCase):
         self.assertIsNotNone(claim)
         self.assertEqual(claim["running_owner"], "owner-b")
 
+    def test_stale_claim_is_cleared_when_next_run_is_not_due(self):
+        import sqlite3
+
+        now = 1_700_000_000.0
+        db.claim_due_backup("owner-a", cadence_seconds=3600, now=now)
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            conn.execute(
+                "UPDATE backup_runs SET running_since=?, next_run_at=? "
+                "WHERE profile_id=?",
+                (now - (2 * 3600), now + 3600, "default"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertIsNone(
+            db.claim_due_backup("owner-b", cadence_seconds=3600, now=now)
+        )
+        state = db.load_backup_state()
+        self.assertEqual(state["running_owner"], "")
+        self.assertEqual(state["running_since"], 0.0)
+        self.assertFalse(db.backup_state_public_view(state)["running"])
+
     def test_success_defers_the_next_run_by_one_cadence_across_restart(self):
         now = 1_700_000_000.0
         db.claim_due_backup("owner-a", cadence_seconds=3600, now=now)

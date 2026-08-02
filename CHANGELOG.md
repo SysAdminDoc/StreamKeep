@@ -48,6 +48,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   re-reading the schema version under lock and preserving migration rollback
   behavior for concurrent GUI, service, and CLI starts.
 
+- Cleared stale backup claims (V66) during not-due schedule updates, so a
+  crashed process no longer leaves the operations view reporting a run as
+  active until the next cadence.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,
