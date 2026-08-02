@@ -539,6 +539,7 @@ class SettingsCompanionMixin:
             "queue": queue_items,
             "failures": failures,
             "retry_circuits": _db.load_retry_circuits(),
+            "backup": _db.backup_state_public_view(_db.load_backup_state()),
             "history": history,
             "monitor": monitor,
             "live_channels": live_channels,

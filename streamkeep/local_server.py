@@ -1047,6 +1047,7 @@ def _build_handler(
                 "queue": state.get("queue", []),
                 "failures": failures,
                 "retry_circuits": state.get("retry_circuits", []),
+                "backup": state.get("backup", {}),
                 "live_channels": state.get("live_channels", []),
                 "active_workers": state.get("active_workers", []),
                 "resumable": state.get("resumable", []),

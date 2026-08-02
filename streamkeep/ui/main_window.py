@@ -60,6 +60,7 @@ from streamkeep.postprocess import (
 from streamkeep.monitor import ChannelMonitor
 from streamkeep.clipboard import ClipboardMonitor
 from streamkeep import db as _db
+from streamkeep.workers import ScheduledBackupWorker
 from .main_window_jobs import MainWindowJobsMixin
 
 # Legacy NATIVE_PROXY compatibility — some UI code below assigns this.
@@ -229,6 +230,7 @@ class StreamKeep(
         self._executor_owner_id = f"gui:{os.getpid()}:{uuid.uuid4().hex}"
         self._queue_execution_enabled = False
         self._executor_lease_message = ""
+        self._backup_worker = None
         self._queue_executor_warning_shown = False
         self._write_nfo = False
         self._dl_overrides = {}  # Per-download settings overrides (F18)
@@ -539,6 +541,7 @@ class StreamKeep(
         arrived, and update rate_limit based on bandwidth scheduler rules."""
         self._apply_bandwidth_schedule()
         self._promote_due_failed_retries()
+        self._tick_scheduled_backup()
         # Check for ready scheduled items
         worker = getattr(self, "download_worker", None)
         if worker is not None and worker.isRunning():
@@ -549,6 +552,39 @@ class StreamKeep(
         )
         if has_ready:
             self._advance_queue()
+
+    def _tick_scheduled_backup(self):
+        """Run one due rotating profile backup while this window owns execution.
+
+        Gated on the executor lease so a desktop window and a headless service
+        pointed at the same profile cannot both write the rotation directory.
+        """
+        if not self._queue_execution_enabled:
+            return
+        worker = getattr(self, "_backup_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = ScheduledBackupWorker(self._config, self._executor_owner_id, self)
+        worker.finished_run.connect(self._on_scheduled_backup_finished)
+        worker.finished.connect(self._clear_backup_worker)
+        worker.finished.connect(worker.deleteLater)
+        self._backup_worker = worker
+        worker.start()
+
+    def _clear_backup_worker(self):
+        self._backup_worker = None
+
+    def _on_scheduled_backup_finished(self, ok, message, state):
+        text = message or (
+            "[BACKUP] Automatic backup completed" if ok
+            else "[BACKUP] Automatic backup failed"
+        )
+        self._log(text)
+        detail = str(state.get("last_error", "") or "") if not ok else ""
+        self._notify_center(
+            detail or text.replace("[BACKUP] ", ""),
+            "success" if ok else "error",
+        )
 
     def _queue_item_ready(self, q):
         """Return True if the queue item is ready to download now."""
@@ -1485,6 +1521,15 @@ class StreamKeep(
         try:
             if getattr(self, "_disk_monitor", None) is not None:
                 self._disk_monitor.stop()
+        except Exception:
+            pass
+        try:
+            worker = getattr(self, "_backup_worker", None)
+            if worker is not None and worker.isRunning():
+                # Let the archive finish so the claim is released and no
+                # partial rotation file is left behind.
+                worker.wait(5000)
+                _db.release_backup_claim(self._executor_owner_id)
         except Exception:
             pass
         self._persist_config()

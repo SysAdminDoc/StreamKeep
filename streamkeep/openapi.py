@@ -190,6 +190,14 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                                 "live_channels": {"type": "array", "items": {"type": "object"}},
                                 "active_workers": {"type": "array", "items": {"type": "object"}},
                                 "resumable": {"type": "array", "items": {"type": "object"}},
+                                "backup": {
+                                    "type": "object",
+                                    "description": (
+                                        "Automatic profile backup schedule: last "
+                                        "success, size, next run, and any failure "
+                                        "reason. Host paths are never included."
+                                    ),
+                                },
                             },
                         }),
                         "401": unauthorized,

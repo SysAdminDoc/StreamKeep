@@ -281,6 +281,67 @@ class SettingsToolsMixin:
 
     # ── Config import / export ───────────────────────────────────────
 
+    # ── Automatic backups (V51) ───────────────────────────────────
+
+    def _on_browse_auto_backup_dir(self):
+        """Pick the rotation directory for automatic profile backups."""
+        current = self.auto_backup_dir_input.text().strip()
+        path = QFileDialog.getExistingDirectory(
+            self, "Choose Backup Folder", current or str(Path.home()),
+        )
+        if path:
+            self.auto_backup_dir_input.setText(path)
+
+    def _refresh_backup_status(self):
+        """Show last success, size, next run, and any failure reason."""
+        from ... import db as _db
+        from ...backup import backup_settings
+        from ...utils import fmt_size
+
+        label = getattr(self, "auto_backup_status_label", None)
+        if label is None:
+            return
+        settings = backup_settings(self._config)
+        view = _db.backup_state_public_view(_db.load_backup_state())
+        if not settings["enabled"]:
+            label.setText("Automatic backups are off.")
+            return
+        parts = []
+        if view["last_success_at"]:
+            size = fmt_size(view["last_size"]) if view["last_size"] else "unknown size"
+            parts.append(
+                f"Last backup {view['last_success_at']} "
+                f"({view['last_name'] or 'archive'}, {size})"
+            )
+        else:
+            parts.append("No successful backup yet")
+        if view["running"]:
+            parts.append("a backup is running now")
+        elif view["next_run_at"]:
+            parts.append(f"next run {view['next_run_at']}")
+        if view["last_error"]:
+            parts.append(
+                f"last failure {view['last_failure_at']}: {view['last_error']}"
+            )
+        label.setText(". ".join(parts) + ".")
+
+    def _on_backup_now(self):
+        """Force the next scheduled backup to be due immediately."""
+        from ... import db as _db
+        from ...backup import backup_settings
+
+        self._persist_config()
+        settings = backup_settings(self._config)
+        if not settings["enabled"]:
+            self._set_status(
+                "Enable automatic backups and save settings first.", "warning",
+            )
+            return
+        _db.request_backup_now(cadence_seconds=settings["cadence_seconds"])
+        self._tick_scheduled_backup()
+        self._set_status("Backup requested; it runs on the next tick.", "info")
+        self._refresh_backup_status()
+
     def _on_export_config(self):
         """Write current config to a user-chosen JSON file."""
         self._persist_config()  # sync latest UI state first

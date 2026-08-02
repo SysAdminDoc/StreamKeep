@@ -296,13 +296,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Acceptance: jobs/rules/monitors persist only an opaque profile ID; each profile declares allowed hosts/platforms and refuses cross-site fallback; cookie/token material remains in permission-restricted files or OS secure storage; validation is per profile; logs, hooks, backups, diagnostics and exports reveal neither secret material nor sensitive paths; the current global cookie setting migrates to an explicit default profile without duplicating its contents.
   Complexity: M
 
-- [ ] P1 — V51 — Make rotating automatic backups reachable and observable
-  Why: `auto_backup()` already creates and rotates validated backups, but no production path schedules it and the module documents a nonexistent `schedule_backup()`.
-  Evidence: `streamkeep/backup.py:13` and `:229-259`, `streamkeep/maintenance.py`; local-first products need recovery that does not depend on remembering a manual command.
-  Touches: backup settings, GUI/headless profile scheduler, V44 ownership lease, maintenance/operations status, notifications, fake-clock/restart tests.
-  Acceptance: users configure enablement, destination, cadence and retention; only the profile execution owner runs a non-overlapping backup through an atomic temporary output; last success, next run, size and failure reason are visible; destination loss or validation failure preserves older backups and notifies without retry storms; fake-clock tests cover restart, rotation, cancellation, and restore validation.
-  Complexity: M
-
 - [ ] P1 — V52 — Add one unsigned local release gate with machine-checked product claims
   Why: reproducible build smoke is strong but skips source/tests/translations/advisories, while README, capability registry, Flatpak metadata, updater policy, and Spanish completeness currently disagree with reachable behavior.
   Evidence: `packaging/reproducible_build.py`, `packaging/sbom.py` (`--audit` is unused by the builder), `streamkeep/capabilities.py:186-208`, `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml:18-19`, `README.md:90`, `:154`, and `:216-227`; Spanish catalog 139/1,325 translated on 2026-07-29.

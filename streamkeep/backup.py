@@ -10,7 +10,12 @@ Authentication state and cookies are deliberately excluded. Use the explicit
 password-protected portable-secret backup for credential transfer.
 
 Restore extracts and replaces the current config directory contents.
-Scheduled auto-backup via ``schedule_backup()`` with rotation.
+
+Automatic rotating backups run through ``run_scheduled_backup()``, which claims
+a durable, non-overlapping slot in the ``backup_runs`` table and is driven by
+whichever process holds the profile execution lease (the GUI window or the
+headless service). ``auto_backup()`` performs one validated, atomically-renamed
+rotation write and may also be called directly.
 """
 
 import json
@@ -18,6 +23,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -226,24 +232,71 @@ def list_backup_contents(backup_path):
         return []
 
 
-def auto_backup(backup_dir, *, keep_last=5):
-    """Create a timestamped backup and rotate old ones.
+def validate_backup_archive(backup_path):
+    """Check that a written backup is a readable archive with real content.
 
-    Returns ``(ok, message)``.
+    Returns ``(ok, message)``. This is deliberately cheaper than the full
+    restore validation: it proves the file is not truncated or corrupt so a
+    half-written archive can never displace a known-good rotation slot.
+    """
+    try:
+        with zipfile.ZipFile(backup_path, "r") as zf:
+            damaged = zf.testzip()
+            if damaged is not None:
+                return False, f"Backup is corrupt: {damaged}"
+            names = set(zf.namelist())
+            if "_backup_meta.json" not in names:
+                return False, "Backup is missing its metadata"
+            meta = json.loads(zf.read("_backup_meta.json").decode("utf-8"))
+            if not isinstance(meta, dict) or not str(meta.get("version") or "").strip():
+                return False, "Backup metadata is missing a version"
+            if not names & set(BACKUP_FILES):
+                return False, "Backup contains no profile data"
+    except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as e:
+        return False, f"Backup validation failed: {e}"
+    return True, "Backup validated"
+
+
+def auto_backup(backup_dir, *, keep_last=5, timestamp=None):
+    """Create a validated timestamped backup and rotate old ones.
+
+    The archive is written to a temporary file in the destination directory and
+    only renamed into its rotation slot after it validates, so an interrupted
+    or corrupt run can never be counted as a retained backup. Rotation runs
+    only after a successful write, so a failing destination preserves whatever
+    older backups already exist.
+
+    Returns ``(ok, message, path)``.
     """
     if not backup_dir:
-        return False, "No backup directory configured"
+        return False, "No backup directory configured", ""
     try:
         keep_last = max(1, int(keep_last or 1))
     except (TypeError, ValueError):
         keep_last = 5
-    os.makedirs(backup_dir, exist_ok=True)
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except OSError as e:
+        return False, f"Backup destination is unavailable: {e}", ""
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(backup_dir, f"streamkeep_{timestamp}.skbackup")
-    ok, msg = create_backup(path)
-    if not ok:
-        return ok, msg
+    stamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(backup_dir, f"streamkeep_{stamp}.skbackup")
+    tmp_path = f"{path}.part"
+    try:
+        ok, msg = create_backup(tmp_path)
+        if ok:
+            ok, msg = validate_backup_archive(tmp_path)
+        if not ok:
+            return False, msg, ""
+        os.replace(tmp_path, path)
+    except OSError as e:
+        return False, f"Backup failed: {e}", ""
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     # Rotate: keep only the last N backups
     backups = sorted(
@@ -256,7 +309,118 @@ def auto_backup(backup_dir, *, keep_last=5):
         except OSError:
             pass
 
-    return True, f"Auto-backup: {msg} (keeping last {keep_last})"
+    return True, f"Auto-backup: {msg} (keeping last {keep_last})", path
+
+
+# ── Automatic backup schedule ───────────────────────────────────────
+
+BACKUP_CADENCES = {
+    "hourly": 60 * 60,
+    "daily": 24 * 60 * 60,
+    "weekly": 7 * 24 * 60 * 60,
+}
+DEFAULT_CADENCE = "daily"
+# Failures back off from this floor, doubling per consecutive failure, so a
+# missing network destination is retried a handful of times per cadence
+# window instead of on every scheduler tick.
+FAILURE_BACKOFF_SECONDS = 15 * 60
+
+
+def cadence_seconds(name):
+    """Return the interval for a named cadence, falling back to daily."""
+    return BACKUP_CADENCES.get(
+        str(name or "").strip().lower(), BACKUP_CADENCES[DEFAULT_CADENCE]
+    )
+
+
+def default_backup_dir():
+    """Return the default rotation directory inside the profile."""
+    return str(CONFIG_DIR / "backups")
+
+
+def backup_settings(config):
+    """Read the automatic-backup preferences out of a config mapping."""
+    config = config or {}
+    directory = str(config.get("auto_backup_dir", "") or "").strip()
+    try:
+        keep_last = int(config.get("auto_backup_keep_last", 5) or 5)
+    except (TypeError, ValueError):
+        keep_last = 5
+    cadence = str(config.get("auto_backup_cadence", "") or DEFAULT_CADENCE).lower()
+    if cadence not in BACKUP_CADENCES:
+        cadence = DEFAULT_CADENCE
+    return {
+        "enabled": bool(config.get("auto_backup_enabled", False)),
+        "dir": directory or default_backup_dir(),
+        "cadence": cadence,
+        "cadence_seconds": BACKUP_CADENCES[cadence],
+        "keep_last": max(1, min(50, keep_last)),
+    }
+
+
+def failure_backoff_seconds(consecutive_failures, *, cap_seconds):
+    """Return the delay before retrying a failed scheduled backup."""
+    attempts = max(1, int(consecutive_failures or 1))
+    delay = FAILURE_BACKOFF_SECONDS * (2 ** min(10, attempts - 1))
+    return int(max(FAILURE_BACKOFF_SECONDS, min(delay, max(1, int(cap_seconds)))))
+
+
+def run_scheduled_backup(config, owner_id, *, now=None, log_fn=None, notify_fn=None):
+    """Run one due automatic backup if this owner can claim it.
+
+    Returns the resulting state dict when an attempt ran, otherwise ``None``.
+    Callers must already hold the profile execution lease; the durable claim
+    here only prevents overlap and takeover races.
+    """
+    from . import db
+
+    settings = backup_settings(config)
+    if not settings["enabled"]:
+        db.release_backup_claim(owner_id)
+        return None
+    current = float(time.time() if now is None else now)
+    claim = db.claim_due_backup(
+        owner_id,
+        cadence_seconds=settings["cadence_seconds"],
+        now=current,
+    )
+    if claim is None:
+        return None
+
+    ok, message, path = auto_backup(
+        settings["dir"], keep_last=settings["keep_last"],
+    )
+    size = 0
+    if ok:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+    backoff = 0
+    if not ok:
+        backoff = failure_backoff_seconds(
+            int(claim.get("consecutive_failures", 0) or 0) + 1,
+            cap_seconds=settings["cadence_seconds"],
+        )
+    state = db.finish_backup_run(
+        owner_id,
+        ok=ok,
+        now=float(time.time() if now is None else now),
+        cadence_seconds=settings["cadence_seconds"],
+        path=path,
+        size=size,
+        error="" if ok else message,
+        failure_backoff_seconds=backoff,
+    )
+    if callable(log_fn):
+        log_fn(f"[BACKUP] {message}")
+    if callable(notify_fn):
+        notify_fn(
+            "Automatic backup" if ok else "Automatic backup failed",
+            message,
+            "success" if ok else "error",
+        )
+    return state
 
 
 def _meta_json():

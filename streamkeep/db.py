@@ -15,6 +15,7 @@ migration so future schema changes are orderly.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -28,7 +29,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _write_lock = threading.Lock()
 
@@ -203,6 +204,22 @@ def _apply_schema(db):
             heartbeat_at REAL    NOT NULL DEFAULT 0,
             expires_at   REAL    NOT NULL DEFAULT 0,
             generation   INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS backup_runs (
+            profile_id       TEXT PRIMARY KEY,
+            running_owner    TEXT    NOT NULL DEFAULT '',
+            running_since    REAL    NOT NULL DEFAULT 0,
+            next_run_at      REAL    NOT NULL DEFAULT 0,
+            cadence_seconds  INTEGER NOT NULL DEFAULT 0,
+            last_started_at  TEXT    NOT NULL DEFAULT '',
+            last_success_at  TEXT    NOT NULL DEFAULT '',
+            last_failure_at  TEXT    NOT NULL DEFAULT '',
+            last_path        TEXT    NOT NULL DEFAULT '',
+            last_size        INTEGER NOT NULL DEFAULT 0,
+            last_error       TEXT    NOT NULL DEFAULT '',
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            updated_at       TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS archive_manifests (
@@ -2578,6 +2595,311 @@ def load_retry_circuits() -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
     finally:
         db.close()
+
+
+_BACKUP_STATE_DEFAULT: dict[str, Any] = {
+    "profile_id": "default",
+    "running_owner": "",
+    "running_since": 0.0,
+    "next_run_at": 0.0,
+    "cadence_seconds": 0,
+    "last_started_at": "",
+    "last_success_at": "",
+    "last_failure_at": "",
+    "last_path": "",
+    "last_size": 0,
+    "last_error": "",
+    "consecutive_failures": 0,
+    "updated_at": "",
+}
+
+# A claim held past this many seconds belongs to a process that died mid-run;
+# a later owner may take it over rather than blocking backups forever.
+BACKUP_CLAIM_STALE_SECONDS = 60 * 60
+
+
+def load_backup_state(profile_id: str = "default") -> dict[str, Any]:
+    """Return the persisted automatic-backup schedule state."""
+    db = _connect(readonly=True)
+    try:
+        row = db.execute(
+            "SELECT * FROM backup_runs WHERE profile_id=?", (str(profile_id),),
+        ).fetchone()
+    finally:
+        db.close()
+    state = dict(_BACKUP_STATE_DEFAULT)
+    state["profile_id"] = str(profile_id)
+    if row is not None:
+        state.update(dict(row))
+    return _normalize_backup_state(state)
+
+
+def _normalize_backup_state(state: dict[str, Any]) -> dict[str, Any]:
+    state["running_since"] = float(state.get("running_since", 0) or 0)
+    state["next_run_at"] = float(state.get("next_run_at", 0) or 0)
+    state["cadence_seconds"] = int(state.get("cadence_seconds", 0) or 0)
+    state["last_size"] = int(state.get("last_size", 0) or 0)
+    state["consecutive_failures"] = int(state.get("consecutive_failures", 0) or 0)
+    for key in (
+        "profile_id", "running_owner", "last_started_at", "last_success_at",
+        "last_failure_at", "last_path", "last_error", "updated_at",
+    ):
+        state[key] = str(state.get(key, "") or "")
+    return state
+
+
+def claim_due_backup(
+    owner_id: str,
+    *,
+    cadence_seconds: int,
+    now: float,
+    profile_id: str = "default",
+) -> dict[str, Any] | None:
+    """Atomically claim the next due backup run for one execution owner.
+
+    Returns the claimed state, or ``None`` when nothing is due, another live
+    owner already holds the claim, or the caller supplied no cadence. First
+    contact with a cadence schedules an immediate run so enabling backups does
+    not silently wait a full interval.
+    """
+    owner = str(owner_id or "").strip()
+    interval = max(1, int(cadence_seconds or 0))
+    current = float(now)
+    if not owner:
+        return None
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM backup_runs WHERE profile_id=?", (str(profile_id),),
+            ).fetchone()
+            state = dict(_BACKUP_STATE_DEFAULT)
+            state["profile_id"] = str(profile_id)
+            if row is not None:
+                state.update(dict(row))
+            state = _normalize_backup_state(state)
+            running_owner = state["running_owner"]
+            if running_owner and running_owner != owner and (
+                current - state["running_since"] < BACKUP_CLAIM_STALE_SECONDS
+            ):
+                db.rollback()
+                return None
+            next_run_at = state["next_run_at"]
+            if next_run_at <= 0 or state["cadence_seconds"] != interval:
+                # A first schedule, or a cadence the operator just changed:
+                # re-anchor from the last success so shortening the interval
+                # cannot skip a run and lengthening it cannot fire early.
+                anchor = _iso_epoch(state["last_success_at"])
+                next_run_at = (anchor + interval) if anchor else current
+            if current < next_run_at:
+                db.execute(
+                    "INSERT INTO backup_runs (profile_id, next_run_at, "
+                    "cadence_seconds, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(profile_id) DO UPDATE SET "
+                    "next_run_at=excluded.next_run_at, "
+                    "cadence_seconds=excluded.cadence_seconds, "
+                    "updated_at=excluded.updated_at",
+                    (str(profile_id), next_run_at, interval, _utc_now_iso()),
+                )
+                db.commit()
+                return None
+            started_at = _utc_iso(current)
+            db.execute(
+                "INSERT INTO backup_runs (profile_id, running_owner, "
+                "running_since, next_run_at, cadence_seconds, last_started_at, "
+                "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(profile_id) DO UPDATE SET "
+                "running_owner=excluded.running_owner, "
+                "running_since=excluded.running_since, "
+                "cadence_seconds=excluded.cadence_seconds, "
+                "last_started_at=excluded.last_started_at, "
+                "updated_at=excluded.updated_at",
+                (
+                    str(profile_id), owner, current, next_run_at, interval,
+                    started_at, _utc_now_iso(),
+                ),
+            )
+            db.commit()
+            state.update({
+                "running_owner": owner,
+                "running_since": current,
+                "cadence_seconds": interval,
+                "last_started_at": started_at,
+            })
+            return state
+        finally:
+            db.close()
+
+
+def finish_backup_run(
+    owner_id: str,
+    *,
+    ok: bool,
+    now: float,
+    cadence_seconds: int,
+    path: str = "",
+    size: int = 0,
+    error: str = "",
+    failure_backoff_seconds: int = 0,
+    profile_id: str = "default",
+) -> dict[str, Any]:
+    """Record one completed backup attempt and schedule the next one."""
+    owner = str(owner_id or "").strip()
+    interval = max(1, int(cadence_seconds or 0))
+    current = float(now)
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM backup_runs WHERE profile_id=?", (str(profile_id),),
+            ).fetchone()
+            state = dict(_BACKUP_STATE_DEFAULT)
+            state["profile_id"] = str(profile_id)
+            if row is not None:
+                state.update(dict(row))
+            state = _normalize_backup_state(state)
+            if state["running_owner"] and state["running_owner"] != owner:
+                db.rollback()
+                return state
+            stamp = _utc_iso(current)
+            if ok:
+                state.update({
+                    "last_success_at": stamp,
+                    "last_path": str(path or ""),
+                    "last_size": max(0, int(size or 0)),
+                    "last_error": "",
+                    "consecutive_failures": 0,
+                    "next_run_at": current + interval,
+                })
+            else:
+                failures = state["consecutive_failures"] + 1
+                backoff = max(1, int(failure_backoff_seconds or interval))
+                state.update({
+                    "last_failure_at": stamp,
+                    "last_error": str(error or "Backup failed"),
+                    "consecutive_failures": failures,
+                    "next_run_at": current + backoff,
+                })
+            state.update({
+                "running_owner": "",
+                "running_since": 0.0,
+                "cadence_seconds": interval,
+                "updated_at": _utc_now_iso(),
+            })
+            db.execute(
+                "INSERT INTO backup_runs (profile_id, running_owner, "
+                "running_since, next_run_at, cadence_seconds, last_started_at, "
+                "last_success_at, last_failure_at, last_path, last_size, "
+                "last_error, consecutive_failures, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(profile_id) DO UPDATE SET "
+                "running_owner='', running_since=0, "
+                "next_run_at=excluded.next_run_at, "
+                "cadence_seconds=excluded.cadence_seconds, "
+                "last_success_at=excluded.last_success_at, "
+                "last_failure_at=excluded.last_failure_at, "
+                "last_path=excluded.last_path, last_size=excluded.last_size, "
+                "last_error=excluded.last_error, "
+                "consecutive_failures=excluded.consecutive_failures, "
+                "updated_at=excluded.updated_at",
+                (
+                    str(profile_id), "", 0.0, state["next_run_at"], interval,
+                    state["last_started_at"], state["last_success_at"],
+                    state["last_failure_at"], state["last_path"],
+                    state["last_size"], state["last_error"],
+                    state["consecutive_failures"], state["updated_at"],
+                ),
+            )
+            db.commit()
+            return state
+        finally:
+            db.close()
+
+
+def request_backup_now(
+    *, cadence_seconds: int, profile_id: str = "default",
+) -> bool:
+    """Make the next scheduled backup due immediately.
+
+    Only the due time moves; success history and failure counters are left
+    alone so an operator-forced run cannot rewrite the observable record.
+    """
+    interval = max(1, int(cadence_seconds or 0))
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute(
+                "INSERT INTO backup_runs (profile_id, next_run_at, "
+                "cadence_seconds, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(profile_id) DO UPDATE SET "
+                "next_run_at=excluded.next_run_at, "
+                "cadence_seconds=excluded.cadence_seconds, "
+                "updated_at=excluded.updated_at",
+                (str(profile_id), 1.0, interval, _utc_now_iso()),
+            )
+            db.commit()
+            return True
+        finally:
+            db.close()
+
+
+def release_backup_claim(
+    owner_id: str, *, profile_id: str = "default",
+) -> bool:
+    """Drop a claim taken by this owner without recording an attempt."""
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return False
+    with _write_lock:
+        db = _connect()
+        try:
+            cur = db.execute(
+                "UPDATE backup_runs SET running_owner='', running_since=0, "
+                "updated_at=? WHERE profile_id=? AND running_owner=?",
+                (_utc_now_iso(), str(profile_id), owner),
+            )
+            db.commit()
+            return cur.rowcount > 0
+        finally:
+            db.close()
+
+
+def backup_state_public_view(state: dict[str, Any]) -> dict[str, Any]:
+    """Project backup state into the operations API shape (no host paths)."""
+    from .retry import sanitize_failure_reason
+
+    normalized = _normalize_backup_state(dict(state or {}))
+    last_path = normalized["last_path"]
+    return {
+        "running": bool(normalized["running_owner"]),
+        "cadence_seconds": normalized["cadence_seconds"],
+        "next_run_at": (
+            _utc_iso(normalized["next_run_at"])
+            if normalized["next_run_at"] > 0 else ""
+        ),
+        "last_started_at": normalized["last_started_at"],
+        "last_success_at": normalized["last_success_at"],
+        "last_failure_at": normalized["last_failure_at"],
+        "last_size": normalized["last_size"],
+        "last_name": os.path.basename(last_path) if last_path else "",
+        "last_error": sanitize_failure_reason(normalized["last_error"])
+        if normalized["last_error"] else "",
+        "consecutive_failures": normalized["consecutive_failures"],
+    }
+
+
+def _utc_iso(timestamp: float) -> str:
+    from .retry import utc_iso
+
+    return utc_iso(timestamp)
+
+
+def _iso_epoch(value: object) -> float:
+    from .retry import iso_timestamp
+
+    return iso_timestamp(value)
 
 
 def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:

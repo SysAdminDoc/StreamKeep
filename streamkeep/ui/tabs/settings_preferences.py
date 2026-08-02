@@ -624,6 +624,19 @@ class SettingsPreferencesMixin:
                 "favorites_exempt": self.lc_fav_exempt_check.isChecked(),
                 "keep_last_per_source": self.lc_keep_last_spin.value(),
             }
+        # Apply automatic-backup schedule (V51)
+        if hasattr(self, "auto_backup_check"):
+            self._config["auto_backup_enabled"] = self.auto_backup_check.isChecked()
+            self._config["auto_backup_dir"] = (
+                self.auto_backup_dir_input.text().strip()
+            )
+            self._config["auto_backup_cadence"] = str(
+                self.auto_backup_cadence_combo.currentData() or "daily"
+            )
+            self._config["auto_backup_keep_last"] = int(
+                self.auto_backup_keep_spin.value()
+            )
+            self._refresh_backup_status()
         # Apply library/NFO + chat
         from ...extractors.twitch import TwitchExtractor
         self._write_nfo = self.nfo_check.isChecked()

@@ -22,7 +22,12 @@ from .upgrade import (
     quality_rank,
 )
 from .utils import default_output_dir, fmt_size, safe_filename
-from .workers import DownloadWorker, FetchWorker, FinalizeWorker
+from .workers import (
+    DownloadWorker,
+    FetchWorker,
+    FinalizeWorker,
+    ScheduledBackupWorker,
+)
 
 
 class HeadlessJobService(QObject):
@@ -68,6 +73,10 @@ class HeadlessJobService(QObject):
         self._lease_timer = QTimer(self)
         self._lease_timer.setInterval(10_000)
         self._lease_timer.timeout.connect(self._heartbeat_lease)
+        self._backup_worker: ScheduledBackupWorker | None = None
+        self._backup_timer = QTimer(self)
+        self._backup_timer.setInterval(60_000)
+        self._backup_timer.timeout.connect(self._tick_scheduled_backup)
         self._wake_requested.connect(
             self._dispatch, Qt.ConnectionType.QueuedConnection
         )
@@ -89,7 +98,9 @@ class HeadlessJobService(QObject):
         self._stopping = False
         self._dispatch_timer.start()
         self._lease_timer.start()
+        self._backup_timer.start()
         QTimer.singleShot(0, self._dispatch)
+        QTimer.singleShot(0, self._tick_scheduled_backup)
         return recovered
 
     def stop(self, wait_ms: int = 3000) -> None:
@@ -98,6 +109,7 @@ class HeadlessJobService(QObject):
         self._started = False
         self._dispatch_timer.stop()
         self._lease_timer.stop()
+        self._backup_timer.stop()
         for worker in list(self._fetchers.values()):
             worker.requestInterruption()
         for worker in list(self._downloads.values()):
@@ -110,6 +122,12 @@ class HeadlessJobService(QObject):
         ]:
             if worker.isRunning():
                 worker.wait(max(0, int(wait_ms)))
+        if self._backup_worker is not None and self._backup_worker.isRunning():
+            # A backup is a short, self-contained write; let it finish so the
+            # claim is released and no partial archive is left behind.
+            self._backup_worker.wait(max(0, int(wait_ms)))
+            db.release_backup_claim(self.owner_id)
+        self._backup_worker = None
         if self._lease_acquired:
             db.release_executor_lease(self.owner_id)
             self._lease_acquired = False
@@ -139,6 +157,30 @@ class HeadlessJobService(QObject):
         write_log_line(
             "[SERVICE] Queue executor lease was lost; active work was stopped "
             "to prevent duplicate execution."
+        )
+
+    def _tick_scheduled_backup(self) -> None:
+        """Start one due rotating backup while this process owns execution."""
+        if not self._started or self._stopping or not self._lease_acquired:
+            return
+        if self._backup_worker is not None and self._backup_worker.isRunning():
+            return
+        worker = ScheduledBackupWorker(self.config, self.owner_id, parent=self)
+        worker.finished_run.connect(self._on_backup_finished)
+        worker.finished.connect(self._clear_backup_worker)
+        worker.finished.connect(worker.deleteLater)
+        self._backup_worker = worker
+        worker.start()
+
+    def _clear_backup_worker(self) -> None:
+        self._backup_worker = None
+
+    def _on_backup_finished(
+        self, ok: bool, message: str, _state: dict[str, Any],
+    ) -> None:
+        write_log_line(
+            message or ("[BACKUP] Automatic backup completed"
+                        if ok else "[BACKUP] Automatic backup failed")
         )
 
     # These provider methods are intentionally thread-safe for local_server.
@@ -205,6 +247,7 @@ class HeadlessJobService(QObject):
                 db.failed_job_public_view(item) for item in db.load_failed_jobs()
             ],
             "retry_circuits": db.load_retry_circuits(),
+            "backup": db.backup_state_public_view(db.load_backup_state()),
             "history": db.query_history_page(limit=100),
             "history_total": db.history_count(),
             "monitor": db.load_monitor_channels(),

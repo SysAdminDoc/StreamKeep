@@ -134,7 +134,7 @@ class PersistentRetrySchedulerTests(unittest.TestCase):
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
                 conn.close()
 
-            self.assertEqual(version, 10)
+            self.assertEqual(version, db.SCHEMA_VERSION)
             self.assertEqual(failure["category"], "timeout")
             self.assertTrue(failure["retryable"])
             self.assertTrue(failure["auto_retry"])

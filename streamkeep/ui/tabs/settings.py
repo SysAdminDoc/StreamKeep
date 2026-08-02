@@ -1854,6 +1854,80 @@ def build_settings_tab(win):
     lc_lay.addLayout(lc_btn_row)
     card_lay.addWidget(lc_block)
 
+    # ── Automatic Backups (V51) ───────────────────────────────────
+    from ...backup import BACKUP_CADENCES, backup_settings
+
+    backup_cfg = backup_settings(win._config)
+    backup_block, backup_lay = make_field_block(
+        "Automatic Backups",
+        "Rotate validated .skbackup archives of your profile on a schedule. "
+        "Only the app instance that owns queue execution runs the backup.",
+    )
+    win.auto_backup_check = QCheckBox("Back up this profile automatically")
+    win.auto_backup_check.setChecked(backup_cfg["enabled"])
+    win.auto_backup_check.setToolTip(
+        "Archives config, library, tags, search index and notification history. "
+        "Credentials and cookies are never included."
+    )
+    backup_lay.addWidget(win.auto_backup_check)
+
+    backup_dir_row = QHBoxLayout()
+    backup_dir_row.setSpacing(8)
+    backup_dir_row.addWidget(QLabel("Destination:"))
+    win.auto_backup_dir_input = QLineEdit(backup_cfg["dir"])
+    win.auto_backup_dir_input.setPlaceholderText("Backup folder")
+    backup_dir_row.addWidget(win.auto_backup_dir_input, 1)
+    win.auto_backup_browse_btn = QPushButton("Browse…")
+    win.auto_backup_browse_btn.setObjectName("secondary")
+    win.auto_backup_browse_btn.setFixedWidth(96)
+    win.auto_backup_browse_btn.clicked.connect(win._on_browse_auto_backup_dir)
+    backup_dir_row.addWidget(win.auto_backup_browse_btn)
+    backup_lay.addLayout(backup_dir_row)
+
+    backup_opt_row = QHBoxLayout()
+    backup_opt_row.setSpacing(8)
+    backup_opt_row.addWidget(QLabel("Cadence:"))
+    win.auto_backup_cadence_combo = QComboBox()
+    for name in BACKUP_CADENCES:
+        win.auto_backup_cadence_combo.addItem(name.capitalize(), name)
+    index = win.auto_backup_cadence_combo.findData(backup_cfg["cadence"])
+    win.auto_backup_cadence_combo.setCurrentIndex(max(0, index))
+    backup_opt_row.addWidget(win.auto_backup_cadence_combo)
+    backup_opt_row.addSpacing(12)
+    backup_opt_row.addWidget(QLabel("Keep last:"))
+    win.auto_backup_keep_spin = QSpinBox()
+    win.auto_backup_keep_spin.setRange(1, 50)
+    win.auto_backup_keep_spin.setValue(backup_cfg["keep_last"])
+    win.auto_backup_keep_spin.setToolTip(
+        "Older archives beyond this count are removed only after a new backup "
+        "has been written and validated."
+    )
+    backup_opt_row.addWidget(win.auto_backup_keep_spin)
+    backup_opt_row.addStretch(1)
+    backup_lay.addLayout(backup_opt_row)
+
+    win.auto_backup_status_label = QLabel("")
+    win.auto_backup_status_label.setObjectName("hintLabel")
+    win.auto_backup_status_label.setWordWrap(True)
+    backup_lay.addWidget(win.auto_backup_status_label)
+
+    backup_btn_row = QHBoxLayout()
+    backup_btn_row.setSpacing(8)
+    win.auto_backup_now_btn = QPushButton("Back up now")
+    win.auto_backup_now_btn.setObjectName("secondary")
+    win.auto_backup_now_btn.setFixedWidth(150)
+    win.auto_backup_now_btn.clicked.connect(win._on_backup_now)
+    backup_btn_row.addWidget(win.auto_backup_now_btn)
+    win.auto_backup_refresh_btn = QPushButton("Refresh status")
+    win.auto_backup_refresh_btn.setObjectName("secondary")
+    win.auto_backup_refresh_btn.setFixedWidth(150)
+    win.auto_backup_refresh_btn.clicked.connect(win._refresh_backup_status)
+    backup_btn_row.addWidget(win.auto_backup_refresh_btn)
+    backup_btn_row.addStretch(1)
+    backup_lay.addLayout(backup_btn_row)
+    card_lay.addWidget(backup_block)
+    win._refresh_backup_status()
+
     # ── Media Library ──────────────────────────────────────────────
     lib_block, lib_lay = make_field_block(
         "Media Library",
