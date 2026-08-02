@@ -68,6 +68,9 @@ class DownloadJobSpec:
     ytdlp_unavailable_fragments: str = ""
     ytdlp_throttled_rate: str = ""
     ytdlp_live_from_start: bool = False
+    # Opt-in from-start re-capture with ytarchive when a live yt-dlp
+    # capture reports fragment gaps (V36).
+    live_engine_fallback: bool = False
     ytdlp_wait_for_video: str = ""
     ytdlp_embed_chapters: bool | None = None
     ytdlp_embed_metadata: bool | None = None
@@ -181,6 +184,7 @@ class DownloadJobSpec:
         worker.ytdlp_unavailable_fragments = self.ytdlp_unavailable_fragments
         worker.ytdlp_throttled_rate = self.ytdlp_throttled_rate
         worker.ytdlp_live_from_start = self.ytdlp_live_from_start
+        worker.live_engine_fallback = self.live_engine_fallback
         worker.ytdlp_wait_for_video = self.ytdlp_wait_for_video
         worker.ytdlp_embed_chapters = self.ytdlp_embed_chapters
         worker.ytdlp_embed_metadata = self.ytdlp_embed_metadata
@@ -248,6 +252,9 @@ class DownloadJobSpec:
             ),
             ytdlp_throttled_rate=worker.ytdlp_throttled_rate or "",
             ytdlp_live_from_start=bool(worker.ytdlp_live_from_start),
+            live_engine_fallback=bool(
+                getattr(worker, "live_engine_fallback", False)
+            ),
             ytdlp_wait_for_video=worker.ytdlp_wait_for_video or "",
             ytdlp_embed_chapters=worker.ytdlp_embed_chapters,
             ytdlp_embed_metadata=worker.ytdlp_embed_metadata,

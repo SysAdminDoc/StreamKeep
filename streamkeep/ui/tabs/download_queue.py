@@ -954,6 +954,9 @@ class DownloadQueueMixin:
             ytdlp_unavailable_fragments=transfer["unavailable_fragments"],
             ytdlp_throttled_rate=transfer["throttled_rate"],
             ytdlp_live_from_start=transfer["live_from_start"],
+            live_engine_fallback=bool(
+                self._config.get("live_engine_fallback", False)
+            ),
             ytdlp_wait_for_video=transfer["wait_for_video"],
             ytdlp_embed_chapters=transfer["embed_chapters"],
             ytdlp_embed_metadata=transfer["embed_metadata"],

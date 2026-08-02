@@ -216,14 +216,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Complexity: M
   > 2026-07-29: No signing is permitted. Remove/disable the Authenticode/PFX-only updater path for unsigned builds; use explicit manual/package-manager updating with published hashes, replace the stale WinGet 4.38.0 placeholder hash, and keep Windows scope separate from V53. (RESEARCH.md 2026-07-29)
 
-- [ ] P1 — V36 — Live-capture reliability: fragment-gap recovery + optional ytarchive engine
-  Why: yt-dlp `--live-from-start` drops fragments on unstable streams (open issues #13359/#15921/#16673) and users route to ytarchive/streamlink for reliability-critical captures; StreamKeep is yt-dlp/ffmpeg-only for live.
-  Evidence: https://github.com/yt-dlp/yt-dlp/issues/13359, /15921, /16673; https://github.com/Kethsar/ytarchive; existing optional-engine pattern in `streamkeep/integrations/`. Pairs with V13 (streamlink) as multi-engine live fallback.
-  Touches: a generalized typed download-engine interface (factor out of `integrations/gallery_dl.py`/`lux.py`), an `ytarchive` engine adapter, live-fragment gap detection/retry in `workers/download.py`, capability detection in `capabilities.py`, Settings engine preference, tests.
-  Acceptance: when yt-dlp live capture reports fragment gaps, the job either recovers the missing fragments or (opt-in) falls back to ytarchive for a from-start capture; the engine is optional and detected like gallery-dl/lux; absence degrades to current yt-dlp behavior; a fixture reproduces a gap and asserts recovery/fallback.
-  Complexity: L
-  > 2026-07-29: Preserve raw `.part`/TS/segment staging after interruption or finalization failure, report missing intervals, and provide an idempotent “Finalize/Salvage to new file” action; never overwrite the raw capture or known-good output. (BililiveRecorder, livestream_saver v2.0.0, ytarchive; RESEARCH.md 2026-07-29)
-
 #### P2 — Later
 
 - [ ] P2 — V34 — Optional yt-dlp-ytse SABR fallback engine for YouTube

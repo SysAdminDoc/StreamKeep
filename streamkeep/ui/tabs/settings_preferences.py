@@ -597,6 +597,11 @@ class SettingsPreferencesMixin:
                 self._config.pop(key, None)
             else:
                 self._config[key] = value
+        # Apply the optional from-start live engine fallback (V36)
+        if hasattr(self, "live_engine_fallback_check"):
+            self._config["live_engine_fallback"] = (
+                self.live_engine_fallback_check.isChecked()
+            )
         # Apply proxy (also routes native extractor curl calls through it)
         proxy = self.proxy_input.text().strip()
         YtDlpExtractor.proxy = proxy

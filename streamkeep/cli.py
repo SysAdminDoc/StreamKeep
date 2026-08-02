@@ -409,6 +409,9 @@ def _run_download(args):
             ytdlp_unavailable_fragments=transfer_options.get("unavailable_fragments", ""),
             ytdlp_throttled_rate=transfer_options.get("throttled_rate", ""),
             ytdlp_live_from_start=transfer_options.get("live_from_start", False),
+            live_engine_fallback=bool(
+                cfg.get("live_engine_fallback", False)
+            ),
             ytdlp_wait_for_video=transfer_options.get("wait_for_video", ""),
             ytdlp_embed_chapters=transfer_options.get("embed_chapters"),
             ytdlp_embed_metadata=transfer_options.get("embed_metadata"),

@@ -102,7 +102,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "enable_diarization", "notif_sound", "native_notifications",
     "download_subs", "subtitle_auto",
     "subtitle_embed", "sponsorblock", "capture_youtube_chat",
-    "ytdlp_live_from_start", "ytdlp_embed_chapters",
+    "ytdlp_live_from_start", "live_engine_fallback", "ytdlp_embed_chapters",
     "ytdlp_embed_metadata", "ytdlp_embed_thumbnail",
     "pp_extract_audio", "pp_normalize_loudness", "pp_reencode_h265",
     "pp_contact_sheet", "pp_split_by_chapter", "pp_remove_silence",

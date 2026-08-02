@@ -561,6 +561,9 @@ class HeadlessJobService(QObject):
             ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
             ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
             ytdlp_live_from_start=transfer.get("live_from_start", False),
+            live_engine_fallback=bool(
+                self.config.get("live_engine_fallback", False)
+            ),
             ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
             ytdlp_embed_chapters=transfer.get("embed_chapters"),
             ytdlp_embed_metadata=transfer.get("embed_metadata"),

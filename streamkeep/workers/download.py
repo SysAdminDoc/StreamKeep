@@ -65,6 +65,10 @@ class DownloadWorker(QThread):
         # Opaque site-bound authentication profile ID (V50). The worker
         # never holds cookie material or a credential path.
         self.auth_profile_id = ""
+        # Live-capture reliability (V36): opt-in from-start fallback and
+        # the gap report from the most recent capture attempt.
+        self.live_engine_fallback = False
+        self.last_capture_gaps = None
         self.rate_limit = ""
         self.proxy = ""
         self.download_subs = False
@@ -868,9 +872,17 @@ class DownloadWorker(QThread):
                 cmd, seg_idx, label, outfile, expected_outfile, is_live=is_live
             )
             if outcome == "ok":
+                self._report_fragment_gaps(label, output_lines)
                 return True
             if outcome == "cancel":
                 return False
+            # A live capture that failed with reported fragment gaps is a
+            # reliability problem, not a bad URL: keep the bytes and offer the
+            # optional from-start engine before giving up.
+            if is_live and self._handle_live_gap_failure(
+                seg_idx, label, outfile, expected_outfile, output_lines,
+            ):
+                return True
             # outcome == "fail": retry once behind Cloudflare with a real
             # browser TLS fingerprint before surfacing the failure.
             if (not attempted_impersonate and _impersonation_available()
@@ -891,6 +903,99 @@ class DownloadWorker(QThread):
             )
             self._maybe_warn_sabr_pot(output_lines)
             return False
+
+    def _report_fragment_gaps(self, label, output_lines):
+        """Log fragment losses a completed capture reported, and return them.
+
+        A capture that exits 0 can still have holes; surfacing them is the
+        difference between an archive the operator trusts and one they do not.
+        """
+        from ..live_capture import parse_fragment_gaps
+
+        gaps = parse_fragment_gaps(output_lines)
+        if gaps.has_gaps:
+            self.last_capture_gaps = gaps
+            self.log.emit(
+                f"[WARN] {label}: live capture reported {gaps.describe()}"
+            )
+        return gaps
+
+    def _handle_live_gap_failure(
+        self, seg_idx, label, outfile, expected_outfile, output_lines,
+    ):
+        """Preserve a gapped live capture and try the optional from-start engine.
+
+        Returns True when a usable recording was produced. The raw staging
+        files are always preserved first, so nothing here can destroy the bytes
+        that were captured before the failure.
+        """
+        from ..live_capture import preserve_raw_capture
+
+        gaps = self._report_fragment_gaps(label, output_lines)
+        if not gaps.has_gaps:
+            return False
+
+        target = expected_outfile or outfile
+        staged = preserve_raw_capture(
+            target, self.output_dir, label,
+            gaps=gaps, reason="live capture reported fragment gaps",
+        )
+        if staged.exists:
+            self.log.emit(
+                f"[SALVAGE] Kept {fmt_size(staged.total_bytes)} of raw capture "
+                f"in {os.path.basename(staged.directory)} — use "
+                "\"Salvage raw capture\" to build a playable file."
+            )
+        return self._try_ytarchive_fallback(seg_idx, label, outfile)
+
+    def _try_ytarchive_fallback(self, seg_idx, label, outfile):
+        """Re-capture from the start with ytarchive when it is available.
+
+        Opt-in and optional: without the toggle or the binary this returns
+        False and the caller reports the original yt-dlp failure unchanged.
+        """
+        from ..integrations.ytarchive import (
+            YtArchiveUnavailable,
+            build_ytarchive_command,
+            is_youtube_live_url,
+            ytarchive_available,
+        )
+
+        if not getattr(self, "live_engine_fallback", False):
+            return False
+        source = self._effective_ytdlp_source()
+        if not is_youtube_live_url(source):
+            return False
+        if not ytarchive_available():
+            from ..integrations.ytarchive import ytarchive_install_hint
+            self.log.emit(f"[HINT] {ytarchive_install_hint()}")
+            return False
+
+        base, _ext = os.path.splitext(outfile.replace("%(ext)s", "mp4"))
+        template = f"{base}.ytarchive.%(ext)s"
+        try:
+            cmd = build_ytarchive_command(
+                source, template,
+                quality=self.ytdlp_format or "best",
+                proxy=self.proxy or "",
+            )
+        except (ValueError, YtArchiveUnavailable) as error:
+            self.log.emit(f"[HINT] ytarchive fallback skipped: {error}")
+            return False
+
+        self.log.emit(
+            f"[ENGINE] Retrying {label} from the start with ytarchive..."
+        )
+        outcome, lines = self._stream_ytdlp_download(
+            cmd, seg_idx, label, template, None, is_live=True,
+        )
+        if outcome == "ok":
+            return True
+        self.log.emit(
+            "[FAIL] ytarchive fallback did not produce a recording: "
+            f"{sanitize_failure_reason(chr(10).join(lines[-3:]))}"
+        )
+        return False
 
     def _maybe_warn_sabr_pot(self, output_lines):
         """Turn a YouTube SABR/PO-token gated failure into remediation advice."""

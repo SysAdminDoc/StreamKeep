@@ -786,6 +786,30 @@ def build_settings_tab(win):
     live_row.addWidget(win.ytdlp_live_from_start_check)
     network_lay.addLayout(live_row)
 
+    # Live-capture reliability (V36)
+    from ...integrations.ytarchive import (
+        ytarchive_available,
+        ytarchive_install_hint,
+    )
+    engine_row = QHBoxLayout()
+    engine_row.setSpacing(8)
+    win.live_engine_fallback_check = QCheckBox(
+        "Re-capture from the start with ytarchive when a live capture drops "
+        "fragments"
+    )
+    win.live_engine_fallback_check.setChecked(bool(
+        win._config.get("live_engine_fallback", False)
+    ))
+    win.live_engine_fallback_check.setToolTip(
+        "Raw capture files are always preserved for salvage. This only adds an "
+        "optional second attempt using the external ytarchive engine."
+        if ytarchive_available() else ytarchive_install_hint()
+    )
+    win.live_engine_fallback_check.setEnabled(ytarchive_available())
+    engine_row.addWidget(win.live_engine_fallback_check)
+    engine_row.addStretch(1)
+    network_lay.addLayout(engine_row)
+
     embed_row = QHBoxLayout()
     embed_row.addWidget(QLabel("Embed:"))
     for name, label in (

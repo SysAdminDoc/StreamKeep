@@ -647,6 +647,19 @@ class HistoryTabMixin:
         verify_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         rescan_manifest_act = menu.addAction("Rescan integrity manifest")
         rescan_manifest_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        # Live-capture salvage (V36): only offered when raw staging files
+        # from an interrupted or failed capture were actually preserved.
+        from ...live_capture import list_staged_captures
+        staged_dirs = (
+            list_staged_captures(h.path)
+            if h.path and os.path.isdir(h.path) else []
+        )
+        salvage_act = menu.addAction("Salvage raw capture to a new file")
+        salvage_act.setEnabled(bool(staged_dirs))
+        if not staged_dirs:
+            salvage_act.setToolTip(
+                "No preserved raw capture files were found for this recording."
+            )
         transcribe_act = menu.addAction("Transcribe (Whisper)...")
         transcribe_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         silence_act = menu.addAction("Remove silence...")
@@ -711,6 +724,8 @@ class HistoryTabMixin:
             self._verify_archive_integrity(h)
         elif chosen == rescan_manifest_act and h.path and os.path.isdir(h.path):
             self._rescan_archive_manifest(h)
+        elif chosen == salvage_act and staged_dirs:
+            self._salvage_raw_captures(staged_dirs)
         elif chosen == transcribe_act and h.path and os.path.isdir(h.path):
             self._start_transcribe_for_dir(h.path)
         elif chosen == silence_act and h.path and os.path.isdir(h.path):
@@ -795,6 +810,82 @@ class HistoryTabMixin:
         else:
             self._set_status(details, "warning")
             self._notify_center(f"Integrity drift: {title}", "warning")
+
+    def _salvage_raw_captures(self, staging_dirs):
+        """Rebuild playable files from preserved raw capture fragments (V36).
+
+        Idempotent: each staging directory produces one ``.salvaged.<ext>``
+        file. An existing salvage output is reported and left alone, and the
+        raw capture itself is never modified or removed.
+        """
+        import subprocess
+
+        from ...capabilities import CapabilityUnavailableError, resolve_tool_command
+        from ...live_capture import (
+            build_salvage_command,
+            load_report,
+            salvage_target,
+            write_concat_list,
+        )
+        from ...paths import _CREATE_NO_WINDOW
+
+        try:
+            ffmpeg = resolve_tool_command("ffmpeg")
+        except CapabilityUnavailableError as error:
+            self._set_status(str(error), "error")
+            return
+
+        built = 0
+        for staging_dir in staging_dirs:
+            target = salvage_target(staging_dir)
+            report = load_report(staging_dir)
+            summary = str(
+                (report.get("gaps") or {}).get("summary", "") or ""
+            )
+            if os.path.isfile(target):
+                self._log(
+                    f"[SALVAGE] {os.path.basename(target)} already exists - "
+                    "leaving it untouched."
+                )
+                continue
+            listing = write_concat_list(staging_dir)
+            if not listing:
+                self._log(
+                    f"[SALVAGE] {os.path.basename(staging_dir)} holds no "
+                    "usable fragments."
+                )
+                continue
+            try:
+                cmd = build_salvage_command(
+                    staging_dir, target, ffmpeg=ffmpeg, concat_list=listing,
+                )
+            except ValueError as error:
+                self._log(f"[SALVAGE] {error}")
+                continue
+            if summary:
+                self._log(f"[SALVAGE] Known gaps: {summary}")
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", creationflags=_CREATE_NO_WINDOW,
+            )
+            if result.returncode == 0 and os.path.isfile(target):
+                built += 1
+                self._log(f"[SALVAGE] Wrote {os.path.basename(target)}")
+            else:
+                tail = (result.stderr or "").strip().splitlines()[-3:]
+                self._log(
+                    "[SALVAGE] ffmpeg could not rebuild "
+                    f"{os.path.basename(staging_dir)}: {' '.join(tail)}"
+                )
+        if built:
+            self._set_status(
+                f"Salvaged {built} raw capture(s) into new files.", "success",
+            )
+        else:
+            self._set_status(
+                "No new salvage files were produced; the raw capture is "
+                "unchanged.", "warning",
+            )
 
     def _rescan_archive_manifest(self, h):
         """Rebaseline a history row manifest to the current file state."""
