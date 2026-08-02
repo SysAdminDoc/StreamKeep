@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V64 — Test suite carries dead imports and a placeholderless f-string (ruff-clean-up)
-  Category: testing
-  Where: `tests/test_bandwidth.py:9` (`_LazyTracker` unused), `tests/test_channel_stats.py:2,5` (`time`, `unittest.mock` unused), `tests/test_podcast_sidecars.py:6` (`pytest` unused), `tests/test_credential_check.py:106` (F541 f-string with no placeholder); also `StreamKeep.py:73` (E702 two statements on one line), `streamkeep/metadata.py:397` and `streamkeep/ui/tabs/settings.py:109` (E731 lambda assigned to a name).
-  Problem: `ruff check .` reports 50 items; excluding the 42 intentional `E402` launcher-import-ordering entries, the remainder are genuine small cleanups. Dead imports in tests obscure real dependencies and mildly slow collection; the F541 and E731/E702 are style nits the project's own hygiene rules would flag. pyflakes (the project's configured linter) is already clean, so these are ruff-only.
-  Evidence: `py -3.12 -m ruff check . --output-format=concise` lists each with file:line. There is no ruff config in the repo (pyflakes is the enforced linter), so these are advisory.
-  Fix: Remove the four unused imports, add a placeholder or drop the `f` prefix at test_credential_check.py:106, and (optionally) split the E702 line and convert the two E731 lambdas to `def`. Do not attempt to "fix" the 42 `E402` items — the launcher deliberately orders imports after runtime guards.
-  Acceptance: `py -3.12 -m ruff check . --select F,E7` reports no errors (E402 left as-is); pyflakes and the full test suite remain green.
-  Confidence: Verified.
-  Effort: S
-
 - [ ] P3 — V65 — `init_db()` schema migration has no cross-process serialization; concurrent first-start after an upgrade can crash on duplicate `ALTER TABLE`
   Category: reliability
   Where: `streamkeep/db.py:51-97` (`init_db`) and the migration helpers it calls (`_migrate_queue_v4/v5`, `_migrate_monitor_v6`, `_migrate_execution_v8`, `_migrate_identity_v9`, `_migrate_retry_v10`, `_migrate_auth_profiles_v11`).

@@ -106,7 +106,10 @@ def _pp_apply_snapshot(snap, win=None):
     if win is None:
         return
     # Refresh UI checkboxes/combos to match
-    _setc = lambda w, v: (w.blockSignals(True), w.setChecked(bool(v)), w.blockSignals(False))
+    def _setc(w, v):
+        w.blockSignals(True)
+        w.setChecked(bool(v))
+        w.blockSignals(False)
     if hasattr(win, "pp_audio_check"):
         _setc(win.pp_audio_check, PostProcessor.extract_audio)
     if hasattr(win, "pp_loud_check"):

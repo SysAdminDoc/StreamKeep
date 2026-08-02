@@ -40,6 +40,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 - Hardened RSS and gallery attribute rendering (V63) so media URLs, share IDs,
   and gallery base URLs cannot break out of quoted XML/HTML attributes.
 
+- Cleared the Ruff F/E7 hygiene findings (V64), removing dead imports and
+  replacing style-only lambdas and semicolon-packed statements with explicit
+  definitions.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

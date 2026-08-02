@@ -394,9 +394,8 @@ def _safe_quality_rows(value):
         if isinstance(item, dict):
             get = item.get
         else:
-            get = lambda name, default=None, row=item: getattr(
-                row, name, default,
-            )
+            def get(name, default=None, row=item):
+                return getattr(row, name, default)
         try:
             bandwidth = int(float(get("bandwidth", 0) or 0))
         except (TypeError, ValueError, OverflowError):

@@ -141,7 +141,7 @@
             <translation>(blank = global template)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="171" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="174" />
             <source>(custom)</source>
             <translation>(custom)</translation>
         </message>
@@ -151,8 +151,8 @@
             <translation>(source default)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="987" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="994" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="990" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="997" />
             <source>(unlimited)</source>
             <translation>(unlimited)</translation>
         </message>
@@ -163,7 +163,7 @@
             <translation>(use global setting)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1146" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1149" />
             <source>(used by Transcribe... in History)</source>
             <translation>(used by Transcribe... in History)</translation>
         </message>
@@ -177,12 +177,12 @@
             <location filename="streamkeep/ui/tabs/analytics.py" line="236" />
             <location filename="streamkeep/ui/tabs/analytics.py" line="359" />
             <location filename="streamkeep/ui/tabs/analytics.py" line="365" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="968" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="971" />
             <source>-</source>
             <translation>-</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="855" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="858" />
             <source>--add-header
 Referer: https://example.com/
 --user-agent
@@ -193,12 +193,12 @@ Referer: https://example.com/
 Archive workstation</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1221" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1224" />
             <source>.ass sidecar for replay sync</source>
             <translation>.ass sidecar for replay sync</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2112" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2115" />
             <source>/path/to/media/library</source>
             <translation>/path/to/media/library</translation>
         </message>
@@ -258,27 +258,27 @@ Archive workstation</translation>
             <translation>0:00</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2304" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2307" />
             <source>128k</source>
             <translation>128k</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2304" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2307" />
             <source>192k</source>
             <translation>192k</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2304" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2307" />
             <source>256k</source>
             <translation>256k</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="977" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="980" />
             <source>2M</source>
             <translation>2M</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2304" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2307" />
             <source>320k</source>
             <translation>320k</translation>
         </message>
@@ -288,7 +288,7 @@ Archive workstation</translation>
             <translation>4-step setup</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1293" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1296" />
             <source>5-minute code</source>
             <translation>5-minute code</translation>
         </message>
@@ -303,17 +303,17 @@ Archive workstation</translation>
             <translation>50%</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="943" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="946" />
             <source>500K</source>
             <translation>500K</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2304" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2307" />
             <source>96k</source>
             <translation>96k</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1174" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1177" />
             <source>&lt;b&gt;Chat Render&lt;/b&gt;</source>
             <translation>&lt;b&gt;Chat Render&lt;/b&gt;</translation>
         </message>
@@ -365,17 +365,17 @@ Archive workstation</translation>
             <translation>A transcription is already running.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="760" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="763" />
             <source>Abort download</source>
             <translation>Abort download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="423" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="426" />
             <source>Accent</source>
             <translation>Accent</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1283" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1286" />
             <source>Access scope</source>
             <translation>Access scope</translation>
         </message>
@@ -387,7 +387,7 @@ Archive workstation</translation>
         <message>
             <location filename="streamkeep/ui/recover_dialog.py" line="138" />
             <location filename="streamkeep/ui/tabs/download.py" line="796" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1577" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1580" />
             <location filename="streamkeep/ui/tabs/storage.py" line="247" />
             <source>Action</source>
             <translation>Action</translation>
@@ -501,7 +501,7 @@ Archive workstation</translation>
             <translation>Advanced</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2356" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2359" />
             <source>After download, stack a primary and secondary subtitle language into one file (SRT or two-style ASS). Requires both language sidecars.</source>
             <translation>After download, stack a primary and secondary subtitle language into one file (SRT or two-style ASS). Requires both language sidecars.</translation>
         </message>
@@ -586,24 +586,24 @@ Archive workstation</translation>
             <translation>Analyzing for highlights...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2091" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2094" />
             <source>API token:</source>
             <translation>API token:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1617" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1620" />
             <source>API URL:</source>
             <translation>API URL:</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/onboarding.py" line="174" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="326" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="383" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="329" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="386" />
             <source>Appearance</source>
             <translation>Appearance</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="303" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="306" />
             <source>Appearance, downloads, privacy, and integrations.</source>
             <translation>Appearance, downloads, privacy, and integrations.</translation>
         </message>
@@ -613,7 +613,7 @@ Archive workstation</translation>
             <translation>appears most in history</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="385" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="388" />
             <source>Applied immediately.</source>
             <translation>Applied immediately.</translation>
         </message>
@@ -683,17 +683,17 @@ Archive workstation</translation>
             <translation>Archive sync is current; no new playlist entries were queued.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1980" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1983" />
             <source>Archives config, library, tags, search index and notification history. Credentials and cookies are never included.</source>
             <translation>Archives config, library, tags, search index and notification history. Credentials and cookies are never included.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="841" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="844" />
             <source>Argument template:</source>
             <translation>Argument template:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2376" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2379" />
             <source>ass</source>
             <translation>ass</translation>
         </message>
@@ -708,12 +708,12 @@ Archive workstation</translation>
             <translation>Attach a validated named argv template from Settings when this channel resolves through yt-dlp.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1215" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1218" />
             <source>Attach an anonymous Twitch IRC reader to every auto-recorded Twitch stream. Writes chat.jsonl sidecar in the output folder. Kick and other platforms are not supported yet.</source>
             <translation>Attach an anonymous Twitch IRC reader to every auto-recorded Twitch stream. Writes chat.jsonl sidecar in the output folder. Kick and other platforms are not supported yet.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1372" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1375" />
             <source>Audible beep on notification events</source>
             <translation>Audible beep on notification events</translation>
         </message>
@@ -733,7 +733,7 @@ Archive workstation</translation>
             <translation>Audio extraction:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="597" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="600" />
             <source>Authentication Profiles</source>
             <translation>Authentication Profiles</translation>
         </message>
@@ -748,12 +748,12 @@ Archive workstation</translation>
             <translation>Auto Record</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1902" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1905" />
             <source>Auto-Cleanup Lifecycle</source>
             <translation>Auto-Cleanup Lifecycle</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1423" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1426" />
             <source>Auto-pause new downloads when space is critically low</source>
             <translation>Auto-pause new downloads when space is critically low</translation>
         </message>
@@ -803,7 +803,7 @@ Archive workstation</translation>
             <translation>AUTOMATED CAPTURE</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1973" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1976" />
             <source>Automatic Backups</source>
             <translation>Automatic Backups</translation>
         </message>
@@ -813,7 +813,7 @@ Archive workstation</translation>
             <translation>Automatic backups are off.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2119" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2122" />
             <source>Automatic ffmpeg operations on each downloaded file. Originals are preserved.</source>
             <translation>Automatic ffmpeg operations on each downloaded file. Originals are preserved.</translation>
         </message>
@@ -823,7 +823,7 @@ Archive workstation</translation>
             <translation>Automatic retry cancelled; the failure remains available.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1902" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1905" />
             <source>Automatically recycle old or watched recordings to reclaim disk space. Always uses the recycle bin — never permanent delete.</source>
             <translation>Automatically recycle old or watched recordings to reclaim disk space. Always uses the recycle bin — never permanent delete.</translation>
         </message>
@@ -843,12 +843,12 @@ Archive workstation</translation>
             <translation>Back</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2028" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2031" />
             <source>Back up now</source>
             <translation>Back up now</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1978" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1981" />
             <source>Back up this profile automatically</source>
             <translation>Back up this profile automatically</translation>
         </message>
@@ -863,7 +863,7 @@ Archive workstation</translation>
             <translation>Background finalization was cancelled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1990" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1993" />
             <source>Backup folder</source>
             <translation>Backup folder</translation>
         </message>
@@ -918,23 +918,23 @@ Archive workstation</translation>
             <translation>before YYYYMMDD</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1202" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1205" />
             <source>BG opacity:</source>
             <translation>BG opacity:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2312" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2315" />
             <source>Bitrate (ignored for flac/pcm)</source>
             <translation>Bitrate (ignored for flac/pcm)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2337" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2340" />
             <source>Bitrate:</source>
             <translation>Bitrate:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="470" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="554" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="473" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="557" />
             <source>Browse</source>
             <translation>Browse</translation>
         </message>
@@ -949,7 +949,7 @@ Archive workstation</translation>
             <translation>Browser clip range prefilled; fetching the source.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1232" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1235" />
             <source>Browser Companion</source>
             <translation>Browser Companion</translation>
         </message>
@@ -994,13 +994,13 @@ Archive workstation</translation>
             <translation>Browser companion web remote is not available yet.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="527" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="530" />
             <source>Browser Cookies</source>
             <translation>Browser Cookies</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="108" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1992" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1995" />
             <source>Browse…</source>
             <translation>Browse…</translation>
         </message>
@@ -1046,7 +1046,7 @@ Archive workstation</translation>
             <translation>by count</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2001" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2004" />
             <source>Cadence:</source>
             <translation>Cadence:</translation>
         </message>
@@ -1073,7 +1073,7 @@ Archive workstation</translation>
         <message>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="69" />
             <location filename="streamkeep/ui/rename_dialog.py" line="165" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="2424" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2427" />
             <location filename="streamkeep/ui/tabs/storage.py" line="234" />
             <source>Cancel</source>
             <translation>Cancel</translation>
@@ -1115,7 +1115,7 @@ Archive workstation</translation>
             <translation>Capture and queue streams, VODs, and media for local archiving.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1213" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1216" />
             <source>Capture Twitch chat during live recordings</source>
             <translation>Capture Twitch chat during live recordings</translation>
         </message>
@@ -1125,13 +1125,13 @@ Archive workstation</translation>
             <translation>Capture volume</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1536" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1539" />
             <source>Capture YouTube live-chat replay (live_chat.json) for VODs</source>
             <translation>Capture YouTube live-chat replay (live_chat.json) for VODs</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="796" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1577" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1580" />
             <source>Category</source>
             <translation>Category</translation>
         </message>
@@ -1205,7 +1205,7 @@ Archive workstation</translation>
             <translation>Channels</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1048" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1051" />
             <source>channels captured at once (default 2)</source>
             <translation>channels captured at once (default 2)</translation>
         </message>
@@ -1235,8 +1235,8 @@ Archive workstation</translation>
             <translation>Chat spike @ {r * 100}%</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="571" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="685" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="574" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="688" />
             <source>Check</source>
             <translation>Check</translation>
         </message>
@@ -1246,12 +1246,12 @@ Archive workstation</translation>
             <translation>Check Every</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1464" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1467" />
             <source>Check for updates on startup</source>
             <translation>Check for updates on startup</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1895" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1898" />
             <source>Check history for URL and title matches before download</source>
             <translation>Check history for URL and title matches before download</translation>
         </message>
@@ -1261,7 +1261,7 @@ Archive workstation</translation>
             <translation>Check only maintenance actions that should be applied</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="574" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="577" />
             <source>Check the imported cookies for expiry</source>
             <translation>Check the imported cookies for expiry</translation>
         </message>
@@ -1271,7 +1271,7 @@ Archive workstation</translation>
             <translation>Check the value and try again</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1690" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1693" />
             <source>Check yt-dlp/JS runtime readiness and PO-token provider presence, and show remediation steps if YouTube is likely to return capped or image-only results.</source>
             <translation>Check yt-dlp/JS runtime readiness and PO-token provider presence, and show remediation steps if YouTube is likely to return capped or image-only results.</translation>
         </message>
@@ -1365,13 +1365,13 @@ Archive workstation</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="1176" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="577" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="580" />
             <source>Clear</source>
             <translation>Clear</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/main_window.py" line="2545" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="693" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="696" />
             <source>Clear all</source>
             <translation>Clear all</translation>
         </message>
@@ -1447,13 +1447,13 @@ Archive workstation</translation>
             <translation>Codec / rate</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2264" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="2334" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2267" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2337" />
             <source>Codec:</source>
             <translation>Codec:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1504" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1507" />
             <source>Comma-separated language codes or yt-dlp regex patterns. Per-download source languages are selectable in Advanced.</source>
             <translation>Comma-separated language codes or yt-dlp regex patterns. Per-download source languages are selectable in Advanced.</translation>
         </message>
@@ -1495,12 +1495,12 @@ Archive workstation</translation>
             <translation>Completed downloads appear here.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1057" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1060" />
             <source>Concurrent queue jobs:</source>
             <translation>Concurrent queue jobs:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="329" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="332" />
             <source>Config</source>
             <translation>Config</translation>
         </message>
@@ -1525,8 +1525,8 @@ Archive workstation</translation>
             <translation>Conflicting rows are highlighted in red. Adjust the template before renaming.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2261" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="2331" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2264" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2334" />
             <source>Container:</source>
             <translation>Container:</translation>
         </message>
@@ -1546,32 +1546,32 @@ Archive workstation</translation>
             <translation>Conversion finished: {successes} ok, {failures} failed. See log.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2388" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2391" />
             <source>Convert a subtitle sidecar of the chosen language into a synchronized [mm:ss.xx] .lrc file for music players.</source>
             <translation>Convert a subtitle sidecar of the chosen language into a synchronized [mm:ss.xx] .lrc file for music players.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2276" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2279" />
             <source>Convert audio to:</source>
             <translation>Convert audio to:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2407" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2410" />
             <source>Convert Files...</source>
             <translation>Convert Files...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2416" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2419" />
             <source>Convert Folder...</source>
             <translation>Convert Folder...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1521" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1524" />
             <source>Convert to {sub_format.upper()}</source>
             <translation>Convert to {sub_format.upper()}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2196" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2199" />
             <source>Convert video to:</source>
             <translation>Convert video to:</translation>
         </message>
@@ -1611,12 +1611,12 @@ Archive workstation</translation>
             <translation>Cookies: {result.label}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1313" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1316" />
             <source>Copy</source>
             <translation>Copy</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2295" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2298" />
             <source>copy = remux only
 mp3 = libmp3lame (universal)
 aac = AAC-LC (Apple-friendly)
@@ -1631,7 +1631,7 @@ vorbis = open-source lossy
 flac/pcm = lossless</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1336" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1339" />
             <source>Copy code</source>
             <translation>Copy code</translation>
         </message>
@@ -1641,7 +1641,7 @@ flac/pcm = lossless</translation>
             <translation>Copy command</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2059" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2062" />
             <source>Copy recordings into a Plex/Jellyfin/Emby library folder and trigger a library scan after each download.</source>
             <translation>Copy recordings into a Plex/Jellyfin/Emby library folder and trigger a library scan after each download.</translation>
         </message>
@@ -1680,7 +1680,7 @@ flac/pcm = lossless</translation>
             <translation>Credential check complete.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1414" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1417" />
             <source>Critical under</source>
             <translation>Critical under</translation>
         </message>
@@ -1690,7 +1690,7 @@ flac/pcm = lossless</translation>
             <translation>Crop offset:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="498" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="501" />
             <source>curl</source>
             <translation>curl</translation>
         </message>
@@ -1720,7 +1720,7 @@ flac/pcm = lossless</translation>
             <translation>Daily</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="401" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="404" />
             <source>Dark</source>
             <translation>Dark</translation>
         </message>
@@ -1737,12 +1737,12 @@ flac/pcm = lossless</translation>
             <translation>Date</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="962" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="965" />
             <source>Day:</source>
             <translation>Day:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1921" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1924" />
             <source>days</source>
             <translation>days</translation>
         </message>
@@ -1752,18 +1752,18 @@ flac/pcm = lossless</translation>
             <translation>Default API, or a custom HTTPS base URL</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="739" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="745" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="742" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="748" />
             <source>default or infinite</source>
             <translation>default or infinite</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="462" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="465" />
             <source>Default Output</source>
             <translation>Default Output</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1101" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1104" />
             <source>Default quality per platform</source>
             <translation>Default quality per platform</translation>
         </message>
@@ -1773,32 +1773,32 @@ flac/pcm = lossless</translation>
             <translation>Default recording folder</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1556" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1559" />
             <source>Delay subscribed downloads by</source>
             <translation>Delay subscribed downloads by</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2140" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2143" />
             <source>Delete</source>
             <translation>Delete</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2345" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2348" />
             <source>Delete original source file after successful conversion</source>
             <translation>Delete original source file after successful conversion</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1914" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1917" />
             <source>Delete recordings older than</source>
             <translation>Delete recordings older than</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="861" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="864" />
             <source>Delete template</source>
             <translation>Delete template</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1951" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1954" />
             <source>Delete watched recordings automatically</source>
             <translation>Delete watched recordings automatically</translation>
         </message>
@@ -1818,7 +1818,7 @@ flac/pcm = lossless</translation>
             <translation>Deleted yt-dlp argument template "{name}".</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="410" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="413" />
             <source>Density</source>
             <translation>Density</translation>
         </message>
@@ -1828,7 +1828,7 @@ flac/pcm = lossless</translation>
             <translation>Desktop build v{VERSION}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1988" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1991" />
             <source>Destination:</source>
             <translation>Destination:</translation>
         </message>
@@ -1843,7 +1843,7 @@ flac/pcm = lossless</translation>
             <translation>Detect scenes</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2171" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2174" />
             <source>Detect silent segments with ffmpeg silencedetect and cut them out.
 Produces a .nosilence copy — the original is preserved.</source>
             <translation>Detect silent segments with ffmpeg silencedetect and cut them out.
@@ -1989,12 +1989,12 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Download stopped after failed segment(s). Resume sidecar was kept for retry.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1494" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1497" />
             <source>Download subtitles by default</source>
             <translation>Download subtitles by default</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2052" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2055" />
             <source>Download Twitch VOD chat replay (JSON + plain text)</source>
             <translation>Download Twitch VOD chat replay (JSON + plain text)</translation>
         </message>
@@ -2061,7 +2061,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Downmix to mono</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2239" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2242" />
             <source>Downscale target height. Aspect ratio is preserved.
 Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation>Downscale target height. Aspect ratio is preserved.
@@ -2088,7 +2088,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Dropped file is not a recognized media type ({exts}).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1891" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1894" />
             <source>Duplicate Detection</source>
             <translation>Duplicate Detection</translation>
         </message>
@@ -2113,7 +2113,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Dynamic audio normalization (mpv dynaudnorm)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="774" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="777" />
             <source>e.g. 100K</source>
             <translation>e.g. 100K</translation>
         </message>
@@ -2128,7 +2128,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>e.g. 1:10,15,20:30:2 (blank = all)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="713" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="716" />
             <source>e.g. 500K or 2M (leave blank for unlimited)</source>
             <translation>e.g. 500K or 2M (leave blank for unlimited)</translation>
         </message>
@@ -2138,7 +2138,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>e.g. 5M (blank = global)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="754" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="757" />
             <source>e.g. fragment:exp=1:20</source>
             <translation>e.g. fragment:exp=1:20</translation>
         </message>
@@ -2148,7 +2148,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>e.g. Funny moment</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="880" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="883" />
             <source>e.g. socks5://127.0.0.1:1080 or http://proxy:8080</source>
             <translation>e.g. socks5://127.0.0.1:1080 or http://proxy:8080</translation>
         </message>
@@ -2178,12 +2178,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Embed</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1531" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1534" />
             <source>Embed in video</source>
             <translation>Embed in video</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="814" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="817" />
             <source>Embed:</source>
             <translation>Embed:</translation>
         </message>
@@ -2198,8 +2198,8 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Empty download queue</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2366" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="2398" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2369" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2401" />
             <source>en</source>
             <translation>en</translation>
         </message>
@@ -2209,12 +2209,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Enable 'Convert video' or 'Convert audio' in Post-Processing first.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1908" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1911" />
             <source>Enable auto-cleanup after each download</source>
             <translation>Enable auto-cleanup after each download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2065" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2068" />
             <source>Enable auto-import after download</source>
             <translation>Enable auto-import after download</translation>
         </message>
@@ -2234,42 +2234,42 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Enable automatic backups and save settings first.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="921" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="924" />
             <source>Enable bandwidth schedule (overrides Rate limit within the window)</source>
             <translation>Enable bandwidth schedule (overrides Rate limit within the window)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1238" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1241" />
             <source>Enable browser-extension companion (local server)</source>
             <translation>Enable browser-extension companion (local server)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1246" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1249" />
             <source>Enable LAN through HTTPS reverse proxy</source>
             <translation>Enable LAN through HTTPS reverse proxy</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1153" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1156" />
             <source>Enable speaker diarization</source>
             <translation>Enable speaker diarization</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="958" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="961" />
             <source>Enable speed schedule</source>
             <translation>Enable speed schedule</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1547" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1550" />
             <source>Enable SponsorBlock by default</source>
             <translation>Enable SponsorBlock by default</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1308" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1311" />
             <source>Enable the companion server to expose a local URL</source>
             <translation>Enable the companion server to expose a local URL</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1854" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1857" />
             <source>Enabled</source>
             <translation>Enabled</translation>
         </message>
@@ -2314,7 +2314,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Error</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2371" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2374" />
             <source>es</source>
             <translation>es</translation>
         </message>
@@ -2344,12 +2344,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>ETA</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1839" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1842" />
             <source>Event Hooks</source>
             <translation>Event Hooks</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1848" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1851" />
             <source>Event:</source>
             <translation>Event:</translation>
         </message>
@@ -2364,12 +2364,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Every selected recording has a unique destination name.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1266" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1269" />
             <source>Exact public origin served by your trusted local reverse proxy. HTTP origins, paths, query strings, and broad host patterns are rejected.</source>
             <translation>Exact public origin served by your trusted local reverse proxy. HTTP origins, paths, query strings, and broad host patterns are rejected.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1860" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1863" />
             <source>Executable:</source>
             <translation>Executable:</translation>
         </message>
@@ -2394,7 +2394,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Expires in 5 min</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2386" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2389" />
             <source>Export an LRC lyrics file from a subtitle track</source>
             <translation>Export an LRC lyrics file from a subtitle track</translation>
         </message>
@@ -2415,7 +2415,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Export complete</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2441" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2444" />
             <source>Export config</source>
             <translation>Export config</translation>
         </message>
@@ -2468,12 +2468,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Exporting {mode}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2148" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2151" />
             <source>Extract audio as MP3 (libmp3lame, VBR quality 2)</source>
             <translation>Extract audio as MP3 (libmp3lame, VBR quality 2)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="565" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="568" />
             <source>Extract cookies from the selected browser and save as cookies.txt for authenticated downloads (F47)</source>
             <translation>Extract cookies from the selected browser and save as cookies.txt for authenticated downloads (F47)</translation>
         </message>
@@ -2513,7 +2513,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Failure #{failure_id}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1954" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1957" />
             <source>Favorited recordings are exempt from cleanup</source>
             <translation>Favorited recordings are exempt from cleanup</translation>
         </message>
@@ -2551,7 +2551,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Fetching stream info and available playback options...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="488" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="491" />
             <source>FFmpeg</source>
             <translation>FFmpeg</translation>
         </message>
@@ -2579,12 +2579,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Filename template</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1748" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1751" />
             <source>Filename Templates</source>
             <translation>Filename Templates</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1764" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1767" />
             <source>Filename:</source>
             <translation>Filename:</translation>
         </message>
@@ -2650,7 +2650,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Folder template:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1755" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1758" />
             <source>Folder:</source>
             <translation>Folder:</translation>
         </message>
@@ -2660,17 +2660,17 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Follow system — stay in sync with your OS preference</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1188" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1191" />
             <source>Font size:</source>
             <translation>Font size:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1542" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1545" />
             <source>For eligible YouTube VODs, also fetch the live-chat replay. It is normalized into StreamKeep's chat pipeline at finalize; unavailable replay is non-fatal.</source>
             <translation>For eligible YouTube VODs, also fetch the live-chat replay. It is normalized into StreamKeep's chat pipeline at finalize; unavailable replay is non-fatal.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2374" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2377" />
             <source>Format</source>
             <translation>Format</translation>
         </message>
@@ -2712,12 +2712,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Found {len(vod_list)} VOD(s). Select one to inspect or batch download.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2270" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2273" />
             <source>FPS:</source>
             <translation>FPS:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="741" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="744" />
             <source>Fragment retries:</source>
             <translation>Fragment retries:</translation>
         </message>
@@ -2727,12 +2727,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>fragment retries: global/infinite</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="727" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="730" />
             <source>Fragments:</source>
             <translation>Fragments:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2253" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2256" />
             <source>Frame rate cap. Forces a re-encode when not 'original'.</source>
             <translation>Frame rate cap. Forces a re-encode when not 'original'.</translation>
         </message>
@@ -2742,7 +2742,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Frame-accurate (re-encode)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1166" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1169" />
             <source>Free HuggingFace token for pyannote speaker diarization models.</source>
             <translation>Free HuggingFace token for pyannote speaker diarization models.</translation>
         </message>
@@ -2757,12 +2757,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>From</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1863" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1866" />
             <source>Full path to a program (e.g. C:/Tools/notify.exe)</source>
             <translation>Full path to a program (e.g. C:/Tools/notify.exe)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1934" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1937" />
             <source>GB (remove oldest first when exceeded)</source>
             <translation>GB (remove oldest first when exceeded)</translation>
         </message>
@@ -2772,12 +2772,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Generate</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1344" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1347" />
             <source>Generate a one-use pairing code valid for five minutes.</source>
             <translation>Generate a one-use pairing code valid for five minutes.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2157" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2160" />
             <source>Generate contact sheet (3x3 thumbnail grid .jpg)</source>
             <translation>Generate contact sheet (3x3 thumbnail grid .jpg)</translation>
         </message>
@@ -2792,7 +2792,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Generate storyboard</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="150" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="153" />
             <source>Generic JSON POST endpoint</source>
             <translation>Generic JSON POST endpoint</translation>
         </message>
@@ -2808,7 +2808,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
 • Visit Settings if you want cookies, proxies, or file templates.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1183" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1186" />
             <source>Height:</source>
             <translation>Height:</translation>
         </message>
@@ -2819,12 +2819,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Held {changed} pending queue job(s).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1160" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1163" />
             <source>HF token:</source>
             <translation>HF token:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1162" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1165" />
             <source>hf_...</source>
             <translation>hf_...</translation>
         </message>
@@ -2836,7 +2836,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>HH:MM:SS</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="404" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="407" />
             <source>High Contrast</source>
             <translation>High Contrast</translation>
         </message>
@@ -2875,7 +2875,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>HLS clear key:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1561" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1564" />
             <source>Hold auto-discovered (subscribed-channel) YouTube VODs for this many hours after they were published before downloading, so SponsorBlock crowd-sourced segments have time to accumulate. 0 disables the delay. Already-old VODs and quality upgrades download immediately.</source>
             <translation>Hold auto-discovered (subscribed-channel) YouTube VODs for this many hours after they were published before downloading, so SponsorBlock crowd-sourced segments have time to accumulate. 0 disables the delay. Already-old VODs and quality upgrades download immediately.</translation>
         </message>
@@ -2895,12 +2895,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Hook is invalid: {data}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1710" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1713" />
             <source>http://127.0.0.1:4416 (loopback only)</source>
             <translation>http://127.0.0.1:4416 (loopback only)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2085" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2088" />
             <source>http://localhost:32400</source>
             <translation>http://localhost:32400</translation>
         </message>
@@ -2915,22 +2915,22 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>HTTPS remote origin is invalid or the companion could not restart.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1259" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1262" />
             <source>HTTPS remote origin:</source>
             <translation>HTTPS remote origin:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1826" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1829" />
             <source>https://discord.com/api/webhooks/... or any POST endpoint</source>
             <translation>https://discord.com/api/webhooks/... or any POST endpoint</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1623" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1626" />
             <source>https://sponsor.ajay.app (blank = yt-dlp default)</source>
             <translation>https://sponsor.ajay.app (blank = yt-dlp default)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1263" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1266" />
             <source>https://streamkeep.example.lan</source>
             <translation>https://streamkeep.example.lan</translation>
         </message>
@@ -2950,7 +2950,7 @@ https://kick.com/channel
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="819" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1603" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1606" />
             <source>Ignore</source>
             <translation>Ignore</translation>
         </message>
@@ -2965,12 +2965,12 @@ https://kick.com/channel
             <translation>Import a list</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2436" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2439" />
             <source>Import config</source>
             <translation>Import config</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="563" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="566" />
             <source>Import cookies from browser</source>
             <translation>Import cookies from browser</translation>
         </message>
@@ -3011,13 +3011,13 @@ https://kick.com/channel
             <translation>Imported {added} channels ({skipped} skipped as duplicates).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1223" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1226" />
             <source>In addition to chat.jsonl, write chat.ass next to the video. VLC/mpv will pick it up automatically on replay.</source>
             <translation>In addition to chat.jsonl, write chat.ass next to the video. VLC/mpv will pick it up automatically on replay.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="761" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1509" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1512" />
             <source>Include automatic captions</source>
             <translation>Include automatic captions</translation>
         </message>
@@ -3062,7 +3062,7 @@ https://kick.com/channel
             <translation>Install now</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1718" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1721" />
             <source>Install the provider plugin where possible, start the configured local server, then re-probe. Shows copy-paste steps if it cannot.</source>
             <translation>Install the provider plugin where possible, start the configured local server, then re-probe. Shows copy-paste steps if it cannot.</translation>
         </message>
@@ -3092,12 +3092,12 @@ https://kick.com/channel
             <translation>Invalid channel list — expected a JSON array.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1808" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1811" />
             <source>Invalid template</source>
             <translation>Invalid template</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1354" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1357" />
             <source>Invalidate every paired client and rotate the secure master token.</source>
             <translation>Invalidate every paired client and rotate the secure master token.</translation>
         </message>
@@ -3112,7 +3112,7 @@ https://kick.com/channel
             <translation>Jump to {format_hhmmss(t)[:8]}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1532" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1535" />
             <source>Keep as sidecar files</source>
             <translation>Keep as sidecar files</translation>
         </message>
@@ -3127,17 +3127,17 @@ https://kick.com/channel
             <translation>Keep last</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2009" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2012" />
             <source>Keep last:</source>
             <translation>Keep last:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1940" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1943" />
             <source>Keep only the newest</source>
             <translation>Keep only the newest</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1519" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1522" />
             <source>Keep source subtitle format</source>
             <translation>Keep source subtitle format</translation>
         </message>
@@ -3148,7 +3148,7 @@ https://kick.com/channel
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="613" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="435" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="438" />
             <source>Language</source>
             <translation>Language</translation>
         </message>
@@ -3163,7 +3163,7 @@ https://kick.com/channel
             <translation>Language updated across StreamKeep.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1497" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1500" />
             <source>Languages:</source>
             <translation>Languages:</translation>
         </message>
@@ -3188,7 +3188,7 @@ https://kick.com/channel
             <translation>Latest</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1728" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1731" />
             <source>Launch:</source>
             <translation>Launch:</translation>
         </message>
@@ -3224,12 +3224,12 @@ https://kick.com/channel
             <translation>Level</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2100" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2103" />
             <source>Library ID:</source>
             <translation>Library ID:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2110" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2113" />
             <source>Library path:</source>
             <translation>Library path:</translation>
         </message>
@@ -3239,7 +3239,7 @@ https://kick.com/channel
             <translation>Lifecycle cleanup: {removed} recording(s) recycled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="402" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="405" />
             <source>Light</source>
             <translation>Light</translation>
         </message>
@@ -3249,8 +3249,8 @@ https://kick.com/channel
             <translation>Light — brighter surfaces and cleaner daytime readability</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="941" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="974" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="944" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="977" />
             <source>Limit:</source>
             <translation>Limit:</translation>
         </message>
@@ -3281,7 +3281,7 @@ https://kick.com/channel
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="911" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="782" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="785" />
             <source>Live from start</source>
             <translation>Live from start</translation>
         </message>
@@ -3312,7 +3312,7 @@ https://kick.com/channel
             <translation>Load a recording with embedded chapters or save bookmarks while you watch.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2129" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2132" />
             <source>Load a saved post-processing profile</source>
             <translation>Load a saved post-processing profile</translation>
         </message>
@@ -3351,7 +3351,7 @@ https://kick.com/channel
             <translation>LOCAL ARCHIVE</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1288" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1291" />
             <source>Local control</source>
             <translation>Local control</translation>
         </message>
@@ -3361,17 +3361,17 @@ https://kick.com/channel
             <translation>Local listener</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1283" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1286" />
             <source>Local only</source>
             <translation>Local only</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="329" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="332" />
             <source>Local preferences</source>
             <translation>Local preferences</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="477" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="480" />
             <source>Local Toolchain</source>
             <translation>Local Toolchain</translation>
         </message>
@@ -3387,7 +3387,7 @@ https://kick.com/channel
             <translation>Local-only  •  {active_jobs} active  •  {queued} queued</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2396" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2399" />
             <source>LRC language</source>
             <translation>LRC language</translation>
         </message>
@@ -3428,17 +3428,17 @@ https://kick.com/channel
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="820" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1604" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1607" />
             <source>Mark chapter</source>
             <translation>Mark chapter</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1927" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1930" />
             <source>Max total storage</source>
             <translation>Max total storage</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1063" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1066" />
             <source>Maximum queued downloads that run at the same time.
 Bandwidth is shared evenly across active jobs when a
 rate limit is set.</source>
@@ -3447,7 +3447,7 @@ Bandwidth is shared evenly across active jobs when a
 rate limit is set.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1042" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1045" />
             <source>Maximum simultaneous auto-recordings when multiple monitored channels go live at the same time. Each recording uses its own ffmpeg process.</source>
             <translation>Maximum simultaneous auto-recordings when multiple monitored channels go live at the same time. Each recording uses its own ffmpeg process.</translation>
         </message>
@@ -3457,12 +3457,12 @@ rate limit is set.</translation>
             <translation>media items found</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2044" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2047" />
             <source>Media Library</source>
             <translation>Media Library</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2059" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2062" />
             <source>Media Server Auto-Import</source>
             <translation>Media Server Auto-Import</translation>
         </message>
@@ -3477,7 +3477,7 @@ rate limit is set.</translation>
             <translation>Media tracks</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2352" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2355" />
             <source>Merge bilingual subtitles from downloaded sidecars</source>
             <translation>Merge bilingual subtitles from downloaded sidecars</translation>
         </message>
@@ -3492,7 +3492,7 @@ rate limit is set.</translation>
             <translation>Message</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1197" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1200" />
             <source>Message duration (s):</source>
             <translation>Message duration (s):</translation>
         </message>
@@ -3502,12 +3502,12 @@ rate limit is set.</translation>
             <translation>Metadata search matches title, platform, channel, folder path, and source URL.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2184" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2187" />
             <source>Min:</source>
             <translation>Min:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2189" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2192" />
             <source>Minimum consecutive silence before cutting</source>
             <translation>Minimum consecutive silence before cutting</translation>
         </message>
@@ -3527,7 +3527,7 @@ rate limit is set.</translation>
             <translation>Monitor</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1398" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1401" />
             <source>Monitor free space on the download drive</source>
             <translation>Monitor free space on the download drive</translation>
         </message>
@@ -3557,7 +3557,7 @@ rate limit is set.</translation>
             <translation>MP4 (default)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1021" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1024" />
             <source>Multi-connection HTTP Range splitting for direct MP4 files.
 Higher values can be 3-5x faster on CDN-hosted content.
 Set to 1 to disable and always use ffmpeg.</source>
@@ -3576,17 +3576,17 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Name</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="597" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="600" />
             <source>Named credentials bound to the sites they are allowed to authenticate. A profile is never sent to a site outside its scope.</source>
             <translation>Named credentials bound to the sites they are allowed to authenticate. A profile is never sent to a site outside its scope.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="830" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="833" />
             <source>Named yt-dlp argument templates use one argv element per line. They never run through a shell; command/config delegation and link writers are rejected. Templates can be attached in Download Advanced or a monitor channel profile.</source>
             <translation>Named yt-dlp argument templates use one argv element per line. They never run through a shell; command/config delegation and link writers are rejected. Templates can be attached in Download Advanced or a monitor channel profile.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1386" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1389" />
             <source>Native OS notifications on completion, live, and failure</source>
             <translation>Native OS notifications on completion, live, and failure</translation>
         </message>
@@ -3596,12 +3596,12 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Needs attention</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="703" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="706" />
             <source>Network</source>
             <translation>Network</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1341" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1344" />
             <source>New code</source>
             <translation>New code</translation>
         </message>
@@ -3611,7 +3611,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>New download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="462" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="465" />
             <source>New downloads will default to this folder.</source>
             <translation>New downloads will default to this folder.</translation>
         </message>
@@ -3641,7 +3641,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Next week</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="984" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="987" />
             <source>Night limit:</source>
             <translation>Night limit:</translation>
         </message>
@@ -3929,12 +3929,12 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No Whisper runtime installed. Install `faster-whisper` or put whisper.cpp in PATH.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2181" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2184" />
             <source>Noise floor — lower values are more aggressive</source>
             <translation>Noise floor — lower values are more aggressive</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="540" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="543" />
             <location filename="streamkeep/ui/tabs/settings_preferences.py" line="155" />
             <location filename="streamkeep/ui/tabs/settings_preferences.py" line="171" />
             <source>None</source>
@@ -3946,7 +3946,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Normalize</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2151" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2154" />
             <source>Normalize loudness (EBU R128: I=-16, TP=-1.5, LRA=11)</source>
             <translation>Normalize loudness (EBU R128: I=-16, TP=-1.5, LRA=11)</translation>
         </message>
@@ -3997,7 +3997,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Notifications</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1288" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1291" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="198" />
             <source>Off</source>
             <translation>Off</translation>
@@ -4015,12 +4015,12 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Offset:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2013" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2016" />
             <source>Older archives beyond this count are removed only after a new backup has been written and validated.</source>
             <translation>Older archives beyond this count are removed only after a new backup has been written and validated.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1466" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1469" />
             <source>Once per launch, asks GitHub whether a newer StreamKeep release is available. The check is opt-in; downloads and installs still require explicit confirmation.</source>
             <translation>Once per launch, asks GitHub whether a newer StreamKeep release is available. The check is opt-in; downloads and installs still require explicit confirmation.</translation>
         </message>
@@ -4035,7 +4035,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Once you run a search, any recoverable VODs for that month will appear here.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1870" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1873" />
             <source>One argument per line. Use $SK_* environment variables for context, e.g.
 --title
 %SK_TITLE%</source>
@@ -4069,7 +4069,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>One-time pairing code generated for five minutes.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1327" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1330" />
             <source>One-time pairing code:</source>
             <translation>One-time pairing code:</translation>
         </message>
@@ -4079,7 +4079,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Only monitor during a scheduled window</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1318" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1321" />
             <source>Open</source>
             <translation>Open</translation>
         </message>
@@ -4127,7 +4127,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Open Settings to inspect local runtime and storage health</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1309" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1312" />
             <source>Open the loopback URL on this PC, or the configured HTTPS origin from a paired LAN client.</source>
             <translation>Open the loopback URL on this PC, or the configured HTTPS origin from a paired LAN client.</translation>
         </message>
@@ -4152,17 +4152,17 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Optional 1-32 digit hexadecimal initialization vector</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1453" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1456" />
             <source>Optional action to run once, after the whole queue drains. Sleep, hibernate, and shutdown are issued with a native cancellable delay (Windows: run 'shutdown /a' to abort). Default: do nothing.</source>
             <translation>Optional action to run once, after the whole queue drains. Sleep, hibernate, and shutdown are issued with a native cancellable delay (Windows: run 'shutdown /a' to abort). Default: do nothing.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="703" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="706" />
             <source>Optional bandwidth throttling and proxy for geo-blocked content.</source>
             <translation>Optional bandwidth throttling and proxy for geo-blocked content.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1734" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1737" />
             <source>Optional command that starts the provider server</source>
             <translation>Optional command that starts the provider server</translation>
         </message>
@@ -4172,7 +4172,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Optional encoder quality; 0 is best, 10 is worst, or use a bitrate such as 128K</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1491" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1494" />
             <source>Optional features for compatible yt-dlp sources.</source>
             <translation>Optional features for compatible yt-dlp sources.</translation>
         </message>
@@ -4187,7 +4187,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Original</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="334" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="337" />
             <source>OS credential store</source>
             <translation>OS credential store</translation>
         </message>
@@ -4209,7 +4209,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="830" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1515" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1518" />
             <source>Output:</source>
             <translation>Output:</translation>
         </message>
@@ -4219,18 +4219,18 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Override where recordings land, how files are named, and which quality to prefer for this channel.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1293" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1296" />
             <source>Pairing code</source>
             <translation>Pairing code</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1036" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1039" />
             <source>Parallel auto-records:</source>
             <translation>Parallel auto-records:</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="669" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1015" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1018" />
             <source>Parallel connections:</source>
             <translation>Parallel connections:</translation>
         </message>
@@ -4316,7 +4316,7 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Path missing and no saved URL to retry.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="551" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="554" />
             <source>Path to cookies.txt (Netscape format)</source>
             <translation>Path to cookies.txt (Netscape format)</translation>
         </message>
@@ -4331,12 +4331,12 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Pause all</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1094" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1097" />
             <source>per chunk (default 2 hours)</source>
             <translation>per chunk (default 2 hours)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1027" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1030" />
             <source>per direct MP4 (1 = off, default 4)</source>
             <translation>per direct MP4 (1 = off, default 4)</translation>
         </message>
@@ -4346,7 +4346,7 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Per-download overrides</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2418" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2421" />
             <source>Pick a folder; every video/audio file in it gets converted.</source>
             <translation>Pick a folder; every video/audio file in it gets converted.</translation>
         </message>
@@ -4356,7 +4356,7 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Pick a quality before starting the download.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2409" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2412" />
             <source>Pick individual media files and convert them with the current settings.
 Saves your settings first.</source>
             <translation>Pick individual media files and convert them with the current settings.
@@ -4383,7 +4383,7 @@ Saves your settings first.</translation>
             <translation>Picture-in-Picture mini player</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="503" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="506" />
             <source>Pillow</source>
             <translation>Pillow</translation>
         </message>
@@ -4407,7 +4407,7 @@ Saves your settings first.</translation>
             <translation>Platform</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="654" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="657" />
             <source>Platform Accounts</source>
             <translation>Platform Accounts</translation>
         </message>
@@ -4442,7 +4442,7 @@ Saves your settings first.</translation>
             <translation>Play or pause the current recording</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1374" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1377" />
             <source>Play the system beep when a notable event fires (live detected, download complete, error). The Notifications bell in the header always updates regardless of this setting.</source>
             <translation>Play the system beep when a notable event fires (live detected, download complete, error). The Notifications bell in the header always updates regardless of this setting.</translation>
         </message>
@@ -4485,12 +4485,12 @@ Saves your settings first.</translation>
             <translation>Playlist sync:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2103" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2106" />
             <source>Plex library section ID (e.g. 1). Ignored for Jellyfin/Emby.</source>
             <translation>Plex library section ID (e.g. 1). Ignored for Jellyfin/Emby.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2094" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2097" />
             <source>Plex token / Jellyfin API key</source>
             <translation>Plex token / Jellyfin API key</translation>
         </message>
@@ -4500,12 +4500,12 @@ Saves your settings first.</translation>
             <translation>Plugin {status['plugin']} is installed but nothing is answering on {status['base_url']}.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1704" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1707" />
             <source>PO-token URL:</source>
             <translation>PO-token URL:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1400" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1403" />
             <source>Poll the output drive and show remaining free space in the status bar, warning before it runs out.</source>
             <translation>Poll the output drive and show remaining free space in the status bar, warning before it runs out.</translation>
         </message>
@@ -4525,7 +4525,7 @@ Saves your settings first.</translation>
             <translation>Possible duplicate of "{dup.title}" ({dup.date}). Download anyway if intentional.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1820" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1823" />
             <source>POST a JSON payload when downloads complete. Discord webhook URLs are auto-detected and formatted as embeds.</source>
             <translation>POST a JSON payload when downloads complete. Discord webhook URLs are auto-detected and formatted as embeds.</translation>
         </message>
@@ -4535,7 +4535,7 @@ Saves your settings first.</translation>
             <translation>Post-process preset:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2119" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2122" />
             <source>Post-Processing</source>
             <translation>Post-Processing</translation>
         </message>
@@ -4555,7 +4555,7 @@ Saves your settings first.</translation>
             <translation>Preparing VOD {self._batch_idx + 1} of {self._batch_total}: {vod.title}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2126" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2129" />
             <source>Preset:</source>
             <translation>Preset:</translation>
         </message>
@@ -4572,7 +4572,7 @@ Saves your settings first.</translation>
             <translation>Preview chat render (60s)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1960" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1963" />
             <source>Preview cleanup…</source>
             <translation>Preview cleanup…</translation>
         </message>
@@ -4597,7 +4597,7 @@ Saves your settings first.</translation>
             <translation>Preview position {self._seek_ratio * 100} percent</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1787" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1790" />
             <source>Preview:</source>
             <translation>Preview:</translation>
         </message>
@@ -4612,7 +4612,7 @@ Saves your settings first.</translation>
             <translation>Previous week</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2364" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2367" />
             <source>Primary</source>
             <translation>Primary</translation>
         </message>
@@ -4638,7 +4638,7 @@ Saves your settings first.</translation>
             <translation>Progress for {item.get('title', 'queue item')}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="334" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="337" />
             <source>Protected</source>
             <translation>Protected</translation>
         </message>
@@ -4648,7 +4648,7 @@ Saves your settings first.</translation>
             <translation>Provider {status['plugin']} is answering on {status['base_url']}; YouTube jobs use it.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="886" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="889" />
             <source>Proxy pool: assign proxies to specific platforms. Format per line: url|platform1,platform2|label (platforms optional).</source>
             <translation>Proxy pool: assign proxies to specific platforms. Format per line: url|platform1,platform2|label (platforms optional).</translation>
         </message>
@@ -4658,7 +4658,7 @@ Saves your settings first.</translation>
             <translation>Proxy test: {ok_count}/{len(results)} reachable.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="876" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="879" />
             <source>Proxy URL:</source>
             <translation>Proxy URL:</translation>
         </message>
@@ -4765,7 +4765,7 @@ Saves your settings first.</translation>
             <translation>Quit</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1388" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1391" />
             <source>Raise a desktop notification (Windows Toast / macOS / Linux) for notable events. Falls back to the tray icon when no native backend is installed. Suppressed while the StreamKeep window is focused.</source>
             <translation>Raise a desktop notification (Windows Toast / macOS / Linux) for notable events. Falls back to the tray icon when no native backend is installed. Suppressed while the StreamKeep window is focused.</translation>
         </message>
@@ -4786,12 +4786,12 @@ Saves your settings first.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="662" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="709" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="712" />
             <source>Rate limit:</source>
             <translation>Rate limit:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2340" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2343" />
             <source>Rate:</source>
             <translation>Rate:</translation>
         </message>
@@ -4801,7 +4801,7 @@ Saves your settings first.</translation>
             <translation>Raw format spec:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="796" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="799" />
             <source>Re-capture from the start with ytarchive when a live capture drops fragments</source>
             <translation>Re-capture from the start with ytarchive when a live capture drops fragments</translation>
         </message>
@@ -4811,7 +4811,7 @@ Saves your settings first.</translation>
             <translation>Re-download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2154" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2157" />
             <source>Re-encode video to H.265/HEVC (libx265, CRF 23 — slow)</source>
             <translation>Re-encode video to H.265/HEVC (libx265, CRF 23 — slow)</translation>
         </message>
@@ -4869,7 +4869,7 @@ Saves your settings first.</translation>
             <translation>Recent notifications ({unread} unread)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1283" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1286" />
             <source>Recommended</source>
             <translation>Recommended</translation>
         </message>
@@ -4900,7 +4900,7 @@ Saves your settings first.</translation>
             <translation>Recordings by folder (newest first)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1947" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1950" />
             <source>recordings per source channel</source>
             <translation>recordings per source channel</translation>
         </message>
@@ -4966,7 +4966,7 @@ Saves your settings first.</translation>
             <translation>Refresh schedules after adding Twitch channels to fill this calendar with upcoming stream windows.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2033" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2036" />
             <source>Refresh status</source>
             <translation>Refresh status</translation>
         </message>
@@ -5002,7 +5002,7 @@ Saves your settings first.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="822" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1606" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1609" />
             <source>Remove segment</source>
             <translation>Remove segment</translation>
         </message>
@@ -5012,7 +5012,7 @@ Saves your settings first.</translation>
             <translation>Remove selected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2169" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2172" />
             <source>Remove silence / dead air</source>
             <translation>Remove silence / dead air</translation>
         </message>
@@ -5067,12 +5067,12 @@ Saves your settings first.</translation>
             <translation>Rendering chat overlay ({label})...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2438" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2441" />
             <source>Replace current settings with a backup file</source>
             <translation>Replace current settings with a backup file</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1155" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1158" />
             <source>Requires WhisperX + pyannote-audio + a HuggingFace token. Labels transcript segments with speaker IDs (Speaker 1, Speaker 2, ...).</source>
             <translation>Requires WhisperX + pyannote-audio + a HuggingFace token. Labels transcript segments with speaker IDs (Speaker 1, Speaker 2, ...).</translation>
         </message>
@@ -5149,7 +5149,7 @@ Saves your settings first.</translation>
             <translation>Retention</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="735" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="738" />
             <source>Retries:</source>
             <translation>Retries:</translation>
         </message>
@@ -5174,7 +5174,7 @@ Saves your settings first.</translation>
             <translation>Retry queued: {queue_job.get('title', '')[:60]}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="750" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="753" />
             <source>Retry sleep:</source>
             <translation>Retry sleep:</translation>
         </message>
@@ -5194,17 +5194,17 @@ Saves your settings first.</translation>
             <translation>Review the current folder names against the generated results before renaming anything on disk.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1351" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1354" />
             <source>Revoke all</source>
             <translation>Revoke all</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1973" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1976" />
             <source>Rotate validated .skbackup archives of your profile on a schedule. Only the app instance that owns queue execution runs the backup.</source>
             <translation>Rotate validated .skbackup archives of your profile on a schedule. Only the app instance that owns queue execution runs the backup.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1839" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1842" />
             <source>Run a program on lifecycle events. Each hook is an executable plus an explicit argument list — no shell. Context is passed only as environment variables ($SK_EVENT, $SK_TITLE, $SK_CHANNEL, $SK_PLATFORM, $SK_PATH, $SK_URL, $SK_QUALITY, $SK_ERROR). Legacy shell-command hooks are disabled until you re-create them here.</source>
             <translation>Run a program on lifecycle events. Each hook is an executable plus an explicit argument list — no shell. Context is passed only as environment variables ($SK_EVENT, $SK_TITLE, $SK_CHANNEL, $SK_PLATFORM, $SK_PATH, $SK_URL, $SK_QUALITY, $SK_ERROR). Legacy shell-command hooks are disabled until you re-create them here.</translation>
         </message>
@@ -5246,7 +5246,7 @@ Saves your settings first.</translation>
             <translation>Salvaged {built} raw capture(s) into new files.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2323" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2326" />
             <source>Sample rate (Hz). Forces a re-encode when not 'original'.</source>
             <translation>Sample rate (Hz). Forces a re-encode when not 'original'.</translation>
         </message>
@@ -5255,12 +5255,12 @@ Saves your settings first.</translation>
             <translation>Save</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1882" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1885" />
             <source>Save action</source>
             <translation>Save action</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2135" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2138" />
             <source>Save As…</source>
             <translation>Save As…</translation>
         </message>
@@ -5274,17 +5274,17 @@ Saves your settings first.</translation>
             <translation>Save Settings</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2447" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2450" />
             <source>Save settings</source>
             <translation>Save settings</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="867" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="870" />
             <source>Save template</source>
             <translation>Save template</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="681" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="684" />
             <source>Save tokens</source>
             <translation>Save tokens</translation>
         </message>
@@ -5314,7 +5314,7 @@ Saves your settings first.</translation>
             <translation>Saved {state} {event} action.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2267" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2270" />
             <source>Scale:</source>
             <translation>Scale:</translation>
         </message>
@@ -5324,7 +5324,7 @@ Saves your settings first.</translation>
             <translation>Scan failed: {err}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="542" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="545" />
             <source>Scan for browsers</source>
             <translation>Scan for browsers</translation>
         </message>
@@ -5500,17 +5500,17 @@ Saves your settings first.</translation>
             <translation>Searching…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2369" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2372" />
             <source>Secondary</source>
             <translation>Secondary</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="780" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="783" />
             <source>seconds or MIN-MAX</source>
             <translation>seconds or MIN-MAX</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="334" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="337" />
             <source>Secrets</source>
             <translation>Secrets</translation>
         </message>
@@ -5595,7 +5595,7 @@ Saves your settings first.</translation>
             <translation>Select at least one VOD to queue.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1330" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1333" />
             <source>Select New code after the server starts</source>
             <translation>Select New code after the server starts</translation>
         </message>
@@ -5641,7 +5641,7 @@ Saves your settings first.</translation>
             <translation>Selected {self._tooltip_for_segment(self._segments[idx][2])}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1232" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1235" />
             <source>Send URLs from the extension with one click, or open the lightweight web remote for queue and status checks. Keep LAN access off unless another device truly needs it.</source>
             <translation>Send URLs from the extension with one click, or open the lightweight web remote for queue and status checks. Keep LAN access off unless another device truly needs it.</translation>
         </message>
@@ -5656,12 +5656,12 @@ Saves your settings first.</translation>
             <translation>Sent to Download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2071" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2074" />
             <source>Server type:</source>
             <translation>Server type:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2083" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2086" />
             <source>Server URL:</source>
             <translation>Server URL:</translation>
         </message>
@@ -5676,7 +5676,7 @@ Saves your settings first.</translation>
             <translation>Set schedule window for all selected...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1716" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1719" />
             <source>Set up provider</source>
             <translation>Set up provider</translation>
         </message>
@@ -5686,8 +5686,8 @@ Saves your settings first.</translation>
             <translation>Set up StreamKeep in a minute</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="297" />
             <location filename="streamkeep/ui/tabs/settings.py" line="300" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="303" />
             <source>Settings</source>
             <translation>Settings</translation>
         </message>
@@ -5752,7 +5752,7 @@ Saves your settings first.</translation>
             <translation>Silence removal complete.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1069" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1072" />
             <source>simultaneous queue downloads (default 3)</source>
             <translation>simultaneous queue downloads (default 3)</translation>
         </message>
@@ -5770,7 +5770,7 @@ Saves your settings first.</translation>
             <translation>Size</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="759" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="762" />
             <source>Skip</source>
             <translation>Skip</translation>
         </message>
@@ -5790,7 +5790,7 @@ Saves your settings first.</translation>
             <translation>Smallest file</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="895" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="898" />
             <source>socks5://us.proxy:1080|twitch,kick|US proxy
 http://de.proxy:8080|youtube|DE proxy
 http://fallback:3128||Global fallback</source>
@@ -5851,7 +5851,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Speed</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="951" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="954" />
             <source>Speed schedule: set different bandwidth limits for day, night, and weekends. Applied to new downloads only.</source>
             <translation>Speed schedule: set different bandwidth limits for day, night, and weekends. Applied to new downloads only.</translation>
         </message>
@@ -5861,12 +5861,12 @@ http://fallback:3128||Global fallback</translation>
             <translation>speedrun, tournament, collab</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2160" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2163" />
             <source>Split by chapters into per-chapter files (for videos with chapters)</source>
             <translation>Split by chapters into per-chapter files (for videos with chapters)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1078" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1081" />
             <source>Split long live captures into chunks</source>
             <translation>Split long live captures into chunks</translation>
         </message>
@@ -5886,7 +5886,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>SponsorBlock:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2376" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2379" />
             <source>srt</source>
             <translation>srt</translation>
         </message>
@@ -5931,7 +5931,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Starting</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1240" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1243" />
             <source>Starts a 127.0.0.1-only HTTP server on a random port. Clients must exchange a short-lived pairing code for an origin-bound token.</source>
             <translation>Starts a 127.0.0.1-only HTTP server on a random port. Clients must exchange a short-lived pairing code for an origin-bound token.</translation>
         </message>
@@ -5967,7 +5967,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Stop playback</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1425" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1428" />
             <source>Stop the active download and hold the queue while free space is below the critical threshold. The queue resumes automatically once space recovers.</source>
             <translation>Stop the active download and hold the queue while free space is below the critical threshold. The queue resumes automatically once space recovers.</translation>
         </message>
@@ -6002,7 +6002,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Storage scan failed. See the log for details.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="654" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="657" />
             <source>Store API tokens for authenticated platform access. Tokens are encrypted with Windows DPAPI.</source>
             <translation>Store API tokens for authenticated platform access. Tokens are encrypted with Windows DPAPI.</translation>
         </message>
@@ -6057,7 +6057,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>StreamKeep Player</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="477" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="480" />
             <source>StreamKeep relies on these binaries for robust downloads.</source>
             <translation>StreamKeep relies on these binaries for robust downloads.</translation>
         </message>
@@ -6069,7 +6069,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>StreamKeep v{VERSION}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="314" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="317" />
             <source>StreamKeep v{VERSION}
 Config file: {CONFIG_FILE}
 Supported platforms: {', '.join(Extractor.all_names())}</source>
@@ -6134,7 +6134,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Sync viewer ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="403" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="406" />
             <source>System</source>
             <translation>System</translation>
         </message>
@@ -6153,17 +6153,17 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Template</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="849" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="852" />
             <source>Template name</source>
             <translation>Template name</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1688" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1691" />
             <source>Test capability</source>
             <translation>Test capability</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="914" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="917" />
             <source>Test proxies</source>
             <translation>Test proxies</translation>
         </message>
@@ -6188,7 +6188,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>The active queue job cannot be reordered while it is running.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1248" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1251" />
             <source>The app remains loopback-only. A locally managed reverse proxy must terminate trusted HTTPS and forward to the displayed listener port.</source>
             <translation>The app remains loopback-only. A locally managed reverse proxy must terminate trusted HTTPS and forward to the displayed listener port.</translation>
         </message>
@@ -6198,7 +6198,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>The clear-key override applies only to non-DRM HLS sources.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1361" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1364" />
             <source>The master token is generated with 256 bits and kept in the operating-system secure store. Clients receive scoped, origin-bound tokens only after explicit one-time pairing. Mutating calls are nonce-protected.</source>
             <translation>The master token is generated with 256 bits and kept in the operating-system secure store. Clients receive scoped, origin-bound tokens only after explicit one-time pairing. Mutating calls are nonce-protected.</translation>
         </message>
@@ -6224,12 +6224,12 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>The sync viewer shines with multiple POVs. Once streams are added, playback stays locked to one shared transport bar.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="396" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="399" />
             <source>Theme</source>
             <translation>Theme</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="428" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="431" />
             <source>Theme default</source>
             <translation>Theme default</translation>
         </message>
@@ -6290,7 +6290,7 @@ Download again?</translation>
             <translation>This Year</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2176" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2179" />
             <source>Threshold:</source>
             <translation>Threshold:</translation>
         </message>
@@ -6300,7 +6300,7 @@ Download again?</translation>
             <translation>throttled rate: global</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="770" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="773" />
             <source>Throttled threshold:</source>
             <translation>Throttled threshold:</translation>
         </message>
@@ -6335,7 +6335,7 @@ Download again?</translation>
             <translation>Timeline and preview</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1142" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1145" />
             <source>tiny/base are fast on CPU; medium/large-v3 need GPU for sane speeds.</source>
             <translation>tiny/base are fast on CPU; medium/large-v3 need GPU for sane speeds.</translation>
         </message>
@@ -6367,7 +6367,7 @@ Download again?</translation>
             <translation>To</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="934" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="937" />
             <source>to</source>
             <translation>to</translation>
         </message>
@@ -6529,7 +6529,7 @@ Download again?</translation>
             <translation>Type</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="756" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="759" />
             <source>Unavailable fragments:</source>
             <translation>Unavailable fragments:</translation>
         </message>
@@ -6589,7 +6589,7 @@ Download again?</translation>
             <translation>Use</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="527" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="530" />
             <source>Use browser cookies or a cookies.txt file for age-restricted or authenticated content.</source>
             <translation>Use browser cookies or a cookies.txt file for age-restricted or authenticated content.</translation>
         </message>
@@ -6650,7 +6650,7 @@ Download again?</translation>
             <translation>Use the Twitch channel name only, for example `streamer_name`.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1331" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1334" />
             <source>Use this once in the extension or web remote. It expires after five minutes and is never placed in a URL or log.</source>
             <translation>Use this once in the extension or web remote. It expires after five minutes and is never placed in a URL or log.</translation>
         </message>
@@ -6660,12 +6660,12 @@ Download again?</translation>
             <translation>Use tokens to build a naming pattern that stays readable across platforms, dates, and long recording libraries.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="688" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="691" />
             <source>Validate saved tokens against each platform without downloading</source>
             <translation>Validate saved tokens against each platform without downloading</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1748" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1751" />
             <source>Variables: {title} {channel} {platform} {date} {year} {month} {day}. Use / to create subfolders. Each segment is sanitized.</source>
             <translation>Variables: {title} {channel} {platform} {date} {year} {month} {day}. Use / to create subfolders. Each segment is sanitized.</translation>
         </message>
@@ -6710,7 +6710,7 @@ Download again?</translation>
             <translation>Vol</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="776" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="779" />
             <source>Wait for scheduled video:</source>
             <translation>Wait for scheduled video:</translation>
         </message>
@@ -6727,7 +6727,7 @@ Download again?</translation>
         <message>
             <location filename="streamkeep/player/chapter_panel.py" line="186" />
             <location filename="streamkeep/player/sync_viewer.py" line="66" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="1293" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1296" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="209" />
             <source>Waiting</source>
             <translation>Waiting</translation>
@@ -6738,12 +6738,12 @@ Download again?</translation>
             <translation>Waiting for data</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1891" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1894" />
             <source>Warn before downloading something already in your history.</source>
             <translation>Warn before downloading something already in your history.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1408" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1411" />
             <source>Warn under</source>
             <translation>Warn under</translation>
         </message>
@@ -6777,17 +6777,17 @@ Download again?</translation>
             <translation>Watch together ({len(sync_entries)} streams)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1288" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1291" />
             <source>Web remote</source>
             <translation>Web remote</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1305" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1308" />
             <source>Web remote:</source>
             <translation>Web remote:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1820" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1823" />
             <source>Webhook Notifications</source>
             <translation>Webhook Notifications</translation>
         </message>
@@ -6802,7 +6802,7 @@ Download again?</translation>
             <translation>Weekday mask... (mon,tue,fri)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="991" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="994" />
             <source>Weekend limit:</source>
             <translation>Weekend limit:</translation>
         </message>
@@ -6832,7 +6832,7 @@ Download again?</translation>
             <translation>When checked, queries search indexed transcript text (SRT/VTT) instead of metadata.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1080" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1083" />
             <source>When enabled, live captures are written as sequential _part001.mp4, _part002.mp4, ... files of the configured chunk length. Only applies to live recordings (not VODs).</source>
             <translation>When enabled, live captures are written as sequential _part001.mp4, _part002.mp4, ... files of the configured chunk length. Only applies to live recordings (not VODs).</translation>
         </message>
@@ -6842,22 +6842,22 @@ Download again?</translation>
             <translation>When results are available, use Download to send the recovered stream URL back to the main download flow.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1444" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1447" />
             <source>When the download queue finishes:</source>
             <translation>When the download queue finishes:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1711" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1714" />
             <source>Where the local PO-token provider answers. Only loopback addresses are accepted: a provider handles account-bound tokens.</source>
             <translation>Where the local PO-token provider answers. Only loopback addresses are accepted: a provider handles account-bound tokens.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1671" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1674" />
             <source>Which player client yt-dlp impersonates for YouTube. Change this if YouTube caps quality, demands sign-in, or a working download breaks. Run 'StreamKeep.py youtube-health' for a full capability report.</source>
             <translation>Which player client yt-dlp impersonates for YouTube. Change this if YouTube caps quality, demands sign-in, or a working download breaks. Run 'StreamKeep.py youtube-health' for a full capability report.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1135" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1138" />
             <source>Whisper model:</source>
             <translation>Whisper model:</translation>
         </message>
@@ -6867,12 +6867,12 @@ Download again?</translation>
             <translation>Who appears most often in the active date range.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1178" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1181" />
             <source>Width:</source>
             <translation>Width:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="928" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="931" />
             <source>Window:</source>
             <translation>Window:</translation>
         </message>
@@ -6882,17 +6882,17 @@ Download again?</translation>
             <translation>Work from the current recording without touching the original file.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2049" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2052" />
             <source>Write .nfo file (movie schema) alongside each download</source>
             <translation>Write .nfo file (movie schema) alongside each download</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2443" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2446" />
             <source>Write current settings to a backup file</source>
             <translation>Write current settings to a backup file</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="2044" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="2047" />
             <source>Write Kodi/Jellyfin/Plex-compatible metadata files and chat replays for archival.</source>
             <translation>Write Kodi/Jellyfin/Plex-compatible metadata files and chat replays for archival.</translation>
         </message>
@@ -6923,12 +6923,12 @@ Download again?</translation>
             <translation>Your queue is clear</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1667" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1670" />
             <source>YouTube client:</source>
             <translation>YouTube client:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="493" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="496" />
             <source>yt-dlp</source>
             <translation>yt-dlp</translation>
         </message>
@@ -6943,7 +6943,7 @@ Download again?</translation>
             <translation>yt-dlp arguments:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="758" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="761" />
             <source>yt-dlp default</source>
             <translation>yt-dlp default</translation>
         </message>
@@ -6953,12 +6953,12 @@ Download again?</translation>
             <translation>yt-dlp embedding:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1503" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1506" />
             <source>yt-dlp expression, e.g. en.*,es</source>
             <translation>yt-dlp expression, e.g. en.*,es</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="1491" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="1494" />
             <source>yt-dlp Extras</source>
             <translation>yt-dlp Extras</translation>
         </message>
@@ -6988,7 +6988,7 @@ Download again?</translation>
             <translation>yt-dlp retry policy:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="718" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="721" />
             <source>yt-dlp transfer depth applies to direct yt-dlp downloads. Blank or zero values retain yt-dlp defaults.</source>
             <translation>yt-dlp transfer depth applies to direct yt-dlp downloads. Blank or zero values retain yt-dlp defaults.</translation>
         </message>
@@ -7119,18 +7119,18 @@ Download again?</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="926" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="823" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="826" />
             <source>{label}: off</source>
             <translation>{label}: off</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="925" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="822" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="825" />
             <source>{label}: on</source>
             <translation>{label}: on</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="821" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="824" />
             <source>{label}: yt-dlp default</source>
             <translation>{label}: yt-dlp default</translation>
         </message>
@@ -7215,7 +7215,7 @@ Download again?</translation>
             <translation>{n.ts}  {prefix}  {n.text}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="664" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="667" />
             <source>{plat_info['label']}:</source>
             <translation>{plat_info['label']}:</translation>
         </message>
@@ -7318,32 +7318,32 @@ Download again?</translation>
         <message>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="243" />
             <location filename="streamkeep/ui/tabs/download_controls.py" line="23" />
-            <location filename="streamkeep/ui/tabs/settings.py" line="173" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="176" />
             <source>★ {name}</source>
             <translation>★ {name}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="146" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="149" />
             <source>⚠ Telegram — add ?chat_id=YOUR_ID to the URL</source>
             <translation>⚠ Telegram — add ?chat_id=YOUR_ID to the URL</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="139" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="142" />
             <source>✔ Discord webhook detected</source>
             <translation>✔ Discord webhook detected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="148" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="151" />
             <source>✔ ntfy push notification detected</source>
             <translation>✔ ntfy push notification detected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="141" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="144" />
             <source>✔ Slack incoming webhook detected</source>
             <translation>✔ Slack incoming webhook detected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings.py" line="144" />
+            <location filename="streamkeep/ui/tabs/settings.py" line="147" />
             <source>✔ Telegram bot detected (chat_id found)</source>
             <translation>✔ Telegram bot detected (chat_id found)</translation>
         </message>

@@ -3,8 +3,6 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 from streamkeep import cli, podcast_sidecars
 from streamkeep.extractors.podcast import parse_podcast_chapters_json
 from streamkeep.podcast_sidecars import (

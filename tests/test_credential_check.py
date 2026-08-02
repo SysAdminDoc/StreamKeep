@@ -103,7 +103,7 @@ def test_cookies_valid_counts_live(tmp_path):
     future = 9999999999
     rows = [
         f".twitch.tv\tTRUE\t/\tTRUE\t{future}\tauth-token\tabc",
-        f".youtube.com\tTRUE\t/\tTRUE\t0\tSESSION\txyz",  # session cookie
+        ".youtube.com\tTRUE\t/\tTRUE\t0\tSESSION\txyz",  # session cookie
     ]
     r = cc.probe_cookies(path=_write_cookies(tmp_path, rows))
     assert r.status == cc.VALID

@@ -70,7 +70,9 @@ def _branding_icon_path() -> Path:
     return Path("icon.png")
 
 
-from streamkeep import VERSION as _VERSION; _VERSION  # version grep anchor
+from streamkeep import VERSION as _VERSION
+
+_VERSION  # version grep anchor
 
 
 def _restore_internal_cli_streams():

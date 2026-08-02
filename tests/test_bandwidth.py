@@ -6,7 +6,7 @@ from pathlib import Path
 
 class BandwidthTrackerTests(unittest.TestCase):
     def test_lazy_tracker_initializes_on_access(self):
-        from streamkeep.bandwidth import _LazyTracker, BandwidthTracker
+        from streamkeep.bandwidth import BandwidthTracker
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "library.db")
