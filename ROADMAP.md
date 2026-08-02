@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V63 — feed.py / gallery.py XML/HTML attribute escaping does not escape quotes (latent; harden with the gallery/RSS publishing item)
-  Category: security
-  Where: `streamkeep/feed.py:80` (`<enclosure url="{escape(media_url)}" …/>`) and `streamkeep/gallery.py:87` (`href="{base_url}/share/{sid}"`, `base_url` injected unescaped).
-  Problem: `xml.sax.saxutils.escape` escapes `& < >` but NOT `"`, and the gallery `href` interpolates `base_url` with no escaping at all. Both are attribute contexts, so an unescaped `"` would break out of the attribute — attribute injection. Currently non-exploitable because share IDs are hex tokens and `base_url` is server-derived, and these modules are dead code (no server route dispatches them; `capabilities.py` already flags gallery.py as unreachable). This refines, not duplicates, the existing "Complete authenticated gallery and RSS publishing" P2 item: whoever wires those routes must fix the escaping and add the auth/scope/Host/origin gate the `/api/*` routes have (these handlers have none).
-  Evidence: Read feed.py:80 (uses `escape` from `xml.sax.saxutils`, which per the stdlib does not escape quotes unless passed an entities map) and gallery.py:87 (`base_url` interpolated raw). `grep` confirms `serve_media_range`/`render_gallery_html`/`generate_rss`/`register_shared` are referenced only by tests, and `local_server._build_handler` dispatches no `/gallery`, `/share`, `/media`, or `/feed` route.
-  Fix: Use `escape(value, {'"': "&quot;"})` (or `xml.sax.saxutils.quoteattr`) for every attribute-context value, and escape `base_url`; when the publishing item is implemented, put these routes behind the same token/scope/Host/origin gate as `/api/*`.
-  Acceptance: A unit test renders a feed enclosure and a gallery share link with a value containing `"` and `<` and asserts both are entity-escaped in the output; the routes, once wired, reject unauthenticated requests.
-  Confidence: Verified (escaping gap confirmed; exploitation is latent because the modules are unreachable and inputs are currently trusted).
-  Effort: S
-
 - [ ] P3 — V64 — Test suite carries dead imports and a placeholderless f-string (ruff-clean-up)
   Category: testing
   Where: `tests/test_bandwidth.py:9` (`_LazyTracker` unused), `tests/test_channel_stats.py:2,5` (`time`, `unittest.mock` unused), `tests/test_podcast_sidecars.py:6` (`pytest` unused), `tests/test_credential_check.py:106` (F541 f-string with no placeholder); also `StreamKeep.py:73` (E702 two statements on one line), `streamkeep/metadata.py:397` and `streamkeep/ui/tabs/settings.py:109` (E731 lambda assigned to a name).

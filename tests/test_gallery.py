@@ -2,10 +2,39 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from streamkeep import gallery
+from streamkeep import feed, gallery
 
 
 class GalleryTests(unittest.TestCase):
+    def test_rss_enclosure_escapes_xml_attribute_delimiters(self):
+        xml = feed.generate_rss(
+            [{"share_id": 'id"<&', "media_path": "", "duration_secs": 1}],
+            'https://media.example/"<&',
+        )
+
+        self.assertIn(
+            'url="https://media.example/&quot;&lt;&amp;/media/id&quot;&lt;&amp;"',
+            xml,
+        )
+
+    def test_gallery_escapes_base_url_and_share_id_in_attributes(self):
+        share_id = 'id"<&'
+        gallery.register_shared(share_id, "/p", "Title", "Channel", "clip.mp4")
+        try:
+            html = gallery.render_gallery_html('https://media.example/"<&')
+            share_html = gallery.render_share_html(
+                share_id,
+                'https://media.example/"<&',
+            )
+        finally:
+            gallery.unregister_shared(share_id)
+
+        escaped_base = "https://media.example/&quot;&lt;&amp;"
+        escaped_id = "id&quot;&lt;&amp;"
+        self.assertIn(f'href="{escaped_base}/share/{escaped_id}"', html)
+        self.assertIn(f'href="{escaped_base}/gallery"', share_html)
+        self.assertIn(f'src="{escaped_base}/media/{escaped_id}"', share_html)
+
     def test_serve_media_range_returns_partial_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "clip.webm"

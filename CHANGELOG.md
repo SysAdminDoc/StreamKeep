@@ -37,6 +37,9 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 - Improved first-run onboarding (V62) with a High Contrast appearance option,
   immediate theme application, and clearer "FFmpeg ready" status copy.
 
+- Hardened RSS and gallery attribute rendering (V63) so media URLs, share IDs,
+  and gallery base URLs cannot break out of quoted XML/HTML attributes.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

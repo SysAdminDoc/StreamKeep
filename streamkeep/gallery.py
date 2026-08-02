@@ -79,12 +79,13 @@ def render_gallery_html(base_url=""):
     if not snapshot:
         items_html = '<p style="color:#aaa;text-align:center;">No shared recordings.</p>'
     else:
+        safe_base_url = _esc(base_url)
         for sid, info in snapshot.items():
             title = info.get("title", "Untitled")[:50]
             channel = info.get("channel", "")
             items_html += (
                 f'<div class="card">'
-                f'<a href="{base_url}/share/{sid}">'
+                f'<a href="{safe_base_url}/share/{_esc(sid)}">'
                 f'<div class="title">{_esc(title)}</div>'
                 f'<div class="channel">{_esc(channel)}</div>'
                 f'</a></div>\n'
@@ -117,6 +118,8 @@ def render_share_html(share_id, base_url=""):
     channel = info.get("channel", "")
     media_type = _media_type(info.get("media", ""))
     player_tag = "audio" if media_type.startswith("audio/") else "video"
+    safe_base_url = _esc(base_url)
+    safe_share_id = _esc(share_id)
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{_esc(title)} - StreamKeep</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -127,11 +130,11 @@ h2 {{ color: {CAT['subtext0']}; font-size: 1em; font-weight: normal; }}
 video, audio {{ width: 100%; max-width: 1200px; border-radius: 8px; background: #000; }}
 a {{ color: {CAT['blue']}; }}
 </style></head><body>
-<a href="{base_url}/gallery">&larr; Gallery</a>
+<a href="{safe_base_url}/gallery">&larr; Gallery</a>
 <h1>{_esc(title)}</h1>
 <h2>{_esc(channel)}</h2>
 <{player_tag} controls preload="metadata">
-<source src="{base_url}/media/{share_id}" type="{_esc(media_type)}">
+<source src="{safe_base_url}/media/{safe_share_id}" type="{_esc(media_type)}">
 </{player_tag}>
 </body></html>"""
 

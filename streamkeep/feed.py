@@ -14,6 +14,11 @@ from datetime import datetime
 from xml.sax.saxutils import escape
 
 
+def _escape_xml_attribute(value):
+    """Escape a value used inside a double-quoted XML attribute."""
+    return escape(str(value or ""), {'"': "&quot;", "'": "&apos;"})
+
+
 def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
                  limit=100):
     """Build RSS 2.0 XML from history entries.
@@ -77,7 +82,7 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
 
         if media_url:
             items_xml += f"""
-      <enclosure url="{escape(media_url)}" length="{file_size}" type="video/mp4"/>"""
+      <enclosure url="{_escape_xml_attribute(media_url)}" length="{file_size}" type="video/mp4"/>"""
 
         if dur_str:
             items_xml += f"""
