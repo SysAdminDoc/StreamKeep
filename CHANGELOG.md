@@ -10,6 +10,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   Unsafe loopback, private-LAN, link-local, and metadata targets are refused
   before any output bytes are written.
 
+- Fixed resumed multi-segment downloads (V56): completion now treats the
+  worker's remaining segment set as a subset of the already-completed resume
+  state, so successful resumes emit finalization, clear their sidecar, and do
+  not remain stuck as partial jobs.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

@@ -1714,7 +1714,7 @@ class DownloadWorker(QThread):
             if self._resume_state is not None:
                 expected = {s[0] for s in self.segments}
                 completed = set(self._resume_state.completed)
-                if expected != completed:
+                if not expected.issubset(completed):
                     all_succeeded = False
             if all_succeeded:
                 if self._resume_state is not None:

@@ -886,6 +886,99 @@ def test_parallel_direct_download_blocks_unsafe_url_before_transfer(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def _run_resumed_ffmpeg_worker(tmp_path, monkeypatch, *, returncode, make_output):
+    worker = DownloadWorker(
+        playlist_url="https://example.com/archive.m3u8",
+        segments=[
+            (3, "segment-3", 30, 10),
+            (4, "segment-4", 40, 10),
+            (5, "segment-5", 50, 10),
+        ],
+        output_dir=str(tmp_path),
+        format_type="hls",
+    )
+    worker.max_retries = 0
+    state = ResumeState(
+        output_dir=str(tmp_path),
+        segments=[
+            [0, "segment-0", 0, 10],
+            [1, "segment-1", 10, 10],
+            [2, "segment-2", 20, 10],
+        ],
+        completed=[0, 1, 2],
+    )
+    worker.attach_resume_state(state)
+    done = []
+    errors = []
+    logs = []
+    worker.all_done.connect(lambda: done.append(True))
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+    worker.log.connect(logs.append)
+    call_index = [0]
+
+    class _FakeStderr:
+        def __iter__(self):
+            return iter(())
+
+        def close(self):
+            pass
+
+    class _FakeProc:
+        def __init__(self, command, *args, **kwargs):
+            del args, kwargs
+            label = worker.segments[call_index[0]][1]
+            call_index[0] += 1
+            if make_output:
+                (tmp_path / f"{label}.mp4").write_bytes(b"x" * 4096)
+            self.command = command
+            self.returncode = returncode
+            self.stderr = _FakeStderr()
+
+        def wait(self):
+            return self.returncode
+
+    with mock.patch.object(
+        worker, "_ensure_supported_ffmpeg", return_value=True
+    ), mock.patch.object(
+        worker, "_ensure_guarded_transport", return_value=True
+    ), mock.patch(
+        "streamkeep.workers.download.resolve_tool_command", return_value="ffmpeg"
+    ), mock.patch(
+        "streamkeep.workers.download.subprocess.Popen", _FakeProc
+    ):
+        worker.run()
+
+    return worker, state, done, errors, logs
+
+
+def test_resumed_segments_finalize_when_completed_is_a_superset(
+    tmp_path, monkeypatch,
+):
+    worker, state, done, errors, logs = _run_resumed_ffmpeg_worker(
+        tmp_path, monkeypatch, returncode=0, make_output=True,
+    )
+
+    assert done == [True]
+    assert errors == []
+    assert state.completed == [0, 1, 2, 3, 4, 5]
+    assert not (tmp_path / ".streamkeep_resume.json").exists()
+    assert not any("[PARTIAL]" in line for line in logs)
+    assert worker._resume_state is state
+
+
+def test_resumed_partial_failure_keeps_sidecar(
+    tmp_path, monkeypatch,
+):
+    _worker, _state, done, errors, logs = _run_resumed_ffmpeg_worker(
+        tmp_path, monkeypatch, returncode=1, make_output=False,
+    )
+
+    assert done == []
+    assert errors
+    assert (tmp_path / ".streamkeep_resume.json").exists()
+    assert any("[PARTIAL]" in line for line in logs)
+
+
 def test_ffmpeg_path_blocks_before_process_start(tmp_path):
     worker = DownloadWorker(
         playlist_url="https://example.com/live.m3u8",
