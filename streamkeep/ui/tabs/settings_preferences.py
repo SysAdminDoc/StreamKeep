@@ -63,6 +63,57 @@ class SettingsPreferencesMixin:
         if d:
             line_edit.setText(d)
 
+    def _refresh_pot_status(self):
+        """Show whether the PO-token provider is installed and answering."""
+        from ...pot_provider import cached_status
+
+        label = getattr(self, "pot_status_label", None)
+        if label is None:
+            return
+        status = cached_status(self._config, refresh=True)
+        if status["usable"]:
+            label.setText(
+                f"Provider {status['plugin']} is answering on "
+                f"{status['base_url']}; YouTube jobs use it."
+            )
+        elif status["plugin_installed"]:
+            label.setText(
+                f"Plugin {status['plugin']} is installed but nothing is "
+                f"answering on {status['base_url']}."
+            )
+        else:
+            label.setText("No PO-token provider is installed.")
+
+    def _on_setup_pot_provider(self):
+        """Install/launch the local PO-token provider, or explain how (V33)."""
+        from ...pot_provider import (
+            CONFIG_BASE_URL_KEY,
+            CONFIG_COMMAND_KEY,
+            ensure_provider,
+            invalidate_status_cache,
+            normalize_base_url,
+        )
+
+        raw_url = self.pot_base_url_input.text().strip()
+        if raw_url and not normalize_base_url(raw_url):
+            self._set_status(
+                "The PO-token provider URL must be a loopback address.", "error",
+            )
+            return
+        self._config[CONFIG_BASE_URL_KEY] = raw_url
+        self._config[CONFIG_COMMAND_KEY] = self.pot_command_input.text().strip()
+        invalidate_status_cache()
+        ok, message = ensure_provider(self._config, log_fn=self._log)
+        self._refresh_pot_status()
+        self._log(f"[POT] {message}")
+        show_premium_message(
+            self,
+            title="PO-token provider",
+            body=message,
+            eyebrow="YOUTUBE",
+            tone="success" if ok else "warning",
+        )
+
     def _on_test_youtube_capability(self):
         """Run the local YouTube capability report (V26) and present the
         result plus concrete remediation for SABR/PO-token gating."""
@@ -597,6 +648,27 @@ class SettingsPreferencesMixin:
                 self._config.pop(key, None)
             else:
                 self._config[key] = value
+        # Apply the PO-token provider endpoint/launch command (V33)
+        if hasattr(self, "pot_base_url_input"):
+            from ...pot_provider import (
+                CONFIG_BASE_URL_KEY,
+                CONFIG_COMMAND_KEY,
+                invalidate_status_cache,
+                normalize_base_url,
+            )
+            raw_pot_url = self.pot_base_url_input.text().strip()
+            if raw_pot_url and not normalize_base_url(raw_pot_url):
+                self._set_status(
+                    "The PO-token provider URL must be a loopback address.",
+                    "warning",
+                )
+            else:
+                self._config[CONFIG_BASE_URL_KEY] = raw_pot_url
+                self._config[CONFIG_COMMAND_KEY] = (
+                    self.pot_command_input.text().strip()
+                )
+                invalidate_status_cache()
+                self._refresh_pot_status()
         # Apply the optional from-start live engine fallback (V36)
         if hasattr(self, "live_engine_fallback_check"):
             self._config["live_engine_fallback"] = (

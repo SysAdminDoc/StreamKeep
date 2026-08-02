@@ -1696,6 +1696,52 @@ def build_settings_tab(win):
     pc_row.addWidget(win.youtube_health_btn)
     yt_lay.addLayout(pc_row)
 
+    # PO-token provider lifecycle (V33). yt-dlp can use a provider but cannot
+    # start one; this row installs/launches it and reports whether it answers.
+    from ...pot_provider import CONFIG_BASE_URL_KEY, CONFIG_COMMAND_KEY
+    pot_row = QHBoxLayout()
+    pot_row.setSpacing(8)
+    pot_label = QLabel("PO-token URL:")
+    pot_label.setFixedWidth(100)
+    pot_row.addWidget(pot_label)
+    win.pot_base_url_input = QLineEdit(
+        str(win._config.get(CONFIG_BASE_URL_KEY, "") or "")
+    )
+    win.pot_base_url_input.setPlaceholderText("http://127.0.0.1:4416 (loopback only)")
+    win.pot_base_url_input.setToolTip(
+        "Where the local PO-token provider answers. Only loopback addresses "
+        "are accepted: a provider handles account-bound tokens."
+    )
+    pot_row.addWidget(win.pot_base_url_input, 1)
+    win.pot_setup_btn = QPushButton("Set up provider")
+    win.pot_setup_btn.setObjectName("secondary")
+    win.pot_setup_btn.setToolTip(
+        "Install the provider plugin where possible, start the configured "
+        "local server, then re-probe. Shows copy-paste steps if it cannot."
+    )
+    win.pot_setup_btn.clicked.connect(win._on_setup_pot_provider)
+    pot_row.addWidget(win.pot_setup_btn)
+    yt_lay.addLayout(pot_row)
+
+    pot_cmd_row = QHBoxLayout()
+    pot_cmd_row.setSpacing(8)
+    pot_cmd_label = QLabel("Launch:")
+    pot_cmd_label.setFixedWidth(100)
+    pot_cmd_row.addWidget(pot_cmd_label)
+    win.pot_command_input = QLineEdit(
+        str(win._config.get(CONFIG_COMMAND_KEY, "") or "")
+    )
+    win.pot_command_input.setPlaceholderText(
+        "Optional command that starts the provider server"
+    )
+    pot_cmd_row.addWidget(win.pot_command_input, 1)
+    yt_lay.addLayout(pot_cmd_row)
+
+    win.pot_status_label = QLabel("")
+    win.pot_status_label.setObjectName("subtleText")
+    win.pot_status_label.setWordWrap(True)
+    yt_lay.addWidget(win.pot_status_label)
+
     card_lay.addWidget(yt_block)
 
     # ── Filename templates ─────────────────────────────────────────

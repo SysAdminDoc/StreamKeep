@@ -1077,7 +1077,15 @@ def _run_youtube_health(args):
     from .config import load_config
     from .extractors.ytdlp import youtube_health_report
 
-    preset = str(load_config().get("youtube_player_client", "") or "")
+    config = load_config()
+    if getattr(args, "setup_pot_provider", False):
+        from .pot_provider import ensure_provider
+        ok, message = ensure_provider(config, log_fn=_print_line)
+        _print_line(message)
+        if not ok:
+            sys.exit(1)
+
+    preset = str(config.get("youtube_player_client", "") or "")
     report = youtube_health_report(player_client=preset)
 
     if getattr(args, "json", False):
@@ -1089,10 +1097,14 @@ def _run_youtube_health(args):
         _print_line(f"  JS runtime     : {runtime.get('name') or 'none'}")
         _print_line(f"  EJS available  : {'yes' if report['ejs_available'] else 'no'}")
         _print_line(f"  player_client  : {report['player_client']}")
+        endpoint = report.get("pot_endpoint") or {}
         _print_line(
             f"  PO-token       : "
             f"{'detected' if report['pot_provider']['available'] else 'not detected'}"
+            f"{' (answering)' if endpoint.get('reachable') else ''}"
         )
+        if endpoint.get("base_url"):
+            _print_line(f"  PO-token URL   : {endpoint['base_url']}")
         for warning in report["warnings"]:
             _print_line(f"  ! {warning}")
         pot_setup = report.get("pot_setup") or {}
@@ -1436,6 +1448,13 @@ def build_parser():
     )
     yth_p.add_argument("--json", action="store_true",
                        help="Emit the redacted report as JSON")
+    yth_p.add_argument(
+        "--setup-pot-provider", action="store_true",
+        help=(
+            "Set up the local PO-token provider: install the plugin where "
+            "possible, launch a configured local server, then re-probe"
+        ),
+    )
     yth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 

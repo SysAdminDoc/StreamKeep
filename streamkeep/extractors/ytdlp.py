@@ -224,6 +224,18 @@ def youtube_player_client_args(preset, url=None):
     return ["--extractor-args", f"youtube:player_client={value}"]
 
 
+
+def youtube_pot_args(url=None):
+    """Return the PO-token provider extractor-arg for a YouTube job, or [].
+
+    Thin, failure-proof wrapper so every command builder can splice provider
+    support in unconditionally (V33).
+    """
+    from ..pot_provider import active_extractor_args
+
+    return active_extractor_args(url)
+
+
 # Known yt-dlp PO-token provider plugin packages. A provider supplies the
 # proof-of-origin tokens some YouTube formats now require; without one,
 # certain qualities and age-gated videos fail even with a JS runtime.
@@ -341,6 +353,19 @@ def youtube_health_report(player_client=""):
         warnings.append(runtime_warning)
     if not pot["available"]:
         warnings.append(pot["detail"])
+    # V33: report whether the provider endpoint actually answers, not merely
+    # whether a plugin is importable - an installed-but-dead provider looks
+    # identical to a working one from an import check alone.
+    try:
+        from ..pot_provider import cached_status
+        provider = cached_status()
+    except Exception:
+        provider = {}
+    if pot["available"] and provider and not provider.get("reachable"):
+        warnings.append(
+            provider.get("detail")
+            or "A PO-token provider plugin is installed but nothing is answering."
+        )
     healthy = runtime.get("state") == "ready"
     return {
         "healthy": healthy,
@@ -352,6 +377,7 @@ def youtube_health_report(player_client=""):
         "player_client": client_value or "default",
         "pot_provider": pot,
         "pot_setup": youtube_pot_setup_guidance(),
+        "pot_endpoint": provider,
         "warnings": warnings,
     }
 
@@ -458,6 +484,7 @@ class YtDlpExtractor(Extractor):
         if include_runtime and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
+        cmd.extend(youtube_pot_args(url))
         cmd.extend(self._auth_args(url))
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
@@ -500,6 +527,7 @@ class YtDlpExtractor(Extractor):
         if log_fn and _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
+        cmd.extend(youtube_pot_args(url))
         cmd.extend(["--cookies-from-browser", browser_name, "--", url])
         try:
             result = run_capture_interruptible(cmd, timeout=self.resolve_timeout)
@@ -829,6 +857,7 @@ class YtDlpExtractor(Extractor):
         if _is_youtube_url(url):
             cmd.extend(ytdlp_runtime_args(runtime_status))
         cmd.extend(youtube_player_client_args(self.youtube_player_client, url))
+        cmd.extend(youtube_pot_args(url))
         cmd.extend(self._auth_args(url))
         if self.proxy:
             cmd.extend(["--proxy", self.proxy])
