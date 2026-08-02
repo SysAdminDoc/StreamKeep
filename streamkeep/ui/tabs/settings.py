@@ -813,6 +813,51 @@ def build_settings_tab(win):
     engine_row.addStretch(1)
     network_lay.addLayout(engine_row)
 
+    # Optional in-process live transport (V13). Keep the dependency optional
+    # and fail closed when an unsupported Streamlink release is installed.
+    from ...integrations.streamlink import (
+        streamlink_available,
+        streamlink_install_hint,
+    )
+    streamlink_row = QHBoxLayout()
+    streamlink_row.setSpacing(8)
+    win.streamlink_live_engine_check = QCheckBox(
+        "Use Streamlink for Twitch/Kick live captures"
+    )
+    streamlink_live_available = streamlink_available()
+    win.streamlink_live_engine_check.setChecked(bool(
+        win._config.get("streamlink_live_engine", False)
+    ))
+    win.streamlink_live_engine_check.setEnabled(streamlink_live_available)
+    win.streamlink_live_engine_check.setToolTip(
+        "Uses Streamlink's mandatory Twitch ad filtering, low-latency mode, "
+        "and guarded HLS DVR options."
+        if streamlink_live_available else streamlink_install_hint()
+    )
+    streamlink_row.addWidget(win.streamlink_live_engine_check)
+    streamlink_row.addStretch(1)
+    network_lay.addLayout(streamlink_row)
+
+    streamlink_dvr_row = QHBoxLayout()
+    streamlink_dvr_row.addWidget(QLabel("Streamlink DVR offset (seconds):"))
+    win.streamlink_hls_offset_input = QLineEdit(str(
+        win._config.get("streamlink_hls_start_offset", "") or ""
+    ))
+    win.streamlink_hls_offset_input.setPlaceholderText("0 = current live edge")
+    streamlink_dvr_row.addWidget(win.streamlink_hls_offset_input)
+    win.streamlink_hls_restart_check = QCheckBox(
+        "Start from the oldest available live segment"
+    )
+    win.streamlink_hls_restart_check.setChecked(bool(
+        win._config.get("streamlink_hls_live_restart", False)
+    ))
+    win.streamlink_hls_restart_check.setToolTip(
+        "Uses Streamlink's HLS live-restart/DVR behavior. The source must "
+        "still expose those older segments."
+    )
+    streamlink_dvr_row.addWidget(win.streamlink_hls_restart_check)
+    network_lay.addLayout(streamlink_dvr_row)
+
     embed_row = QHBoxLayout()
     embed_row.addWidget(QLabel("Embed:"))
     for name, label in (

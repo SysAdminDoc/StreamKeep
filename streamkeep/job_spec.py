@@ -74,6 +74,11 @@ class DownloadJobSpec:
     # Opt-in from-start re-capture with ytarchive when a live yt-dlp
     # capture reports fragment gaps (V36).
     live_engine_fallback: bool = False
+    # Opt-in in-process Streamlink transport for Twitch/Kick live captures
+    # (V13). This is a runtime choice and does not add a dependency to jobs.
+    streamlink_live_engine: bool = False
+    streamlink_hls_start_offset: float = 0.0
+    streamlink_hls_live_restart: bool = False
     ytdlp_wait_for_video: str = ""
     ytdlp_embed_chapters: bool | None = None
     ytdlp_embed_metadata: bool | None = None
@@ -190,6 +195,9 @@ class DownloadJobSpec:
         worker.ytdlp_throttled_rate = self.ytdlp_throttled_rate
         worker.ytdlp_live_from_start = self.ytdlp_live_from_start
         worker.live_engine_fallback = self.live_engine_fallback
+        worker.streamlink_live_engine = self.streamlink_live_engine
+        worker.streamlink_hls_start_offset = self.streamlink_hls_start_offset
+        worker.streamlink_hls_live_restart = self.streamlink_hls_live_restart
         worker.ytdlp_wait_for_video = self.ytdlp_wait_for_video
         worker.ytdlp_embed_chapters = self.ytdlp_embed_chapters
         worker.ytdlp_embed_metadata = self.ytdlp_embed_metadata
@@ -263,6 +271,15 @@ class DownloadJobSpec:
             ytdlp_live_from_start=bool(worker.ytdlp_live_from_start),
             live_engine_fallback=bool(
                 getattr(worker, "live_engine_fallback", False)
+            ),
+            streamlink_live_engine=bool(
+                getattr(worker, "streamlink_live_engine", False)
+            ),
+            streamlink_hls_start_offset=getattr(
+                worker, "streamlink_hls_start_offset", 0.0
+            ),
+            streamlink_hls_live_restart=bool(
+                getattr(worker, "streamlink_hls_live_restart", False)
             ),
             ytdlp_wait_for_video=worker.ytdlp_wait_for_video or "",
             ytdlp_embed_chapters=worker.ytdlp_embed_chapters,

@@ -420,6 +420,15 @@ def _run_download(args):
             live_engine_fallback=bool(
                 cfg.get("live_engine_fallback", False)
             ),
+            streamlink_live_engine=bool(
+                cfg.get("streamlink_live_engine", False)
+            ),
+            streamlink_hls_start_offset=(
+                cfg.get("streamlink_hls_start_offset", 0) or 0
+            ),
+            streamlink_hls_live_restart=bool(
+                cfg.get("streamlink_hls_live_restart", False)
+            ),
             ytdlp_wait_for_video=transfer_options.get("wait_for_video", ""),
             ytdlp_embed_chapters=transfer_options.get("embed_chapters"),
             ytdlp_embed_metadata=transfer_options.get("embed_metadata"),

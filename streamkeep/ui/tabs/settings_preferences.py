@@ -674,6 +674,34 @@ class SettingsPreferencesMixin:
             self._config["live_engine_fallback"] = (
                 self.live_engine_fallback_check.isChecked()
             )
+        if hasattr(self, "streamlink_live_engine_check"):
+            self._config["streamlink_live_engine"] = (
+                self.streamlink_live_engine_check.isChecked()
+            )
+        if hasattr(self, "streamlink_hls_offset_input"):
+            try:
+                streamlink_offset = float(
+                    self.streamlink_hls_offset_input.text().strip() or 0
+                )
+            except (TypeError, ValueError):
+                self._set_status(
+                    "Streamlink DVR offset must be a non-negative number.",
+                    "warning",
+                )
+                return
+            if streamlink_offset < 0:
+                self._set_status(
+                    "Streamlink DVR offset must be a non-negative number.",
+                    "warning",
+                )
+                return
+            self._config["streamlink_hls_start_offset"] = (
+                str(streamlink_offset) if streamlink_offset else ""
+            )
+        if hasattr(self, "streamlink_hls_restart_check"):
+            self._config["streamlink_hls_live_restart"] = (
+                self.streamlink_hls_restart_check.isChecked()
+            )
         # Apply proxy (also routes native extractor curl calls through it)
         proxy = self.proxy_input.text().strip()
         YtDlpExtractor.proxy = proxy

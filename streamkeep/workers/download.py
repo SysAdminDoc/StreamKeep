@@ -69,6 +69,11 @@ class DownloadWorker(QThread):
         # Live-capture reliability (V36): opt-in from-start fallback and
         # the gap report from the most recent capture attempt.
         self.live_engine_fallback = False
+        # Optional Streamlink live transport for Twitch/Kick (V13). It is
+        # opt-in and deliberately kept separate from the ytarchive fallback.
+        self.streamlink_live_engine = False
+        self.streamlink_hls_start_offset = 0.0
+        self.streamlink_hls_live_restart = False
         self.last_capture_gaps = None
         self.rate_limit = ""
         self.proxy = ""
@@ -1281,6 +1286,97 @@ class DownloadWorker(QThread):
             return "mp4"
         return container.lstrip(".")
 
+    def _download_with_streamlink(self, seg_idx, label, outfile):
+        """Capture one Twitch/Kick live stream through optional Streamlink.
+
+        Streamlink writes a progressive byte stream, so capture first lands in
+        a sibling staging file and is remuxed only after the reader closes.
+        A failed remux leaves that raw file available for manual salvage.
+        """
+        from ..integrations.streamlink import (
+            StreamlinkEngine,
+            StreamlinkNoStream,
+            StreamlinkOptions,
+            StreamlinkSecurityError,
+            StreamlinkUnavailable,
+            remux_capture,
+        )
+
+        source = str(self.webpage_url or self.playlist_url or "").strip()
+        if not source:
+            self._last_failure_reason = "Streamlink live capture has no source URL"
+            return "fail"
+        raw_path = outfile + ".streamlink.part"
+        try:
+            if os.path.isfile(raw_path):
+                os.remove(raw_path)
+        except OSError:
+            pass
+
+        self.log.emit(
+            f"[ENGINE] Streamlink live capture for {self.source_platform or 'live'}"
+        )
+        try:
+            with StreamlinkEngine().open(
+                source,
+                platform=self.source_platform,
+                options=StreamlinkOptions(
+                    low_latency=True,
+                    start_offset=self.streamlink_hls_start_offset,
+                    live_restart=self.streamlink_hls_live_restart,
+                ),
+                request_headers=self.request_headers,
+            ) as capture:
+                result = capture.copy_to(
+                    raw_path,
+                    cancel_check=lambda: self._cancel,
+                    progress_cb=lambda total: self.progress.emit(
+                        seg_idx, 0, f"{fmt_size(total)} captured (Streamlink)"
+                    ),
+                )
+        except StreamlinkUnavailable as error:
+            self._last_failure_reason = str(error)
+            self.log.emit(f"[HINT] {error}")
+            return "fail"
+        except StreamlinkNoStream as error:
+            self._last_failure_reason = str(error)
+            self.log.emit(f"[STREAMLINK] {error}")
+            return "fail"
+        except StreamlinkSecurityError as error:
+            self._last_failure_reason = f"Streamlink policy blocked the source: {error}"
+            self.log.emit(f"[BLOCKED] {self._last_failure_reason}")
+            return "fail"
+        except Exception as error:
+            self._last_failure_reason = str(error or "Streamlink capture failed")
+            self.log.emit(
+                f"[ERROR] Streamlink capture failed: "
+                f"{sanitize_failure_reason(self._last_failure_reason)}"
+            )
+            return "fail"
+
+        if result.bytes_written <= 0:
+            self._last_failure_reason = "Streamlink produced no media bytes"
+            return "fail"
+        if not remux_capture(
+            raw_path, outfile, ffmpeg=self._ffmpeg_path or "ffmpeg",
+        ):
+            self._last_failure_reason = (
+                "Streamlink raw capture could not be remuxed; "
+                f"raw bytes were kept at {os.path.basename(raw_path)}"
+            )
+            self.log.emit(f"[FAIL] {self._last_failure_reason}")
+            return "fail"
+
+        size = os.path.getsize(outfile)
+        self.progress.emit(seg_idx, 100, "Complete")
+        self.segment_done.emit(seg_idx, fmt_size(size))
+        self._mark_segment_done(seg_idx)
+        self.log.emit(f"[DONE] {label} - {fmt_size(size)} (Streamlink)")
+        if self._resume_state is not None:
+            clear_resume_state(self.output_dir)
+            self._resume_state = None
+        return "ok"
+
     def _mark_segment_done(self, seg_idx):
         """Merge the segment into the resume sidecar and persist it."""
         if self._resume_state is None:
@@ -1388,6 +1484,37 @@ class DownloadWorker(QThread):
                         seg_idx,
                         self._last_failure_reason or "yt-dlp download failed",
                     )
+                continue
+
+            # Optional in-process live engine for Twitch/Kick. Streamlink is
+            # self-guarded through the remote-manifest proxy and is only used
+            # for a live native capture when explicitly enabled.
+            if (
+                is_live_capture
+                and getattr(self, "streamlink_live_engine", False)
+                and str(self.source_platform or "").strip().casefold()
+                in {"twitch", "kick"}
+                and self.chunk_length_secs <= 0
+            ):
+                if not self._ensure_supported_ffmpeg():
+                    self.error.emit(
+                        seg_idx,
+                        "Unsafe or missing FFmpeg; see log for repair guidance",
+                    )
+                    return
+                self._last_failure_reason = ""
+                streamlink_outcome = self._download_with_streamlink(
+                    seg_idx, label, outfile,
+                )
+                if streamlink_outcome == "ok":
+                    continue
+                if self._cancel:
+                    return
+                all_succeeded = False
+                self.error.emit(
+                    seg_idx,
+                    self._last_failure_reason or "Streamlink live capture failed",
+                )
                 continue
 
             # Multi-connection parallel download for direct MP4 URLs

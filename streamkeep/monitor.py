@@ -112,12 +112,27 @@ class _PollTask(QRunnable):
                     self.signals.finished.emit(entry.channel_id, "error")
                     return
                 if ext.supports_live_check():
+                    live_error = None
                     try:
                         is_live = ext.check_live(entry.url)
                     except Exception as ex:
-                        self.signals.log.emit(
-                            f"[MONITOR ERROR] {entry.channel_id}: {ex}"
+                        is_live = None
+                        live_error = ex
+                    # Kick's public and fallback APIs can both return no
+                    # answer during churn. Streamlink is an optional,
+                    # guarded stream-up probe for Twitch/Kick in that case.
+                    if is_live is None and str(getattr(ext, "NAME", "")) in {
+                        "Twitch", "Kick",
+                    }:
+                        from .integrations.streamlink import streamlink_live_status
+                        is_live = streamlink_live_status(
+                            entry.url, platform=ext.NAME,
                         )
+                    if is_live is None:
+                        if live_error is not None:
+                            self.signals.log.emit(
+                                f"[MONITOR ERROR] {entry.channel_id}: {live_error}"
+                            )
                         self.signals.finished.emit(entry.channel_id, "error")
                         return
                     prev = entry.last_status

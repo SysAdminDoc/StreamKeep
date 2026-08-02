@@ -227,6 +227,15 @@ class MainWindowJobsMixin:
                 ytdlp_unavailable_fragments=transfer.get("unavailable_fragments", ""),
                 ytdlp_throttled_rate=transfer.get("throttled_rate", ""),
                 ytdlp_live_from_start=transfer.get("live_from_start", False),
+                streamlink_live_engine=bool(
+                    self._config.get("streamlink_live_engine", False)
+                ),
+                streamlink_hls_start_offset=(
+                    self._config.get("streamlink_hls_start_offset", 0) or 0
+                ),
+                streamlink_hls_live_restart=bool(
+                    self._config.get("streamlink_hls_live_restart", False)
+                ),
                 ytdlp_wait_for_video=transfer.get("wait_for_video", ""),
                 ytdlp_embed_chapters=transfer.get("embed_chapters"),
                 ytdlp_embed_metadata=transfer.get("embed_metadata"),

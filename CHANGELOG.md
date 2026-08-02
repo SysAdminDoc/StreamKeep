@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added the optional V13 Streamlink live engine for Twitch/Kick. When
+  Streamlink 8.4+ is installed and enabled, live captures use mandatory Twitch
+  ad filtering, low-latency HLS, DVR rewind options, and an in-process byte
+  reader behind the shared SSRF-guarded proxy. A missing or old install stays
+  non-fatal, and monitor polling can use the same guarded engine when a native
+  platform API has no answer.
+
 - Added V12 browser-companion media handoff: the MV3 extension can explicitly
   capture active-tab manifests and media requests, surface them in the popup,
   and send a bounded replay context to Fetch or Queue. StreamKeep keeps only

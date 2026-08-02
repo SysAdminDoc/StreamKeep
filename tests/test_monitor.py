@@ -94,6 +94,13 @@ class _FakeExtractor:
         return url
 
 
+class _TwitchWithoutApiAnswer(_FakeExtractor):
+    NAME = "Twitch"
+
+    def check_live(self, _url):
+        return None
+
+
 class ChannelMonitorDedupTests(unittest.TestCase):
     def setUp(self):
         self.monitor = ChannelMonitor()
@@ -148,6 +155,26 @@ class ChannelMonitorDedupTests(unittest.TestCase):
                 mock.patch.object(self.monitor._pool, "start") as start:
             self.monitor._poll_tick()
             start.assert_not_called()
+
+    def test_twitch_streamlink_probe_fills_an_empty_platform_answer(self):
+        entry = MonitorEntry(
+            url="https://twitch.tv/channel",
+            platform="Twitch",
+            channel_id="channel",
+        )
+        signals = mock.Mock()
+        with mock.patch.object(
+            monitor_mod.Extractor,
+            "detect",
+            return_value=_TwitchWithoutApiAnswer(),
+        ), mock.patch(
+            "streamkeep.integrations.streamlink.streamlink_live_status",
+            return_value=True,
+        ) as probe:
+            monitor_mod._PollTask(entry, signals, False).run()
+        probe.assert_called_once_with(entry.url, platform="Twitch")
+        signals.went_live.emit.assert_called_once_with("channel")
+        signals.finished.emit.assert_called_once_with("channel", "live")
 
     def test_db_roundtrip_preserves_auth_profile_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:

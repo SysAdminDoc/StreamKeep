@@ -27,12 +27,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P1 — Breadth (new source classes)
 
-- [ ] V13 — streamlink live engine (optional)
-  What: in-process streamlink for Twitch/Kick live: mandatory ad-filtering, low-latency mode, DVR rewind (--hls-start-offset/--hls-live-restart), stream-up polling for monitors.
-  Effort: L
-  > 2026-07-27: streamlink ≥7.5.0 removed `--twitch-disable-ads` — ad-filtering is now default/mandatory, so assume it is always on. Pairs with V37 (SSAI ad-segment stripping for VODs, which streamlink's live pre-mux grab does not cover). (RESEARCH.md 2026-07-27)
-  > 2026-07-29: V46 is a security prerequisite. Streamlink 8.4 fixed CVE-2026-44353 after nested HLS/DASH `file://` URIs disclosed local files; every engine must share StreamKeep's remote-manifest URI/SSRF policy rather than trusting engine defaults. (RESEARCH.md 2026-07-29)
-
 - [ ] V14 — MSE buffer recorder (DRM-free only)
   What: Playwright init-script hook on SourceBuffer.appendBuffer teeing segments to disk; ffmpeg concat/remux; hard-refuse on any EME session; tab-open/playback-speed limitations documented.
   Effort: L
