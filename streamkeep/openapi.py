@@ -28,6 +28,9 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /ping",
     "GET /api/spec",
     "GET /api/status",
+    "GET /api/operations",
+    "POST /api/operations/action",
+    "POST /api/operations/export",
     "GET /api/library",
     "GET /api/monitor",
     "GET /gallery",
@@ -345,6 +348,27 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "403": forbidden,
                     },
                 }
+            },
+            "/api/operations": {
+                "get": {
+                    "summary": "Read a paged, filterable operations view.",
+                    "tags": ["operations"],
+                    "security": bearer,
+                    "parameters": [
+                        {"name": "state", "in": "query", "schema": {"type": "string"}},
+                        {"name": "source", "in": "query", "schema": {"type": "string"}},
+                        {"name": "stage", "in": "query", "schema": {"type": "string"}},
+                        {"name": "kind", "in": "query", "schema": {"type": "string"}},
+                        {"name": "search", "in": "query", "schema": {"type": "string"}},
+                        {"name": "page", "in": "query", "schema": {"type": "integer", "minimum": 0}},
+                        {"name": "page_size", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200}},
+                    ],
+                    "responses": {
+                        "200": json_ok("Paged operations and aggregate state.", {"type": "object"}),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
             },
             "/api/library": {
                 "get": {
@@ -1010,6 +1034,41 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "500": {"description": "Retry failed.", "content": error_content},
                     },
                 }
+            },
+            "/api/operations/action": {
+                "post": {
+                    "summary": "Retry or discard up to 100 selected failures.",
+                    "tags": ["operations"],
+                    "security": bearer,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["retry", "discard"]},
+                            "failure_ids": {"type": "array", "items": {"type": "integer"}},
+                        },
+                        "required": ["action", "failure_ids"],
+                    }}}},
+                    "responses": {
+                        "200": json_ok("Selected failure actions.", {"type": "object"}),
+                        "400": {"description": "Invalid action.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/operations/export": {
+                "post": {
+                    "summary": "Return a redacted, URL/path-free operations report.",
+                    "tags": ["operations"],
+                    "security": bearer,
+                    "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
+                    "responses": {
+                        "200": json_ok("Redacted operations report.", {"type": "object"}),
+                        "400": {"description": "Invalid report request.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
             },
             "/api/failures/discard": {
                 "post": {

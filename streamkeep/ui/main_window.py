@@ -114,6 +114,11 @@ def _chrome_icon(kind, *, active=False):
             painter.setBrush(QColor(CAT["panel"]))
             painter.drawEllipse(x - 2, y - 2, 4, 4)
             painter.setBrush(Qt.BrushStyle.NoBrush)
+    elif kind == "operations":
+        painter.drawRect(4, 4, 14, 14)
+        painter.drawLine(7, 8, 15, 8)
+        painter.drawLine(7, 11, 15, 11)
+        painter.drawLine(7, 14, 12, 14)
     elif kind == "bell":
         painter.drawArc(QRectF(5, 4, 12, 13), 0, 180 * 16)
         painter.drawLine(5, 10, 5, 15)
@@ -188,6 +193,7 @@ from .tabs.settings import build_settings_tab, SettingsTabMixin
 from .tabs.storage import (
     build_storage_tab, StorageTabMixin,
 )
+from .tabs.operations import build_operations_tab
 
 
 class StreamKeep(
@@ -1714,6 +1720,7 @@ class StreamKeep(
         current = self._stack.currentIndex() if hasattr(self, "_stack") else 0
         icon_names = (
             "download", "monitor", "history", "analytics", "storage", "settings",
+            "operations",
         )
         for index, button in enumerate(getattr(self, "_tab_btns", ())):
             button.setIcon(_chrome_icon(
@@ -1871,9 +1878,11 @@ class StreamKeep(
         self._tab_btns = []
         self._tab_names = [
             "Download", "Monitor", "History", "Analytics", "Storage", "Settings",
+            "Operations",
         ]
         icon_names = (
             "download", "monitor", "history", "analytics", "storage", "settings",
+            "operations",
         )
         for i, name in enumerate(self._tab_names):
             btn = QPushButton(name)
@@ -2021,10 +2030,12 @@ class StreamKeep(
         analytics_page = self._prepare_page_for_shell(build_analytics_tab(self))
         storage_page = self._prepare_page_for_shell(build_storage_tab(self))
         settings_page = self._prepare_page_for_shell(build_settings_tab(self))
+        operations_page = self._prepare_page_for_shell(build_operations_tab(self))
         self._download_scroll = self._wrap_scroll_page(download_page)
         self._stack.addWidget(self._download_scroll)
         for page in (
             monitor_page, history_page, analytics_page, storage_page, settings_page,
+            operations_page,
         ):
             self._stack.addWidget(self._wrap_scroll_page(page))
         root.addWidget(self._stack, 1)
@@ -2099,6 +2110,10 @@ class StreamKeep(
                 "monitor_table": ("Monitored channels", "Channels and their current live state"),
                 "history_table": ("Download history", "Completed downloads; use arrow keys to navigate rows"),
                 "storage_table": ("Archive storage", "Recording folders; use Space to select rows"),
+                "operations_table": (
+                    "Operations table",
+                    "Paged queue, failure, and monitor state; select failed rows for actions",
+                ),
             },
         )
         self._set_status("Paste a URL to begin.", "idle")
@@ -2134,6 +2149,7 @@ class StreamKeep(
             "Understand archive growth and capture patterns.",
             "Inspect disk use, integrity, and recoverable cleanup.",
             "Tune local workflows, privacy, and integrations.",
+            "Filter durable queue, monitor, and failure state in one place.",
         )
         if hasattr(self, "shell_page_title") and 0 <= idx < len(self._tab_names):
             title_source = self._tab_names[idx]
@@ -2163,6 +2179,7 @@ class StreamKeep(
                 "analytics_range",
                 "storage_table",
                 "theme_combo",
+                "operations_table",
             )
             target = getattr(self, targets[idx], None) if idx < len(targets) else None
             if target is not None and target.isEnabled() and not target.isHidden():
@@ -2185,6 +2202,13 @@ class StreamKeep(
         if idx == analytics_idx and analytics_idx >= 0:
             from .tabs.analytics import _refresh_analytics
             QTimer.singleShot(100, lambda: _refresh_analytics(self))
+        try:
+            operations_idx = self._tab_names.index("Operations")
+        except ValueError:
+            operations_idx = -1
+        if idx == operations_idx and operations_idx >= 0:
+            from .tabs.operations import _refresh_operations
+            QTimer.singleShot(100, lambda: _refresh_operations(self))
 
     # ── Download Tab ──────────────────────────────────────────────────
 

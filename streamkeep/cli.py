@@ -991,6 +991,71 @@ def _run_plugins(args):
             _print_line(f"    WARNING: {warning}")
 
 
+def _run_operations(args):
+    """Read, act on, or export the durable operations view."""
+    from .operations import (
+        OperationsFilters,
+        discard_failure_ids,
+        query_operations,
+        retry_failure_ids,
+        write_operations_report,
+    )
+
+    filters = OperationsFilters.from_mapping(vars(args))
+    actions = []
+    retry_ids = getattr(args, "retry", []) or []
+    discard_ids = getattr(args, "discard", []) or []
+    if retry_ids:
+        actions.extend({"action": "retry", **result}
+                       for result in retry_failure_ids(retry_ids))
+    if discard_ids:
+        actions.extend({"action": "discard", **result}
+                       for result in discard_failure_ids(discard_ids))
+
+    output = str(getattr(args, "output", "") or "").strip()
+    if output:
+        report = write_operations_report(output, filters)
+        if getattr(args, "json", False):
+            _print_line(json.dumps({"output": output, "report": report}, indent=2))
+        else:
+            _print_line(
+                f"Operations report written to {output} "
+                f"({report['row_count']} row(s){', truncated' if report['truncated'] else ''})."
+            )
+        return
+
+    page = query_operations(filters)
+    if getattr(args, "json", False):
+        payload = page.to_dict()
+        if actions:
+            payload["actions"] = actions
+        _print_line(json.dumps(payload, indent=2))
+        return
+    summary = page.summary
+    _print_line(
+        f"Operations: {summary.total_count} item(s), {summary.active_count} active, "
+        f"{summary.failure_count} failure(s), {summary.monitor_count} monitor(s)"
+    )
+    _print_line(
+        f"Estimated: {summary.estimated_size_bytes} bytes, "
+        f"{summary.estimated_duration_seconds:.0f}s duration; "
+        f"last success {summary.last_success_at or '—'}; "
+        f"next run {summary.next_run_at or '—'}"
+    )
+    if summary.retry_reason:
+        _print_line(f"Latest retry reason: {summary.retry_reason}")
+    for action in actions:
+        _print_line(
+            f"{action['action'].title()} failure {action['failure_id']}: "
+            f"{'OK' if action['ok'] else 'not available'}"
+        )
+    for row in page.rows:
+        _print_line(
+            f"  {row.kind:<8} {row.state:<12} {row.source or 'Unknown':<16} "
+            f"{row.title or row.item_id}"
+        )
+
+
 def _run_snapshot(args):
     """Export a privacy-redacted diagnostic snapshot."""
     from .diagnostics import create_diagnostic_snapshot
@@ -1790,6 +1855,25 @@ def build_parser():
         help="Load enabled plugins explicitly marked trusted",
     )
     plugin_p.add_argument("--json", action="store_true", help="Emit JSON diagnostics")
+
+    # -- operations --
+    operations_p = sub.add_parser(
+        "operations", help="Inspect the paged queue, monitor, and failure view",
+    )
+    operations_p.add_argument("--state", default="", help="Filter by state or failed/active")
+    operations_p.add_argument("--source", default="", help="Filter by source/platform")
+    operations_p.add_argument("--stage", default="", help="Filter by pipeline stage")
+    operations_p.add_argument(
+        "--kind", choices=["", "queue", "monitor", "failure"], default="",
+        help="Filter by durable record kind",
+    )
+    operations_p.add_argument("--search", default="", help="Search title, source, or retry reason")
+    operations_p.add_argument("--page", type=int, default=0)
+    operations_p.add_argument("--page-size", type=int, default=50)
+    operations_p.add_argument("--retry", nargs="*", default=[], metavar="FAILURE_ID")
+    operations_p.add_argument("--discard", nargs="*", default=[], metavar="FAILURE_ID")
+    operations_p.add_argument("--output", default="", help="Write a redacted JSON or CSV report")
+    operations_p.add_argument("--json", action="store_true", help="Emit machine-readable output")
     ext_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
@@ -2208,6 +2292,8 @@ def run_cli(argv=None):
         _list_extractors()
     elif args.command == "plugins":
         _run_plugins(args)
+    elif args.command == "operations":
+        _run_operations(args)
     elif args.command == "gallery":
         _run_gallery(args)
     elif args.command == "capture":
@@ -2252,7 +2338,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "capture", "server", "extractors", "plugins", "gallery", "lux", "db",
+        "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",

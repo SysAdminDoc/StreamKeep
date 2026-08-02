@@ -203,6 +203,24 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
+        "operations-view", "Unified queue, monitor, and failure operations view", "shipped",
+        "Operations view",
+        (
+            ReachableProductPath(
+                "gui", "Operations",
+                "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+            ),
+            ReachableProductPath(
+                "cli", "operations",
+                "tests/test_capability_reachability.py::test_operations_cli_reaches_dispatch",
+            ),
+            ReachableProductPath(
+                "rest", "GET /api/operations",
+                "tests/test_local_server.py::LocalServerTests::test_authenticated_operations_view_actions_and_export",
+            ),
+        ),
+    ),
+    ProductCapabilityClaim(
         "llm-summaries", "Consent-aware local or cloud LLM summaries", "shipped",
         "LLM summaries",
         (ReachableProductPath(

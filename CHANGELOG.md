@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a durable Operations view over queue, monitor, and failure state. The
+  desktop, CLI, and authenticated local API share bounded paging, state/source/
+  stage filters, aggregate size/duration and retry health, selected retry or
+  discard actions, and URL/path-free JSON or CSV reports.
+
 - Added versioned plugin adapter contracts for extractors, post-processors, and
   upload destinations. Manifest v2 declarations now include interface versions,
   permissions, dependencies, and bounded timeouts; compatibility diagnostics

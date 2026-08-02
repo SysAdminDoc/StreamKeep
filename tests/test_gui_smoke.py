@@ -146,11 +146,11 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 history_id,
                 str(recording_media),
             )
-            assert window._stack.count() == len(window._tab_names) == 6
+            assert window._stack.count() == len(window._tab_names) == 7
             assert [button.text() for button in window._tab_btns] == window._tab_names
             assert all(button.isCheckable() for button in window._tab_btns)
             assert [button.isChecked() for button in window._tab_btns] == [
-                True, False, False, False, False, False,
+                True, False, False, False, False, False, False,
             ]
             assert window._global_search.accessibleName() == "Search StreamKeep"
             assert window.url_input.accessibleName() == "Source URL"
@@ -160,6 +160,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 (window.monitor_table, "Monitored channels"),
                 (window.history_table, "Download history"),
                 (window.storage_table, "Archive storage"),
+                (window.operations_table, "Operations table"),
             ):
                 assert table.focusPolicy() == Qt.FocusPolicy.StrongFocus
                 assert table.accessibleName() == expected_name

@@ -84,14 +84,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### P2 — Later
 
-- [ ] P2 — Add an operations view over queue, monitor, and failure state
-  Why: Durable jobs and retries exist, but operators lack one filterable view of failed-only work, retry reasons, source health, totals, and next actions.
-  Evidence: `streamkeep/db.py` queue/failed-job tables, `streamkeep/ui/tabs/download.py`, `ui/tabs/monitor.py`; Parabolic failed filtering and TubeSync task visibility.
-  Touches: typed job/event queries, queue/monitor UI model, local server reads, thumbnails, batch actions and tests.
-  Acceptance: Users can filter by state/source/stage, see batch count/duration/size estimates plus last success/next run/retry reason, retry or discard selected failures, and export a redacted report; 100,000 seeded jobs remain paged and responsive; state matches CLI/server reads after restart.
-  Complexity: L
-
-
 ### 2026-07-18 Research-Driven Additions
 
 #### P0 — Now

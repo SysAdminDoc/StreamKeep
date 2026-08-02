@@ -12,6 +12,7 @@ scopes. ``rotate_token()`` replaces it atomically;
 
 REST API endpoints (F37):
   GET  /api/status    — active downloads, queue, live channels  [status]
+  GET  /api/operations — paged queue/monitor/failure operations [status]
   GET  /api/jobs/{id} — inspect one durable queue job            [status]
   POST /api/validate  — resolve a URL into safe picker metadata  [queue]
   POST /api/queue     — add a URL to the download queue         [queue]
@@ -41,6 +42,8 @@ REST API endpoints (F37):
   POST /api/failures/retry    — retry a persisted failed job    [recovery]
   POST /api/failures/cancel-retry — stop an automatic retry     [recovery]
   POST /api/failures/discard  — discard a persisted failed job  [recovery]
+  POST /api/operations/action — retry or discard selected failures [recovery]
+  POST /api/operations/export — return a redacted operations report [status]
   GET  /api/spec       — OpenAPI 3.1 specification (unauthenticated)
   GET  /               — serves the single-page web remote UI
 
@@ -58,7 +61,7 @@ import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -93,6 +96,9 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /api/intelligence/summary/rebuild",
     "POST /api/failures/retry",
     "POST /api/failures/cancel-retry",
+    "GET /api/operations",
+    "POST /api/operations/action",
+    "POST /api/operations/export",
 })
 
 SCOPE_STATUS = "status"
@@ -993,6 +999,9 @@ def _build_handler(
             elif path == "/api/status":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_status()
+            elif path == "/api/operations":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_operations()
             elif path == "/api/library":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_library()
@@ -1101,6 +1110,12 @@ def _build_handler(
             elif path == "/api/failures/discard":
                 if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_failure_discard()
+            elif path == "/api/operations/action":
+                if self._require_auth(SCOPE_RECOVERY, mutating=True):
+                    self._handle_api_operations_action()
+            elif path == "/api/operations/export":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_operations_export()
             else:
                 self._json_response(404, {"ok": False, "err": "not_found"})
 
@@ -1298,6 +1313,59 @@ def _build_handler(
                 "live_channels": state.get("live_channels", []),
                 "active_workers": state.get("active_workers", []),
                 "resumable": state.get("resumable", []),
+            })
+
+        def _handle_api_operations(self):
+            from .operations import OperationsFilters, query_operations
+
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            values = {key: entries[-1] for key, entries in query.items() if entries}
+            page = query_operations(OperationsFilters.from_mapping(values))
+            self._json_response(200, page.to_dict())
+
+        def _handle_api_operations_export(self):
+            from .operations import OperationsFilters, export_operations_report
+
+            data = self._read_body()
+            raw_filters = data.get("filters", data)
+            if not isinstance(raw_filters, dict):
+                self._json_response(400, {
+                    "ok": False, "err": "filters must be an object",
+                })
+                return
+            try:
+                report = export_operations_report(OperationsFilters.from_mapping(raw_filters))
+            except Exception as error:
+                from .diagnostics import redact_text
+                self._json_response(400, {
+                    "ok": False, "err": "operations_export_failed",
+                    "message": redact_text(str(error)),
+                })
+                return
+            self._json_response(200, {"ok": True, "report": report})
+
+        def _handle_api_operations_action(self):
+            from .operations import discard_failure_ids, retry_failure_ids
+
+            data = self._read_body()
+            action = str(data.get("action") or "").strip().lower()
+            raw_ids = data.get("failure_ids", data.get("ids", data.get("id", [])))
+            if isinstance(raw_ids, str):
+                raw_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            if not isinstance(raw_ids, list):
+                raw_ids = [raw_ids]
+            raw_ids = raw_ids[:100]
+            if action == "retry":
+                results = retry_failure_ids(raw_ids)
+            elif action == "discard":
+                results = discard_failure_ids(raw_ids)
+            else:
+                self._json_response(400, {
+                    "ok": False, "err": "action must be retry or discard",
+                })
+                return
+            self._json_response(200, {
+                "ok": True, "action": action, "results": results,
             })
 
         def _handle_api_library(self):

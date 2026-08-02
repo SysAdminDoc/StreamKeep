@@ -86,6 +86,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Generate contact sheets, chapters, subtitle files, transcripts, highlights, and silence-removed cuts. **Smart thumbnails** are resource-bounded and preserve source artwork. **LLM summaries** are local-first through History, CLI, and the authenticated local API; cloud requests require an exact transcript preview and one-use consent, with optional redaction.
 - Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
 - **Plugin adapters** cover versioned extractor, post-process, and upload contracts through `plugins --json`; enabled trusted adapters can be loaded explicitly with `plugins --load-trusted`. Manifest permissions, dependencies, compatibility, timeouts, and typed outcomes are enforced by the adapter broker.
+- **Operations view** unifies durable queue, monitor, and failure state across the desktop, CLI, and authenticated local API. Filter by state/source/stage, inspect totals and retry health, retry or discard selected failures, and export a redacted report without URLs or paths.
 
 ### Backup and Recovery
 
@@ -109,6 +110,8 @@ python StreamKeep.py --version
 python StreamKeep.py extractors
 python StreamKeep.py plugins --json
 python StreamKeep.py plugins --load-trusted
+python StreamKeep.py operations --json
+python StreamKeep.py operations --state failed --output C:\Support\operations.json
 python StreamKeep.py gallery "https://x.com/user" --output C:\Galleries
 python StreamKeep.py lux "https://www.bilibili.com/video/BV1xx" --info
 python StreamKeep.py db info

@@ -53,3 +53,13 @@ def test_plugins_cli_reaches_diagnostics_dispatch():
         cli.run_cli(["plugins"])
 
     run_plugins.assert_called_once()
+
+
+def test_operations_cli_reaches_dispatch():
+    with mock.patch("streamkeep.crash_log.setup_crash_logging"), mock.patch.object(
+        cli, "_run_operations"
+    ) as run_operations:
+        cli.run_cli(["operations", "--state", "failed"])
+
+    run_operations.assert_called_once()
+    assert run_operations.call_args.args[0].state == "failed"

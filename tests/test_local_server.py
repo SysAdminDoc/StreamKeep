@@ -903,6 +903,61 @@ class LocalServerTests(unittest.TestCase):
             self.assertTrue(discard_payload["ok"])
             self.assertEqual(active_after_discard, [])
 
+    def test_authenticated_operations_view_actions_and_export(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            operations_server = LocalCompanionServer()
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                failure_id = db.save_failed_job(
+                    url="https://example.com/private/video",
+                    platform="Example",
+                    title="Operations fixture",
+                    stage="fetch",
+                    error="temporary failure at https://example.com/private/video",
+                    output_dir=str(Path(tmpdir) / "private-recording"),
+                    queue_data={"url": "https://example.com/private/video"},
+                )
+                operations_server.start()
+                try:
+                    page, status = self._open_json(
+                        "/api/operations?state=failed",
+                        server=operations_server,
+                        token=operations_server.token,
+                    )
+                    report_response, report_status = self._open_json(
+                        "/api/operations/export",
+                        server=operations_server,
+                        token=operations_server.token,
+                        method="POST",
+                        data={"filters": {"state": "failed"}},
+                    )
+                    action, action_status = self._open_json(
+                        "/api/operations/action",
+                        server=operations_server,
+                        token=operations_server.token,
+                        method="POST",
+                        data={"action": "discard", "failure_ids": [failure_id]},
+                    )
+                    after, _ = self._open_json(
+                        "/api/operations?state=failed",
+                        server=operations_server,
+                        token=operations_server.token,
+                    )
+                finally:
+                    operations_server.stop()
+
+            self.assertEqual(status, 200)
+            self.assertEqual(page["total_count"], 1)
+            self.assertEqual(page["rows"][0]["kind"], "failure")
+            self.assertNotIn("url", page["rows"][0])
+            self.assertEqual(report_status, 200)
+            self.assertEqual(report_response["report"]["row_count"], 1)
+            self.assertNotIn("url", json.dumps(report_response))
+            self.assertEqual(action_status, 200)
+            self.assertTrue(action["results"][0]["ok"])
+            self.assertEqual(after["total_count"], 0)
+
     # ── Clip-range handoff ──────────────────────────────────────────
 
     def test_send_url_with_clip_range_accepted(self):
