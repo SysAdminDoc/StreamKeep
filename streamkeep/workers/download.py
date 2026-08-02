@@ -1391,6 +1391,9 @@ class DownloadWorker(QThread):
             if (self.format_type == "mp4" and not self.audio_url
                     and not self.selected_tracks
                     and self.parallel_connections > 1):
+                if not self._guard_transport_or_report(seg_idx):
+                    all_succeeded = False
+                    return
                 worker_ref = self
 
                 def _cb(done, total, speed):
@@ -1414,6 +1417,7 @@ class DownloadWorker(QThread):
                         connections=self.parallel_connections,
                         progress_cb=_cb, cancel_check=_cancel,
                         log_fn=lambda m: self.log.emit(m),
+                        guarded_proxy_url=self._guarded_proxy.url,
                     )
                 except Exception as e:
                     self.log.emit(f"[PARALLEL ERR] {label}: {e}")

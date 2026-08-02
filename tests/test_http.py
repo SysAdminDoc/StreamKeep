@@ -197,6 +197,9 @@ class ParallelDownloadTests(unittest.TestCase):
             self.assertEqual(len(commands), 2)
             for cmd in commands:
                 self.assertIn("If-Range: \"v1\"", cmd)
+                self.assertIn("--proxy", cmd)
+                self.assertIn("--noproxy", cmd)
+                self.assertEqual(cmd[cmd.index("--noproxy") + 1], "")
 
             bad_outfile = Path(tmpdir) / "bad.mp4"
             self.assertFalse(self._run(

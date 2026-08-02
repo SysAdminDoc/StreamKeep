@@ -842,12 +842,17 @@ def test_parallel_direct_download_does_not_require_ffmpeg(tmp_path):
     )
     worker.parallel_connections = 2
 
-    def parallel(_url, outfile, **_kwargs):
+    guarded_proxy = mock.Mock(url="http://127.0.0.1:45678")
+
+    def parallel(_url, outfile, **kwargs):
+        assert kwargs["guarded_proxy_url"] == guarded_proxy.url
         with open(outfile, "wb") as fh:
             fh.write(b"parallel payload")
         return True
 
-    with mock.patch(
+    worker._guarded_proxy = guarded_proxy
+    with mock.patch.object(worker, "_ensure_guarded_transport", return_value=True), \
+            mock.patch(
             "streamkeep.workers.download.parallel_http_download",
             side_effect=parallel,
     ), mock.patch(
@@ -857,6 +862,28 @@ def test_parallel_direct_download_does_not_require_ffmpeg(tmp_path):
         worker.run()
 
     assert (tmp_path / "video.mp4").read_bytes() == b"parallel payload"
+
+
+def test_parallel_direct_download_blocks_unsafe_url_before_transfer(tmp_path):
+    worker = DownloadWorker(
+        playlist_url="http://127.0.0.1/video.mp4",
+        segments=[(0, "video", 0, 10)],
+        output_dir=str(tmp_path),
+        format_type="mp4",
+    )
+    worker.parallel_connections = 2
+    errors = []
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+
+    with mock.patch(
+            "streamkeep.workers.download.parallel_http_download",
+    ) as parallel:
+        worker.run()
+
+    parallel.assert_not_called()
+    assert errors and errors[0][0] == 0
+    assert "Remote media policy rejected" in errors[0][1]
+    assert not list(tmp_path.iterdir())
 
 
 def test_ffmpeg_path_blocks_before_process_start(tmp_path):

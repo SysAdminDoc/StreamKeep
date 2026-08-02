@@ -251,6 +251,27 @@ def curl(url: str, headers: dict[str, str] | None = None, timeout: float = 30) -
     return result.stdout if result.returncode == 0 else None
 
 
+def _loopback_proxy_args(proxy_url):
+    """Return curl options for a validated StreamKeep loopback proxy."""
+    try:
+        proxy = urllib.parse.urlsplit(str(proxy_url or ""))
+        port = proxy.port
+    except ValueError:
+        raise ValueError("guarded proxy must be an explicit loopback URL") from None
+    if (
+        proxy.scheme != "http"
+        or proxy.hostname not in {"127.0.0.1", "::1", "localhost"}
+        or not port
+        or proxy.path not in {"", "/"}
+        or proxy.query
+        or proxy.fragment
+        or proxy.username is not None
+        or proxy.password is not None
+    ):
+        raise ValueError("guarded proxy must be an explicit loopback URL")
+    return ["--proxy", str(proxy_url), "--noproxy", ""]
+
+
 def guarded_curl(
     url: str,
     proxy_url: str,
@@ -265,13 +286,7 @@ def guarded_curl(
     Host-profile headers are intentionally not replayed across CDN redirects.
     """
     try:
-        proxy = urllib.parse.urlsplit(str(proxy_url or ""))
-        if (
-            proxy.scheme != "http"
-            or proxy.hostname not in {"127.0.0.1", "::1", "localhost"}
-            or not proxy.port
-        ):
-            raise ValueError("guarded proxy must be an explicit loopback URL")
+        proxy_args = _loopback_proxy_args(proxy_url)
         curl_path = resolve_tool_command("curl")
     except (CapabilityUnavailableError, ValueError) as error:
         logger.warning("Guarded manifest fetch unavailable: %s", error)
@@ -293,8 +308,7 @@ def guarded_curl(
         "--max-filesize", str(
             max(1024, min(int(max_bytes), 16 * 1024 * 1024))
         ),
-        "--proxy", proxy_url,
-        "--noproxy", "",
+        *proxy_args,
     ]
     _append_cookie_args(cmd, url)
     cmd.append(str(url))
@@ -361,20 +375,24 @@ def _parse_final_response_headers(raw_headers):
     return status, headers
 
 
-def http_head_details(url, timeout=20):
+def http_head_details(url, timeout=20, guarded_proxy_url=""):
     """HEAD request returning range, validator, and digest metadata."""
     connect_timeout = max(1, min(10, int(timeout or 20)))
     try:
         cmd = [
             resolve_tool_command("curl"), "-sI", "-L",
             "--proto", "=http,https",
+            "--proto-redir", "=http,https",
             "--max-redirs", "5",
             "--connect-timeout", str(connect_timeout),
             "--max-time", str(max(1, int(timeout or 20))),
         ]
-        _proxy = _resolve_proxy(url)
-        if _proxy:
-            cmd.extend(["-x", _proxy])
+        if guarded_proxy_url:
+            cmd.extend(_loopback_proxy_args(guarded_proxy_url))
+        else:
+            _proxy = _resolve_proxy(url)
+            if _proxy:
+                cmd.extend(["-x", _proxy])
         _append_cookie_args(cmd, url)
         cmd.append(url)
         result = run_capture_interruptible(cmd, timeout=timeout + 2)
@@ -564,7 +582,34 @@ def http_probe(url, headers=None, timeout=20):
 
 
 def parallel_http_download(url, outfile, connections=4, progress_cb=None,
-                           cancel_check=None, min_size_mb=8, log_fn=None):
+                           cancel_check=None, min_size_mb=8, log_fn=None,
+                           guarded_proxy_url=""):
+    """Download a direct HTTP file through a guarded transport.
+
+    The public helper owns a short-lived policy proxy when the caller does not
+    already have one. DownloadWorker passes its existing proxy so the direct
+    MP4 path shares one validated transport with the FFmpeg fallback.
+    """
+    if guarded_proxy_url:
+        return _parallel_http_download_impl(
+            url, outfile, connections=connections, progress_cb=progress_cb,
+            cancel_check=cancel_check, min_size_mb=min_size_mb,
+            log_fn=log_fn, guarded_proxy_url=guarded_proxy_url,
+        )
+    from .net_guard import GuardedHTTPProxy
+
+    with GuardedHTTPProxy() as guarded_proxy:
+        return _parallel_http_download_impl(
+            url, outfile, connections=connections, progress_cb=progress_cb,
+            cancel_check=cancel_check, min_size_mb=min_size_mb,
+            log_fn=log_fn, guarded_proxy_url=guarded_proxy.url,
+        )
+
+
+def _parallel_http_download_impl(
+    url, outfile, connections=4, progress_cb=None, cancel_check=None,
+    min_size_mb=8, log_fn=None, guarded_proxy_url="",
+):
     """Download a direct HTTP file using N parallel Range requests.
 
     Probes with HEAD first. Returns False if the server lacks Range
@@ -577,7 +622,9 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         if log_fn:
             log_fn(f"[PARALLEL] blocked: {error}")
         return False
-    head = http_head_details(url)
+    if guarded_proxy_url:
+        _loopback_proxy_args(guarded_proxy_url)
+    head = http_head_details(url, guarded_proxy_url=guarded_proxy_url)
     status = int(head.get("status", 0) or 0)
     total = int(head.get("content_length", 0) or 0)
     accepts = bool(head.get("accepts_ranges", False))
@@ -659,7 +706,9 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
         ]
         if resume_metadata["validator"]:
             cmd.extend(["-H", f"If-Range: {resume_metadata['validator']}"])
-        if proxy_url:
+        if guarded_proxy_url:
+            cmd.extend(_loopback_proxy_args(guarded_proxy_url))
+        elif proxy_url:
             cmd.extend(["-x", proxy_url])
         _append_cookie_args(cmd, url)
         cmd.append(url)
@@ -762,7 +811,7 @@ def parallel_http_download(url, outfile, connections=4, progress_cb=None,
                 pass
 
     threads = []
-    proxy_url = _resolve_proxy(url)
+    proxy_url = guarded_proxy_url or _resolve_proxy(url)
     last_report = time.time()
     last_bytes = sum(bytes_done)
     for i, start, end in ranges:
