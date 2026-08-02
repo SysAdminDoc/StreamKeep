@@ -271,16 +271,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 Deep audit pass on v4.44.0. Baseline captured first: `1293 passed, 113 subtests` (`py -3.12 -m pytest tests/`), pyflakes clean, ruff reports 50 style-only items (42 `E402` launcher-import ordering, plus test-file dead imports — see V64). New IDs continue the V-scheme (highest prior = V54). Every item below was traced to a reachable path and confirmed against current source; confidence is stated per item. No code was changed in this pass.
 
-- [ ] P3 — V60 — Local server `_read_body` returns non-dict JSON, causing an AttributeError (dropped connection) on network handlers including pre-auth `/pair`
-  Category: security
-  Where: `streamkeep/local_server.py:803-814` (`_read_body`) and its consumers: `_handle_pair` (line ~923, `data.get("code")`, reachable pre-authentication), `_handle_send_url` (~984), `_handle_api_queue` (~1088), `_handle_api_job_cancel` (~1111), `_read_failure_id` (~1129).
-  Problem: `_read_body` returns `json.loads(raw)` verbatim. A body that is valid JSON but not an object — `[]`, `"x"`, or `5` — parses without error and is returned as a list/str/int; every consumer then calls `.get(...)` on it. `[1,2].get("code")` raises `AttributeError`, which is not caught in the handler and propagates to `socketserver.process_request_thread`, which logs a traceback to stderr and drops the connection with no HTTP response. Not a crash/DoS (threaded per-connection), but a network-facing endpoint returns a dropped connection instead of a clean 400, and `/pair` is reachable without a token given only valid freshness headers + `Content-Type: application/json`.
-  Evidence: Read `_read_body` (803-814) — it returns `json.loads(raw) if raw else {}` with no `isinstance` check. Read `_handle_pair` (918-928) — `data = self._read_body(max_bytes=4096)` then `pairing_store.consume(data.get("code"))` with no dict guard. The codebase already applies `isinstance(data, dict)` guards for yt-dlp JSON responses elsewhere, so this is an inconsistency.
-  Fix: Coerce in one place: `data = json.loads(raw); return data if isinstance(data, dict) else {}` inside `_read_body`. All consumers then safely see `{}` and return their existing validation errors (400/401).
-  Acceptance: A test posts `[]` (and `5`) to `/pair` and to `/api/queue` and asserts a clean 400/401 JSON response with no unhandled exception and no dropped connection.
-  Confidence: Verified.
-  Effort: S
-
 - [ ] P3 — V61 — Monitor `auth_profile_id` column is dropped by the ChannelMonitor save/load round-trip
   Category: correctness
   Where: `streamkeep/monitor.py` — `_entry_to_dict` (~292-311) and `_load_channel_dict` (~352-385); field defined at `streamkeep/models.py:246`; column written by `db.save_all_monitor_channels` (db.py ~1096) and `migrate_from_config` (db.py ~3233).

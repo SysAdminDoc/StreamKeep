@@ -421,6 +421,19 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertTrue(paired["token"])
 
+    def test_json_object_endpoints_reject_non_object_bodies_cleanly(self):
+        for body in ([], 5):
+            with self.subTest(body=body):
+                pairing_error = self._expect_error(
+                    "/pair", 401, method="POST", data=body,
+                )
+                queue_error = self._expect_error(
+                    "/api/queue", 400, token=self.server.token,
+                    method="POST", data=body,
+                )
+                self.assertEqual(pairing_error["err"], "pairing_invalid")
+                self.assertEqual(queue_error["err"], "invalid url")
+
     def test_queue_rejects_ssrf_target_urls(self):
         """A submitted URL resolving to loopback/metadata/private space is
         refused (V30). IP-literal targets need no DNS, so this is offline."""

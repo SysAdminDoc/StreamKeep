@@ -809,7 +809,8 @@ def _build_handler(
                         self.close_connection = True
                     return {}
                 raw = self.rfile.read(length).decode("utf-8", errors="replace")
-                return json.loads(raw) if raw else {}
+                data = json.loads(raw) if raw else {}
+                return data if isinstance(data, dict) else {}
             except (ValueError, OSError):
                 return {}
 

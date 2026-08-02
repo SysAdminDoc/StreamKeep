@@ -26,6 +26,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   tokens for filmstrip placeholders, range handles, waveform paints, and crop
   overlays, including refreshes when the active palette changes.
 
+- Hardened local-server JSON body handling (V60): valid JSON arrays and scalar
+  values are rejected as empty request objects, producing clean validation
+  responses on pairing and queue endpoints instead of dropped connections.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,
