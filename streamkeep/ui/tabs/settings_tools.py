@@ -83,6 +83,185 @@ class SettingsToolsMixin:
         self._persist_config()
         self._set_status(f'Deleted yt-dlp argument template "{name}".', "success")
 
+    # ── Smart Mode URL profiles (V16) ───────────────────────────────
+
+    def _refresh_smart_profiles(self, selected=""):
+        from ...smart_mode import load_profiles
+
+        combo = getattr(self, "smart_profile_combo", None)
+        if combo is None:
+            return
+        profiles = load_profiles(self._config)
+        self._config["smart_profiles"] = profiles
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("New profile", userData="")
+        for profile in profiles:
+            combo.addItem(profile["name"], userData=profile["name"])
+        index = combo.findData(selected)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+        self._on_smart_profile_selected()
+        self._refresh_smart_profile_hint(
+            self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        )
+
+    def _on_smart_profile_selected(self):
+        combo = getattr(self, "smart_profile_combo", None)
+        if combo is None:
+            return
+        selected = str(combo.currentData() or "")
+        profile = next(
+            (
+                value for value in self._config.get("smart_profiles", [])
+                if isinstance(value, dict) and value.get("name") == selected
+            ),
+            None,
+        )
+        fields = (
+            "smart_profile_name_input", "smart_profile_patterns_edit",
+            "smart_profile_output_input", "smart_profile_quality_input",
+            "smart_profile_folder_input", "smart_profile_file_input",
+            "smart_profile_template_input", "smart_profile_auth_input",
+            "smart_profile_proxy_input",
+        )
+        if profile is None:
+            self.smart_profile_name_input.clear()
+            self.smart_profile_patterns_edit.clear()
+            self.smart_profile_enabled_check.setChecked(True)
+            for name in fields[2:]:
+                getattr(self, name).clear()
+            self.smart_profile_delete_btn.setEnabled(False)
+            self.smart_profile_status.setText(
+                "New profile. Save at least one URL pattern."
+            )
+            return
+        overrides = profile.get("overrides", {})
+        self.smart_profile_enabled_check.setChecked(bool(profile.get("enabled", True)))
+        self.smart_profile_name_input.setText(str(profile.get("name", "")))
+        self.smart_profile_patterns_edit.setPlainText(
+            "\n".join(str(pattern) for pattern in profile.get("patterns", []))
+        )
+        self.smart_profile_output_input.setText(str(overrides.get("output_dir", "")))
+        self.smart_profile_quality_input.setText(str(overrides.get("quality", "")))
+        self.smart_profile_folder_input.setText(str(overrides.get("folder_template", "")))
+        self.smart_profile_file_input.setText(str(overrides.get("file_template", "")))
+        self.smart_profile_template_input.setText(
+            str(overrides.get("ytdlp_template_name", ""))
+        )
+        self.smart_profile_auth_input.setText(str(overrides.get("auth_profile_id", "")))
+        self.smart_profile_proxy_input.setText(str(overrides.get("proxy", "")))
+        self.smart_profile_delete_btn.setEnabled(True)
+        state = "enabled" if profile.get("enabled", True) else "disabled"
+        self.smart_profile_status.setText(
+            f"{state.capitalize()} profile. First matching profile wins."
+        )
+
+    def _smart_profile_from_editor(self):
+        from ...smart_mode import normalize_profile
+
+        candidate = {
+            "name": self.smart_profile_name_input.text().strip(),
+            "enabled": self.smart_profile_enabled_check.isChecked(),
+            "patterns": self.smart_profile_patterns_edit.toPlainText().splitlines(),
+            "overrides": {
+                "output_dir": self.smart_profile_output_input.text().strip(),
+                "quality": self.smart_profile_quality_input.text().strip(),
+                "folder_template": self.smart_profile_folder_input.text().strip(),
+                "file_template": self.smart_profile_file_input.text().strip(),
+                "ytdlp_template_name": self.smart_profile_template_input.text().strip(),
+                "auth_profile_id": self.smart_profile_auth_input.text().strip(),
+                "proxy": self.smart_profile_proxy_input.text().strip(),
+            },
+        }
+        return normalize_profile(candidate)
+
+    def _on_smart_profile_save(self):
+        from ...download_options import resolve_ytdlp_arg_template
+
+        profile = self._smart_profile_from_editor()
+        if profile is None:
+            self.smart_profile_status.setText(
+                "Enter a name and at least one valid URL pattern."
+            )
+            self._set_status("Smart Mode profile is incomplete.", "warning")
+            return
+        template_name = profile["overrides"].get("ytdlp_template_name", "")
+        if template_name:
+            try:
+                resolve_ytdlp_arg_template(
+                    self._config.get("ytdlp_arg_templates", {}), template_name
+                )
+            except ValueError as error:
+                self.smart_profile_status.setText(str(error))
+                self._set_status(str(error), "warning")
+                return
+        profiles = list(self._config.get("smart_profiles", []))
+        selected = str(self.smart_profile_combo.currentData() or "")
+        replaced = False
+        updated = []
+        for existing in profiles:
+            if not isinstance(existing, dict):
+                continue
+            if existing.get("name") in {selected, profile["name"]}:
+                if not replaced:
+                    updated.append(profile)
+                    replaced = True
+                continue
+            updated.append(existing)
+        if not replaced:
+            updated.append(profile)
+        self._config["smart_profiles"] = updated
+        self._refresh_smart_profiles(profile["name"])
+        self._persist_config()
+        self._set_status(
+            f'Saved Smart Mode profile "{profile["name"]}".', "success"
+        )
+
+    def _on_smart_profile_delete(self):
+        combo = getattr(self, "smart_profile_combo", None)
+        if combo is None:
+            return
+        selected = str(combo.currentData() or "")
+        if not selected:
+            return
+        self._config["smart_profiles"] = [
+            profile for profile in self._config.get("smart_profiles", [])
+            if not isinstance(profile, dict) or profile.get("name") != selected
+        ]
+        self._refresh_smart_profiles()
+        self._persist_config()
+        self._set_status(f'Deleted Smart Mode profile "{selected}".', "success")
+
+    def _on_smart_mode_toggled(self, checked, source=""):
+        del source
+        enabled = bool(checked)
+        self._config["smart_mode"] = enabled
+        for name in ("smart_mode_download_check", "smart_mode_settings_check"):
+            widget = getattr(self, name, None)
+            if widget is not None and widget.isChecked() != enabled:
+                widget.blockSignals(True)
+                widget.setChecked(enabled)
+                widget.blockSignals(False)
+        self._refresh_smart_profile_hint(
+            self.url_input.text().strip() if hasattr(self, "url_input") else ""
+        )
+        self._persist_config()
+
+    def _refresh_smart_profile_hint(self, url=""):
+        label = getattr(self, "smart_profile_hint", None)
+        if label is None:
+            return
+        if not bool(self._config.get("smart_mode", False)):
+            label.setText("Smart Mode off")
+            return
+        from ...smart_mode import resolve_profile
+        profile = resolve_profile(url, self._config) if url else None
+        if profile is None:
+            label.setText("Smart Mode on — no profile matches this URL")
+        else:
+            label.setText(f"Smart profile: {profile['name']}")
+
     # ── Event hooks (structured, no-shell actions) ───────────────────
 
     def _refresh_hook_editor(self, selected=""):

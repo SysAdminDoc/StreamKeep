@@ -271,10 +271,6 @@ def _run_download(args):
         transfer_options = resolve_ytdlp_transfer_options(
             cfg, overrides=transfer_overrides,
         )
-        ytdlp_template_args = resolve_ytdlp_arg_template(
-            cfg.get("ytdlp_arg_templates", {}),
-            getattr(args, "arg_template", ""),
-        )
     except ValueError as error:
         _print_line(f"Error: Invalid yt-dlp settings: {error}")
         sys.exit(2)
@@ -284,6 +280,11 @@ def _run_download(args):
         output_dir = default_output_dir()
 
     quality_pref = (args.quality or "best").lower()
+    folder_template = getattr(args, "folder_template", "") or ""
+    file_template = getattr(args, "file_template", "") or ""
+    template_name = getattr(args, "arg_template", "") or ""
+    auth_profile_id = getattr(args, "auth_profile", "") or ""
+    proxy = str(cfg.get("proxy", "") or "")
 
     _print_line(f"StreamKeep v{VERSION} (CLI)")
     _print_line(f"URL:     {args.url}")
@@ -305,6 +306,8 @@ def _run_download(args):
     state["fw"] = fw  # prevent GC while event loop runs
 
     def on_fetch_done(info):
+        nonlocal output_dir, quality_pref, folder_template, file_template
+        nonlocal template_name, auth_profile_id, proxy
         state["info"] = info
         state["phase"] = "download"
         _print_line(
@@ -327,11 +330,60 @@ def _run_download(args):
             app.quit()
             return
 
+        # Smart Mode is resolved after metadata because the final webpage URL
+        # and platform provide the strongest match. CLI defaults such as
+        # ``best`` are treated as implicit, so a profile may replace them;
+        # explicit values and paths always win.
+        from .smart_mode import apply_smart_profile_to_job
+        smart_job = apply_smart_profile_to_job({
+            "url": args.url,
+            "webpage_url": getattr(info, "webpage_url", "") or args.url,
+            "platform": getattr(info, "platform", "") or "",
+            "quality": "" if quality_pref in {"", "best"} else quality_pref,
+            "output_dir": getattr(args, "output", "") or "",
+            "folder_template": getattr(args, "folder_template", "") or "",
+            "file_template": getattr(args, "file_template", "") or "",
+            "arg_template": getattr(args, "arg_template", "") or "",
+            "proxy": "",
+            "auth_profile_id": getattr(args, "auth_profile", "") or "",
+        }, cfg)
+        quality_pref = str(smart_job.get("quality") or quality_pref or "best").lower()
+        if not getattr(args, "output", ""):
+            output_dir = str(smart_job.get("output_dir") or output_dir)
+        folder_template = str(
+            smart_job.get("folder_template") or getattr(args, "folder_template", "") or ""
+        )
+        file_template = str(
+            smart_job.get("file_template") or getattr(args, "file_template", "") or ""
+        )
+        template_name = str(
+            smart_job.get("arg_template") or getattr(args, "arg_template", "") or ""
+        )
+        auth_profile_id = str(
+            smart_job.get("auth_profile_id")
+            or getattr(args, "auth_profile", "")
+            or ""
+        )
+        proxy = str(smart_job.get("proxy") or cfg.get("proxy", "") or "")
+        if smart_job.get("_smart_profile"):
+            _print_line(f"Smart profile: {smart_job['_smart_profile']}")
+
+        try:
+            ytdlp_template_args = resolve_ytdlp_arg_template(
+                cfg.get("ytdlp_arg_templates", {}), template_name,
+            )
+        except ValueError as error:
+            _print_line(f"Error: Invalid Smart Mode template: {error}")
+            _record_cli_failure(args.url, "download", str(error), output_dir, info)
+            state["exit_code"] = 2
+            app.quit()
+            return
+
         # Pick quality
         qi = _pick_quality(info.qualities, quality_pref)
         _print_line(f"Selected: {qi.name} ({qi.resolution or qi.format_type})")
         _print_line("")
-        if requested_ytdlp_output and qi.format_type != "ytdlp_direct":
+        if (requested_ytdlp_output or bool(template_name)) and qi.format_type != "ytdlp_direct":
             message = (
                 "Format/output/subtitle controls require a yt-dlp direct "
                 "source; the selected quality uses " + qi.format_type + "."
@@ -353,8 +405,8 @@ def _run_download(args):
         job_output_dir, label = resolve_output_paths(
             info,
             output_dir,
-            folder_template=getattr(args, "folder_template", ""),
-            file_template=getattr(args, "file_template", ""),
+            folder_template=folder_template,
+            file_template=file_template,
             config=cfg,
         )
         segments = [(0, label, 0, info.total_secs)]
@@ -362,8 +414,7 @@ def _run_download(args):
         # Resolve the named profile against this URL up front so a scope
         # mismatch is reported instead of silently sending no credentials.
         from . import auth_profiles as _ap
-        auth_profile_id = ""
-        requested_profile = str(getattr(args, "auth_profile", "") or "").strip()
+        requested_profile = str(auth_profile_id or "").strip()
         if requested_profile:
             profile = _ap.resolve_profile(
                 info.webpage_url or args.url,
@@ -437,8 +488,9 @@ def _run_download(args):
             ytdlp_aria2c_connections=int(getattr(args, "aria2c_connections", 0) or 0),
             ytdlp_aria2c_splits=int(getattr(args, "aria2c_splits", 0) or 0),
             ytdlp_aria2c_min_split_size=getattr(args, "aria2c_min_split_size", "") or "",
-            ytdlp_template_name=getattr(args, "arg_template", "") or "",
+            ytdlp_template_name=template_name,
             ytdlp_template_args=tuple(ytdlp_template_args),
+            proxy=proxy,
             rate_limit=args.rate_limit or "",
             auth_profile_id=auth_profile_id,
         )

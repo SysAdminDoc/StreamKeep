@@ -420,6 +420,8 @@ class DownloadQueueMixin:
         for key in (
             "quality", "container", "thumbnail_path", "thumbnail_url",
             "progress", "speed", "eta", "size", "size_bytes",
+            "output_dir", "folder_template", "file_template", "proxy",
+            "auth_profile_id", "smart_profile",
         ):
             value = item.get(key)
             if value not in (None, ""):
@@ -463,10 +465,36 @@ class DownloadQueueMixin:
         ):
             return False
         try:
+            from ...smart_mode import apply_smart_profile_to_job
+            smart_job = apply_smart_profile_to_job({
+                "url": url,
+                "webpage_url": webpage_url or url,
+                "platform": platform or "",
+                "title": title or vod_title or "",
+                "quality": "",
+                "output_dir": "",
+                "folder_template": "",
+                "file_template": "",
+                "arg_template": ytdlp_template_name,
+                "proxy": "",
+                "auth_profile_id": "",
+            }, {
+                **self._config,
+                "smart_mode": bool(
+                    self.smart_mode_download_check.isChecked()
+                    if getattr(self, "smart_mode_download_check", None)
+                    is not None else self._config.get("smart_mode", False)
+                ),
+            })
+        except Exception:
+            # Profile config is user-editable; an invalid entry must never
+            # prevent a normal queue item from being added.
+            smart_job = {}
+        try:
             from ...download_options import resolve_ytdlp_arg_template
             resolve_ytdlp_arg_template(
                 self._config.get("ytdlp_arg_templates", {}),
-                ytdlp_template_name,
+                smart_job.get("arg_template") or ytdlp_template_name,
             )
         except ValueError as error:
             self._set_status(str(error), "warning")
@@ -488,7 +516,16 @@ class DownloadQueueMixin:
             "webpage_url": webpage_url,
             "download_archive": download_archive,
             "break_on_existing": break_on_existing,
-            "ytdlp_template_name": ytdlp_template_name,
+            "ytdlp_template_name": (
+                smart_job.get("arg_template") or ytdlp_template_name
+            ),
+            "quality": smart_job.get("quality", ""),
+            "output_dir": smart_job.get("output_dir", ""),
+            "folder_template": smart_job.get("folder_template", ""),
+            "file_template": smart_job.get("file_template", ""),
+            "proxy": smart_job.get("proxy", ""),
+            "auth_profile_id": smart_job.get("auth_profile_id", ""),
+            "smart_profile": smart_job.get("_smart_profile", ""),
             "is_upgrade": is_upgrade,
             "upgrade_history_id": upgrade_history_id,
             "upgrade_existing_path": upgrade_existing_path,
@@ -708,10 +745,15 @@ class DownloadQueueMixin:
         # resolved info so finalize can fetch this episode's sidecars.
         if not getattr(info, "feed_url", "") and item.get("feed_url"):
             info.feed_url = item["feed_url"]
-        # Pick the best quality
+        # Pick the profile-selected quality (or best when no preference was
+        # stored). Smart Mode made this choice when the URL was queued.
         q_data = None
         if info.qualities:
-            q_data = info.qualities[0]  # Highest quality (pre-sorted)
+            from ...smart_mode import quality_index
+            quality_pref = str(item.get("quality", "") or "best")
+            quality_idx = quality_index(info.qualities, quality_pref)
+            if quality_idx >= 0:
+                q_data = info.qualities[quality_idx]
         if q_data is None and not info.url:
             job_id = self._record_failed_job(
                 stage="fetch",
@@ -830,14 +872,26 @@ class DownloadQueueMixin:
         ytdlp_source = q_data.ytdlp_source if q_data else ""
         ytdlp_format = q_data.ytdlp_format if q_data else ""
         is_live = info.is_live or info.total_secs <= 0
-        title_safe = _safe_filename(info.title or item.get("title") or "download")
+        folder_template = str(
+            item.get("folder_template") or self._folder_template
+        )
+        file_template = str(item.get("file_template") or self._file_template)
+        ctx = _build_template_context(info)
+        file_parts = _render_template(file_template, ctx)
+        title_safe = _safe_filename(
+            (file_parts[-1] if file_parts else "")
+            or info.title or item.get("title") or "download"
+        )
         segments = [(0, title_safe, 0, 0 if is_live else int(info.total_secs))]
         if upgrade_paths is not None:
             out_dir = str(upgrade_paths.staging)
         else:
-            ctx = _build_template_context(info)
-            folder_parts = _render_template(self._folder_template, ctx)
-            base_out = self.output_input.text().strip() or str(_default_output_dir())
+            folder_parts = _render_template(folder_template, ctx)
+            base_out = (
+                str(item.get("output_dir", "") or "").strip()
+                or self.output_input.text().strip()
+                or str(_default_output_dir())
+            )
             out_dir = (
                 os.path.join(base_out, *folder_parts)
                 if folder_parts else base_out
@@ -884,6 +938,8 @@ class DownloadQueueMixin:
             (q_data.format_type if q_data else fmt_type).replace("ytdlp_direct", "MP4").upper()
         )
         item["thumbnail_url"] = str(getattr(info, "thumbnail_url", "") or "")
+        if item.get("smart_profile"):
+            self._log(f"[SMART] Applied profile: {item['smart_profile']}")
         self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
         # --- Resolve config-driven options before building the spec ---
         from ...download_options import (
@@ -936,6 +992,29 @@ class DownloadQueueMixin:
             from ...models import default_media_tracks
             selected_tracks = tuple(default_media_tracks(q_data))
 
+        auth_profile_id = str(item.get("auth_profile_id", "") or "").strip()
+        if auth_profile_id:
+            from ...auth_profiles import resolve_profile
+            profile = resolve_profile(
+                getattr(info, "webpage_url", "") or item.get("url", ""),
+                getattr(info, "platform", "") or item.get("platform", ""),
+                profile_id=auth_profile_id,
+            )
+            if profile is None:
+                error = (
+                    "Authentication profile is unknown or is not allowed for this site"
+                )
+                failure_id = self._record_failed_job(
+                    stage="download", error=error, item=item,
+                    info=info, out_dir=out_dir,
+                )
+                if failure_id:
+                    item["failure_id"] = failure_id
+                self._set_queue_item_status(item, "failed", error)
+                self._log(f"[QUEUE] {error}")
+                self._advance_queue()
+                return
+            auth_profile_id = profile.profile_id
         spec = DownloadJobSpec(
             source_platform=str(getattr(info, "platform", "") or ""),
             source_id=str(getattr(info, "source_id", "") or ""),
@@ -955,7 +1034,8 @@ class DownloadQueueMixin:
             ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=rl,
-            proxy=YtDlpExtractor.proxy,
+            proxy=str(item.get("proxy") or YtDlpExtractor.proxy or ""),
+            auth_profile_id=auth_profile_id,
             download_subs=YtDlpExtractor.download_subs,
             capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
             subtitle_languages=YtDlpExtractor.subtitle_languages,

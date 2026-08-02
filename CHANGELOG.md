@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added V16 Smart Mode URL profiles. An ordered, shell-free profile resolver now
+  selects URL-pattern preferences consistently for desktop downloads, queue
+  jobs, CLI runs, and the local REST service, with explicit job values taking
+  precedence. The desktop has a zero-dialog toggle and profile editor for
+  output/templates/quality, proxy, and site-bound authentication references;
+  imported profiles remain quarantined until approved.
+
 - Added the V14 DRM-free MSE recorder. The headless `mse-capture` command
   injects a pre-navigation `SourceBuffer.appendBuffer` tee, writes bounded
   ordered chunks, remuxes them with FFmpeg, and hard-refuses EME requests or

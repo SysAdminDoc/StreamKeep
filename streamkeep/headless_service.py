@@ -202,6 +202,12 @@ class HeadlessJobService(QObject):
         url = str(item.get("url", "")).strip()
         if not url.startswith(("http://", "https://")):
             raise ValueError("invalid url")
+        # Smart Mode (V16) resolves the first matching URL profile before the
+        # ordered rules engine. Both layers fill only missing fields, so an
+        # explicit REST value remains authoritative and rules can still add
+        # the fields a profile did not set.
+        from .smart_mode import apply_smart_profile_to_job
+        item = apply_smart_profile_to_job(item, self.config)
         # Ordered rules engine (V15): fold matching folder/template/preset/
         # proxy/priority/auto-start actions into the job before defaults are
         # applied, so a rule-set output_dir wins over the service default.
@@ -488,6 +494,15 @@ class HeadlessJobService(QObject):
             output_dir = str(upgrade_paths.staging)
         else:
             output_dir = str(job.get("output_dir", "") or self.output_dir)
+            if job.get("folder_template") or job.get("file_template"):
+                from .utils import resolve_output_paths
+                output_dir, _label = resolve_output_paths(
+                    info,
+                    output_dir,
+                    folder_template=str(job.get("folder_template", "") or ""),
+                    file_template=str(job.get("file_template", "") or ""),
+                    config=self.config,
+                )
         try:
             os.makedirs(output_dir, exist_ok=True)
         except OSError as error:
@@ -567,6 +582,7 @@ class HeadlessJobService(QObject):
             ),
             parallel_connections=self.parallel_connections,
             cookies_browser=str(self.config.get("cookies_browser", "") or ""),
+            auth_profile_id=str(job.get("auth_profile_id", "") or ""),
             rate_limit=str(self.config.get("rate_limit", "") or ""),
             proxy=str(job.get("proxy", "") or self.config.get("proxy", "") or ""),
             download_subs=bool(self.config.get("download_subs", False)),

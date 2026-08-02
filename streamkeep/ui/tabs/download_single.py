@@ -72,6 +72,49 @@ class _ThumbnailFetchWorker(QThread):
 class DownloadSingleMixin:
     """One active fetch/download and its direct supporting workflows."""
 
+    def _smart_job(self, job):
+        """Resolve a Smart Mode profile for a GUI job without mutating it."""
+        from ...smart_mode import apply_smart_profile_to_job
+
+        if hasattr(self, "smart_mode_download_check"):
+            enabled = self.smart_mode_download_check.isChecked()
+        else:
+            enabled = bool(self._config.get("smart_mode", False))
+        if not enabled:
+            return dict(job or {})
+        config = dict(self._config)
+        config["smart_mode"] = True
+        return apply_smart_profile_to_job(job, config)
+
+    def _refresh_smart_profile_for_url(self, url="", info=None):
+        if not hasattr(self, "smart_profile_hint"):
+            return
+        self._refresh_smart_profile_hint(
+            str(
+                getattr(info, "webpage_url", "")
+                if info is not None else url
+            ) or str(url or "")
+        )
+
+    def _apply_smart_quality(self, info):
+        """Apply only the matching profile's implicit quality choice."""
+        qualities = list(getattr(info, "qualities", []) or [])
+        if not qualities:
+            return None
+        job = self._smart_job({
+            "url": getattr(info, "webpage_url", "") or self.url_input.text().strip(),
+            "webpage_url": getattr(info, "webpage_url", "") or "",
+            "quality": "",
+        })
+        preference = str(job.get("quality", "") or "").strip()
+        if not preference:
+            return job
+        from ...smart_mode import quality_index
+        index = quality_index(qualities, preference)
+        if index >= 0:
+            self.quality_combo.setCurrentIndex(index)
+        return job
+
     def _refresh_download_summary(self):
         if not hasattr(self, "download_hero_title"):
             return
@@ -209,6 +252,7 @@ class DownloadSingleMixin:
                 self._apply_auto_output(str(_default_output_dir() / _safe_filename(ch)))
         else:
             self._update_badge(None)
+        self._refresh_smart_profile_for_url(text.strip())
         self._refresh_download_summary()
 
     def _on_toggle_clipboard(self, checked):
@@ -387,6 +431,10 @@ class DownloadSingleMixin:
             self.quality_combo.setCurrentIndex(selected_idx)
         self.quality_combo.setEnabled(len(qualities) > 0)
         self.quality_combo.blockSignals(False)
+        smart_job = self._apply_smart_quality(info)
+        if smart_job and smart_job.get("output_dir") and self._can_autofill_output():
+            self._apply_auto_output(str(smart_job["output_dir"]))
+        self._refresh_smart_profile_for_url(self.url_input.text().strip(), info)
         _populate_track_table(self)
         if not qualities:
             self._log("[WARN] No playable qualities found for this URL.")
@@ -776,6 +824,22 @@ class DownloadSingleMixin:
 
         # Per-download overrides (F18)
         _dl_overrides = get_adv_overrides(self)
+        smart_job = self._smart_job({
+            "url": src_url,
+            "webpage_url": getattr(self.stream_info, "webpage_url", "") or src_url,
+            "quality": self.quality_combo.currentData() and "explicit" or "",
+            "output_dir": (
+                self.output_input.text().strip()
+                if not self._can_autofill_output() else ""
+            ),
+            "folder_template": _dl_overrides.get("folder_template", ""),
+            "file_template": _dl_overrides.get("file_template", ""),
+            "arg_template": _dl_overrides.get("ytdlp_template_name", ""),
+            "proxy": "",
+            "auth_profile_id": "",
+        })
+        if smart_job.get("_smart_profile"):
+            self._log(f"[SMART] Applied profile: {smart_job['_smart_profile']}")
         ytdlp_override_keys = {
             "format_spec", "format_sort_preset", "container",
             "audio_format", "audio_quality", "subtitle_mode",
@@ -785,6 +849,8 @@ class DownloadSingleMixin:
             key for key in _dl_overrides if key.startswith("ytdlp_")
         )
         active_ytdlp_overrides = ytdlp_override_keys.intersection(_dl_overrides)
+        if smart_job.get("arg_template"):
+            active_ytdlp_overrides.add("ytdlp_template_name")
         if active_ytdlp_overrides and fmt_type != "ytdlp_direct":
             self._log(
                 "[OUTPUT] Format/container/audio controls require a yt-dlp direct quality."
@@ -860,6 +926,9 @@ class DownloadSingleMixin:
             ytdlp_template_name = _dl_overrides.get(
                 "ytdlp_template_name", ""
             )
+            ytdlp_template_name = ytdlp_template_name or str(
+                smart_job.get("arg_template", "") or ""
+            )
             ytdlp_template_args = resolve_ytdlp_arg_template(
                 self._config.get("ytdlp_arg_templates", {}),
                 ytdlp_template_name,
@@ -913,8 +982,16 @@ class DownloadSingleMixin:
         # Render filename + folder from templates (templates can produce
         # nested paths like "{channel}/{date} - {title}")
         ctx = _build_template_context(self.stream_info)
-        _folder_tpl = _dl_overrides.get("folder_template") or self._folder_template
-        _file_tpl = _dl_overrides.get("file_template") or self._file_template
+        _folder_tpl = (
+            _dl_overrides.get("folder_template")
+            or smart_job.get("folder_template")
+            or self._folder_template
+        )
+        _file_tpl = (
+            _dl_overrides.get("file_template")
+            or smart_job.get("file_template")
+            or self._file_template
+        )
         folder_parts = _render_template(_folder_tpl, ctx)
         file_parts = _render_template(_file_tpl, ctx)
         title_safe = file_parts[-1] if file_parts else (
@@ -972,7 +1049,11 @@ class DownloadSingleMixin:
         # For non-channel content, user's output box is the base; folder template
         # adds a subfolder. For channel content the template already has
         # {channel} in it, so joining still works.
-        base_out = self.output_input.text().strip()
+        base_out = str(
+            smart_job.get("output_dir")
+            or self.output_input.text().strip()
+            or _default_output_dir()
+        )
         if folder_parts:
             out_dir = os.path.join(base_out, *folder_parts)
         else:
@@ -1041,6 +1122,22 @@ class DownloadSingleMixin:
             _download_sections = f"*{cs}-{ce}" if ce else f"*{cs}-"
 
         from ...job_spec import DownloadJobSpec
+        auth_profile_id = str(smart_job.get("auth_profile_id", "") or "").strip()
+        if auth_profile_id:
+            from ...auth_profiles import resolve_profile
+            profile = resolve_profile(
+                getattr(self.stream_info, "webpage_url", "") or src_url,
+                getattr(self.stream_info, "platform", "") or "",
+                profile_id=auth_profile_id,
+            )
+            if profile is None:
+                self._set_status(
+                    "The Smart Mode authentication profile is unknown or not allowed for this site.",
+                    "warning",
+                )
+                return False
+            auth_profile_id = profile.profile_id
+        job_proxy = str(smart_job.get("proxy") or YtDlpExtractor.proxy or "")
         spec = DownloadJobSpec(
             source_platform=str(getattr(self.stream_info, "platform", "") or ""),
             source_id=str(getattr(self.stream_info, "source_id", "") or ""),
@@ -1062,7 +1159,8 @@ class DownloadSingleMixin:
             ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=_dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit,
-            proxy=YtDlpExtractor.proxy,
+            proxy=job_proxy,
+            auth_profile_id=auth_profile_id,
             download_subs=subtitle_options["enabled"],
             capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
             subtitle_languages=subtitle_options["languages"],

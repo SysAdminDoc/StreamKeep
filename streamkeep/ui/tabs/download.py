@@ -414,6 +414,28 @@ def build_download_tab(win):
     url_row.addWidget(more_btn)
     url_lay.addLayout(url_row)
 
+    smart_row = QHBoxLayout()
+    smart_row.setSpacing(8)
+    win.smart_mode_download_check = QCheckBox("Smart Mode")
+    win.smart_mode_download_check.setAccessibleName("Smart Mode")
+    win.smart_mode_download_check.setToolTip(
+        "Use the first matching URL profile without opening another dialog."
+    )
+    win.smart_mode_download_check.setChecked(
+        bool(win._config.get("smart_mode", False))
+    )
+    win.smart_mode_download_check.toggled.connect(
+        lambda checked: win._on_smart_mode_toggled(checked, source="download")
+    )
+    smart_row.addWidget(win.smart_mode_download_check)
+    win.smart_profile_hint = QLabel("No URL profile selected")
+    win.smart_profile_hint.setObjectName("subtleText")
+    win.smart_profile_hint.setWordWrap(True)
+    smart_row.addWidget(win.smart_profile_hint, 1)
+    smart_row.addStretch(1)
+    url_lay.addLayout(smart_row)
+    win._refresh_smart_profile_hint("")
+
     win.info_label = QLabel("")
     win.info_label.setObjectName("streamInfo")
     win.info_label.setWordWrap(True)

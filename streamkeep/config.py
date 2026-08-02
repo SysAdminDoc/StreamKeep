@@ -113,7 +113,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "pp_convert_video", "pp_convert_audio", "pp_convert_delete_source",
     "pp_bilingual_subs", "pp_lrc_export",
     "disk_monitor_enabled", "disk_auto_pause",
-    "first_run_complete",
+    "first_run_complete", "smart_mode",
 })
 _INT_CONFIG_KEYS = frozenset({
     "segment_idx", "parallel_connections", "parallel_autorecords",
@@ -129,7 +129,7 @@ _DICT_CONFIG_KEYS = frozenset({
     "lifecycle", "media_server", "schedules", "storage_snapshots", "hooks",
     "ytdlp_arg_templates",
 })
-_LIST_CONFIG_KEYS = frozenset({"recent_urls", "proxy_pool"})
+_LIST_CONFIG_KEYS = frozenset({"recent_urls", "proxy_pool", "smart_profiles"})
 _FORBIDDEN_IMPORT_KEYS = frozenset({
     "history", "monitor_channels", "download_queue", "accounts", "cookies",
 })
@@ -401,6 +401,7 @@ def _validate_config_schema(config):
     _validate_media_server_schema(config.get("media_server", {}))
     _validate_lifecycle_schema(config.get("lifecycle", {}))
     _validate_ytdlp_templates_schema(config.get("ytdlp_arg_templates", {}))
+    _validate_smart_profiles_schema(config.get("smart_profiles", []))
     _reject_imported_secret_handles(config)
 
 
@@ -519,6 +520,16 @@ def _validate_ytdlp_templates_schema(value):
         raise ConfigImportError(str(error)) from error
 
 
+def _validate_smart_profiles_schema(value):
+    if not value:
+        return
+    from .smart_mode import validate_profiles
+    try:
+        validate_profiles(value)
+    except ValueError as error:
+        raise ConfigImportError(str(error)) from error
+
+
 def _quarantine_import_capabilities(config):
     result = copy.deepcopy(config)
     held = {}
@@ -587,6 +598,16 @@ def _quarantine_import_capabilities(config):
     hold("lifecycle_cleanup", [lifecycle_path], active=lifecycle_active)
     if lifecycle_active:
         result.setdefault("lifecycle", {})["enabled"] = False
+
+    smart_profiles = config.get("smart_profiles", [])
+    smart_active = bool(config.get("smart_mode") or smart_profiles)
+    smart_paths = [
+        (key,) for key in ("smart_mode", "smart_profiles") if key in config
+    ]
+    hold("smart_profiles", smart_paths, active=smart_active)
+    if smart_active:
+        result["smart_mode"] = False
+        result["smart_profiles"] = []
 
     return result, held
 

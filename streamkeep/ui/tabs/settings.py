@@ -1883,6 +1883,101 @@ def build_settings_tab(win):
     _update_webhook_indicator(win, win._webhook_url)
     card_lay.addWidget(hook_block)
 
+    # ── Smart Mode URL profiles (V16) ─────────────────────────────
+    smart_block, smart_lay = make_field_block(
+        "Smart Mode URL Profiles",
+        "Select the first matching URL profile automatically. Profiles only "
+        "store URL patterns and safe download preferences; they never run a command.",
+    )
+    win.smart_mode_settings_check = QCheckBox(
+        "Enable Smart Mode for new downloads and queue items"
+    )
+    win.smart_mode_settings_check.setChecked(
+        bool(win._config.get("smart_mode", False))
+    )
+    win.smart_mode_settings_check.toggled.connect(
+        lambda checked: win._on_smart_mode_toggled(checked, source="settings")
+    )
+    smart_lay.addWidget(win.smart_mode_settings_check)
+
+    profile_pick_row = QHBoxLayout()
+    profile_pick_row.addWidget(QLabel("Profile:"))
+    win.smart_profile_combo = QComboBox()
+    win.smart_profile_combo.currentIndexChanged.connect(
+        lambda _idx: win._on_smart_profile_selected()
+    )
+    profile_pick_row.addWidget(win.smart_profile_combo, 1)
+    win.smart_profile_enabled_check = QCheckBox("Enabled")
+    win.smart_profile_enabled_check.setAccessibleName("Smart profile enabled")
+    win.smart_profile_enabled_check.setChecked(True)
+    profile_pick_row.addWidget(win.smart_profile_enabled_check)
+    smart_lay.addLayout(profile_pick_row)
+
+    profile_name_row = QHBoxLayout()
+    profile_name_row.addWidget(QLabel("Name:"))
+    win.smart_profile_name_input = QLineEdit()
+    win.smart_profile_name_input.setPlaceholderText("e.g. YouTube archive")
+    profile_name_row.addWidget(win.smart_profile_name_input, 1)
+    smart_lay.addLayout(profile_name_row)
+
+    smart_lay.addWidget(QLabel("URL patterns (one per line; * is a wildcard):"))
+    win.smart_profile_patterns_edit = QPlainTextEdit()
+    win.smart_profile_patterns_edit.setPlaceholderText(
+        "https://www.youtube.com/*\nhttps://youtu.be/*"
+    )
+    win.smart_profile_patterns_edit.setFixedHeight(76)
+    smart_lay.addWidget(win.smart_profile_patterns_edit)
+
+    profile_grid = QGridLayout()
+    profile_grid.setHorizontalSpacing(10)
+    profile_grid.setVerticalSpacing(6)
+    profile_grid.addWidget(QLabel("Output folder:"), 0, 0)
+    win.smart_profile_output_input = QLineEdit()
+    win.smart_profile_output_input.setPlaceholderText("Optional base output folder")
+    profile_grid.addWidget(win.smart_profile_output_input, 0, 1)
+    profile_grid.addWidget(QLabel("Quality:"), 0, 2)
+    win.smart_profile_quality_input = QLineEdit()
+    win.smart_profile_quality_input.setPlaceholderText("best, 1080p, audio")
+    profile_grid.addWidget(win.smart_profile_quality_input, 0, 3)
+    profile_grid.addWidget(QLabel("Folder template:"), 1, 0)
+    win.smart_profile_folder_input = QLineEdit()
+    win.smart_profile_folder_input.setPlaceholderText("{channel}/{date}")
+    profile_grid.addWidget(win.smart_profile_folder_input, 1, 1)
+    profile_grid.addWidget(QLabel("File template:"), 1, 2)
+    win.smart_profile_file_input = QLineEdit()
+    win.smart_profile_file_input.setPlaceholderText("{title}")
+    profile_grid.addWidget(win.smart_profile_file_input, 1, 3)
+    profile_grid.addWidget(QLabel("yt-dlp template:"), 2, 0)
+    win.smart_profile_template_input = QLineEdit()
+    win.smart_profile_template_input.setPlaceholderText("Named template (optional)")
+    profile_grid.addWidget(win.smart_profile_template_input, 2, 1)
+    profile_grid.addWidget(QLabel("Auth profile ID:"), 2, 2)
+    win.smart_profile_auth_input = QLineEdit()
+    win.smart_profile_auth_input.setPlaceholderText("Opaque site-bound ID")
+    profile_grid.addWidget(win.smart_profile_auth_input, 2, 3)
+    profile_grid.addWidget(QLabel("Proxy:"), 3, 0)
+    win.smart_profile_proxy_input = QLineEdit()
+    win.smart_profile_proxy_input.setPlaceholderText("Optional per-profile proxy URL")
+    profile_grid.addWidget(win.smart_profile_proxy_input, 3, 1, 1, 3)
+    smart_lay.addLayout(profile_grid)
+
+    smart_action_row = QHBoxLayout()
+    win.smart_profile_status = QLabel("")
+    win.smart_profile_status.setObjectName("subtleText")
+    win.smart_profile_status.setWordWrap(True)
+    smart_action_row.addWidget(win.smart_profile_status, 1)
+    win.smart_profile_delete_btn = QPushButton("Delete profile")
+    win.smart_profile_delete_btn.setObjectName("secondary")
+    win.smart_profile_delete_btn.clicked.connect(win._on_smart_profile_delete)
+    smart_action_row.addWidget(win.smart_profile_delete_btn)
+    win.smart_profile_save_btn = QPushButton("Save profile")
+    win.smart_profile_save_btn.setObjectName("secondary")
+    win.smart_profile_save_btn.clicked.connect(win._on_smart_profile_save)
+    smart_action_row.addWidget(win.smart_profile_save_btn)
+    smart_lay.addLayout(smart_action_row)
+    card_lay.addWidget(smart_block)
+    win._refresh_smart_profiles()
+
     # ── Event Hooks (F24) — structured, no-shell actions ──────────
     evt_block, evt_lay = make_field_block(
         "Event Hooks",
@@ -2510,7 +2605,7 @@ def build_settings_tab(win):
         cookies_block,
         network_block,
         companion_panel,
-        hook_block,
+        smart_block,
         lib_block,
         pp_block,
     )

@@ -697,6 +697,19 @@ class StreamKeep(
 
     def _apply_config(self):
         cfg = self._config
+        from streamkeep.smart_mode import normalize_profiles
+        self._config["smart_mode"] = bool(cfg.get("smart_mode", False))
+        self._config["smart_profiles"] = normalize_profiles(
+            cfg.get("smart_profiles", [])
+        )
+        for name in ("smart_mode_download_check", "smart_mode_settings_check"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.blockSignals(True)
+                widget.setChecked(self._config["smart_mode"])
+                widget.blockSignals(False)
+        if hasattr(self, "smart_profile_combo"):
+            self._refresh_smart_profiles()
         from streamkeep.theme import apply_visual_system
         from PyQt6.QtWidgets import QApplication
         apply_visual_system(
@@ -970,6 +983,15 @@ class StreamKeep(
 
     def _persist_config(self):
         cfg = self._config
+        from streamkeep.smart_mode import normalize_profiles
+        cfg["smart_mode"] = bool(
+            self.smart_mode_settings_check.isChecked()
+            if hasattr(self, "smart_mode_settings_check")
+            else cfg.get("smart_mode", False)
+        )
+        cfg["smart_profiles"] = normalize_profiles(
+            cfg.get("smart_profiles", [])
+        )
         cfg["output_dir"] = self.output_input.text().strip()
         cfg["segment_idx"] = self.segment_combo.currentIndex()
         # Keep the storage monitor pointed at the current output drive.
