@@ -894,6 +894,43 @@ def _run_snapshot(args):
         sys.exit(1)
 
 
+def _run_mse_capture(args):
+    """Capture one DRM-free MSE page through the headless recorder."""
+    from .config import load_config
+    from .mse_capture import (
+        MSECaptureError,
+        MSEEncryptedError,
+        record_mse_page,
+    )
+
+    cfg = load_config()
+    output = str(args.output or "").strip()
+    if not output:
+        configured = str(cfg.get("output_dir", "") or "").strip()
+        output = os.path.join(configured or os.getcwd(), "mse-capture.mp4")
+    try:
+        result = record_mse_page(
+            args.url,
+            output,
+            wait_seconds=args.seconds,
+            log_fn=_print_line,
+            allow_private_network=bool(args.allow_lan),
+            cleanup_on_success=not bool(args.keep_staging),
+        )
+    except MSEEncryptedError as error:
+        _print_line(f"ERROR: {error}")
+        raise SystemExit(2) from None
+    except MSECaptureError as error:
+        _print_line(f"ERROR: {error}")
+        raise SystemExit(1) from None
+    _print_line(
+        f"MSE capture complete: {result.output_path} "
+        f"({result.chunks} chunks, {result.bytes_written} bytes)"
+    )
+    if result.staging_dir:
+        _print_line(f"Staging retained: {result.staging_dir}")
+
+
 def _run_db_maintenance(args):
     """Run a database maintenance action."""
     import json as _json
@@ -1547,6 +1584,31 @@ def build_parser():
     har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- DRM-free MSE capture (V14) --
+    mse_p = sub.add_parser(
+        "mse-capture",
+        help="Record a DRM-free SourceBuffer page in a headless browser",
+    )
+    mse_p.add_argument("url", help="HTTP(S) page URL to capture")
+    mse_p.add_argument(
+        "-o", "--output", default="",
+        help="Output media path (default: output_dir/mse-capture.mp4)",
+    )
+    mse_p.add_argument(
+        "--seconds", type=float, default=30.0,
+        help="How long to leave the one page open (default: 30 seconds)",
+    )
+    mse_p.add_argument(
+        "--allow-lan", action="store_true",
+        help="Allow RFC1918/ULA page and media targets; loopback stays blocked",
+    )
+    mse_p.add_argument(
+        "--keep-staging", action="store_true",
+        help="Keep the ordered SourceBuffer chunks after a successful remux",
+    )
+    mse_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                       help="Override the config/database directory")
+
     # -- podcast transcript/chapter sidecars (Podcast Namespace) --
     ps_p = sub.add_parser(
         "podcast-sidecars",
@@ -1770,6 +1832,8 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "import-har":
         _run_har_import(args)
+    elif args.command == "mse-capture":
+        _run_mse_capture(args)
     elif args.command == "podcast-sidecars":
         _run_podcast_sidecars(args)
     elif args.command == "credentials":
@@ -1798,7 +1862,7 @@ def has_cli_args():
     cli_triggers = {
         "download", "dl", "capture", "server", "extractors", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
-        "credentials", "auth", "youtube-health", "register-protocol",
+        "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

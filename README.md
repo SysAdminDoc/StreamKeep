@@ -177,6 +177,24 @@ The Chrome/Edge/Firefox companion extension lives in `browser-extension/`.
 
 Extension icons are shipped under `browser-extension/icons/`. The 256-bit master token is stored through the operating-system credential backend and never shared with clients. One-time pairing codes expire after five minutes; successful pairing returns a scoped, origin-bound client token. **Revoke all** invalidates every client and rotates the stored master token.
 
+## DRM-free MSE recorder
+
+For pages that feed media through the browser's Media Source Extensions API,
+use the explicit headless command:
+
+```powershell
+python StreamKeep.py mse-capture https://example.com/player --output capture.mp4 --seconds 30
+```
+
+The recorder opens one isolated headless tab, installs its `SourceBuffer`
+capture hook before navigation, writes bounded append payloads to staging, and
+uses FFmpeg to remux them. It never changes playback speed or simulates user
+input. Encrypted Media Extensions are refused immediately; this is not a DRM
+capture path. Pages that require a visible tab, multiple tabs, or a manually
+controlled playback rate are outside the recorder's contract. Failed remuxes
+retain their staging directory for explicit recovery; `--keep-staging` keeps
+it after a successful remux.
+
 ## Requirements
 
 - Python 3.11 or newer.

@@ -27,10 +27,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P1 — Breadth (new source classes)
 
-- [ ] V14 — MSE buffer recorder (DRM-free only)
-  What: Playwright init-script hook on SourceBuffer.appendBuffer teeing segments to disk; ffmpeg concat/remux; hard-refuse on any EME session; tab-open/playback-speed limitations documented.
-  Effort: L
-
 #### VP-P2 — Automation, lifecycle, and reach
 
 - [ ] V16 — URL-pattern → profile auto-selection + zero-dialog Smart Mode toggle. Effort: M

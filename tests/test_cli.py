@@ -196,3 +196,16 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     assert transfer_args.embed_chapters is True
     assert transfer_args.embed_metadata is False
     assert transfer_args.embed_thumbnail is True
+
+
+def test_mse_capture_parser_exposes_headless_drm_free_controls():
+    args = cli.build_parser().parse_args([
+        "mse-capture", "https://example.com/player",
+        "--output", "capture.mp4", "--seconds", "12",
+        "--allow-lan", "--keep-staging",
+    ])
+    assert args.url == "https://example.com/player"
+    assert args.output == "capture.mp4"
+    assert args.seconds == 12
+    assert args.allow_lan is True
+    assert args.keep_staging is True

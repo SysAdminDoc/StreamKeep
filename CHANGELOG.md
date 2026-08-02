@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added the V14 DRM-free MSE recorder. The headless `mse-capture` command
+  injects a pre-navigation `SourceBuffer.appendBuffer` tee, writes bounded
+  ordered chunks, remuxes them with FFmpeg, and hard-refuses EME requests or
+  encrypted events. It uses the existing DNS-pinned Playwright network broker,
+  one-tab/no-playback-speed contract, and retains staging when remux fails.
+
 - Added the optional V13 Streamlink live engine for Twitch/Kick. When
   Streamlink 8.4+ is installed and enabled, live captures use mandatory Twitch
   ad filtering, low-latency HLS, DVR rewind options, and an in-process byte
