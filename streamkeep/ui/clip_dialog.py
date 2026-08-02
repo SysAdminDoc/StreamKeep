@@ -64,6 +64,14 @@ SOCIAL_SPECS = {
     "twitter": {"w": 1920, "h": 1080, "max_secs": 140},
 }
 _VERTICAL_PRESETS = {"tiktok", "shorts", "reels"}
+_RANGE_COLOR_TOKENS = ("blue", "mauve", "teal", "yellow", "pink", "green")
+
+
+def _theme_color(token, alpha=None):
+    color = QColor(CAT[token])
+    if alpha is not None:
+        color.setAlpha(alpha)
+    return color
 
 
 def parse_hhmmss(text, fallback=0.0):
@@ -125,19 +133,23 @@ class ScrubberView(QGraphicsView):
         self._drag_target = None   # "start" | "end" | None
         self._keyboard_target = "start"
         self._strip_width = THUMB_COUNT * THUMB_W
+        self._placeholder_items = []
+        self._spike_items = []
+        self._range_items = []
+        self._range_color_tokens = []
         self._build_strip()
 
     def _build_strip(self):
         scene = self.scene()
         scene.clear()
         self._thumb_items = []
+        self._placeholder_items = []
         # Placeholder rectangles so the layout is stable before thumbs land.
         for i in range(THUMB_COUNT):
             x = i * THUMB_W
             placeholder = QGraphicsRectItem(QRectF(x, 0, THUMB_W - 1, THUMB_H))
-            placeholder.setPen(QPen(QColor(69, 71, 90)))
-            placeholder.setBrush(QBrush(QColor(30, 30, 46)))
             scene.addItem(placeholder)
+            self._placeholder_items.append(placeholder)
             pix_item = QGraphicsPixmapItem()
             pix_item.setPos(x, 0)
             scene.addItem(pix_item)
@@ -153,17 +165,39 @@ class ScrubberView(QGraphicsView):
         scene.addItem(self._dim_right)
         # Handles: tall narrow rectangles at start/end.
         self._start_handle = QGraphicsRectItem()
-        self._start_handle.setBrush(QBrush(QColor(137, 180, 250)))   # CAT blue
-        self._start_handle.setPen(QPen(QColor(137, 180, 250)))
         self._start_handle.setZValue(5)
         scene.addItem(self._start_handle)
         self._end_handle = QGraphicsRectItem()
-        self._end_handle.setBrush(QBrush(QColor(166, 227, 161)))     # CAT green
-        self._end_handle.setPen(QPen(QColor(166, 227, 161)))
         self._end_handle.setZValue(5)
         scene.addItem(self._end_handle)
         scene.setSceneRect(0, 0, self._strip_width, THUMB_H + 2)
+        self.refresh_theme()
         self._refresh_handles()
+
+    def refresh_theme(self):
+        """Refresh custom timeline colors after a palette or accent change."""
+        for placeholder in getattr(self, "_placeholder_items", ()):
+            placeholder.setPen(QPen(_theme_color("stroke")))
+            placeholder.setBrush(QBrush(_theme_color("surface1")))
+        if hasattr(self, "_start_handle"):
+            accent = _theme_color("accent")
+            self._start_handle.setBrush(QBrush(accent))
+            self._start_handle.setPen(QPen(accent))
+        if hasattr(self, "_end_handle"):
+            green = _theme_color("green")
+            self._end_handle.setBrush(QBrush(green))
+            self._end_handle.setPen(QPen(green))
+        spike_color = _theme_color("peach")
+        for item in getattr(self, "_spike_items", ()):
+            item.setPen(QPen(spike_color, 1))
+            item.setBrush(QBrush(spike_color))
+        for item, token in zip(
+            getattr(self, "_range_items", ()),
+            getattr(self, "_range_color_tokens", ()),
+        ):
+            item.setBrush(QBrush(_theme_color(token, 60)))
+        self.scene().update()
+        self.viewport().update()
 
     def set_spike_markers(self, ratios):
         """Draw colored tick marks at the given positions (0..1 ratios)."""
@@ -172,7 +206,7 @@ class ScrubberView(QGraphicsView):
         for item in getattr(self, "_spike_items", []):
             scene.removeItem(item)
         self._spike_items = []
-        spike_color = QColor(250, 179, 135)  # CAT peach
+        spike_color = _theme_color("peach")
         for r in ratios:
             x = r * self._strip_width
             tick = QGraphicsRectItem(QRectF(x - 1, -4, 2, THUMB_H + 8))
@@ -189,18 +223,12 @@ class ScrubberView(QGraphicsView):
         for item in getattr(self, "_range_items", []):
             scene.removeItem(item)
         self._range_items = []
-        colors = [
-            QColor(137, 180, 250, 60),   # blue
-            QColor(203, 166, 247, 60),    # mauve
-            QColor(148, 226, 213, 60),    # teal
-            QColor(249, 226, 175, 60),    # yellow
-            QColor(245, 194, 231, 60),    # pink
-            QColor(166, 227, 161, 60),    # green
-        ]
+        self._range_color_tokens = []
         for i, (sr, er) in enumerate(ranges_ratios):
             if i == active_idx:
                 continue
-            color = colors[i % len(colors)]
+            token = _RANGE_COLOR_TOKENS[i % len(_RANGE_COLOR_TOKENS)]
+            color = _theme_color(token, 60)
             x1 = sr * self._strip_width
             x2 = er * self._strip_width
             rect = QGraphicsRectItem(QRectF(x1, 0, max(0, x2 - x1), THUMB_H))
@@ -210,6 +238,8 @@ class ScrubberView(QGraphicsView):
             rect.setToolTip(f"Range {i + 1}")
             scene.addItem(rect)
             self._range_items.append(rect)
+            self._range_color_tokens.append(token)
+        self.refresh_theme()
 
     def set_thumb(self, index, path):
         if not (0 <= index < len(self._thumb_items)):
@@ -484,6 +514,9 @@ class WaveformWidget(QWidget):
         self._end_ratio = end_ratio
         self.update()
 
+    def refresh_theme(self):
+        self.update()
+
     def paintEvent(self, event):
         if not self._peaks:
             return
@@ -494,7 +527,7 @@ class WaveformWidget(QWidget):
         mid = h / 2.0
 
         # Background
-        p.fillRect(0, 0, w, h, QColor(24, 24, 37))  # CAT crust
+        p.fillRect(0, 0, w, h, _theme_color("crust"))
 
         # Dim region outside selection
         sx = int(self._start_ratio * w)
@@ -507,8 +540,8 @@ class WaveformWidget(QWidget):
 
         # Draw waveform columns
         n_peaks = len(self._peaks)
-        in_color = QColor(137, 180, 250, 180)    # CAT blue
-        out_color = QColor(88, 91, 112, 140)      # CAT overlay0 dimmed
+        in_color = _theme_color("accent", 180)
+        out_color = _theme_color("overlay0", 140)
         for x in range(w):
             idx = int(x * n_peaks / w)
             if idx >= n_peaks:
@@ -522,9 +555,9 @@ class WaveformWidget(QWidget):
             p.drawLine(x, y_top, x, y_bot)
 
         # Handle markers
-        p.setPen(QPen(QColor(137, 180, 250), 2))
+        p.setPen(QPen(_theme_color("accent"), 2))
         p.drawLine(sx, 0, sx, h)
-        p.setPen(QPen(QColor(166, 227, 161), 2))
+        p.setPen(QPen(_theme_color("green"), 2))
         p.drawLine(ex, 0, ex, h)
 
         p.end()
@@ -1045,6 +1078,29 @@ class ClipDialog(TranslatableDialog):
         if not (self.social_combo.currentData() or ""):
             self._refresh_status_summary()
 
+    def refresh_theme(self):
+        """Refresh clip-specific paints and inline styles after a palette change."""
+        if hasattr(self, "scrubber"):
+            self.scrubber.refresh_theme()
+        if hasattr(self, "waveform"):
+            self.waveform.refresh_theme()
+        if hasattr(self, "preview_label"):
+            self.preview_label.setStyleSheet(
+                f"background-color: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
+                f"border-radius: 8px; color: {CAT['overlay0']};"
+            )
+        if hasattr(self, "preview_time_label"):
+            self.preview_time_label.setStyleSheet(f"color: {CAT['subtext0']};")
+        if hasattr(self, "_story_scroll"):
+            self._story_scroll.setStyleSheet(
+                f"QScrollArea {{ background: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
+                f"border-radius: 6px; }}"
+            )
+        if hasattr(self, "dur_label"):
+            self.dur_label.setStyleSheet(f"color: {CAT['green']}; font-weight: 600;")
+        if getattr(self, "_last_preview_pix", None):
+            self._refresh_crop_overlay()
+
     # ── Social clip export (F31) ───────────────────────────────
 
     def _on_social_changed(self, _idx):
@@ -1078,7 +1134,7 @@ class ClipDialog(TranslatableDialog):
         right = crop_x + crop_w
         if right < sw:
             p.fillRect(right, 0, sw - right, sh, dim)
-        p.setPen(QPen(QColor(137, 180, 250), 2))
+        p.setPen(QPen(_theme_color("accent"), 2))
         p.drawRect(crop_x, 0, crop_w - 1, sh - 1)
         p.end()
         return result

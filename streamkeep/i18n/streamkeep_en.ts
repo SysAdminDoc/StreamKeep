@@ -298,7 +298,7 @@ Archive workstation</translation>
             <translation>5-sec avg ({len(recent)} samples)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="787" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="820" />
             <source>50%</source>
             <translation>50%</translation>
         </message>
@@ -318,7 +318,7 @@ Archive workstation</translation>
             <translation>&lt;b&gt;Chat Render&lt;/b&gt;</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="595" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="628" />
             <source>&lt;b&gt;File&lt;/b&gt;: {os.path.basename(source_path)}&lt;br&gt;&lt;b&gt;Duration&lt;/b&gt;: {fmt_duration(self._duration) if self._duration else 'Unknown'}</source>
             <translation>&lt;b&gt;File&lt;/b&gt;: {os.path.basename(source_path)}&lt;br&gt;&lt;b&gt;Duration&lt;/b&gt;: {fmt_duration(self._duration) if self._duration else 'Unknown'}</translation>
         </message>
@@ -939,7 +939,7 @@ Archive workstation</translation>
             <translation>Browse</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="801" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="834" />
             <source>Browse...</source>
             <translation>Browse...</translation>
         </message>
@@ -1230,7 +1230,7 @@ Archive workstation</translation>
             <translation>Chat render: {status} ({pct}%)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="182" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="216" />
             <source>Chat spike @ {r * 100}%</source>
             <translation>Chat spike @ {r * 100}%</translation>
         </message>
@@ -1319,12 +1319,12 @@ Archive workstation</translation>
             <translation>Choose a reporting range.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="742" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="775" />
             <source>Choose accuracy, framing, and destination before saving the final clip.</source>
             <translation>Choose accuracy, framing, and destination before saving the final clip.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1140" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1196" />
             <source>Choose an output path</source>
             <translation>Choose an output path</translation>
         </message>
@@ -1410,12 +1410,12 @@ Archive workstation</translation>
             <translation>Cleared the {event} hook.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="704" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="737" />
             <source>Clip length</source>
             <translation>Clip length</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
             <source>CLIP STUDIO</source>
             <translation>CLIP STUDIO</translation>
         </message>
@@ -1435,7 +1435,7 @@ Archive workstation</translation>
             <translation>Clipboard watch</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="823" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="856" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="111" />
             <location filename="streamkeep/ui/recover_dialog.py" line="165" />
             <source>Close</source>
@@ -1685,7 +1685,7 @@ flac/pcm = lossless</translation>
             <translation>Critical under</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="777" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="810" />
             <source>Crop offset:</source>
             <translation>Crop offset:</translation>
         </message>
@@ -1838,7 +1838,7 @@ flac/pcm = lossless</translation>
             <translation>Details</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="667" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="700" />
             <source>Detect scenes</source>
             <translation>Detect scenes</translation>
         </message>
@@ -1850,7 +1850,7 @@ Produces a .nosilence copy — the original is preserved.</source>
 Produces a .nosilence copy — the original is preserved.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1243" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1299" />
             <source>Detecting scenes</source>
             <translation>Detecting scenes</translation>
         </message>
@@ -2068,12 +2068,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
 Forces a re-encode when not 'original' (copy codec ignored).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="626" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="659" />
             <source>Drag the handles</source>
             <translation>Drag the handles</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="604" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="637" />
             <source>Drag the handles or click the waveform to refine your clip visually before export.</source>
             <translation>Drag the handles or click the waveform to refine your clip visually before export.</translation>
         </message>
@@ -2103,7 +2103,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Duration</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="847" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="880" />
             <source>Duration could not be read</source>
             <translation>Duration could not be read</translation>
         </message>
@@ -2274,12 +2274,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Enabled</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="695" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="728" />
             <source>End (HH:MM:SS)</source>
             <translation>End (HH:MM:SS)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1184" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1240" />
             <source>End time needs to be later than start time</source>
             <translation>End time needs to be later than start time</translation>
         </message>
@@ -2399,17 +2399,17 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Export an LRC lyrics file from a subtitle track</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1408" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1464" />
             <source>Export canceled</source>
             <translation>Export canceled</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="827" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="860" />
             <source>Export Clip</source>
             <translation>Export Clip</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1215" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1271" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="234" />
             <source>Export complete</source>
             <translation>Export complete</translation>
@@ -2420,7 +2420,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Export config</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1222" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1278" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="224" />
             <source>Export failed</source>
             <translation>Export failed</translation>
@@ -2437,12 +2437,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Export filtered log…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="816" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="849" />
             <source>Export progress and ffmpeg messages appear here.</source>
             <translation>Export progress and ffmpeg messages appear here.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="742" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="775" />
             <source>Export settings</source>
             <translation>Export settings</translation>
         </message>
@@ -2463,7 +2463,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Exported {len(data)} channels to {os.path.basename(path)}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1131" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1187" />
             <source>Exporting {mode}</source>
             <translation>Exporting {mode}</translation>
         </message>
@@ -2737,7 +2737,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Frame rate cap. Forces a re-encode when not 'original'.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="750" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="783" />
             <source>Frame-accurate (re-encode)</source>
             <translation>Frame-accurate (re-encode)</translation>
         </message>
@@ -3102,7 +3102,7 @@ https://kick.com/channel
             <translation>Jump to sections or save your own markers.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1275" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1331" />
             <source>Jump to {format_hhmmss(t)[:8]}</source>
             <translation>Jump to {format_hhmmss(t)[:8]}</translation>
         </message>
@@ -3884,7 +3884,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No storage trend data</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="658" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="691" />
             <source>No storyboard yet. Detect scenes to create quick jump points.</source>
             <translation>No storyboard yet. Detect scenes to create quick jump points.</translation>
         </message>
@@ -3894,7 +3894,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No subtitles</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1162" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1218" />
             <source>No valid ranges to export</source>
             <translation>No valid ranges to export</translation>
         </message>
@@ -3998,7 +3998,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Off</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="751" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="784" />
             <source>Off (default): lossless stream copy — fast, but cut-points snap to the nearest keyframe.
 On: frame-exact trim using the selected codec — slower.</source>
             <translation>Off (default): lossless stream copy — fast, but cut-points snap to the nearest keyframe.
@@ -4198,12 +4198,12 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Output folder</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1148" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1204" />
             <source>Output path conflicts with the source</source>
             <translation>Output path conflicts with the source</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="797" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="830" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1515" />
             <source>Output:</source>
             <translation>Output:</translation>
@@ -4422,7 +4422,7 @@ Saves your settings first.</translation>
             <translation>Platform mix</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="771" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="804" />
             <source>Platform:</source>
             <translation>Platform:</translation>
         </message>
@@ -4587,7 +4587,7 @@ Saves your settings first.</translation>
             <translation>Preview maintenance</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="547" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
             <source>Preview position {self._seek_ratio * 100} percent</source>
             <translation>Preview position {self._seek_ratio * 100} percent</translation>
         </message>
@@ -4770,12 +4770,12 @@ Saves your settings first.</translation>
             <translation>Range</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="210" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="238" />
             <source>Range {i + 1}</source>
             <translation>Range {i + 1}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="676" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="709" />
             <source>Ranges</source>
             <translation>Ranges</translation>
         </message>
@@ -4833,7 +4833,7 @@ Saves your settings first.</translation>
             <translation>Ready to capture</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1024" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1057" />
             <source>Ready to export a {export_mode}</source>
             <translation>Ready to export a {export_mode}</translation>
         </message>
@@ -5204,7 +5204,7 @@ Saves your settings first.</translation>
             <translation>Run a program on lifecycle events. Each hook is an executable plus an explicit argument list — no shell. Context is passed only as environment variables ($SK_EVENT, $SK_TITLE, $SK_CHANNEL, $SK_PLATFORM, $SK_PATH, $SK_URL, $SK_QUALITY, $SK_ERROR). Legacy shell-command hooks are disabled until you re-create them here.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="669" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="702" />
             <source>Run scene detection (requires scenedetect)</source>
             <translation>Run scene detection (requires scenedetect)</translation>
         </message>
@@ -5661,7 +5661,7 @@ Saves your settings first.</translation>
             <translation>Server URL:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
             <source>Set in and out points visually, build highlight reels from multiple ranges, and export in the format that best fits the destination.</source>
             <translation>Set in and out points visually, build highlight reels from multiple ranges, and export in the format that best fits the destination.</translation>
         </message>
@@ -5752,7 +5752,7 @@ Saves your settings first.</translation>
             <translation>simultaneous queue downloads (default 3)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
             <source>Single clip</source>
             <translation>Single clip</translation>
         </message>
@@ -5808,7 +5808,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Source detected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="591" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="624" />
             <source>Source media</source>
             <translation>Source media</translation>
         </message>
@@ -5896,7 +5896,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Start</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="686" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="719" />
             <source>Start (HH:MM:SS)</source>
             <translation>Start (HH:MM:SS)</translation>
         </message>
@@ -5911,7 +5911,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Start download  (Enter)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="247" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="277" />
             <source>Start {self._start_ratio * 100} percent; end {self._end_ratio * 100} percent; keyboard controls {self._keyboard_target} handle</source>
             <translation>Start {self._start_ratio * 100} percent; end {self._end_ratio * 100} percent; keyboard controls {self._keyboard_target} handle</translation>
         </message>
@@ -6002,7 +6002,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Store API tokens for authenticated platform access. Tokens are encrypted with Windows DPAPI.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1285" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1341" />
             <source>Storyboard ready</source>
             <translation>Storyboard ready</translation>
         </message>
@@ -6325,7 +6325,7 @@ Download again?</translation>
             <translation>Time range end must be after start.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="604" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="637" />
             <source>Timeline and preview</source>
             <translation>Timeline and preview</translation>
         </message>
@@ -6459,7 +6459,7 @@ Download again?</translation>
             <translation>Transcript search matches indexed dialogue. Hover a title to preview matching lines, then double-click to open the folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="561" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="594" />
             <source>Trim / Clip</source>
             <translation>Trim / Clip</translation>
         </message>
@@ -6475,7 +6475,7 @@ Download again?</translation>
             <translation>Trim older auto-recordings from this channel’s folder after a successful run, or keep everything indefinitely.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
             <source>Trim, package, and export moments cleanly</source>
             <translation>Trim, package, and export moments cleanly</translation>
         </message>
@@ -6620,7 +6620,7 @@ Download again?</translation>
             <translation>Use level and search together to narrow the log quickly.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="676" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="709" />
             <source>Use one range for a clean trim, or stack multiple ranges to export a highlight reel.</source>
             <translation>Use one range for a clean trim, or stack multiple ranges to export a highlight reel.</translation>
         </message>
@@ -6872,7 +6872,7 @@ Download again?</translation>
             <translation>Window:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="591" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="624" />
             <source>Work from the current recording without touching the original file.</source>
             <translation>Work from the current recording without touching the original file.</translation>
         </message>
@@ -7235,7 +7235,7 @@ Download again?</translation>
             <translation>{self._week_start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1087" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1143" />
             <source>{self.crop_slider.value()}%</source>
             <translation>{self.crop_slider.value()}%</translation>
         </message>
@@ -7283,7 +7283,7 @@ Download again?</translation>
             <translation>||</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="628" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="661" />
             <location filename="streamkeep/ui/main_window.py" line="2413" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1414" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1417" />

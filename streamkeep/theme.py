@@ -717,6 +717,9 @@ def _refresh_visual_widgets(app):
             if style is not None:
                 style.unpolish(widget)
                 style.polish(widget)
+            refresh_theme = getattr(widget, "refresh_theme", None)
+            if callable(refresh_theme):
+                refresh_theme()
         window.updateGeometry()
         window.update()
 

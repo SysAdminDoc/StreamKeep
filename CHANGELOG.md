@@ -22,6 +22,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   embedded quotes are escaped, and matching is restricted to transcript text
   so strings such as `C++`, `foo:bar`, and quoted terms return their hits.
 
+- Updated the Clip/Trim visual controls (V59) to use live theme and accent
+  tokens for filmstrip placeholders, range handles, waveform paints, and crop
+  overlays, including refreshes when the active palette changes.
+
 ## [4.44.0] - 2026-08-02
 
 - Audio downloads now get their album-artist filled in (V41). SoundCloud,

@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QLabel, QTableWidget
 
@@ -78,6 +79,39 @@ def test_clip_visual_controls_have_keyboard_equivalents(qt_application):
     QTest.keyClick(waveform, Qt.Key.Key_Right)
     assert seeks == [0.05]
     assert waveform.accessibleName() == "Audio waveform preview"
+
+
+def test_clip_custom_paints_follow_theme_and_accent(qt_application):
+    from streamkeep.theme import CAT, apply_visual_system
+
+    scrubber = ScrubberView()
+    waveform = WaveformWidget()
+    scrubber.show()
+    waveform.resize(100, 32)
+    waveform.set_peaks([(-0.5, 0.5)] * 10)
+    waveform.show()
+    try:
+        apply_visual_system("light", "cozy", "#123456", qt_application)
+        qt_application.processEvents()
+        scrubber.set_range_overlays([(0.0, 0.2), (0.3, 0.5)], active_idx=0)
+        assert scrubber._start_handle.brush().color().name() == "#123456"
+        assert scrubber._end_handle.brush().color().name() == CAT["green"]
+        assert scrubber._placeholder_items[0].brush().color().name() == CAT["surface1"]
+
+        image = QImage(100, 32, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        waveform.render(painter)
+        painter.end()
+        assert image.pixelColor(50, 0).name() == CAT["crust"]
+
+        apply_visual_system("high_contrast", "cozy", "#abcdef", qt_application)
+        qt_application.processEvents()
+        assert scrubber._start_handle.brush().color().name() == "#abcdef"
+        assert scrubber._placeholder_items[0].brush().color().name() == CAT["surface1"]
+    finally:
+        scrubber.close()
+        waveform.close()
+        apply_visual_system("dark", "cozy", "", qt_application)
 
 
 def test_high_contrast_200_percent_scale_keeps_overflow_reachable():
