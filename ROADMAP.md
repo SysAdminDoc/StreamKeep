@@ -29,8 +29,6 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 #### VP-P2 — Automation, lifecycle, and reach
 
-- [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
-  > 2026-07-29: Expand acceptance with native server playlists plus portable M3U and an optional, previewed watched-state import from one explicitly selected Plex/Jellyfin/Emby user. Ambiguous mappings must be skipped, and imported watched state must never trigger lifecycle deletion without a separate opt-in. (Youtarr v1.77.0; RESEARCH.md 2026-07-29)
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
   > 2026-07-27: cobalt's picker also carries per-item type (photo/video/gif) and a separate background-audio track; extend the picker payload accordingly. Dubbed-audio-language selection and a clean audio-strip `mute` mode are tracked separately as V40. (RESEARCH.md 2026-07-27)
 

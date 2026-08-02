@@ -612,6 +612,8 @@ class MonitorTabMixin:
                         except (TypeError, ValueError):
                             e.retention_keep_last = 0
                         e.filter_keywords = str(ch.get("filter_keywords", "") or "")
+                        layout = str(ch.get("media_server_layout", "") or "").lower()
+                        e.media_server_layout = layout if layout in ("seasoned", "flat") else ""
                         break
                 added += 1
                 existing_urls.add(ch["url"])
@@ -953,6 +955,8 @@ class MonitorTabMixin:
                 desc.append(f"window {entry.schedule_start_hhmm}-{entry.schedule_end_hhmm}")
             if entry.retention_keep_last:
                 desc.append(f"keep last {entry.retention_keep_last}")
+            if entry.media_server_layout:
+                desc.append(f"media layout={entry.media_server_layout}")
             if entry.ytdlp_template_name:
                 desc.append(f"args={entry.ytdlp_template_name}")
             self._set_status(
@@ -1450,6 +1454,11 @@ class MonitorTabMixin:
                 ctx.get("q_name", "Live Capture") or "Live Capture",
                 history_url=ctx.get("history_url", ""),
                 info=ctx.get("info"),
+            )
+            self._media_server_import(
+                out_dir,
+                ctx.get("info"),
+                monitor_entry=finished_entry,
             )
             # Clear the resume sidecar — live captures never really "finish"
             # via all_done for the single-segment worker, but a successful

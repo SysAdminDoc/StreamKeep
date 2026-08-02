@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ...extractors.ytdlp import YtDlpExtractor
 from ...http import set_native_proxy
@@ -55,6 +55,33 @@ class _CredentialProbeWorker(QThread):
         self.finished_all.emit()
 
 
+class _MediaServerWorker(QThread):
+    """Fetch media-server users or watched items without blocking Settings."""
+
+    result_ready = pyqtSignal(object)
+    error = pyqtSignal(str)
+
+    def __init__(self, action, config, user_id="", parent=None):
+        super().__init__(parent)
+        self._action = action
+        self._config = dict(config or {})
+        self._user_id = str(user_id or "")
+
+    def run(self):
+        try:
+            from ...integrations.media_server import (
+                fetch_media_server_users,
+                fetch_watched_items,
+            )
+            if self._action == "users":
+                result = fetch_media_server_users(self._config)
+            else:
+                result = fetch_watched_items(self._config, self._user_id)
+            self.result_ready.emit(result)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class SettingsPreferencesMixin:
     """Persisted preferences plus credential and network control handlers."""
 
@@ -83,6 +110,135 @@ class SettingsPreferencesMixin:
             )
         else:
             label.setText("No PO-token provider is installed.")
+
+    def _media_server_form_config(self):
+        """Read the media-server controls without mutating persisted config."""
+        from ...integrations.media_server import SERVER_TYPES
+        config = {
+            "enabled": bool(self.ms_enable_check.isChecked()),
+            "server_type": SERVER_TYPES[self.ms_type_combo.currentIndex()],
+            "url": self.ms_url_input.text().strip(),
+            "token": self.ms_token_input.text().strip(),
+            "library_id": self.ms_library_id_input.text().strip(),
+            "library_path": self.ms_path_input.text().strip(),
+            "layout_mode": str(self.ms_layout_combo.currentData() or "seasoned"),
+            "portable_m3u": bool(self.ms_portable_check.isChecked()),
+            "native_playlist": bool(self.ms_native_playlist_check.isChecked()),
+            "playlist_name": self.ms_playlist_name_input.text().strip() or "StreamKeep",
+        }
+        selected = self.ms_users_combo.currentData()
+        config["watched_user_id"] = str(selected or "")
+        config["watched_user_name"] = (
+            self.ms_users_combo.currentText().strip()
+            if selected else ""
+        )
+        return config
+
+    def _on_media_server_load_users(self):
+        worker = getattr(self, "_media_server_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        config = self._media_server_form_config()
+        self.ms_load_users_btn.setEnabled(False)
+        self.ms_watched_status.setText("Loading users from the configured server…")
+        worker = _MediaServerWorker("users", config, parent=self)
+        worker.result_ready.connect(self._on_media_server_users_ready)
+        worker.error.connect(self._on_media_server_probe_error)
+        worker.finished.connect(lambda: self.ms_load_users_btn.setEnabled(True))
+        self._media_server_worker = worker
+        worker.start()
+
+    def _on_media_server_users_ready(self, users):
+        self.ms_users_combo.clear()
+        self.ms_users_combo.addItem("Select one server user…", userData="")
+        for user in users if isinstance(users, list) else []:
+            if not isinstance(user, dict) or not user.get("id"):
+                continue
+            self.ms_users_combo.addItem(
+                str(user.get("name", "") or user["id"]),
+                userData=str(user["id"]),
+            )
+        configured_id = str(
+            self._config.get("media_server", {}).get("watched_user_id", "") or ""
+        )
+        if configured_id:
+            index = self.ms_users_combo.findData(configured_id)
+            if index >= 0:
+                self.ms_users_combo.setCurrentIndex(index)
+        self.ms_watched_status.setText(
+            f"Loaded {max(0, self.ms_users_combo.count() - 1)} server user(s)."
+        )
+
+    def _on_media_server_preview_watched(self):
+        worker = getattr(self, "_media_server_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        user_id = str(self.ms_users_combo.currentData() or "")
+        if not user_id:
+            self._set_status("Select one media-server user before previewing watched state.", "warning")
+            return
+        config = self._media_server_form_config()
+        self.ms_preview_watched_btn.setEnabled(False)
+        self.ms_apply_watched_btn.setEnabled(False)
+        self.ms_watched_status.setText("Fetching watched state for the selected user…")
+        worker = _MediaServerWorker("watched", config, user_id=user_id, parent=self)
+        worker.result_ready.connect(self._on_media_server_watched_ready)
+        worker.error.connect(self._on_media_server_probe_error)
+        worker.finished.connect(lambda: self.ms_preview_watched_btn.setEnabled(True))
+        self._media_server_worker = worker
+        worker.start()
+
+    def _on_media_server_watched_ready(self, items):
+        from ... import db
+        from ...integrations.media_server import preview_watched_import
+        user_id = str(self.ms_users_combo.currentData() or "")
+        preview = preview_watched_import(items or [], db.load_history(), user_id=user_id)
+        self._media_server_watched_preview = preview
+        matches = len(preview.get("matches", []))
+        ambiguous = len(preview.get("ambiguous", []))
+        skipped = len(preview.get("skipped", []))
+        self.ms_apply_watched_btn.setEnabled(matches > 0)
+        self.ms_watched_status.setText(
+            f"Preview: {matches} match(es), {ambiguous} ambiguous (skipped), {skipped} other skipped."
+        )
+        sample = [
+            f"• {match.get('title', 'Untitled')} → history #{match.get('history_id')}"
+            for match in preview.get("matches", [])[:8]
+        ]
+        if preview.get("ambiguous"):
+            sample.append(
+                f"• {len(preview['ambiguous'])} ambiguous item(s) were skipped"
+            )
+        QMessageBox.information(
+            self,
+            "Watched-state preview",
+            "No local files will be deleted. Only the listed local history rows will be updated.\n\n"
+            + ("\n".join(sample) or "No unambiguous local matches were found."),
+        )
+
+    def _on_media_server_apply_watched(self):
+        preview = getattr(self, "_media_server_watched_preview", None)
+        if not isinstance(preview, dict) or not preview.get("matches"):
+            self._set_status("Load a watched-state preview before applying it.", "warning")
+            return
+        from ... import db
+        from ...integrations.media_server import apply_watched_import
+        applied = apply_watched_import(preview, db.update_history_entry)
+        self._config["media_server"] = self._media_server_form_config()
+        self._persist_config()
+        self._media_server_watched_preview = None
+        self.ms_apply_watched_btn.setEnabled(False)
+        self.ms_watched_status.setText(
+            f"Applied {applied} watched-state row(s). Local media and lifecycle deletion were untouched."
+        )
+        self._set_status(
+            f"Applied watched state for {applied} local recording(s); no files were deleted.",
+            "success",
+        )
+
+    def _on_media_server_probe_error(self, message):
+        self.ms_watched_status.setText(f"Media-server request failed: {message}")
+        self._set_status(f"Media-server request failed: {message}", "error")
 
     def _on_setup_pot_provider(self):
         """Install/launch the local PO-token provider, or explain how (V33)."""
@@ -909,15 +1065,7 @@ class SettingsPreferencesMixin:
         TwitchExtractor.download_chat_enabled = self.chat_check.isChecked()
         # Apply media server auto-import (F33)
         if hasattr(self, "ms_enable_check"):
-            from ...integrations.media_server import SERVER_TYPES
-            self._config["media_server"] = {
-                "enabled": self.ms_enable_check.isChecked(),
-                "server_type": SERVER_TYPES[self.ms_type_combo.currentIndex()],
-                "url": self.ms_url_input.text().strip(),
-                "token": self.ms_token_input.text().strip(),
-                "library_id": self.ms_library_id_input.text().strip(),
-                "library_path": self.ms_path_input.text().strip(),
-            }
+            self._config["media_server"] = self._media_server_form_config()
         # Apply post-processing presets
         PostProcessor.extract_audio = self.pp_audio_check.isChecked()
         PostProcessor.normalize_loudness = self.pp_loud_check.isChecked()

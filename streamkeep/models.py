@@ -246,6 +246,7 @@ class MonitorEntry:
     auth_profile_id: str = ""             # site-bound auth profile (V50); "" = resolve by URL
     auto_upgrade: bool = False            # re-download when higher quality VOD appears (F25)
     min_upgrade_quality: str = ""         # minimum quality to trigger upgrade (e.g. "1080p")
+    media_server_layout: str = ""         # "seasoned"/"flat"; empty = global media-server layout
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
 
 

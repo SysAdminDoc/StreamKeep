@@ -1346,12 +1346,15 @@ class StreamKeep(
             from ..hooks import fire_hook
             fire_hook(event, context, hooks_cfg, log_fn=self._log)
 
-    def _media_server_import(self, out_dir, info=None):
-        """Auto-import recording into media server library (F33)."""
+    def _media_server_import(self, out_dir, info=None, monitor_entry=None):
+        """Auto-import recording into media server library (F33/V18)."""
         ms_cfg = self._config.get("media_server", {})
         if ms_cfg.get("enabled") and out_dir:
             from ..integrations.media_server import import_to_media_server
-            import_to_media_server(ms_cfg, out_dir, info=info, log_fn=self._log)
+            import_to_media_server(
+                ms_cfg, out_dir, info=info, log_fn=self._log,
+                monitor_entry=monitor_entry,
+            )
 
     def _fire_webhook_json(self, url, payload):
         """Fire-and-forget JSON POST via curl."""

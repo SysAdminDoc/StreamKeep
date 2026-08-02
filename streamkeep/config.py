@@ -475,17 +475,28 @@ def _validate_media_server_schema(value):
         return
     allowed = {
         "enabled", "server_type", "url", "token", "library_id", "library_path",
+        "layout_mode", "portable_m3u", "native_playlist", "playlist_name",
+        "watched_user_id", "watched_user_name",
     }
     unknown = set(value) - allowed
     if unknown:
         raise ConfigImportError(
             "media_server has unsupported fields: " + ", ".join(sorted(unknown))
         )
-    if not isinstance(value.get("enabled", False), bool):
-        raise ConfigImportError("media_server.enabled must be boolean")
-    for key in allowed - {"enabled"}:
+    for key in ("enabled", "portable_m3u", "native_playlist"):
+        if key in value and not isinstance(value[key], bool):
+            raise ConfigImportError(f"media_server.{key} must be boolean")
+    for key in allowed - {"enabled", "portable_m3u", "native_playlist"}:
         if key in value and not isinstance(value[key], str):
             raise ConfigImportError(f"media_server.{key} must be a string")
+    if value.get("server_type", "plex") not in {"plex", "jellyfin", "emby", "kodi"}:
+        raise ConfigImportError(
+            "media_server.server_type must be plex, jellyfin, emby, or kodi"
+        )
+    if value.get("layout_mode", "seasoned") not in {"seasoned", "flat"}:
+        raise ConfigImportError(
+            "media_server.layout_mode must be seasoned or flat"
+        )
 
 
 def _validate_lifecycle_schema(value):

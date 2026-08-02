@@ -2256,6 +2256,79 @@ def build_settings_tab(win):
     ms_path_row.addWidget(win.ms_path_input)
     ms_lay.addLayout(ms_path_row)
 
+    ms_layout_row = QHBoxLayout()
+    ms_layout_row.setSpacing(8)
+    ms_layout_row.addWidget(QLabel("Default layout:"))
+    win.ms_layout_combo = QComboBox()
+    win.ms_layout_combo.addItem("Season folders (Channel/Season YYYY)", userData="seasoned")
+    win.ms_layout_combo.addItem("Flat channel folder (Channel)", userData="flat")
+    layout_mode = str(ms_cfg.get("layout_mode", "seasoned") or "seasoned").lower()
+    layout_index = max(0, win.ms_layout_combo.findData(layout_mode))
+    win.ms_layout_combo.setCurrentIndex(layout_index)
+    ms_layout_row.addWidget(win.ms_layout_combo)
+    ms_layout_row.addStretch(1)
+    ms_lay.addLayout(ms_layout_row)
+
+    win.ms_portable_check = QCheckBox("Write a portable M3U playlist in the library root")
+    win.ms_portable_check.setChecked(bool(ms_cfg.get("portable_m3u", False)))
+    ms_lay.addWidget(win.ms_portable_check)
+    win.ms_native_playlist_check = QCheckBox(
+        "Maintain a native server playlist after each imported recording"
+    )
+    win.ms_native_playlist_check.setChecked(bool(ms_cfg.get("native_playlist", False)))
+    ms_lay.addWidget(win.ms_native_playlist_check)
+
+    ms_playlist_row = QHBoxLayout()
+    ms_playlist_row.setSpacing(8)
+    ms_playlist_row.addWidget(QLabel("Playlist name:"))
+    win.ms_playlist_name_input = QLineEdit(
+        str(ms_cfg.get("playlist_name", "StreamKeep") or "StreamKeep")
+    )
+    win.ms_playlist_name_input.setPlaceholderText("StreamKeep")
+    ms_playlist_row.addWidget(win.ms_playlist_name_input)
+    ms_lay.addLayout(ms_playlist_row)
+
+    watched_hint = QLabel(
+        "Watched-state import is manual and preview-first. Select exactly one server user; ambiguous matches are skipped and no files are deleted."
+    )
+    watched_hint.setObjectName("fieldHint")
+    watched_hint.setWordWrap(True)
+    ms_lay.addWidget(watched_hint)
+    ms_user_row = QHBoxLayout()
+    ms_user_row.setSpacing(8)
+    ms_user_row.addWidget(QLabel("Selected user:"))
+    win.ms_users_combo = QComboBox()
+    win.ms_users_combo.addItem("Load users from server…", userData="")
+    selected_user_id = str(ms_cfg.get("watched_user_id", "") or "")
+    selected_user_name = str(ms_cfg.get("watched_user_name", "") or "")
+    if selected_user_id:
+        win.ms_users_combo.addItem(
+            selected_user_name or selected_user_id, userData=selected_user_id
+        )
+        win.ms_users_combo.setCurrentIndex(1)
+    ms_user_row.addWidget(win.ms_users_combo, 1)
+    win.ms_load_users_btn = QPushButton("Load users")
+    win.ms_load_users_btn.setObjectName("secondary")
+    win.ms_load_users_btn.clicked.connect(win._on_media_server_load_users)
+    ms_user_row.addWidget(win.ms_load_users_btn)
+    ms_lay.addLayout(ms_user_row)
+    ms_watch_btn_row = QHBoxLayout()
+    ms_watch_btn_row.setSpacing(8)
+    win.ms_preview_watched_btn = QPushButton("Preview watched state")
+    win.ms_preview_watched_btn.setObjectName("secondary")
+    win.ms_preview_watched_btn.clicked.connect(win._on_media_server_preview_watched)
+    ms_watch_btn_row.addWidget(win.ms_preview_watched_btn)
+    win.ms_apply_watched_btn = QPushButton("Apply preview")
+    win.ms_apply_watched_btn.setObjectName("secondary")
+    win.ms_apply_watched_btn.setEnabled(False)
+    win.ms_apply_watched_btn.clicked.connect(win._on_media_server_apply_watched)
+    ms_watch_btn_row.addWidget(win.ms_apply_watched_btn)
+    win.ms_watched_status = QLabel("No watched-state preview loaded.")
+    win.ms_watched_status.setObjectName("fieldHint")
+    win.ms_watched_status.setWordWrap(True)
+    ms_watch_btn_row.addWidget(win.ms_watched_status, 1)
+    ms_lay.addLayout(ms_watch_btn_row)
+
     card_lay.addWidget(ms_block)
 
     # ── Post-Processing ────────────────────────────────────────────

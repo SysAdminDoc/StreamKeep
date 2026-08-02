@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added V18 media-server layouts for monitored channels. Imports now support
+  Season or flat S/E naming for Plex, Jellyfin, Emby, and Kodi, write existing
+  privacy-safe NFO sidecars, and can maintain a portable M3U or native server
+  playlist. Settings can fetch one explicitly selected server user, show a
+  watched-state preview, skip ambiguous matches, and apply only local watched
+  metadata without triggering lifecycle deletion.
+
 - Added V16 Smart Mode URL profiles. An ordered, shell-free profile resolver now
   selects URL-pattern preferences consistently for desktop downloads, queue
   jobs, CLI runs, and the local REST service, with explicit job values taking

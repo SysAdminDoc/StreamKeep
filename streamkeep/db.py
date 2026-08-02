@@ -29,7 +29,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _write_lock = threading.Lock()
 
@@ -76,6 +76,8 @@ def init_db() -> None:
                 _migrate_retry_v10(db)
             if 0 < v < 11:
                 _migrate_auth_profiles_v11(db)
+            if 0 < v < 12:
+                _migrate_media_layout_v12(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -177,7 +179,8 @@ def _apply_schema(db):
             ytdlp_template_name         TEXT    NOT NULL DEFAULT '',
             auto_upgrade                INTEGER NOT NULL DEFAULT 0,
             min_upgrade_quality         TEXT    NOT NULL DEFAULT '',
-            auth_profile_id             TEXT    NOT NULL DEFAULT ''
+            auth_profile_id             TEXT    NOT NULL DEFAULT '',
+            media_server_layout         TEXT    NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS download_queue (
@@ -485,6 +488,20 @@ def _migrate_identity_v9(db):
                 "UPDATE history SET source_id=? WHERE id=?",
                 (identity, int(row[0])),
             )
+
+
+def _migrate_media_layout_v12(db):
+    """Add the per-monitor media-server layout override."""
+    existing_cols = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(monitor_channels)"
+        ).fetchall()
+    }
+    if existing_cols and "media_server_layout" not in existing_cols:
+        db.execute(
+            "ALTER TABLE monitor_channels ADD COLUMN "
+            "media_server_layout TEXT NOT NULL DEFAULT ''"
+        )
 
 
 def _migrate_retry_v10(db):
@@ -1037,8 +1054,8 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                      schedule_start_hhmm, schedule_end_hhmm, schedule_days_mask,
                      retention_keep_last, filter_keywords, override_pp_preset,
                      ytdlp_template_name, auto_upgrade, min_upgrade_quality,
-                     auth_profile_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     auth_profile_id, media_server_layout)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("url", "")),
                 str(entry_dict.get("platform", "")),
@@ -1060,6 +1077,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                 int(bool(entry_dict.get("auto_upgrade", False))),
                 str(entry_dict.get("min_upgrade_quality", "") or ""),
                 str(entry_dict.get("auth_profile_id", "") or ""),
+                str(entry_dict.get("media_server_layout", "") or ""),
             ))
             db.commit()
             return cur.lastrowid
@@ -1084,8 +1102,8 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                          schedule_days_mask, retention_keep_last,
                          filter_keywords, override_pp_preset,
                          ytdlp_template_name, auto_upgrade, min_upgrade_quality,
-                         auth_profile_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         auth_profile_id, media_server_layout)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     str(d.get("url", "")),
                     str(d.get("platform", "")),
@@ -1107,6 +1125,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                     int(bool(d.get("auto_upgrade", False))),
                     str(d.get("min_upgrade_quality", "") or ""),
                     str(d.get("auth_profile_id", "") or ""),
+                    str(d.get("media_server_layout", "") or ""),
                 ))
             db.commit()
         finally:
@@ -3257,6 +3276,7 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                 "auto_upgrade": ch.get("auto_upgrade", False),
                 "min_upgrade_quality": ch.get("min_upgrade_quality", ""),
                 "auth_profile_id": ch.get("auth_profile_id", ""),
+                "media_server_layout": ch.get("media_server_layout", ""),
             })
         if entries:
             save_all_monitor_channels(entries)

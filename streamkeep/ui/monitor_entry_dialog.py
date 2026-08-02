@@ -55,6 +55,7 @@ class MonitorEntryDialog(TranslatableDialog):
         page_lay.setSpacing(12)
 
         self._build_output_section(page_lay)
+        self._build_media_server_section(page_lay)
         self._build_schedule_section(page_lay)
         self._build_filter_section(page_lay)
         self._build_processing_section(page_lay)
@@ -196,6 +197,28 @@ class MonitorEntryDialog(TranslatableDialog):
         days_row.addStretch(1)
         content.addLayout(days_row)
 
+        root.addWidget(section)
+
+    def _build_media_server_section(self, root):
+        section, content = make_dialog_section(
+            "Media-server layout",
+            "Choose the folder layout for this monitored channel when global media-server auto-import is enabled.",
+        )
+        hint = QLabel(
+            "Seasoned keeps Channel/Season YYYY/episode naming. Flat keeps the same S/E names directly under Channel."
+        )
+        hint.setObjectName("fieldHint")
+        hint.setWordWrap(True)
+        content.addWidget(hint)
+        self.media_server_layout_combo = QComboBox()
+        self.media_server_layout_combo.addItem("Use global media-server layout", userData="")
+        self.media_server_layout_combo.addItem("Season folders (Channel/Season YYYY)", userData="seasoned")
+        self.media_server_layout_combo.addItem("Flat channel folder (Channel)", userData="flat")
+        current = str(getattr(self.entry, "media_server_layout", "") or "")
+        index = self.media_server_layout_combo.findData(current)
+        self.media_server_layout_combo.setCurrentIndex(max(0, index))
+        self.media_server_layout_combo.currentIndexChanged.connect(self._update_summary)
+        content.addWidget(self.media_server_layout_combo)
         root.addWidget(section)
 
     def _build_filter_section(self, root):
@@ -366,6 +389,8 @@ class MonitorEntryDialog(TranslatableDialog):
             parts.append("auto-upgrade")
         if int(self.retention_spin.value() or 0) > 0:
             parts.append(f"keep last {self.retention_spin.value()}")
+        if self.media_server_layout_combo.currentData() or "":
+            parts.append(f"media layout {self.media_server_layout_combo.currentData()}")
 
         if not parts:
             update_status_banner(
@@ -414,4 +439,5 @@ class MonitorEntryDialog(TranslatableDialog):
         entry.auto_upgrade = self.auto_upgrade_check.isChecked()
         entry.min_upgrade_quality = self.min_upgrade_combo.currentData() or ""
         entry.retention_keep_last = int(self.retention_spin.value())
+        entry.media_server_layout = self.media_server_layout_combo.currentData() or ""
         self.accept()

@@ -324,6 +324,7 @@ class ChannelMonitor(QObject):
             "auth_profile_id": e.auth_profile_id or "",
             "auto_upgrade": bool(e.auto_upgrade),
             "min_upgrade_quality": e.min_upgrade_quality or "",
+            "media_server_layout": e.media_server_layout or "",
         }
 
     def save_to_config(self, cfg):
@@ -346,6 +347,7 @@ class ChannelMonitor(QObject):
                 "ytdlp_template_name": e.ytdlp_template_name or "",
                 "auto_upgrade": bool(e.auto_upgrade),
                 "min_upgrade_quality": e.min_upgrade_quality or "",
+                "media_server_layout": e.media_server_layout or "",
             }
             for e in self.entries
         ]
@@ -399,4 +401,6 @@ class ChannelMonitor(QObject):
                     e.auth_profile_id = str(ch.get("auth_profile_id", "") or "")
                     e.auto_upgrade = bool(ch.get("auto_upgrade", False))
                     e.min_upgrade_quality = str(ch.get("min_upgrade_quality", "") or "")
+                    layout = str(ch.get("media_server_layout", "") or "").lower()
+                    e.media_server_layout = layout if layout in ("seasoned", "flat") else ""
                     break
