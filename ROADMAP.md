@@ -21,7 +21,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ### 0. Versatility Program (2026-07-16 research — active drain queue)
 
-Mission: any video or audio, from any website, in any format, at any quality the source offers, with full user control. See `RESEARCH.md` 2026-07-16 pass for the capability matrix and evidence. DRM circumvention is out of bounds throughout.
+Mission: any video or audio, from any website, in any format, at any quality the source offers, with full user control. See `RESEARCH.md` (2026-07-29) for the current evidence synthesis; dated notes below preserve their own scoped evidence. DRM circumvention is out of bounds throughout.
 
 #### VP-P0 — Depth of control (yt-dlp passthrough + UI)
 
@@ -45,6 +45,7 @@ Mission: any video or audio, from any website, in any format, at any quality the
   What: in-process streamlink for Twitch/Kick live: mandatory ad-filtering, low-latency mode, DVR rewind (--hls-start-offset/--hls-live-restart), stream-up polling for monitors.
   Effort: L
   > 2026-07-27: streamlink ≥7.5.0 removed `--twitch-disable-ads` — ad-filtering is now default/mandatory, so assume it is always on. Pairs with V37 (SSAI ad-segment stripping for VODs, which streamlink's live pre-mux grab does not cover). (RESEARCH.md 2026-07-27)
+  > 2026-07-29: V46 is a security prerequisite. Streamlink 8.4 fixed CVE-2026-44353 after nested HLS/DASH `file://` URIs disclosed local files; every engine must share StreamKeep's remote-manifest URI/SSRF policy rather than trusting engine defaults. (RESEARCH.md 2026-07-29)
 
 - [ ] V14 — MSE buffer recorder (DRM-free only)
   What: Playwright init-script hook on SourceBuffer.appendBuffer teeing segments to disk; ffmpeg concat/remux; hard-refuse on any EME session; tab-open/playback-speed limitations documented.
@@ -54,6 +55,7 @@ Mission: any video or audio, from any website, in any format, at any quality the
 
 - [ ] V16 — URL-pattern → profile auto-selection + zero-dialog Smart Mode toggle. Effort: M
 - [ ] V18 — Media-server output layouts per monitor (Jellyfin/Plex/Kodi S/E naming + NFO). Effort: M
+  > 2026-07-29: Expand acceptance with native server playlists plus portable M3U and an optional, previewed watched-state import from one explicitly selected Plex/Jellyfin/Emby user. Ambiguous mappings must be skipped, and imported watched state must never trigger lifecycle deletion without a separate opt-in. (Youtarr v1.77.0; RESEARCH.md 2026-07-29)
 - [ ] V20 — Pre-queue validation probe + multi-media picker responses (cobalt-style) in GUI and REST. Effort: M
   > 2026-07-27: cobalt's picker also carries per-item type (photo/video/gif) and a separate background-audio track; extend the picker payload accordingly. Dubbed-audio-language selection and a clean audio-strip `mute` mode are tracked separately as V40. (RESEARCH.md 2026-07-27)
 
@@ -164,6 +166,7 @@ Mission: any video or audio, from any website, in any format, at any quality the
   Touches: `streamkeep/local_server.py`, new static HTML/CSS/JS assets, existing authentication and pairing infrastructure.
   Acceptance: The web remote is responsive (mobile-first); authenticated via the existing pairing/token system; provides URL submission, queue status, active download monitoring, and basic library browsing; does not require any native mobile app installation; works over HTTPS reverse proxy for LAN access.
   Complexity: L
+  > 2026-07-29: Core status, queue, library, monitor, resumable, and failure views already ship as an embedded viewport-aware SPA. Remaining scope is V45 first, then real mobile-browser accessibility, focus/error/loading states, narrow-width overflow, and HTTPS reverse-proxy smoke—not a second web UI. (RESEARCH.md 2026-07-29)
 
 ### 2026-07-20 Research-Driven Additions
 
@@ -211,6 +214,7 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Touches: `StreamKeep.spec` (add `COLLECT`), `packaging/build.py`, an Inno/NSIS script (unsigned), `updater.py` self-replace flow (must swap a directory/installer, not a single exe), release artifact + smoke test.
   Acceptance: `packaging/build.py` produces a onedir tree plus an unsigned installer; cold start is measurably faster than the onefile; the self-update path swaps the installed onedir/installer without leaving orphans; artifact smoke passes headless; double-launch no longer races temp extraction.
   Complexity: M
+  > 2026-07-29: No signing is permitted. Remove/disable the Authenticode/PFX-only updater path for unsigned builds; use explicit manual/package-manager updating with published hashes, replace the stale WinGet 4.38.0 placeholder hash, and keep Windows scope separate from V53. (RESEARCH.md 2026-07-29)
 
 - [ ] P1 — V36 — Live-capture reliability: fragment-gap recovery + optional ytarchive engine
   Why: yt-dlp `--live-from-start` drops fragments on unstable streams (open issues #13359/#15921/#16673) and users route to ytarchive/streamlink for reliability-critical captures; StreamKeep is yt-dlp/ffmpeg-only for live.
@@ -218,6 +222,7 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Touches: a generalized typed download-engine interface (factor out of `integrations/gallery_dl.py`/`lux.py`), an `ytarchive` engine adapter, live-fragment gap detection/retry in `workers/download.py`, capability detection in `capabilities.py`, Settings engine preference, tests.
   Acceptance: when yt-dlp live capture reports fragment gaps, the job either recovers the missing fragments or (opt-in) falls back to ytarchive for a from-start capture; the engine is optional and detected like gallery-dl/lux; absence degrades to current yt-dlp behavior; a fixture reproduces a gap and asserts recovery/fallback.
   Complexity: L
+  > 2026-07-29: Preserve raw `.part`/TS/segment staging after interruption or finalization failure, report missing intervals, and provide an idempotent “Finalize/Salvage to new file” action; never overwrite the raw capture or known-good output. (BililiveRecorder, livestream_saver v2.0.0, ytarchive; RESEARCH.md 2026-07-29)
 
 #### P2 — Later
 
@@ -280,3 +285,50 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
   Complexity: M
 
 
+### 2026-07-29 Research-Driven Additions
+
+#### P1 — Next
+
+- [ ] P1 — V49 — Add a persistent error-aware automatic retry scheduler
+  Why: StreamKeep records failures and supports manual retry, but transient outages still require supervision and worker-local retries do not survive restart.
+  Evidence: existing failed-job ledger and operations-view item; TubeSync gradual retries, Tartube issue #735, MeTube issue #767, Pinchflat source health patterns.
+  Touches: failed-job schema/migration, typed error classifier, headless/GUI scheduler, source circuit state, operations/API presentation, deterministic clock/network tests.
+  Acceptance: transient network, timeout, 429 and retryable 5xx failures persist attempt count, category, `next_attempt_at`, `Retry-After`, exponential backoff and jitter; authentication, DRM, missing-media, invalid-config, permission and disk failures stop for intervention; per-source circuit breaking prevents request storms; retries survive restart, can be canceled, and expose last reason/next attempt without leaking URLs or credentials.
+  Complexity: M
+
+- [ ] P1 — V50 — Add named, site-bound authentication profiles
+  Why: One global cookie file cannot safely represent multiple accounts or let rules and monitors select the credentials a source requires.
+  Evidence: `streamkeep/cookies.py`, `streamkeep/accounts.py`, `streamkeep/rules.py`; YTPTube PR #641 and ytarchive membership/PO-token workflows.
+  Touches: profile schema/secure storage, job spec, rules, monitors, CLI/Settings selectors, credential probes, diagnostics/export redaction and migration.
+  Acceptance: jobs/rules/monitors persist only an opaque profile ID; each profile declares allowed hosts/platforms and refuses cross-site fallback; cookie/token material remains in permission-restricted files or OS secure storage; validation is per profile; logs, hooks, backups, diagnostics and exports reveal neither secret material nor sensitive paths; the current global cookie setting migrates to an explicit default profile without duplicating its contents.
+  Complexity: M
+
+- [ ] P1 — V51 — Make rotating automatic backups reachable and observable
+  Why: `auto_backup()` already creates and rotates validated backups, but no production path schedules it and the module documents a nonexistent `schedule_backup()`.
+  Evidence: `streamkeep/backup.py:13` and `:229-259`, `streamkeep/maintenance.py`; local-first products need recovery that does not depend on remembering a manual command.
+  Touches: backup settings, GUI/headless profile scheduler, V44 ownership lease, maintenance/operations status, notifications, fake-clock/restart tests.
+  Acceptance: users configure enablement, destination, cadence and retention; only the profile execution owner runs a non-overlapping backup through an atomic temporary output; last success, next run, size and failure reason are visible; destination loss or validation failure preserves older backups and notifies without retry storms; fake-clock tests cover restart, rotation, cancellation, and restore validation.
+  Complexity: M
+
+- [ ] P1 — V52 — Add one unsigned local release gate with machine-checked product claims
+  Why: reproducible build smoke is strong but skips source/tests/translations/advisories, while README, capability registry, Flatpak metadata, updater policy, and Spanish completeness currently disagree with reachable behavior.
+  Evidence: `packaging/reproducible_build.py`, `packaging/sbom.py` (`--audit` is unused by the builder), `streamkeep/capabilities.py:186-208`, `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml:18-19`, `README.md:90`, `:154`, and `:216-227`; Spanish catalog 139/1,325 translated on 2026-07-29.
+  Touches: a local release-gate command, translation extraction/compilation checks, capability contract tests, README/metainfo/locale labels, advisory scan, V35 build/SBOM/artifact smoke.
+  Acceptance: one command runs compileall, deterministic translation extraction/compile validation, pytest, pyflakes, capability/claim consistency, dependency advisory audit, reproducible unsigned build, SBOM/license generation and artifact startup smoke; it identifies the exact failed stage; native notifications are labeled shipped, upload/plugins experimental, Spanish core/beta, and unsigned updates manual/package-managed; no signing step or GitHub Actions workflow is introduced.
+  Complexity: M
+
+#### P2 — Later
+
+- [ ] P2 — V53 — Produce and smoke-test unsigned macOS and portable Linux artifacts
+  Why: source-level platform claims are not release proof; Windows has real artifact smoke, while macOS has no package and Flatpak/MSIX validation is mostly static.
+  Evidence: current packaging tree; Open Video Downloader, Parabolic, and Media Downloader release matrices; V35 remains the separate Windows lane.
+  Touches: target-specific PyInstaller/packaging definitions, macOS x64/arm64 bundles, portable Linux artifact plus Flatpak install smoke, release manifests/checksums/SBOM, target-host smoke scripts and docs.
+  Acceptance: native target hosts build unsigned macOS x64 and arm64 app bundles and at least one portable Linux artifact; each launches against empty, migrated, and populated profiles, resolves bundled runtime paths, opens the desktop, and exits cleanly; hashes/SBOMs are published and support claims name only proven targets; no code signing, notarization, or signing gate is added.
+  Complexity: L
+
+- [ ] P2 — V54 — Follow the OS contrast preference when System theme is selected
+  Why: StreamKeep ships a tested High Contrast theme, and pinned Qt 6.11 exposes live accessibility contrast hints, but System mode never consumes them.
+  Evidence: `streamkeep/theme.py`, appearance settings, `tests/test_accessibility.py`; Qt `QAccessibilityHints::contrastPreference` available since Qt 6.10; WCAG 2.2.
+  Touches: theme/system-preference observer, main-window theme refresh, Appearance microcopy, signal-driven tests.
+  Acceptance: System theme enters/exits StreamKeep High Contrast when the OS contrast preference changes without restart; explicit Dark, Light, or High Contrast selections remain sticky and ignore later system changes; focus, disabled, error, selection and chart colors remain distinguishable at 100% and 200% scale; tests simulate both signal directions.
+  Complexity: S
