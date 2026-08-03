@@ -30,7 +30,10 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
+
+TOMBSTONE_REASONS = frozenset({"user", "retention", "lifecycle"})
+TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
 
 _PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _PUBLISHING_TEXT_LIMIT = 256
@@ -90,6 +93,8 @@ def init_db() -> None:
                 _migrate_intelligence_v15(db)
             if v < 16:
                 _migrate_identity_v16(db)
+            if v < 17:
+                _migrate_tombstones_v17(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -287,6 +292,7 @@ def _apply_schema(db):
             last_reason      TEXT    NOT NULL DEFAULT '',
             updated_at       TEXT    NOT NULL DEFAULT ''
         );
+
     """
     statement = []
     for line in script.splitlines(keepends=True):
@@ -300,6 +306,36 @@ def _apply_schema(db):
     _apply_publishing_schema(db)
     _apply_upload_schema(db)
     _apply_intelligence_schema(db)
+    _apply_tombstone_schema(db)
+
+
+def _apply_tombstone_schema(db):
+    """Create the durable deletion ledger and its canonical identity indexes."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS media_tombstones (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform    TEXT NOT NULL DEFAULT '',
+            source_id   TEXT NOT NULL DEFAULT '',
+            webpage_url TEXT NOT NULL DEFAULT '',
+            deleted_at  TEXT NOT NULL DEFAULT '',
+            reason      TEXT NOT NULL DEFAULT 'user',
+            path        TEXT NOT NULL DEFAULT '',
+            title       TEXT NOT NULL DEFAULT '',
+            channel     TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_tombstones_identity
+            ON media_tombstones(platform COLLATE NOCASE, source_id);
+        CREATE INDEX IF NOT EXISTS idx_tombstones_webpage_url
+            ON media_tombstones(webpage_url);
+        CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at
+            ON media_tombstones(deleted_at DESC, id DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tombstones_source_identity
+            ON media_tombstones(platform COLLATE NOCASE, source_id)
+            WHERE source_id <> '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tombstones_page_identity
+            ON media_tombstones(webpage_url)
+            WHERE webpage_url <> '';
+    """)
 
 
 def _fts5_enabled():
@@ -730,6 +766,11 @@ def _migrate_identity_v16(db):
     )
 
 
+def _migrate_tombstones_v17(db):
+    """Install the deletion ledger used to suppress deliberate re-fetches."""
+    _apply_tombstone_schema(db)
+
+
 def _migrate_media_layout_v12(db):
     """Add the per-monitor media-server layout override."""
     existing_cols = {
@@ -1110,6 +1151,290 @@ def _canonical_history_entry(entry_dict: dict[str, Any]) -> dict[str, Any]:
     raw["webpage_url"] = provenance.webpage_url
     raw["url"] = provenance.webpage_url or str(raw.get("url", "") or "")
     return raw
+
+
+def _canonical_tombstone_fields(
+    record=None,
+    *,
+    platform="",
+    source_id="",
+    webpage_url="",
+    url="",
+    path="",
+    title="",
+    channel="",
+):
+    """Return canonical identity and display fields for a deletion record."""
+    if isinstance(record, dict):
+        platform = platform or record.get("vod_platform") or record.get("platform", "")
+        source_id = source_id or record.get("source_id", "")
+        webpage_url = webpage_url or record.get("webpage_url", "")
+        url = url or record.get("url", "")
+        url = url or record.get("vod_source", "")
+        path = path or record.get("path", "") or record.get("output_dir", "")
+        title = title or record.get("title", "") or record.get("vod_title", "")
+        channel = channel or record.get("channel", "") or record.get("vod_channel", "")
+    elif record is not None:
+        platform = platform or getattr(record, "vod_platform", "") or getattr(record, "platform", "")
+        source_id = source_id or getattr(record, "source_id", "")
+        webpage_url = webpage_url or getattr(record, "webpage_url", "")
+        url = url or getattr(record, "url", "") or getattr(record, "source", "")
+        path = path or getattr(record, "path", "") or getattr(record, "output_dir", "")
+        title = title or getattr(record, "title", "") or getattr(record, "vod_title", "")
+        channel = channel or getattr(record, "channel", "") or getattr(record, "vod_channel", "")
+
+    from .metadata import build_archival_provenance
+    from .models import StreamInfo
+
+    platform = str(platform or "").strip()
+    source_id = str(source_id or "").strip()
+    webpage_url = str(webpage_url or "").strip()
+    source_url = webpage_url or str(url or "").strip()
+    provenance = build_archival_provenance(
+        StreamInfo(
+            platform=platform,
+            channel=str(channel or "").strip(),
+            source_id=source_id,
+            webpage_url=webpage_url,
+        ),
+        source_url=source_url,
+    )
+    return {
+        "platform": provenance.platform or platform,
+        "source_id": provenance.source_id,
+        "webpage_url": provenance.webpage_url,
+        "path": str(path or ""),
+        "title": str(title or ""),
+        "channel": str(channel or ""),
+    }
+
+
+def _normalize_tombstone_reason(reason):
+    normalized = str(reason or "user").strip().lower()
+    if normalized not in TOMBSTONE_REASONS:
+        raise ValueError(
+            f"tombstone reason must be one of {sorted(TOMBSTONE_REASONS)}"
+        )
+    return normalized
+
+
+def _find_tombstone_in_connection(conn, fields, *, reasons=None):
+    clauses = []
+    params: list[Any] = []
+    platform = str(fields.get("platform", "") or "")
+    source_id = str(fields.get("source_id", "") or "")
+    webpage_url = str(fields.get("webpage_url", "") or "")
+    if source_id:
+        if platform:
+            clauses.append(
+                "(platform=? COLLATE NOCASE AND source_id=?)"
+            )
+            params.extend((platform, source_id))
+        else:
+            clauses.append("source_id=?")
+            params.append(source_id)
+    if webpage_url:
+        clauses.append("webpage_url=?")
+        params.append(webpage_url)
+    if not clauses:
+        return None
+    reason_values = tuple(
+        _normalize_tombstone_reason(reason) for reason in reasons
+    ) if reasons is not None else ()
+    where = [f"({' OR '.join(clauses)})"]
+    if reason_values:
+        placeholders = ",".join("?" for _ in reason_values)
+        where.append(f"reason IN ({placeholders})")
+        params.extend(reason_values)
+    row = conn.execute(
+        "SELECT id, platform, source_id, webpage_url, deleted_at, reason, "
+        "path, title, channel FROM media_tombstones "
+        f"WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT 1",
+        params,
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _upsert_tombstone_in_connection(
+    conn, fields, *, reason="user", deleted_at=None,
+):
+    reason = _normalize_tombstone_reason(reason)
+    if not fields.get("source_id") and not fields.get("webpage_url"):
+        return None
+    deleted_at = str(deleted_at or _utc_now_iso())
+    existing = _find_tombstone_in_connection(conn, fields)
+    if existing is None:
+        cursor = conn.execute(
+            "INSERT INTO media_tombstones "
+            "(platform, source_id, webpage_url, deleted_at, reason, path, title, channel) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                fields.get("platform", ""), fields.get("source_id", ""),
+                fields.get("webpage_url", ""), deleted_at, reason,
+                fields.get("path", ""), fields.get("title", ""),
+                fields.get("channel", ""),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    # A deliberate user deletion must never be downgraded by a later
+    # retention/lifecycle pass for the same media identity.
+    effective_reason = (
+        "user" if existing.get("reason") == "user" or reason == "user"
+        else reason
+    )
+    conn.execute(
+        "UPDATE media_tombstones SET platform=?, source_id=?, webpage_url=?, "
+        "deleted_at=?, reason=?, path=?, title=?, channel=? WHERE id=?",
+        (
+            fields.get("platform", ""), fields.get("source_id", ""),
+            fields.get("webpage_url", ""), deleted_at, effective_reason,
+            fields.get("path", ""), fields.get("title", ""),
+            fields.get("channel", ""), int(existing["id"]),
+        ),
+    )
+    return int(existing["id"])
+
+
+def record_tombstone(
+    record=None,
+    *,
+    platform="",
+    source_id="",
+    webpage_url="",
+    url="",
+    path="",
+    title="",
+    channel="",
+    reason="user",
+    deleted_at=None,
+) -> int | None:
+    """Persist one canonical deletion marker and return its row id."""
+    fields = _canonical_tombstone_fields(
+        record,
+        platform=platform,
+        source_id=source_id,
+        webpage_url=webpage_url,
+        url=url,
+        path=path,
+        title=title,
+        channel=channel,
+    )
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            tombstone_id = _upsert_tombstone_in_connection(
+                conn, fields, reason=reason, deleted_at=deleted_at,
+            )
+            conn.commit()
+            return tombstone_id
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def list_tombstones(*, limit=500, reason="") -> list[dict[str, Any]]:
+    """Return deletion markers newest-first for audit and recovery controls."""
+    limit = max(1, min(5000, int(limit or 500)))
+    params: list[Any] = []
+    where = ""
+    if reason:
+        where = "WHERE reason=?"
+        params.append(_normalize_tombstone_reason(reason))
+    params.append(limit)
+    conn = _connect(readonly=True)
+    try:
+        rows = conn.execute(
+            "SELECT id, platform, source_id, webpage_url, deleted_at, reason, "
+            "path, title, channel FROM media_tombstones "
+            f"{where} ORDER BY deleted_at DESC, id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def find_tombstone(
+    platform="",
+    source_id="",
+    webpage_url="",
+    *,
+    record=None,
+    blocking_only=False,
+) -> dict[str, Any] | None:
+    """Find a tombstone by canonical media identity."""
+    fields = _canonical_tombstone_fields(
+        record,
+        platform=platform,
+        source_id=source_id,
+        webpage_url=webpage_url,
+    )
+    reasons = TOMBSTONE_BLOCKING_REASONS if blocking_only else None
+    conn = _connect(readonly=True)
+    try:
+        return _find_tombstone_in_connection(conn, fields, reasons=reasons)
+    finally:
+        conn.close()
+
+
+def find_tombstone_for_item(item, *, blocking_only=True) -> dict[str, Any] | None:
+    """Find the marker for a queue, VOD, or stream object."""
+    return find_tombstone(record=item, blocking_only=blocking_only)
+
+
+def is_tombstoned(
+    platform="",
+    source_id="",
+    webpage_url="",
+    *,
+    record=None,
+    reasons=None,
+) -> bool:
+    """Return whether an identity is blocked by a deliberate user deletion."""
+    if reasons is None:
+        reasons = TOMBSTONE_BLOCKING_REASONS
+    fields = _canonical_tombstone_fields(
+        record,
+        platform=platform,
+        source_id=source_id,
+        webpage_url=webpage_url,
+    )
+    conn = _connect(readonly=True)
+    try:
+        return _find_tombstone_in_connection(
+            conn, fields, reasons=reasons,
+        ) is not None
+    finally:
+        conn.close()
+
+
+def is_tombstoned_for_item(item, *, reasons=None) -> bool:
+    """Return whether a queue/VOD object is blocked by a tombstone."""
+    return is_tombstoned(record=item, reasons=reasons)
+
+
+def clear_tombstone(tombstone_id: int) -> bool:
+    """Remove one deletion marker so a user can deliberately re-fetch it."""
+    try:
+        tombstone_id = int(tombstone_id)
+    except (TypeError, ValueError):
+        return False
+    if tombstone_id <= 0:
+        return False
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM media_tombstones WHERE id=?", (tombstone_id,)
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
 
 
 def save_completed_recording(
@@ -1495,41 +1820,100 @@ def published_recordings_for_feed(feed_id: Any) -> list[dict[str, Any]] | None:
         db.close()
 
 
-def delete_history_entries(entry_ids: list[int]) -> None:
-    """Delete history rows by id list."""
+def _delete_history_rows_in_connection(conn, entry_ids, *, reason="user") -> int:
+    """Record and remove history rows while the caller owns the transaction."""
+    ids = sorted({int(entry_id) for entry_id in entry_ids})
+    if not ids:
+        return 0
+    reason = _normalize_tombstone_reason(reason)
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT * FROM history WHERE id IN ({placeholders})", ids
+    ).fetchall()
+    for row in rows:
+        _upsert_tombstone_in_connection(
+            conn,
+            _canonical_tombstone_fields(dict(row)),
+            reason=reason,
+        )
+    conn.execute(
+        f"DELETE FROM published_recordings WHERE history_id IN ({placeholders})",
+        ids,
+    )
+    conn.execute(
+        f"DELETE FROM archive_manifests WHERE history_id IN ({placeholders})",
+        ids,
+    )
+    conn.execute(
+        f"DELETE FROM history WHERE id IN ({placeholders})",
+        ids,
+    )
+    return len(rows)
+
+
+def delete_history_entries(
+    entry_ids: list[int], *, reason="user",
+) -> None:
+    """Record deletion tombstones, then delete history rows by id list."""
     if not entry_ids:
         return
     with _write_lock:
         db = _connect()
         try:
-            placeholders = ",".join("?" for _ in entry_ids)
-            ids = [int(i) for i in entry_ids]
-            db.execute(
-                f"DELETE FROM published_recordings WHERE history_id IN ({placeholders})",
-                ids,
-            )
-            db.execute(
-                f"DELETE FROM archive_manifests WHERE history_id IN ({placeholders})",
-                ids,
-            )
-            db.execute(
-                f"DELETE FROM history WHERE id IN ({placeholders})",
-                ids,
+            db.execute("BEGIN IMMEDIATE")
+            _delete_history_rows_in_connection(db, entry_ids, reason=reason)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
+def delete_history_for_paths(paths, *, reason="user") -> int:
+    """Tombstone and remove every history row pointing at one of *paths*."""
+    normalized = {
+        os.path.normcase(os.path.realpath(str(path)))
+        for path in (paths or ()) if path
+    }
+    if not normalized:
+        return 0
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT id, path FROM history").fetchall()
+            ids = [
+                int(row[0]) for row in rows
+                if row[1]
+                and os.path.normcase(os.path.realpath(str(row[1]))) in normalized
+            ]
+            removed = _delete_history_rows_in_connection(
+                db, ids, reason=reason,
             )
             db.commit()
+            return removed
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
 
 def clear_history() -> None:
-    """Delete all history entries."""
+    """Record user tombstones, then delete all history entries."""
     with _write_lock:
         db = _connect()
         try:
-            db.execute("DELETE FROM published_recordings")
-            db.execute("DELETE FROM archive_manifests")
-            db.execute("DELETE FROM history")
+            db.execute("BEGIN IMMEDIATE")
+            ids = [
+                int(row[0]) for row in db.execute("SELECT id FROM history").fetchall()
+            ]
+            _delete_history_rows_in_connection(db, ids, reason="user")
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -1817,6 +2201,74 @@ def load_queue_job(job_id: str) -> dict[str, Any] | None:
         db.close()
 
 
+def _tombstone_skip_data(item, tombstone):
+    data = dict(item or {})
+    data.update({
+        "status": "cancelled",
+        "note": (
+            "Skipped: media was deliberately removed; clear its tombstone "
+            "before downloading again."
+        ),
+        "tombstone_skipped": True,
+        "tombstone_id": int(tombstone.get("id", 0) or 0),
+        "tombstone_reason": str(tombstone.get("reason", "user") or "user"),
+    })
+    return data
+
+
+def skip_tombstoned_queue_jobs(
+    *, statuses=("queued", "failed", "retrying"),
+) -> list[dict[str, Any]]:
+    """Cancel queued work whose canonical identity is user-tombstoned."""
+    statuses = tuple(str(status) for status in statuses if str(status))
+    if not statuses:
+        return []
+    placeholders = ",".join("?" for _ in statuses)
+    changed_ids: list[str] = []
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT job_id, url, title, platform, quality, status, recurrence, "
+                "failure_id, created_at, updated_at, data, revision, execution_owner "
+                "FROM download_queue WHERE status IN (" + placeholders + ") "
+                "ORDER BY position ASC",
+                statuses,
+            ).fetchall()
+            now = _utc_now_iso()
+            for row in rows:
+                item = _queue_row_to_dict(row)
+                tombstone = _find_tombstone_in_connection(
+                    conn,
+                    _canonical_tombstone_fields(item),
+                    reasons=TOMBSTONE_BLOCKING_REASONS,
+                )
+                if tombstone is None:
+                    continue
+                data = _tombstone_skip_data(item, tombstone)
+                conn.execute(
+                    "UPDATE download_queue SET status='cancelled', "
+                    "execution_owner='', updated_at=?, data=?, revision=revision+1 "
+                    "WHERE job_id=?",
+                    (
+                        now, json.dumps(data, ensure_ascii=False),
+                        str(item.get("job_id", "")),
+                    ),
+                )
+                changed_ids.append(str(item.get("job_id", "")))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return [
+        job for job_id in changed_ids
+        if (job := load_queue_job(job_id)) is not None
+    ]
+
+
 def enqueue_queue_job(item: dict[str, Any]) -> dict[str, Any]:
     """Append one durable queue job without rewriting unrelated queue rows."""
     now = _utc_now_iso()
@@ -1830,6 +2282,13 @@ def enqueue_queue_job(item: dict[str, Any]) -> dict[str, Any]:
             position = int(db.execute(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM download_queue"
             ).fetchone()[0])
+            tombstone = _find_tombstone_in_connection(
+                db,
+                _canonical_tombstone_fields(data),
+                reasons=TOMBSTONE_BLOCKING_REASONS,
+            )
+            if tombstone is not None:
+                data = _tombstone_skip_data(data, tombstone)
             db.execute(
                 "INSERT INTO download_queue "
                 "(job_id, position, url, title, platform, quality, status, "
@@ -2350,6 +2809,24 @@ def claim_queue_job(
                 data = json.loads(row[0]) if row[0] else {}
             except (json.JSONDecodeError, TypeError):
                 data = {}
+            tombstone = _find_tombstone_in_connection(
+                conn,
+                _canonical_tombstone_fields(data),
+                reasons=TOMBSTONE_BLOCKING_REASONS,
+            )
+            if tombstone is not None:
+                skipped = _tombstone_skip_data(data, tombstone)
+                conn.execute(
+                    "UPDATE download_queue SET status='cancelled', "
+                    "execution_owner='', updated_at=?, data=?, revision=revision+1 "
+                    "WHERE job_id=? AND status='queued' AND revision=?",
+                    (
+                        _utc_now_iso(), json.dumps(skipped, ensure_ascii=False),
+                        job_id, int(row[1] or 0),
+                    ),
+                )
+                conn.commit()
+                return None
             data.update(changed)
             data["job_id"] = job_id
             result = conn.execute(

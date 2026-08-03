@@ -481,6 +481,30 @@ class DownloadQueueMixin:
         except Exception as error:
             self._set_status(f"Cannot queue this media: {error}", "warning")
             return False
+        tombstone = _db.find_tombstone_for_item({
+            "url": url,
+            "platform": platform,
+            "vod_platform": vod_platform,
+            "vod_source": vod_source,
+            "source_id": source_id,
+            "webpage_url": webpage_url,
+            "title": title or vod_title,
+            "channel": vod_channel,
+        })
+        if tombstone is not None:
+            identity_label = (
+                source_id or webpage_url or vod_source or url
+            )
+            self._log(
+                f"[QUEUE] Skipped tombstoned media {identity_label}; "
+                "clear its tombstone to download it again."
+            )
+            self._set_status(
+                "This media was deliberately removed. Clear its tombstone "
+                "in Settings before downloading it again.",
+                "warning",
+            )
+            return False
         item_key = str(vod_source or url)
         if any(
             (q.get("vod_source") or q.get("url")) == item_key
@@ -663,6 +687,27 @@ class DownloadQueueMixin:
         active_ids = set(self._queue_workers.keys()) | set(self._queue_fetch_workers.keys())
         for q in self._download_queue:
             if q.get("status") != "queued":
+                continue
+            tombstone = _db.find_tombstone_for_item(q)
+            if tombstone is not None:
+                note = (
+                    "Skipped: media was deliberately removed; clear its "
+                    "tombstone before downloading again."
+                )
+                if self._set_queue_item_status(
+                    q,
+                    "cancelled",
+                    note,
+                    tombstone_skipped=True,
+                    tombstone_id=int(tombstone.get("id", 0) or 0),
+                    tombstone_reason=str(
+                        tombstone.get("reason", "user") or "user"
+                    ),
+                ):
+                    self._log(
+                        f"[QUEUE] Skipped tombstoned media "
+                        f"{q.get('source_id') or q.get('webpage_url') or q.get('url')}"
+                    )
                 continue
             if id(q) in active_ids:
                 continue

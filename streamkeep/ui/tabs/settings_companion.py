@@ -425,7 +425,7 @@ class SettingsCompanionMixin:
                     real_path for real_path in removal_real_paths(removals)
                     if not os.path.isdir(real_path)
                 }
-                self._remove_history_for_paths(removed_paths)
+                self._remove_history_for_paths(removed_paths, reason="lifecycle")
             self._log(f"[LIFECYCLE] Recycled {removed} recording(s).")
             self._set_status(f"Lifecycle cleanup: {removed} recording(s) recycled.", "success")
 
@@ -452,8 +452,98 @@ class SettingsCompanionMixin:
                     real_path for real_path in removal_real_paths(removals)
                     if not os.path.isdir(real_path)
                 }
-                self._remove_history_for_paths(removed_paths)
+                self._remove_history_for_paths(removed_paths, reason="lifecycle")
                 self._log(f"[LIFECYCLE] Auto-cleanup recycled {removed} recording(s).")
+
+    def _on_tombstone_manager(self):
+        """List deletion markers and let the user re-enable one identity."""
+        from PyQt6.QtWidgets import (
+            QDialog, QHBoxLayout, QLabel, QPushButton, QTableWidget,
+            QTableWidgetItem, QVBoxLayout,
+        )
+        from PyQt6.QtWidgets import QAbstractItemView, QHeaderView
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Removed media")
+        dialog.setMinimumSize(760, 420)
+        layout = QVBoxLayout(dialog)
+        description = QLabel(
+            "Deliberately removed media stays out of monitor, playlist, and queue "
+            "dispatch until its tombstone is cleared. Retention and lifecycle "
+            "markers are listed for audit but do not block re-fetching."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        summary = QLabel()
+        layout.addWidget(summary)
+        table = QTableWidget(0, 5, dialog)
+        table.setHorizontalHeaderLabels(
+            ("Platform", "Identity", "Deleted", "Reason", "Action")
+        )
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(table, 1)
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        close_row.addWidget(close_button)
+        layout.addLayout(close_row)
+
+        def refresh():
+            rows = _db.list_tombstones(limit=500)
+            table.setRowCount(0)
+            for marker in rows:
+                row = table.rowCount()
+                table.insertRow(row)
+                identity = (
+                    marker.get("source_id")
+                    or marker.get("webpage_url")
+                    or "unknown identity"
+                )
+                values = (
+                    marker.get("platform", ""), identity,
+                    marker.get("deleted_at", ""),
+                    str(marker.get("reason", "user")).capitalize(),
+                )
+                for column, value in enumerate(values):
+                    table.setItem(row, column, QTableWidgetItem(str(value)))
+                action = QPushButton("Clear")
+                action.setObjectName("secondary")
+                action.clicked.connect(
+                    lambda _checked=False, marker_id=marker.get("id", 0):
+                    clear_one(marker_id)
+                )
+                table.setCellWidget(row, 4, action)
+            summary.setText(
+                f"{len(rows)} removed-media marker(s)"
+                if rows else "No removed-media markers."
+            )
+
+        def clear_one(marker_id):
+            if not _db.clear_tombstone(marker_id):
+                return
+            self._log(f"[TOMBSTONE] Cleared removed-media marker {marker_id}.")
+            self._set_status(
+                "Removed-media marker cleared; the identity may be downloaded again.",
+                "success",
+            )
+            refresh()
+
+        refresh()
+        dialog.exec()
 
     # ── Browser companion local server ───────────────────────────────
 

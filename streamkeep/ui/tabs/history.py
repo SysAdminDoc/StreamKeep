@@ -424,23 +424,9 @@ class HistoryTabMixin:
 
     # ── Remove entries whose folders were recycled ───────────────────
 
-    def _remove_history_for_paths(self, real_paths):
-        """Remove all history rows that point at any recycled recording path."""
-        real_paths = {os.path.realpath(path) for path in (real_paths or set()) if path}
-        if not real_paths:
-            return
-
-        def _entry_real_path(entry):
-            path = getattr(entry, "path", "") or ""
-            return os.path.realpath(path) if path else ""
-
-        db_ids = []
-        for row in _db.iter_history(page_size=500):
-            entry = HistoryEntry.from_dict(row)
-            if entry.db_id and _entry_real_path(entry) in real_paths:
-                db_ids.append(entry.db_id)
-        if db_ids:
-            _db.delete_history_entries(db_ids)
+    def _remove_history_for_paths(self, real_paths, *, reason="user"):
+        """Remove history rows for recycled paths and record their reason."""
+        _db.delete_history_for_paths(real_paths, reason=reason)
         self._refresh_history_table()
 
     # ── History Actions ──────────────────────────────────────────────

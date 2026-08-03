@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from streamkeep import db, monitor as monitor_mod
-from streamkeep.models import MonitorEntry
+from streamkeep.models import MonitorEntry, VODInfo
 from streamkeep.monitor import ChannelMonitor, entry_in_schedule_window
 
 
@@ -190,6 +190,44 @@ class ChannelMonitorDedupTests(unittest.TestCase):
 
             self.assertEqual(len(restored.entries), 1)
             self.assertEqual(restored.entries[0].auth_profile_id, "ap_members")
+
+    def test_new_vods_filter_user_tombstones_but_keep_lifecycle_markers_nonblocking(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.record_tombstone(
+                    platform="Twitch", source_id="vod:blocked",
+                    webpage_url="https://www.twitch.tv/videos/blocked",
+                    reason="user",
+                )
+                db.record_tombstone(
+                    platform="Twitch", source_id="vod:retained",
+                    webpage_url="https://www.twitch.tv/videos/retained",
+                    reason="retention",
+                )
+                self.monitor.entries.append(MonitorEntry(
+                    channel_id="channel", _cancel_requested=False,
+                ))
+                emitted = []
+                self.monitor.new_vods_found.connect(
+                    lambda _channel_id, vods: emitted.extend(vods)
+                )
+                self.monitor._on_new_vods("channel", [
+                    VODInfo(
+                        title="Blocked", source="blocked", platform="Twitch",
+                        source_id="vod:blocked",
+                        webpage_url="https://www.twitch.tv/videos/blocked",
+                    ),
+                    VODInfo(
+                        title="Retention", source="retained", platform="Twitch",
+                        source_id="vod:retained",
+                        webpage_url="https://www.twitch.tv/videos/retained",
+                    ),
+                ])
+
+            self.assertEqual([vod.title for vod in emitted], ["Retention"])
+            self.assertEqual(self.monitor.entries[0].archive_ids, ["twitch::vod:retained"])
 
 
 if __name__ == "__main__":

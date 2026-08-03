@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from ...maintenance import (
     apply_maintenance, load_pending_plan, plan_maintenance, save_pending_plan,
 )
+from ... import db as _db
 from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
@@ -737,6 +738,13 @@ class StorageTabMixin:
                 recycled += 1
             except Exception as e:
                 self._log(f"[STORAGE] Could not recycle {g.dir_path}: {e}")
+                continue
+            try:
+                _db.delete_history_for_paths([g.dir_path], reason="user")
+            except Exception as e:
+                self._log(
+                    f"[STORAGE] Could not record tombstone for {g.dir_path}: {e}"
+                )
         if recycled:
             self._log(
                 f"[STORAGE] Recycled {recycled} folder(s) totalling "

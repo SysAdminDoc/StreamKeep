@@ -272,6 +272,16 @@ def execute_cleanup(removals, log_fn=None):
         try:
             _send2trash(path)
             removed += 1
+            try:
+                from . import db as _db
+                _db.delete_history_for_paths([path], reason="lifecycle")
+            except Exception as error:
+                # Recycling the media remains successful even if a legacy or
+                # externally supplied database cannot accept the audit row.
+                if log_fn:
+                    log_fn(
+                        f"[LIFECYCLE] Could not record tombstone for {path}: {error}"
+                    )
             if log_fn:
                 log_fn(f"[LIFECYCLE] Recycled: {os.path.basename(path)} ({reason})")
         except Exception as e:

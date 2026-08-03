@@ -32,6 +32,24 @@ def vod_archive_key(vod):
     return str(getattr(vod, "source", "") or "")
 
 
+def _vod_tombstone(vod):
+    """Return a blocking deletion marker without coupling monitor startup to DB."""
+    try:
+        from . import db
+        return db.find_tombstone_for_item(vod)
+    except Exception:
+        return None
+
+
+def _vod_identity_label(vod):
+    return str(
+        getattr(vod, "source_id", "")
+        or getattr(vod, "webpage_url", "")
+        or getattr(vod, "source", "")
+        or "unknown media"
+    )
+
+
 def _stream_imminent(entry):
     """Return True if a cached schedule shows a stream starting within 10 min."""
     try:
@@ -147,14 +165,21 @@ class _PollTask(QRunnable):
                         vods, _cursor = ext.list_vods(
                             entry.url, log_fn=self.signals.log.emit
                         )
-                        new_vods = [
-                            v for v in vods
-                            if (
+                        new_vods = []
+                        for v in vods:
+                            if not (
                                 v.source
                                 and vod_archive_key(v) not in entry.archive_ids
                                 and v.source not in entry.archive_ids
-                            )
-                        ]
+                            ):
+                                continue
+                            if _vod_tombstone(v) is not None:
+                                self.signals.log.emit(
+                                    f"[SUBSCRIBE] {entry.channel_id}: skipped "
+                                    f"tombstoned VOD {_vod_identity_label(v)}"
+                                )
+                                continue
+                            new_vods.append(v)
                         if new_vods and not getattr(entry, "_cancel_requested", False):
                             self.signals.log.emit(
                                 f"[SUBSCRIBE] {entry.channel_id}: "
@@ -278,20 +303,26 @@ class ChannelMonitor(QObject):
 
     @pyqtSlot(str, list)
     def _on_new_vods(self, channel_id, new_vods):
-        emit = False
+        accepted = []
         with self._entries_lock:
             for e in self.entries:
                 if e.channel_id == channel_id and not e._cancel_requested:
                     for v in new_vods:
+                        if _vod_tombstone(v) is not None:
+                            self.log.emit(
+                                f"[SUBSCRIBE] {channel_id}: skipped tombstoned "
+                                f"VOD {_vod_identity_label(v)}"
+                            )
+                            continue
                         key = vod_archive_key(v)
                         if key and key not in e.archive_ids:
                             e.archive_ids.append(key)
+                        accepted.append(v)
                     if len(e.archive_ids) > 500:
                         e.archive_ids = e.archive_ids[-500:]
-                    emit = True
                     break
-        if emit:
-            self.new_vods_found.emit(channel_id, new_vods)
+        if accepted:
+            self.new_vods_found.emit(channel_id, accepted)
 
     def seed_archive(self, channel_id, vod_sources):
         """Populate the archive list for a channel (e.g. on first subscribe

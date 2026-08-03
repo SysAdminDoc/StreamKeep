@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added canonical deletion tombstones for user, retention, and lifecycle
+  removals. Recycled user media is now skipped by monitored sources, playlist
+  expansion, and queue dispatch until its tombstone is cleared; the Settings
+  companion exposes a list and per-item clear action.
+
 - Persisted a canonical media identity and public page URL across native
   extractors, immutable jobs, history rows, and metadata sidecars. URL keys now
   normalize host, tracking, query order, and provider-specific page forms;

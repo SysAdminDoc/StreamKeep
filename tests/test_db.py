@@ -367,6 +367,113 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(discarded["status"], "discarded")
 
 
+class DbTombstoneTests(unittest.TestCase):
+    def test_user_history_delete_records_canonical_tombstone_and_clear_allows_refetch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "platform": "Twitch",
+                    "title": "Archived VOD",
+                    "path": str(Path(tmpdir) / "recording"),
+                    "url": "https://WWW.Twitch.tv/videos/123456?utm_source=old",
+                })
+                db.delete_history_entries([history_id])
+                tombstones = db.list_tombstones()
+                blocked = db.is_tombstoned(
+                    "twitch", "vod:123456",
+                    "https://www.twitch.tv/videos/123456?utm_campaign=new",
+                )
+                cleared = db.clear_tombstone(tombstones[0]["id"])
+                unblocked = db.is_tombstoned(
+                    "twitch", "vod:123456",
+                    "https://www.twitch.tv/videos/123456",
+                )
+
+            self.assertEqual(len(tombstones), 1)
+            self.assertEqual(tombstones[0]["reason"], "user")
+            self.assertEqual(tombstones[0]["source_id"], "vod:123456")
+            self.assertEqual(
+                tombstones[0]["webpage_url"],
+                "https://www.twitch.tv/videos/123456",
+            )
+            self.assertTrue(blocked)
+            self.assertTrue(cleared)
+            self.assertFalse(unblocked)
+
+    def test_lifecycle_and_retention_tombstones_are_audited_but_not_blocking(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "platform": "yt-dlp",
+                    "title": "Episode",
+                    "path": str(Path(tmpdir) / "episode"),
+                    "url": "https://www.youtube.com/watch?v=abc123",
+                })
+                db.delete_history_entries([history_id], reason="lifecycle")
+                marker = db.find_tombstone(
+                    "yt-dlp", "abc123", blocking_only=False,
+                )
+                blocked = db.is_tombstoned("yt-dlp", "abc123")
+
+            self.assertEqual(marker["reason"], "lifecycle")
+            self.assertFalse(blocked)
+
+    def test_path_delete_and_queue_dispatch_skip_share_the_same_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            recording = Path(tmpdir) / "recording"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "platform": "yt-dlp",
+                    "title": "Episode",
+                    "path": str(recording),
+                    "url": "https://www.youtube.com/watch?v=queue123",
+                })
+                self.assertEqual(
+                    db.delete_history_for_paths([str(recording)]), 1,
+                )
+                remaining = db.history_count()
+                queued = db.enqueue_queue_job({
+                    "url": "https://youtube.com/watch?v=queue123&utm_medium=mail",
+                    "platform": "yt-dlp",
+                    "source_id": "queue123",
+                    "webpage_url": "https://youtube.com/watch?v=queue123",
+                })
+
+            self.assertGreater(history_id, 0)
+            self.assertEqual(remaining, 0)
+            self.assertEqual(queued["status"], "cancelled")
+            self.assertTrue(queued["tombstone_skipped"])
+            self.assertEqual(queued["tombstone_reason"], "user")
+
+    def test_dispatch_cancels_legacy_queued_row_after_tombstone_is_added(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.save_queue([{
+                    "url": "https://www.youtube.com/watch?v=legacy-queued",
+                    "platform": "yt-dlp",
+                    "source_id": "legacy-queued",
+                    "webpage_url": "https://www.youtube.com/watch?v=legacy-queued",
+                    "status": "queued",
+                }])
+                db.record_tombstone(
+                    platform="yt-dlp", source_id="legacy-queued",
+                    webpage_url="https://www.youtube.com/watch?v=legacy-queued",
+                )
+                skipped = db.skip_tombstoned_queue_jobs()
+
+            self.assertEqual(len(skipped), 1)
+            self.assertEqual(skipped[0]["status"], "cancelled")
+            self.assertTrue(skipped[0]["tombstone_skipped"])
+
+
 class DbQueueNormalizationTests(unittest.TestCase):
     def test_executor_lease_takeover_recovers_only_expired_owner(self):
         with tempfile.TemporaryDirectory() as tmpdir:

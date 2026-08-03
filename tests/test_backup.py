@@ -240,6 +240,38 @@ class BackupTests(unittest.TestCase):
             self.assertIn("clip.mp4", row[0])
 
 
+    def test_create_backup_preserves_media_tombstones(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            db_path = config_dir / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                db.record_tombstone(
+                    platform="yt-dlp",
+                    source_id="backup-vod",
+                    webpage_url="https://www.youtube.com/watch?v=backup-vod",
+                    reason="user",
+                )
+
+            backup_path = config_dir / "tombstones.skbackup"
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.create_backup(backup_path)
+
+            self.assertTrue(ok, message)
+            extracted_db = config_dir / "tombstone_snapshot.db"
+            with zipfile.ZipFile(backup_path, "r") as archive:
+                extracted_db.write_bytes(archive.read("library.db"))
+            conn = sqlite3.connect(extracted_db)
+            try:
+                row = conn.execute(
+                    "SELECT platform, source_id, reason FROM media_tombstones"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertEqual(row, ("yt-dlp", "backup-vod", "user"))
+
+
     def _make_valid_db(self, path):
         conn = sqlite3.connect(path)
         conn.execute("CREATE TABLE items (name TEXT)")

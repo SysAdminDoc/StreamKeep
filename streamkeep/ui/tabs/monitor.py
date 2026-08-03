@@ -1056,6 +1056,10 @@ class MonitorTabMixin:
             except Exception as e:
                 self._log(f"[RETENTION] Could not recycle {path}: {e}")
                 continue
+            try:
+                _db.delete_history_for_paths([path], reason="retention")
+            except Exception as e:
+                self._log(f"[RETENTION] Could not record tombstone for {path}: {e}")
             removed += 1
         if removed:
             self._log(
@@ -1561,6 +1565,24 @@ class MonitorTabMixin:
             from ...paths import source_archive_path
             archive_path = source_archive_path(source_url)
         for v in vods:
+            try:
+                tombstone = _db.find_tombstone_for_item(v)
+            except Exception:
+                # Keep lightweight monitor test doubles and pre-migration
+                # windows usable; the initialized application DB enforces the
+                # tombstone check in the worker and queue paths as well.
+                tombstone = None
+            if tombstone is not None:
+                identity_label = (
+                    getattr(v, "source_id", "")
+                    or getattr(v, "webpage_url", "")
+                    or getattr(v, "source", "")
+                )
+                self._log(
+                    f"[SUBSCRIBE] {channel_id}: skipped tombstoned VOD "
+                    f"{identity_label}"
+                )
+                continue
             # Quality auto-upgrade check (F25)
             upgrade_from = self._check_quality_upgrade(channel_id, v)
             is_upgrade = upgrade_from is not None

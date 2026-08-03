@@ -262,6 +262,12 @@ class HeadlessJobService(QObject):
             "source": str(item.get("source", "") or "headless-api"),
         })
         job = db.enqueue_queue_job(item)
+        if job.get("tombstone_skipped"):
+            write_log_line(
+                "[QUEUE] Skipped tombstoned media "
+                f"{job.get('platform', '') or 'source'} / "
+                f"{job.get('source_id', '') or job.get('webpage_url', '') or job.get('url', '')}"
+            )
         if request_headers:
             with self._request_headers_lock:
                 self._request_headers[str(job.get("job_id", ""))] = request_headers
@@ -370,6 +376,13 @@ class HeadlessJobService(QObject):
                 "[SERVICE] Scheduled automatic retry "
                 f"{job.get('job_id', '')} for {job.get('platform', '') or 'source'}"
             )
+        skipped = db.skip_tombstoned_queue_jobs()
+        for job in skipped:
+            write_log_line(
+                "[QUEUE] Skipped tombstoned media "
+                f"{job.get('platform', '') or 'source'} / "
+                f"{job.get('source_id', '') or job.get('webpage_url', '') or job.get('url', '')}"
+            )
         available = self.max_concurrent - len(self._fetchers) - len(self._downloads)
         if available <= 0:
             return
@@ -403,6 +416,13 @@ class HeadlessJobService(QObject):
             job_id, self.owner_id, status="fetching", progress=0, error=""
         )
         if not current:
+            latest = db.load_queue_job(job_id)
+            if latest and latest.get("tombstone_skipped"):
+                write_log_line(
+                    "[QUEUE] Skipped tombstoned media "
+                    f"{latest.get('platform', '') or 'source'} / "
+                    f"{latest.get('source_id', '') or latest.get('webpage_url', '') or latest.get('url', '')}"
+                )
             return
         worker = FetchWorker(
             str(current.get("url", "")),

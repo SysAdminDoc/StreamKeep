@@ -223,6 +223,35 @@ class HeadlessJobServiceTests(unittest.TestCase):
             self.assertEqual(cancelled["status"], "cancelled")
             self.assertEqual(state["queue"][0]["status"], "cancelled")
 
+    def test_enqueue_logs_when_user_tombstone_blocks_job(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with (
+                mock.patch.object(db, "DB_PATH", root / "library.db"),
+                mock.patch("streamkeep.headless_service.write_log_line") as log,
+            ):
+                db.init_db()
+                db.record_tombstone(
+                    platform="yt-dlp",
+                    source_id="video-1",
+                    webpage_url="https://example.com/watch?v=video-1",
+                    reason="user",
+                )
+                service = HeadlessJobService(output_dir=str(root / "output"))
+                job = service.enqueue({
+                    "url": "https://example.com/watch?v=video-1",
+                    "platform": "yt-dlp",
+                    "source_id": "video-1",
+                    "webpage_url": "https://example.com/watch?v=video-1",
+                })
+
+        self.assertEqual(job["status"], "cancelled")
+        self.assertTrue(job["tombstone_skipped"])
+        self.assertTrue(
+            any("Skipped tombstoned media" in call.args[0]
+                for call in log.call_args_list)
+        )
+
     def test_probe_picker_selection_is_bound_to_the_requested_vod(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with (

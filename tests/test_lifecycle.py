@@ -2,9 +2,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from streamkeep import db
 from streamkeep.lifecycle import (
     evaluate_cleanup,
+    execute_cleanup,
     keep_last_map_from_monitor,
     removal_real_paths,
 )
@@ -12,6 +15,41 @@ from streamkeep.models import HistoryEntry, MonitorEntry
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_execute_cleanup_records_lifecycle_tombstone_and_removes_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "library.db"
+            recording_dir = root / "recording"
+            recording_dir.mkdir()
+            (recording_dir / "clip.mp4").write_bytes(b"x")
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                history_id = db.save_history_entry({
+                    "platform": "yt-dlp",
+                    "title": "Lifecycle clip",
+                    "path": str(recording_dir),
+                    "url": "https://www.youtube.com/watch?v=lifecycle1",
+                })
+                with mock.patch("send2trash.send2trash") as recycle:
+                    removed = execute_cleanup([
+                        (HistoryEntry(
+                            db_id=history_id,
+                            platform="yt-dlp",
+                            source_id="lifecycle1",
+                            webpage_url="https://www.youtube.com/watch?v=lifecycle1",
+                            title="Lifecycle clip",
+                            path=str(recording_dir),
+                        ), "watched"),
+                    ])
+                tombstones = db.list_tombstones()
+                remaining = db.history_count()
+
+            recycle.assert_called_once_with(str(recording_dir))
+            self.assertEqual(removed, 1)
+            self.assertEqual(remaining, 0)
+            self.assertEqual(len(tombstones), 1)
+            self.assertEqual(tombstones[0]["reason"], "lifecycle")
+
     def test_evaluate_cleanup_uses_watched_state_from_duplicate_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             recording_dir = Path(tmpdir) / "recording"

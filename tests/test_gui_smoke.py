@@ -1,5 +1,7 @@
 import threading
+import tempfile
 from unittest import mock
+from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -8,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, QualityInfo
+from streamkeep import db
 
 
 def _ready_ytdlp_status():
@@ -611,3 +614,33 @@ def test_playlist_expand_worker_suppresses_signals_after_interruption(qt_applica
     qt_application.processEvents()
     playlist_probe.assert_not_called()
     assert emitted == []
+
+
+def test_playlist_expand_worker_skips_user_tombstoned_entries(qt_application):
+    from streamkeep.workers.playlist import PlaylistExpandWorker
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch.object(db, "DB_PATH", Path(tmpdir) / "library.db"):
+            db.init_db()
+            db.record_tombstone(
+                platform="yt-dlp",
+                source_id="playlist-blocked",
+                webpage_url="https://www.youtube.com/watch?v=playlist-blocked",
+            )
+            emitted = []
+            worker = PlaylistExpandWorker("https://example.com/playlist")
+            worker.finished.connect(
+                emitted.append, type=Qt.ConnectionType.DirectConnection,
+            )
+            with mock.patch(
+                "streamkeep.workers.playlist.YtDlpExtractor.list_playlist_entries",
+                return_value=[{
+                    "id": "playlist-blocked",
+                    "url": "https://www.youtube.com/watch?v=playlist-blocked",
+                    "title": "Removed video",
+                }],
+            ):
+                worker.run()
+
+    qt_application.processEvents()
+    assert emitted == [[]]
