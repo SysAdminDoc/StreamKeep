@@ -374,6 +374,24 @@ https://video.example.com/720p.m3u8
         self.assertEqual(manifests, tuple(documents))
         self.assertEqual(fetched, list(documents))
 
+    def test_twitch_prefetch_uri_is_checked_as_a_media_reference(self):
+        manifest = (
+            "#EXTM3U\n"
+            "#EXT-X-TWITCH-PREFETCH:segments/prefetch.ts\n"
+        )
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            references = validate_hls_manifest(
+                manifest, "https://origin.example.com/live/media.m3u8"
+            )
+
+        self.assertEqual(
+            references.resources,
+            ("https://origin.example.com/live/segments/prefetch.ts",),
+        )
+
     def test_malicious_hls_fixture_cannot_reach_sentinel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             sentinel = Path(tmpdir) / "sentinel.txt"

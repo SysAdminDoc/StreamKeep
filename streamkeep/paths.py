@@ -37,6 +37,15 @@ FFMPEG_REMOTE_INPUT_SAFETY = [
 ]
 FFMPEG_REMOTE_SAFETY = ["-nostdin", *FFMPEG_REMOTE_INPUT_SAFETY]
 
+# Twitch SSAI filtering stages a generated media playlist locally while its
+# segment/key/map URLs remain remote and are still forced through the guarded
+# child environment. Only the generated file protocol is added to the remote
+# allow-list; shell-like and local discovery protocols remain blocked.
+FFMPEG_FILTERED_HLS_INPUT_SAFETY = [
+    "-protocol_whitelist", "file,http,https,httpproxy,tcp,tls,crypto",
+    "-protocol_blacklist", "pipe,concat,concatf,subfile,unix,data",
+]
+
 # Raw-protocol capture jobs intentionally support a wider, explicit FFmpeg
 # input set than remote HTTP manifests. These sources are operator-selected
 # camera/listener/radio endpoints, never URLs discovered inside untrusted

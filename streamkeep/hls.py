@@ -66,6 +66,11 @@ _HLS_URI_ATTRIBUTE_TAGS = frozenset({
     "#EXT-X-SESSION-DATA",
     "#EXT-X-SESSION-KEY",
 })
+_HLS_URI_VALUE_TAGS = frozenset({
+    # Twitch's low-latency prefetch tag carries a bare segment URI instead of
+    # an RFC 8216 URI attribute. It still crosses the same remote URL gate.
+    "#EXT-X-TWITCH-PREFETCH",
+})
 
 
 def validate_hls_manifest(
@@ -117,6 +122,9 @@ def validate_hls_manifest(
             tag, separator, value = line.partition(":")
             if tag == "#EXT-X-STREAM-INF":
                 pending_playlist = True
+            if separator and tag in _HLS_URI_VALUE_TAGS:
+                add(value)
+                continue
             if not separator or tag not in _HLS_URI_ATTRIBUTE_TAGS:
                 continue
             attrs = _parse_attributes(value)

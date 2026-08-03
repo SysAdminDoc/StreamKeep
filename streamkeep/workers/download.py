@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import time
 from glob import glob
 from pathlib import Path
@@ -26,6 +27,7 @@ from ..net_guard import (
     validate_remote_url,
 )
 from ..paths import (
+    FFMPEG_FILTERED_HLS_INPUT_SAFETY,
     FFMPEG_REMOTE_INPUT_SAFETY,
     FFMPEG_REMOTE_SAFETY,
     _CREATE_NO_WINDOW,
@@ -35,6 +37,10 @@ from ..resume import (
     clear_resume_state, merge_completed, save_resume_state,
 )
 from ..retry import sanitize_failure_reason
+from ..twitch_ssai import (
+    TwitchSSAIPlaylistRefresher,
+    is_twitch_hls_job,
+)
 from ..utils import fmt_duration, fmt_size
 
 
@@ -140,6 +146,11 @@ class DownloadWorker(QThread):
         self._proc_lock = __import__("threading").Lock()
         self._guarded_proxy = None
         self._guarded_transport_ready = False
+        # Twitch SSAI (V37): FFmpeg reads a generated local media playlist so
+        # the segment set can be refreshed and filtered without exposing the
+        # original manifest directly to the muxer.
+        self._twitch_ssai_manifest_path = ""
+        self._twitch_ssai_refresher = None
         self._last_failure_reason = ""
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
@@ -634,11 +645,95 @@ class DownloadWorker(QThread):
         return True
 
     def _stop_guarded_transport(self):
+        refresher = self._twitch_ssai_refresher
+        self._twitch_ssai_refresher = None
+        if refresher is not None:
+            refresher.stop()
+        manifest_path = self._twitch_ssai_manifest_path
+        self._twitch_ssai_manifest_path = ""
+        if manifest_path:
+            try:
+                os.remove(manifest_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.debug(
+                    "Could not remove Twitch SSAI playlist %s",
+                    manifest_path,
+                )
         proxy = self._guarded_proxy
         self._guarded_proxy = None
         self._guarded_transport_ready = False
         if proxy is not None:
             proxy.stop()
+
+    def _prepare_twitch_ssai_manifest(self):
+        """Stage and start refreshing a filtered Twitch media playlist."""
+        if self._twitch_ssai_manifest_path:
+            return True
+        if not is_twitch_hls_job(
+            self.source_platform, self.format_type, self.playlist_url,
+        ) or self._uses_ytdlp_download():
+            return True
+        if self._guarded_proxy is None:
+            self.log.emit(
+                "[WARN] Twitch SSAI filter has no guarded transport; "
+                "using the source playlist"
+            )
+            return True
+
+        body = guarded_curl(
+            self.playlist_url, self._guarded_proxy.url, timeout=20,
+        )
+        if not body or not body.lstrip().startswith("#EXTM3U"):
+            self.log.emit(
+                "[WARN] Twitch SSAI playlist refresh was unavailable; "
+                "using the source playlist"
+            )
+            return True
+
+        fd, path = tempfile.mkstemp(
+            prefix=".streamkeep-twitch-ssai-",
+            suffix=".m3u8",
+        )
+        os.close(fd)
+        refresher = TwitchSSAIPlaylistRefresher(
+            self.playlist_url,
+            self._guarded_proxy.url,
+            path,
+            fetch=guarded_curl,
+        )
+        self._twitch_ssai_manifest_path = path
+        self._twitch_ssai_refresher = refresher
+        try:
+            # The staged playlist is allowed to use ``file`` only for its own
+            # generated document. Re-check the fresh remote response before
+            # rendering so a changed manifest cannot smuggle a local or
+            # non-HTTP URI into that wider FFmpeg input allow-list.
+            from ..hls import validate_hls_manifest
+
+            validate_hls_manifest(body, self.playlist_url)
+            result = refresher.start(body)
+        except (OSError, ValueError) as error:
+            self._twitch_ssai_refresher = None
+            self._twitch_ssai_manifest_path = ""
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            self.log.emit(
+                f"[WARN] Twitch SSAI filtering was unavailable ({error}); "
+                "using the source playlist"
+            )
+            return True
+
+        if result.ad_segment_count:
+            self.log.emit(
+                f"[Twitch SSAI] filtered {result.ad_segment_count} ad "
+                f"segment(s) ({result.ad_duration:.1f}s); "
+                f"kept {result.kept_segment_count} content segment(s)"
+            )
+        return True
 
     def _guard_transport_or_report(self, segment_index):
         try:
@@ -650,12 +745,22 @@ class DownloadWorker(QThread):
             return False
 
     def _ffmpeg_input_args(self, url, *, start=None):
-        args = list(FFMPEG_REMOTE_INPUT_SAFETY)
+        filtered_url = (
+            self._twitch_ssai_manifest_path
+            if self._twitch_ssai_manifest_path
+            and str(url) == str(self.playlist_url)
+            else ""
+        )
+        input_url = filtered_url or url
+        args = list(
+            FFMPEG_FILTERED_HLS_INPUT_SAFETY
+            if filtered_url else FFMPEG_REMOTE_INPUT_SAFETY
+        )
         if start is not None:
             args.extend(["-ss", str(start)])
-        if self._guarded_proxy is not None and self._is_remote_input(url):
+        if self._guarded_proxy is not None and self._is_remote_input(input_url):
             args.extend(["-http_proxy", self._guarded_proxy.url])
-        args.extend(["-i", url])
+        args.extend(["-i", input_url])
         return args
 
     def _guarded_child_env(self):
@@ -1636,6 +1741,8 @@ class DownloadWorker(QThread):
                 )
                 return
             if not self._guard_transport_or_report(seg_idx):
+                return
+            if not self._prepare_twitch_ssai_manifest():
                 return
 
             # Live-only: split long captures into chunks via ffmpeg segment

@@ -7,6 +7,7 @@ import urllib.parse
 from ..http import curl, curl_post_json
 from ..hls import parse_hls_duration
 from ..models import QualityInfo, StreamInfo, VODInfo
+from ..twitch_ssai import filter_twitch_ssai_playlist
 from ..utils import fmt_duration
 from .base import Extractor
 
@@ -213,9 +214,25 @@ class TwitchExtractor(Extractor):
             sub = curl(info.qualities[0].url)
             if sub:
                 info.total_secs, info.start_time, info.segment_count = parse_hls_duration(sub)
+                try:
+                    ssai = filter_twitch_ssai_playlist(
+                        sub, info.qualities[0].url,
+                    )
+                except (TypeError, ValueError):
+                    ssai = None
+                if ssai is not None and ssai.ad_segment_count:
+                    info.total_secs = ssai.content_duration
+                    info.segment_count = ssai.kept_segment_count
+                    self._log(
+                        log_fn,
+                        f"Twitch SSAI: excluded {ssai.ad_segment_count} "
+                        f"ad segment(s) from VOD duration",
+                    )
                 # Twitch VODs may not have TOTAL-SECS — sum EXTINF instead.
                 # Tolerate malformed tokens (e.g. live-edit playlists mid-rewrite).
-                if info.total_secs == 0:
+                if info.total_secs == 0 and not (
+                    ssai is not None and ssai.ad_segment_count
+                ):
                     total = 0.0
                     for mm in re.finditer(r'#EXTINF:([\d.]+)', sub):
                         try:
