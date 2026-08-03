@@ -20,7 +20,7 @@ from ..capabilities import (
     require_capability,
     resolve_tool_command,
 )
-from ..http import guarded_curl, parallel_http_download
+from ..http import guarded_curl, http_head_details, parallel_http_download
 from ..net_guard import (
     GuardedHTTPProxy,
     RemoteURLPolicyError,
@@ -41,6 +41,7 @@ from ..twitch_ssai import (
     TwitchSSAIPlaylistRefresher,
     is_twitch_hls_job,
 )
+from ..twitch_unmute import rewrite_twitch_vod_playlist
 from ..utils import fmt_duration, fmt_size
 
 
@@ -80,6 +81,9 @@ class DownloadWorker(QThread):
         self.streamlink_live_engine = False
         self.streamlink_hls_start_offset = 0.0
         self.streamlink_hls_live_restart = False
+        # Optional same-format restoration of Twitch VOD fragments whose audio
+        # was copyright-muted (V38). Live playlists are never probed.
+        self.twitch_unmute = False
         self.last_capture_gaps = None
         self.rate_limit = ""
         self.proxy = ""
@@ -713,6 +717,14 @@ class DownloadWorker(QThread):
             from ..hls import validate_hls_manifest
 
             validate_hls_manifest(body, self.playlist_url)
+            unmute_result = None
+            if self.twitch_unmute and "#EXT-X-ENDLIST" in body.upper():
+                unmute_result = rewrite_twitch_vod_playlist(
+                    body,
+                    self.playlist_url,
+                    probe=self._probe_twitch_unmuted_fragment,
+                )
+                body = unmute_result.rewritten_body
             result = refresher.start(body)
         except (OSError, ValueError) as error:
             self._twitch_ssai_refresher = None
@@ -733,7 +745,38 @@ class DownloadWorker(QThread):
                 f"segment(s) ({result.ad_duration:.1f}s); "
                 f"kept {result.kept_segment_count} content segment(s)"
             )
+        if unmute_result is not None and unmute_result.muted_segment_count:
+            message = (
+                f"[Twitch unmute] restored "
+                f"{unmute_result.restored_segment_count}/"
+                f"{unmute_result.muted_segment_count} copyright-muted VOD "
+                "fragment(s)"
+            )
+            if unmute_result.unavailable_segment_count:
+                message += (
+                    f"; {unmute_result.unavailable_segment_count} had no "
+                    "reachable unmuted source"
+                )
+            if unmute_result.probe_limit_reached:
+                message += "; probe limit reached"
+            self.log.emit(message)
         return True
+
+    def _probe_twitch_unmuted_fragment(self, url):
+        """Probe a derived unmuted URI through the active address guard."""
+        proxy = self._guarded_proxy
+        if proxy is None:
+            return False
+        details = http_head_details(
+            url,
+            timeout=10,
+            guarded_proxy_url=proxy.url,
+        )
+        try:
+            status = int(details.get("status", 0) or 0)
+        except (AttributeError, TypeError, ValueError):
+            status = 0
+        return status in (200, 206)
 
     def _guard_transport_or_report(self, segment_index):
         try:

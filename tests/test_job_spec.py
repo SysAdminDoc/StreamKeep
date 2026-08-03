@@ -61,6 +61,7 @@ def test_full_roundtrip_with_all_fields():
         segments=(("https://cdn.example.com/seg1.ts", "ep1"),),
         output_dir="/tmp/test",
         format_type="ytdlp_direct",
+        twitch_unmute=True,
         ytdlp_source="https://youtube.com/watch?v=abc",
         ytdlp_format="bv*+ba/b",
         ytdlp_container="mkv",
@@ -88,6 +89,7 @@ def test_full_roundtrip_with_all_fields():
     restored = DownloadJobSpec.from_dict(json.loads(json_text))
     assert restored.playlist_url == spec.playlist_url
     assert restored.ytdlp_format == spec.ytdlp_format
+    assert restored.twitch_unmute is True
     assert restored.ytdlp_concurrent_fragments == 4
     assert restored.sponsorblock_mark == "intro,outro"
     assert restored.ytdlp_template_args == ("--no-part",)

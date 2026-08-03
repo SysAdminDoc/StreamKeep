@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added opt-in Twitch VOD audio recovery. Finished Twitch HLS playlists can
+  probe same-format ``-muted`` fragment URLs through the guarded transport and
+  substitute reachable unmuted fragments; unavailable sources remain muted and
+  are reported. The Settings checkbox and ``download --twitch-unmute`` CLI
+  flag share the same job-spec setting, while live captures remain unchanged.
+
 - Added Twitch SSAI filtering for native VOD and live HLS captures. Twitch
   stitched-ad DATERANGEs, Amazon ad titles, cue markers, and post-discontinuity
   low-latency prefetch segments are excluded through a refreshed local media

@@ -1190,6 +1190,7 @@ class DownloadSingleMixin:
             streamlink_hls_live_restart=bool(
                 self._config.get("streamlink_hls_live_restart", False)
             ),
+            twitch_unmute=bool(self._config.get("twitch_unmute", False)),
             ytdlp_wait_for_video=transfer_options["wait_for_video"],
             ytdlp_embed_chapters=transfer_options["embed_chapters"],
             ytdlp_embed_metadata=transfer_options["embed_metadata"],

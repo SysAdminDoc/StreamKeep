@@ -923,6 +923,10 @@ class SettingsPreferencesMixin:
             self._config["streamlink_live_engine"] = (
                 self.streamlink_live_engine_check.isChecked()
             )
+        if hasattr(self, "twitch_unmute_check"):
+            self._config["twitch_unmute"] = (
+                self.twitch_unmute_check.isChecked()
+            )
         if hasattr(self, "streamlink_hls_offset_input"):
             try:
                 streamlink_offset = float(

@@ -107,7 +107,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "download_subs", "subtitle_auto",
     "subtitle_embed", "sponsorblock", "capture_youtube_chat",
     "ytdlp_live_from_start", "live_engine_fallback", "streamlink_live_engine",
-    "streamlink_hls_live_restart",
+    "streamlink_hls_live_restart", "twitch_unmute",
     "ytdlp_embed_chapters",
     "ytdlp_embed_metadata", "ytdlp_embed_thumbnail",
     "pp_extract_audio", "pp_normalize_loudness", "pp_reencode_h265",

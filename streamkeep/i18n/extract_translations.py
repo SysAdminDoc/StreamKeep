@@ -228,6 +228,10 @@ SPANISH_CORE = {
     ("StreamKeep", "Save Settings"): "Guardar configuración",
     ("StreamKeep", "Settings saved and applied to future downloads."):
         "La configuración se guardó y se aplicará a futuras descargas.",
+    ("StreamKeep", "Restore available unmuted audio in Twitch VODs"):
+        "Restaurar el audio sin silenciar disponible en los VOD de Twitch",
+    ("StreamKeep", "For finished Twitch VODs, probe same-format CDN fragments whose paths end in -muted and use the unmuted fragment when it exists. Unreachable fragments remain muted; live captures are not probed."):
+        "En VOD de Twitch terminados, compruebe los fragmentos CDN del mismo formato cuyas rutas terminan en -muted y use el fragmento sin silenciar cuando exista. Los fragmentos inaccesibles permanecen silenciados; las capturas en directo no se comprueban.",
     # First-run states for monitored channels.
     ("StreamKeep", "AUTOMATED CAPTURE"): "CAPTURA AUTOMATIZADA",
     ("StreamKeep", "No channels on watch"): "No hay canales vigilados",

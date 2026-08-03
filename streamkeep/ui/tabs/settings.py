@@ -838,6 +838,23 @@ def build_settings_tab(win):
     streamlink_row.addStretch(1)
     network_lay.addLayout(streamlink_row)
 
+    twitch_unmute_row = QHBoxLayout()
+    twitch_unmute_row.setSpacing(8)
+    win.twitch_unmute_check = QCheckBox(
+        "Restore available unmuted audio in Twitch VODs"
+    )
+    win.twitch_unmute_check.setChecked(bool(
+        win._config.get("twitch_unmute", False)
+    ))
+    win.twitch_unmute_check.setToolTip(
+        "For finished Twitch VODs, probe same-format CDN fragments whose "
+        "paths end in -muted and use the unmuted fragment when it exists. "
+        "Unreachable fragments remain muted; live captures are not probed."
+    )
+    twitch_unmute_row.addWidget(win.twitch_unmute_check)
+    twitch_unmute_row.addStretch(1)
+    network_lay.addLayout(twitch_unmute_row)
+
     streamlink_dvr_row = QHBoxLayout()
     streamlink_dvr_row.addWidget(QLabel("Streamlink DVR offset (seconds):"))
     win.streamlink_hls_offset_input = QLineEdit(str(

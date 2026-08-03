@@ -1,0 +1,11 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:6
+#EXT-X-MEDIA-SEQUENCE:100
+#EXTINF:6.000,
+https://vod.example.com/v123/720p30/segment-100.ts?token=abc
+#EXTINF:6.000,
+https://vod.example.com/v123/720p30/segment-101-muted.ts?token=abc
+#EXTINF:6.000,
+https://vod.example.com/v123/720p30/segment-102.ts?token=abc
+#EXT-X-ENDLIST
