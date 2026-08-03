@@ -330,6 +330,18 @@ class SettingsPreferencesMixin:
             "PO-token provider: "
             + ("detected" if report['pot_provider']['available'] else "not detected"),
         ]
+        ytse = report.get("ytse") or {}
+        if ytse.get("available"):
+            ytse_label = f"available ({ytse.get('version') or 'unknown'})"
+        elif ytse.get("installed"):
+            ytse_label = "installed, SABR unavailable"
+        else:
+            ytse_label = "not installed (optional)"
+        lines.append(f"SABR fallback: {ytse_label}")
+        if ytse.get("installed") or ytse.get("available"):
+            lines.append(
+                "SABR limits: " + ", ".join(ytse.get("limitations") or [])
+            )
         remote = report.get("remote_backend") or {}
         remote_label = "disabled"
         if remote.get("configured"):

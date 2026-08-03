@@ -361,7 +361,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="505" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="517" />
             <source>A profile must declare at least one site.</source>
             <translation type="unfinished" />
         </message>
@@ -556,7 +556,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="705" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="717" />
             <source>All platform tokens cleared.</source>
             <translation type="unfinished" />
         </message>
@@ -1350,7 +1350,7 @@ Archive workstation</source>
             <translation>Comprobando espacio libre</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="730" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="742" />
             <source>Checking platform credentials…</source>
             <translation type="unfinished" />
         </message>
@@ -1370,7 +1370,7 @@ Archive workstation</source>
             <translation>Comprobando yt-dlp</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="721" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="733" />
             <source>Checking…</source>
             <translation type="unfinished" />
         </message>
@@ -1667,27 +1667,27 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="631" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="643" />
             <source>cookies.txt present (updated {age // 3600}h ago).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="629" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="641" />
             <source>cookies.txt present (updated {age // 60}m ago).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="634" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="646" />
             <source>cookies.txt present ({days}d old — consider refreshing).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="627" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="639" />
             <source>cookies.txt present.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="756" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="768" />
             <source>Cookies: {result.label}</source>
             <translation type="unfinished" />
         </message>
@@ -1756,12 +1756,12 @@ flac/pcm = lossless</source>
             <translation>Cómoda</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="514" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="526" />
             <source>Created profile {profile.name}.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="746" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="758" />
             <source>Credential check complete.</source>
             <translation type="unfinished" />
         </message>
@@ -1904,7 +1904,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="591" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="603" />
             <source>Deleted profile {profile.name}.</source>
             <translation type="unfinished" />
         </message>
@@ -2161,7 +2161,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="476" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="488" />
             <source>Downloads use whichever profile declares the site they target.</source>
             <translation type="unfinished" />
         </message>
@@ -2838,12 +2838,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="399" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="411" />
             <source>Found {len(found)} browser cookie store(s).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="395" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="407" />
             <source>Found {len(found)} browser(s):
 {details}</source>
             <translation type="unfinished" />
@@ -3352,12 +3352,12 @@ https://youtu.be/*</source>
             <translation>Idioma</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1251" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1263" />
             <source>Language file could not be loaded.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1246" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1258" />
             <source>Language updated across StreamKeep.</source>
             <translation type="unfinished" />
         </message>
@@ -3948,12 +3948,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="401" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="413" />
             <source>No browser cookie stores found.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="402" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="414" />
             <source>No browser cookie stores were found on this machine.</source>
             <translation type="unfinished" />
         </message>
@@ -3978,7 +3978,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="623" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="635" />
             <source>No cookies.txt — authenticated content may fail.</source>
             <translation type="unfinished" />
         </message>
@@ -4083,12 +4083,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="452" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="464" />
             <source>No profile (resolve by site)</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="790" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="802" />
             <source>No proxies configured to test.</source>
             <translation type="unfinished" />
         </message>
@@ -4231,8 +4231,8 @@ Set to 1 to disable and always use ffmpeg.</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="543" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="364" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="380" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="376" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="392" />
             <source>None</source>
             <translation type="unfinished" />
         </message>
@@ -5046,7 +5046,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="800" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="812" />
             <source>Proxy test: {ok_count}/{len(results)} reachable.</source>
             <translation type="unfinished" />
         </message>
@@ -5794,7 +5794,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="678" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="690" />
             <source>Saved {saved} token(s).</source>
             <translation type="unfinished" />
         </message>
@@ -5910,7 +5910,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="487" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="499" />
             <source>Scope: {scope}. Source: {source}. {state}.</source>
             <translation type="unfinished" />
         </message>
@@ -6021,7 +6021,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="652" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="664" />
             <source>secure store unavailable</source>
             <translation type="unfinished" />
         </message>
@@ -6053,14 +6053,14 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="426" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="438" />
             <source>Select a browser first, then click Import.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="522" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="548" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="569" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="534" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="560" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="581" />
             <source>Select a profile first.</source>
             <translation type="unfinished" />
         </message>
@@ -6228,12 +6228,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Configuración</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1185" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1197" />
             <source>Settings not saved: secure credential storage unavailable.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1188" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1200" />
             <source>Settings saved and applied to future downloads.</source>
             <translation>La configuración se guardó y se aplicará a futuras descargas.</translation>
         </message>
@@ -6462,7 +6462,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1095" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1107" />
             <source>SponsorBlock settings: {error}</source>
             <translation type="unfinished" />
         </message>
@@ -6699,8 +6699,8 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="920" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="926" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="932" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="938" />
             <source>Streamlink DVR offset must be a non-negative number.</source>
             <translation type="unfinished" />
         </message>
@@ -6726,7 +6726,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1055" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1067" />
             <source>Subtitle settings: {error}</source>
             <translation type="unfinished" />
         </message>
@@ -6862,7 +6862,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings_preferences.py" line="301" />
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="870" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="882" />
             <source>The PO-token provider URL must be a loopback address.</source>
             <translation type="unfinished" />
         </message>
@@ -6872,7 +6872,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="893" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="905" />
             <source>The remote backend URL must be a valid HTTP(S) endpoint.</source>
             <translation type="unfinished" />
         </message>
@@ -7043,7 +7043,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="659" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="671" />
             <source>Token save blocked: secure credential storage unavailable.</source>
             <translation type="unfinished" />
         </message>
@@ -7795,7 +7795,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1218" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="1230" />
             <source>{density.title()} density • {accent_name} accent</source>
             <translation type="unfinished" />
         </message>
@@ -7977,12 +7977,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="454" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="466" />
             <source>{profile.name}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="552" />
+            <location filename="streamkeep/ui/tabs/settings_preferences.py" line="564" />
             <source>{profile.name} has no credentials imported.</source>
             <translation type="unfinished" />
         </message>

@@ -316,6 +316,28 @@ def looks_like_sabr_or_pot_failure(text):
     return any(marker in low for marker in _SABR_POT_MARKERS)
 
 
+def looks_like_sabr_only_formats(data):
+    """Return True when resolved YouTube data contains only storyboard media."""
+    if not isinstance(data, dict):
+        return False
+    formats = data.get("formats")
+    if not isinstance(formats, list) or not formats:
+        return False
+    for fmt in formats:
+        if not isinstance(fmt, dict):
+            continue
+        note = str(fmt.get("format_note") or "").lower()
+        if "storyboard" in note:
+            continue
+        codecs = {
+            str(fmt.get("vcodec") or "").lower(),
+            str(fmt.get("acodec") or "").lower(),
+        }
+        if fmt.get("url") and codecs.difference({"", "none"}):
+            return False
+    return True
+
+
 def youtube_pot_setup_guidance():
     """Actionable remediation for YouTube SABR / PO-token failures.
 
@@ -382,6 +404,10 @@ def youtube_health_report(player_client="", config=None):
     remote_backend = backend_status(config)
     if remote_backend["configured"] and not remote_backend["reachable"]:
         warnings.append(remote_backend["detail"])
+    from ..integrations.ytse import ytse_status
+    ytse = ytse_status()
+    if ytse["installed"] and not ytse["available"]:
+        warnings.append(ytse["detail"])
     healthy = runtime.get("state") == "ready"
     return {
         "healthy": healthy,
@@ -395,6 +421,7 @@ def youtube_health_report(player_client="", config=None):
         "pot_setup": youtube_pot_setup_guidance(),
         "pot_endpoint": provider,
         "remote_backend": remote_backend,
+        "ytse": ytse,
         "warnings": warnings,
     }
 
@@ -490,7 +517,10 @@ class YtDlpExtractor(Extractor):
             logger.debug("extract_channel_id failed for %r: %s", url, e)
             return "download"
 
-    def _build_cmd(self, url, include_runtime=False, runtime_status=None, impersonate=False):
+    def _build_cmd(
+        self, url, include_runtime=False, runtime_status=None, impersonate=False,
+        *, extra_youtube_args=(),
+    ):
         # --no-playlist: resolve() must return the single requested video.
         # Without it, a watch?v=X&list=Y URL makes yt-dlp enumerate the whole
         # playlist and emit one JSON object per entry — json.loads then fails
@@ -505,6 +535,7 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_remote_backend_args(
             url, reason="resolve", player_client=self.youtube_player_client,
         ))
+        cmd.extend(list(extra_youtube_args or ()))
         cmd.extend(self._auth_args(url))
         cmd.extend(self._request_header_args())
         if self.proxy:
@@ -883,7 +914,10 @@ class YtDlpExtractor(Extractor):
         "ext", "format_note", "url",
     )
 
-    def _build_print_cmd(self, url, runtime_status=None, impersonate=False):
+    def _build_print_cmd(
+        self, url, runtime_status=None, impersonate=False, *,
+        extra_youtube_args=(),
+    ):
         meta = "%(." + "{" + ",".join(self._FAST_META_FIELDS) + "})j"
         fmts = "%(formats.:.{" + ",".join(self._FAST_FORMAT_FIELDS) + "})j"
         # --no-playlist mirrors _build_cmd: without it a watch?v=X&list=Y URL
@@ -899,6 +933,7 @@ class YtDlpExtractor(Extractor):
         cmd.extend(youtube_remote_backend_args(
             url, reason="resolve-fast", player_client=self.youtube_player_client,
         ))
+        cmd.extend(list(extra_youtube_args or ()))
         cmd.extend(self._auth_args(url))
         cmd.extend(self._request_header_args())
         if self.proxy:
@@ -908,7 +943,9 @@ class YtDlpExtractor(Extractor):
         cmd.extend(["--", url])
         return cmd
 
-    def _fast_resolve_data(self, url, log_fn=None, runtime_status=None):
+    def _fast_resolve_data(
+        self, url, log_fn=None, runtime_status=None, *, extra_youtube_args=(),
+    ):
         """Resolve metadata via ``--print`` field projection.
 
         Returns ``(data, multi_entry)``. *data* is a dict shaped like
@@ -921,12 +958,17 @@ class YtDlpExtractor(Extractor):
         """
         try:
             result = run_capture_interruptible(
-                self._build_print_cmd(url, runtime_status=runtime_status),
+                self._build_print_cmd(
+                    url, runtime_status=runtime_status,
+                    extra_youtube_args=extra_youtube_args,
+                ),
                 timeout=self.resolve_timeout,
             )
         except Exception as e:
+            self._last_resolve_error = str(e)
             logger.debug("fast resolve error for %r: %s", url, e)
             return None, False
+        self._last_resolve_error = str(getattr(result, "stderr", "") or "")
         if (result.interrupted or result.timed_out
                 or result.returncode != 0 or not result.stdout.strip()):
             return None, False
@@ -945,7 +987,9 @@ class YtDlpExtractor(Extractor):
         meta["formats"] = formats
         return meta, False
 
-    def _dump_json_resolve_data(self, url, log_fn=None, runtime_status=None):
+    def _dump_json_resolve_data(
+        self, url, log_fn=None, runtime_status=None, *, extra_youtube_args=(),
+    ):
         """Full ``--dump-json`` resolve with Cloudflare/auth retries.
 
         Returns the parsed info dict or ``None``. Used as the fallback when the
@@ -953,9 +997,13 @@ class YtDlpExtractor(Extractor):
         """
         try:
             result = run_capture_interruptible(
-                self._build_cmd(url, include_runtime=bool(log_fn), runtime_status=runtime_status),
+                self._build_cmd(
+                    url, include_runtime=bool(log_fn), runtime_status=runtime_status,
+                    extra_youtube_args=extra_youtube_args,
+                ),
                 timeout=self.resolve_timeout,
             )
+            self._last_resolve_error = str(getattr(result, "stderr", "") or "")
             if result.interrupted:
                 return None
             if result.timed_out:
@@ -977,6 +1025,7 @@ class YtDlpExtractor(Extractor):
                     self._build_cmd(
                         url, include_runtime=bool(log_fn),
                         runtime_status=runtime_status, impersonate=True,
+                        extra_youtube_args=extra_youtube_args,
                     ),
                     timeout=self.resolve_timeout,
                 )
@@ -984,6 +1033,10 @@ class YtDlpExtractor(Extractor):
                     return None
                 if retry.returncode == 0 and retry.stdout.strip():
                     result = retry
+                else:
+                    self._last_resolve_error = str(
+                        getattr(retry, "stderr", "") or self._last_resolve_error
+                    )
             if result.returncode == 0:
                 return json.loads(result.stdout)
             if self._is_auth_error(result.stderr):
@@ -992,14 +1045,41 @@ class YtDlpExtractor(Extractor):
             self._log(log_fn, f"yt-dlp error: {err}")
             return None
         except json.JSONDecodeError:
+            self._last_resolve_error = "Failed to parse yt-dlp output"
             self._log(log_fn, "Failed to parse yt-dlp output")
             return None
         except Exception as e:
+            self._last_resolve_error = str(e)
             if http_interrupted():
                 return None
             logger.debug("yt-dlp resolve error for %r: %s", url, e)
             self._log(log_fn, "yt-dlp timed out")
             return None
+
+    def _try_sabr_resolve(self, url, log_fn=None, runtime_status=None):
+        """Retry a detected YouTube SABR failure through the optional ytse plugin."""
+        from ..integrations.ytse import ytse_extractor_args, ytse_status
+
+        status = ytse_status()
+        extra_args = ytse_extractor_args(url)
+        if not status["available"] or not extra_args:
+            return None
+        self._log(
+            log_fn,
+            "[RETRY] YouTube returned SABR-only formats; retrying with the "
+            "optional yt-dlp-ytse SABR downloader...",
+        )
+        data, multi_entry = self._fast_resolve_data(
+            url, log_fn, runtime_status, extra_youtube_args=extra_args,
+        )
+        if data is not None and not looks_like_sabr_only_formats(data):
+            return data
+        if multi_entry:
+            return None
+        data = self._dump_json_resolve_data(
+            url, log_fn, runtime_status, extra_youtube_args=extra_args,
+        )
+        return None if looks_like_sabr_only_formats(data) else data
 
     def _auth_args(self, url):
         """Cookie arguments scoped to this request's site."""
@@ -1033,6 +1113,7 @@ class YtDlpExtractor(Extractor):
             return None
 
         self._log(log_fn, f"Running yt-dlp extraction for: {url}")
+        self._last_resolve_error = ""
         runtime_status = None
         if log_fn and _is_youtube_url(url):
             runtime_status = ytdlp_runtime_status()
@@ -1074,6 +1155,20 @@ class YtDlpExtractor(Extractor):
                 "former-livestream VODs)...",
             )
             data = self._dump_json_resolve_data(url, log_fn, runtime_status)
+            if (
+                data is None
+                and _is_youtube_url(url)
+                and looks_like_sabr_or_pot_failure(self._last_resolve_error)
+            ):
+                data = self._try_sabr_resolve(url, log_fn, runtime_status)
+        if (
+            data is not None
+            and _is_youtube_url(url)
+            and looks_like_sabr_only_formats(data)
+        ):
+            fallback = self._try_sabr_resolve(url, log_fn, runtime_status)
+            if fallback is not None:
+                data = fallback
         if data is None:
             return None
 

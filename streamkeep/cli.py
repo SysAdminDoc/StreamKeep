@@ -1393,6 +1393,16 @@ def _run_youtube_health(args):
         )
         if endpoint.get("base_url"):
             _print_line(f"  PO-token URL   : {endpoint['base_url']}")
+        ytse = report.get("ytse") or {}
+        if ytse.get("available"):
+            ytse_label = f"available ({ytse.get('version') or 'unknown'})"
+        elif ytse.get("installed"):
+            ytse_label = "installed, SABR unavailable"
+        else:
+            ytse_label = "not installed (optional)"
+        _print_line(f"  SABR fallback  : {ytse_label}")
+        if ytse.get("installed") or ytse.get("available"):
+            _print_line(f"  SABR limits     : {', '.join(ytse.get('limitations') or [])}")
         remote = report.get("remote_backend") or {}
         remote_label = "disabled"
         if remote.get("configured"):

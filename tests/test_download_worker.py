@@ -1231,6 +1231,39 @@ def test_sabr_hint_emitted_for_gated_youtube_failure(tmp_path):
     assert any(m.startswith("[HINT]") for m in emitted)
 
 
+def test_sabr_download_failure_retries_with_ytse(tmp_path, monkeypatch):
+    worker = _make_worker(tmp_path)
+    commands = []
+    monkeypatch.setattr(
+        worker,
+        "_build_ytdlp_download_cmd",
+        lambda outfile, **kwargs: commands.append(kwargs) or ["yt-dlp", outfile],
+    )
+    monkeypatch.setattr(
+        worker,
+        "_stream_ytdlp_download",
+        mock.Mock(side_effect=[
+            ("fail", ["ERROR: Requested format is not available (SABR)"]),
+            ("ok", []),
+        ]),
+    )
+    monkeypatch.setattr(
+        "streamkeep.integrations.ytse.ytse_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "streamkeep.integrations.ytse.ytse_fallback_blockers",
+        lambda **_kwargs: [],
+    )
+
+    assert worker._download_with_ytdlp(
+        0, "video", str(tmp_path / "video.%(ext)s"), str(tmp_path / "video.mp4")
+    ) is True
+    assert commands == [{"impersonate": False, "use_sabr": False}, {
+        "impersonate": False, "use_sabr": True,
+    }]
+
+
 def test_no_sabr_hint_for_non_youtube_or_transient(tmp_path):
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video.mp4"

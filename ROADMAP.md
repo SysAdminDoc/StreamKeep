@@ -128,13 +128,6 @@ Note: v4.42.0 shipped the prior pass's top items (disk-health alerts + native no
 
 #### P2 — Later
 
-- [ ] P2 — V34 — Optional yt-dlp-ytse SABR fallback engine for YouTube
-  Why: YouTube increasingly leaves only SABR formats for many clients, where a normal resolve returns storyboard-only/"requested format not available"; the native SABR downloader `yt-dlp-ytse` recovers real media.
-  Evidence: https://pypi.org/project/yt-dlp-ytse/; https://github.com/yt-dlp/yt-dlp/issues/12482, /14810; `streamkeep/extractors/ytdlp.py` (`looks_like_sabr_or_pot_failure` already detects the condition). Complements V32/V33 (share the provider/health surface).
-  Touches: capability detection for `yt-dlp-ytse`, extractor-args wiring (`youtube:formats=sabr`), a SABR-only fallback branch in the resolve/download path, health-report surfacing, tests.
-  Acceptance: when a YouTube resolve is detected as SABR-only/storyboard-only and `yt-dlp-ytse` is present, StreamKeep retries via `--extractor-args youtube:formats=sabr` and downloads real media; the engine is optional and detected like gallery-dl/lux; known ytse limits (no `--download-sections`/`-N`/resume) are surfaced, not silently hit; a unit test covers the SABR-detected fallback path.
-  Complexity: M
-
 - [ ] P2 — V37 — Twitch SSAI ad-segment detection/stripping for VOD and live
   Why: Twitch server-side-inserts ads into the m3u8 (SSAI) and signs manifests; VOD downloads splice ad segments into the recording. No all-in-one tool strips them.
   Evidence: https://getblockify.com/blog/how-to-block-twitch-ads/; https://streamlink.github.io/cli/plugins/twitch.html (ad-filter default since 7.5.0); `streamkeep/extractors/twitch.py`, `twitch_recover.py`. Belongs with V13.

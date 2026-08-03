@@ -107,6 +107,18 @@ def test_sabr_pot_failure_detection():
     assert not ytdlp.looks_like_sabr_or_pot_failure("")
 
 
+def test_storyboard_only_formats_are_detected():
+    assert ytdlp.looks_like_sabr_only_formats({
+        "formats": [{"format_id": "sb0", "format_note": "storyboard"}],
+    })
+    assert not ytdlp.looks_like_sabr_only_formats({
+        "formats": [{
+            "format_id": "18", "vcodec": "avc1", "acodec": "mp4a",
+            "url": "https://cdn.example/video.mp4",
+        }],
+    })
+
+
 def test_pot_setup_guidance_when_absent():
     with mock.patch("streamkeep.extractors.ytdlp.importlib.util.find_spec", return_value=None):
         guidance = ytdlp.youtube_pot_setup_guidance()
@@ -133,3 +145,60 @@ def test_health_report_includes_pot_setup():
         report = ytdlp.youtube_health_report()
     assert report["pot_setup"]["provider_present"] is False
     assert "bgutil-ytdlp-pot-provider" in report["pot_setup"]["install_command"]
+
+
+def test_resolve_retries_detected_sabr_failure_with_ytse_args():
+    ext = ytdlp.YtDlpExtractor()
+    ext._has_ytdlp = lambda: True
+    ext._auth_args = lambda _url: []
+    ext._request_header_args = lambda: []
+    failure = type(
+        "Result",
+        (),
+        {
+            "interrupted": False,
+            "timed_out": False,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "ERROR: Requested format is not available (SABR)",
+        },
+    )()
+    success = type(
+        "Result",
+        (),
+        {
+            "interrupted": False,
+            "timed_out": False,
+            "returncode": 0,
+            "stdout": (
+                '{"id":"abc","title":"SABR video","channel":"chan"}\n'
+                '[{"format_id":"18","vcodec":"avc1","acodec":"mp4a",'
+                '"width":640,"height":360,"ext":"mp4","url":"https://cdn/x"}]'
+            ),
+            "stderr": "",
+        },
+    )()
+    calls = []
+
+    def capture(command, **_kwargs):
+        calls.append(command)
+        return [failure, failure, success][len(calls) - 1]
+
+    with mock.patch.object(ytdlp, "ytdlp_command", return_value=["yt-dlp"]), \
+         mock.patch.object(ytdlp, "run_capture_interruptible", side_effect=capture), \
+         mock.patch(
+             "streamkeep.integrations.ytse.ytse_status",
+             return_value={"available": True},
+         ), \
+         mock.patch(
+             "streamkeep.integrations.ytse.ytse_extractor_args",
+             return_value=["--extractor-args", "youtube:formats=sabr"],
+         ):
+        info = ext.resolve("https://www.youtube.com/watch?v=abc")
+
+    assert info is not None
+    assert info.title == "SABR video"
+    assert len(calls) == 3
+    assert "youtube:formats=sabr" not in " ".join(calls[0])
+    assert "youtube:formats=sabr" not in " ".join(calls[1])
+    assert "youtube:formats=sabr" in " ".join(calls[2])

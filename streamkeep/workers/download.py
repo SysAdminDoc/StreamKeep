@@ -282,7 +282,7 @@ class DownloadWorker(QThread):
                     pass
 
     def _build_ytdlp_download_cmd(
-        self, outfile, impersonate=False, *, export=False,
+        self, outfile, impersonate=False, *, export=False, use_sabr=False,
     ):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
@@ -522,6 +522,11 @@ class DownloadWorker(QThread):
                     player_client=YtDlpExtractor.youtube_player_client,
                     log_fn=self.log.emit,
                 ))
+                if use_sabr:
+                    from ..integrations.ytse import ytse_extractor_args
+                    cmd.extend(ytse_extractor_args(
+                        self._effective_ytdlp_source()
+                    ))
         except Exception as e:
             self.log.emit(f"[WARN] Could not check yt-dlp runtime support: {e}")
         source = self._effective_ytdlp_source()
@@ -878,14 +883,19 @@ class DownloadWorker(QThread):
         """
         from ..extractors.ytdlp import (
             _impersonation_available,
+            _is_youtube_url,
             _looks_like_cloudflare,
+            looks_like_sabr_or_pot_failure,
         )
 
         attempted_impersonate = False
+        attempted_sabr = False
         while True:
             try:
                 cmd = self._build_ytdlp_download_cmd(
-                    outfile, impersonate=attempted_impersonate
+                    outfile,
+                    impersonate=attempted_impersonate,
+                    use_sabr=attempted_sabr,
                 )
             except (TypeError, ValueError) as error:
                 self._last_failure_reason = (
@@ -910,6 +920,32 @@ class DownloadWorker(QThread):
                 seg_idx, label, outfile, expected_outfile, output_lines,
             ):
                 return True
+            if (
+                not attempted_sabr
+                and _is_youtube_url(self._effective_ytdlp_source())
+                and looks_like_sabr_or_pot_failure("\n".join(output_lines))
+            ):
+                from ..integrations.ytse import (
+                    ytse_available,
+                    ytse_fallback_blockers,
+                )
+                blockers = ytse_fallback_blockers(
+                    download_sections=self.download_sections,
+                    concurrent_fragments=self.ytdlp_concurrent_fragments,
+                    resume=self._resume_state is not None,
+                )
+                if blockers:
+                    self.log.emit(
+                        "[HINT] yt-dlp-ytse SABR fallback skipped because its "
+                        "documented limits apply: " + "; ".join(blockers)
+                    )
+                elif ytse_available():
+                    attempted_sabr = True
+                    self.log.emit(
+                        "[RETRY] YouTube returned SABR-only formats; retrying "
+                        "with the optional yt-dlp-ytse SABR downloader..."
+                    )
+                    continue
             # outcome == "fail": retry once behind Cloudflare with a real
             # browser TLS fingerprint before surfacing the failure.
             if (not attempted_impersonate and _impersonation_available()
@@ -1043,6 +1079,17 @@ class DownloadWorker(QThread):
             )
             for step in guidance["steps"]:
                 self.log.emit(f"[HINT] {step}")
+            from ..integrations.ytse import ytse_install_hint, ytse_status
+            ytse = ytse_status()
+            if ytse["available"]:
+                self.log.emit(
+                    "[HINT] The optional yt-dlp-ytse SABR fallback was "
+                    "available but did not produce a usable download."
+                )
+            elif ytse["installed"]:
+                self.log.emit(f"[HINT] {ytse['detail']}")
+            else:
+                self.log.emit(f"[HINT] {ytse_install_hint()}")
         except Exception:
             pass
 

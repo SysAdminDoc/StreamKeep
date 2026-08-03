@@ -4,6 +4,14 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added an optional yt-dlp-ytse SABR fallback for YouTube. The installed plugin
+  is recognized only when its SABR module surface is present; detected
+  storyboard/SABR-only resolves and direct downloads retry with
+  `--extractor-args youtube:formats=sabr`. The YouTube health report, CLI, and
+  Settings panel show availability and the plugin's unsupported
+  `--download-sections`, `-N`, and resume limits; incompatible jobs skip the
+  retry with an explicit hint.
+
 - Added an optional manifest-v2 `youtube_backend` plugin contract for remote
   cipher/PO-token helpers. Settings and `youtube-health` expose redacted mode,
   endpoint, plugin, capability, and reachability state; yt-dlp resolve,
