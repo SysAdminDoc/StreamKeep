@@ -486,6 +486,11 @@ def build_settings_tab(win):
     ffmpeg = registry["ffmpeg"]
     curl = registry["curl"]
     pillow = registry["pillow"]
+    sqlite = registry.get("sqlite", {
+        "state": "unknown",
+        "version": "Not found",
+        "detail": "SQLite runtime status is unavailable.",
+    })
     yt_status = ytdlp_runtime_status()
     win._ytdlp_status_snapshot = yt_status
     ff_card, _, _ = make_metric_card(
@@ -508,11 +513,17 @@ def build_settings_tab(win):
         pillow["state"].title(),
         str(pillow.get("version") or "Not found"),
     )
+    sqlite_card, _, _ = make_metric_card(
+        "SQLite",
+        str(sqlite.get("state") or "unknown").title(),
+        str(sqlite.get("version") or "Not found"),
+    )
     for runtime_card, detail in (
         (ff_card, ffmpeg.get("detail", "")),
         (yt_card, yt_status.get("detail", "")),
         (curl_card, curl.get("detail", "")),
         (pillow_card, pillow.get("detail", "")),
+        (sqlite_card, sqlite.get("detail", "")),
     ):
         runtime_card.setToolTip(str(detail or ""))
 
@@ -522,6 +533,7 @@ def build_settings_tab(win):
     tools_metrics.addWidget(yt_card)
     tools_metrics.addWidget(curl_card)
     tools_metrics.addWidget(pillow_card)
+    tools_metrics.addWidget(sqlite_card)
     tools_lay.addLayout(tools_metrics)
     sections_top.addWidget(tools_block, 1)
     card_lay.addLayout(sections_top)

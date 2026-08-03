@@ -14,6 +14,7 @@ import threading
 
 from .paths import CONFIG_DIR
 from .sqlite_runtime import connect as sqlite_connect
+from .sqlite_runtime import runtime_status as sqlite_runtime_status
 
 # WebVTT timestamp: hours are optional (MM:SS.mmm and HH:MM:SS.mmm are both
 # valid per the W3C WebVTT spec); minutes/seconds are two digits, millis three.
@@ -64,26 +65,48 @@ def _ensure_schema(db):
             end_sec        REAL NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ts_path ON transcript_segments(recording_path);
-        CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
-            recording_path, text, start_sec, end_sec,
-            content='transcript_segments',
-            content_rowid='rowid'
-        );
-        CREATE TRIGGER IF NOT EXISTS transcript_segments_ai AFTER INSERT ON transcript_segments BEGIN
-            INSERT INTO transcript_fts(rowid, recording_path, text, start_sec, end_sec)
-            VALUES (new.rowid, new.recording_path, new.text, new.start_sec, new.end_sec);
-        END;
-        CREATE TRIGGER IF NOT EXISTS transcript_segments_ad AFTER DELETE ON transcript_segments BEGIN
-            INSERT INTO transcript_fts(transcript_fts, rowid, recording_path, text, start_sec, end_sec)
-            VALUES ('delete', old.rowid, old.recording_path, old.text, old.start_sec, old.end_sec);
-        END;
-        CREATE TRIGGER IF NOT EXISTS transcript_segments_au AFTER UPDATE ON transcript_segments BEGIN
-            INSERT INTO transcript_fts(transcript_fts, rowid, recording_path, text, start_sec, end_sec)
-            VALUES ('delete', old.rowid, old.recording_path, old.text, old.start_sec, old.end_sec);
-            INSERT INTO transcript_fts(rowid, recording_path, text, start_sec, end_sec)
-            VALUES (new.rowid, new.recording_path, new.text, new.start_sec, new.end_sec);
-        END;
     """)
+    fts5_fixed = sqlite_runtime_status().get("fts5_fixed", True)
+    existing = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='transcript_fts'"
+    ).fetchone()
+    trigger_names = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name IN ('transcript_segments_ai', 'transcript_segments_ad', "
+            "'transcript_segments_au')"
+        ).fetchall()
+    }
+    if fts5_fixed:
+        db.executescript("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
+                recording_path, text, start_sec, end_sec,
+                content='transcript_segments',
+                content_rowid='rowid'
+            );
+            CREATE TRIGGER IF NOT EXISTS transcript_segments_ai AFTER INSERT ON transcript_segments BEGIN
+                INSERT INTO transcript_fts(rowid, recording_path, text, start_sec, end_sec)
+                VALUES (new.rowid, new.recording_path, new.text, new.start_sec, new.end_sec);
+            END;
+            CREATE TRIGGER IF NOT EXISTS transcript_segments_ad AFTER DELETE ON transcript_segments BEGIN
+                INSERT INTO transcript_fts(transcript_fts, rowid, recording_path, text, start_sec, end_sec)
+                VALUES ('delete', old.rowid, old.recording_path, old.text, old.start_sec, old.end_sec);
+            END;
+            CREATE TRIGGER IF NOT EXISTS transcript_segments_au AFTER UPDATE ON transcript_segments BEGIN
+                INSERT INTO transcript_fts(transcript_fts, rowid, recording_path, text, start_sec, end_sec)
+                VALUES ('delete', old.rowid, old.recording_path, old.text, old.start_sec, old.end_sec);
+                INSERT INTO transcript_fts(rowid, recording_path, text, start_sec, end_sec)
+            VALUES (new.rowid, new.recording_path, new.text, new.start_sec, new.end_sec);
+            END;
+        """)
+        if existing is None or len(trigger_names) != 3:
+            db.execute("INSERT INTO transcript_fts(transcript_fts) VALUES('rebuild')")
+    else:
+        db.executescript("""
+            DROP TRIGGER IF EXISTS transcript_segments_ai;
+            DROP TRIGGER IF EXISTS transcript_segments_ad;
+            DROP TRIGGER IF EXISTS transcript_segments_au;
+        """)
     row = db.execute(
         "SELECT value FROM search_meta WHERE key = 'schema_version'"
     ).fetchone()
@@ -92,7 +115,6 @@ def _ensure_schema(db):
     except (TypeError, ValueError):
         current_version = 0
     if current_version < SCHEMA_VERSION:
-        db.execute("INSERT INTO transcript_fts(transcript_fts) VALUES('rebuild')")
         db.execute(
             "INSERT OR REPLACE INTO search_meta (key, value) VALUES (?, ?)",
             ("schema_version", str(SCHEMA_VERSION)),
@@ -261,6 +283,17 @@ def _fts5_literal_query(query):
     return f"text : ({' '.join(terms)})" if terms else ""
 
 
+def _like_transcript_filter(query):
+    terms = [term for term in str(query or "").strip().split() if term]
+    clauses = []
+    params = []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("text LIKE ? ESCAPE '\\' COLLATE NOCASE")
+        params.append(f"%{escaped}%")
+    return " AND ".join(clauses), params
+
+
 def search_transcripts(query, limit=100):
     """Search indexed transcripts. Returns list of dicts:
     ``[{recording_path, text, start_sec, end_sec}]``
@@ -277,15 +310,24 @@ def search_transcripts(query, limit=100):
         limit = 100
     db = _connect()
     try:
-        rows = db.execute(
-            "SELECT s.recording_path, s.text, s.start_sec, s.end_sec "
-            "FROM transcript_fts f "
-            "JOIN transcript_segments s ON s.rowid = f.rowid "
-            "WHERE transcript_fts MATCH ? "
-            "ORDER BY bm25(transcript_fts), s.rowid "
-            "LIMIT ?",
-            (fts_query, limit),
-        ).fetchall()
+        if sqlite_runtime_status().get("fts5_fixed", True):
+            rows = db.execute(
+                "SELECT s.recording_path, s.text, s.start_sec, s.end_sec "
+                "FROM transcript_fts f "
+                "JOIN transcript_segments s ON s.rowid = f.rowid "
+                "WHERE transcript_fts MATCH ? "
+                "ORDER BY bm25(transcript_fts), s.rowid "
+                "LIMIT ?",
+                (fts_query, limit),
+            ).fetchall()
+        else:
+            like_filter, like_params = _like_transcript_filter(query)
+            rows = db.execute(
+                "SELECT recording_path, text, start_sec, end_sec "
+                "FROM transcript_segments "
+                f"WHERE {like_filter} ORDER BY rowid LIMIT ?",
+                (*like_params, limit),
+            ).fetchall()
     except sqlite3.Error:
         rows = []
     finally:

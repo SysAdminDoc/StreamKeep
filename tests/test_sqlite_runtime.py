@@ -17,6 +17,21 @@ class SQLiteRuntimePolicyTests(unittest.TestCase):
             with self.subTest(version=version):
                 self.assertFalse(sqlite_runtime.wal_reset_is_fixed(version))
 
+    def test_fts5_floor_is_separate_from_wal_floor(self):
+        self.assertTrue(sqlite_runtime.fts5_is_fixed((3, 53, 2)))
+        self.assertTrue(sqlite_runtime.fts5_is_fixed((3, 54, 0)))
+        self.assertFalse(sqlite_runtime.fts5_is_fixed((3, 53, 1)))
+        with mock.patch.object(
+                sqlite_runtime.sqlite3, "sqlite_version_info", (3, 53, 1)
+        ):
+            status = sqlite_runtime.runtime_status(frozen=False)
+        self.assertTrue(status["wal_reset_fixed"])
+        self.assertFalse(status["fts5_fixed"])
+        self.assertTrue(status["supported"])
+        self.assertTrue(status["degraded"])
+        self.assertEqual(status["journal_mode"], "wal")
+        self.assertIn("bounded fallback", status["detail"])
+
     def test_vulnerable_source_runtime_enforces_rollback_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir, \
                 mock.patch.object(
@@ -38,6 +53,7 @@ class SQLiteRuntimePolicyTests(unittest.TestCase):
         self.assertTrue(status["supported"])
         self.assertTrue(status["degraded"])
         self.assertIn("rollback journaling", status["detail"])
+        self.assertFalse(status["fts5_fixed"])
 
     def test_fixed_runtime_enables_wal(self):
         with tempfile.TemporaryDirectory() as tmpdir, \
@@ -64,6 +80,74 @@ class SQLiteRuntimePolicyTests(unittest.TestCase):
 
         self.assertFalse(path.exists())
         self.assertIn("Frozen releases require SQLite", str(raised.exception))
+
+    def test_frozen_runtime_below_fts5_floor_is_rejected_before_open(self):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                mock.patch.object(
+                    sqlite_runtime.sqlite3, "sqlite_version_info", (3, 53, 1)
+                ), mock.patch.object(
+                    sqlite_runtime.sys, "frozen", True, create=True
+                ):
+            path = Path(tmpdir) / "must-not-exist.db"
+            with self.assertRaises(sqlite_runtime.UnsafeSQLiteRuntimeError) as raised:
+                sqlite_runtime.connect(path)
+
+        self.assertFalse(path.exists())
+        self.assertIn("FTS5", str(raised.exception))
+
+    def test_history_search_uses_bounded_fallback_below_fts5_floor(self):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                mock.patch.object(db, "CONFIG_DIR", Path(tmpdir)), \
+                mock.patch.object(db, "DB_PATH", Path(tmpdir) / "library.db"), \
+                mock.patch.object(
+                    sqlite_runtime.sqlite3, "sqlite_version_info", (3, 51, 3)
+                ), mock.patch.object(
+                    sqlite_runtime.sys, "frozen", False, create=True
+                ):
+            db.init_db()
+            db.save_history_entry({
+                "title": "Fallback needle result",
+                "platform": "YouTube",
+            })
+            connection = db._connect(readonly=True)
+            try:
+                fts_table = connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='history_fts'"
+                ).fetchone()
+            finally:
+                connection.close()
+            results = db.search_history("needle")
+
+        self.assertIsNone(fts_table)
+        self.assertEqual([row["title"] for row in results], ["Fallback needle result"])
+
+    def test_history_fts_is_enabled_at_the_fixed_floor(self):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                mock.patch.object(db, "CONFIG_DIR", Path(tmpdir)), \
+                mock.patch.object(db, "DB_PATH", Path(tmpdir) / "library.db"), \
+                mock.patch.object(
+                    sqlite_runtime.sqlite3, "sqlite_version_info", (3, 53, 2)
+                ), mock.patch.object(
+                    sqlite_runtime.sys, "frozen", False, create=True
+                ):
+            db.init_db()
+            db.save_history_entry({
+                "title": "Indexed needle result",
+                "platform": "YouTube",
+            })
+            connection = db._connect(readonly=True)
+            try:
+                fts_table = connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='history_fts'"
+                ).fetchone()
+            finally:
+                connection.close()
+            results = db.search_history("needle")
+
+        self.assertIsNotNone(fts_table)
+        self.assertEqual([row["title"] for row in results], ["Indexed needle result"])
 
 
 class SQLiteRecoveryStressTests(unittest.TestCase):

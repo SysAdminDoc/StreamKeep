@@ -96,18 +96,32 @@ def test_100k_archive_uses_bounded_snapshot_paging_and_fts(
                 (100_000, 100_001, 128),
             )
         )
-        fts_plan = " ".join(
-            row[3] for row in connection.execute(
-                "EXPLAIN QUERY PLAN SELECT h.* FROM history h "
-                "JOIN history_fts ON history_fts.rowid = h.id "
-                "WHERE history_fts MATCH ? AND h.id <= ? ORDER BY h.id DESC LIMIT ?",
-                ('"needle"*', 100_000, 128),
+        if db._fts5_enabled():
+            search_plan = " ".join(
+                row[3] for row in connection.execute(
+                    "EXPLAIN QUERY PLAN SELECT h.* FROM history h "
+                    "JOIN history_fts ON history_fts.rowid = h.id "
+                    "WHERE history_fts MATCH ? AND h.id <= ? ORDER BY h.id DESC LIMIT ?",
+                    ('"needle"*', 100_000, 128),
+                )
             )
-        )
+        else:
+            search_plan = " ".join(
+                row[3] for row in connection.execute(
+                    "EXPLAIN QUERY PLAN SELECT h.* FROM history h "
+                    "WHERE h.title LIKE ? COLLATE NOCASE AND h.id <= ? "
+                    "ORDER BY h.id DESC LIMIT ?",
+                    ("%needle%", 100_000, 128),
+                )
+            )
     finally:
         connection.close()
     assert "INTEGER PRIMARY KEY" in keyset_plan
-    assert "VIRTUAL TABLE INDEX" in fts_plan
+    if db._fts5_enabled():
+        assert "VIRTUAL TABLE INDEX" in search_plan
+    else:
+        assert "history_fts" not in search_plan
+        assert "INTEGER PRIMARY KEY" in search_plan
 
 
 def test_history_aggregates_and_exact_lookup_stay_in_sqlite(

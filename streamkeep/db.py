@@ -91,8 +91,6 @@ def init_db() -> None:
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
-            if v < 7:
-                db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
             try:
                 db.execute(
                     "CREATE INDEX IF NOT EXISTS idx_queue_status "
@@ -105,6 +103,7 @@ def init_db() -> None:
                 "ON download_queue(job_id) WHERE job_id <> ''"
             )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        _configure_history_fts(db)
         db.commit()
     except Exception:
         db.rollback()
@@ -147,26 +146,6 @@ def _apply_schema(db):
             ON history(platform COLLATE NOCASE);
         CREATE INDEX IF NOT EXISTS idx_history_channel_nocase
             ON history(channel COLLATE NOCASE);
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
-            title, platform, channel, path, url,
-            content='history', content_rowid='id'
-        );
-        CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
-            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
-            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
-        END;
-        CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
-            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
-        END;
-        CREATE TRIGGER IF NOT EXISTS history_fts_update
-        AFTER UPDATE OF title, platform, channel, path, url ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
-            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
-            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
-            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
-        END;
 
         CREATE TABLE IF NOT EXISTS monitor_channels (
             id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -316,6 +295,55 @@ def _apply_schema(db):
     _apply_publishing_schema(db)
     _apply_upload_schema(db)
     _apply_intelligence_schema(db)
+
+
+def _fts5_enabled():
+    return bool(runtime_status().get("fts5_fixed", True))
+
+
+def _configure_history_fts(db):
+    """Create FTS5 only above its security floor; otherwise remove triggers."""
+    if not _fts5_enabled():
+        db.executescript("""
+            DROP TRIGGER IF EXISTS history_fts_insert;
+            DROP TRIGGER IF EXISTS history_fts_delete;
+            DROP TRIGGER IF EXISTS history_fts_update;
+        """)
+        return
+
+    existing = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='history_fts'"
+    ).fetchone()
+    trigger_names = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name IN ('history_fts_insert', 'history_fts_delete', "
+            "'history_fts_update')"
+        ).fetchall()
+    }
+    db.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
+            title, platform, channel, path, url,
+            content='history', content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_update
+        AFTER UPDATE OF title, platform, channel, path, url ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
+    """)
+    if existing is None or len(trigger_names) != 3:
+        db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
 
 
 def _apply_publishing_schema(db):
@@ -780,6 +808,22 @@ def _history_fts_query(query: str) -> str:
     return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"*' for token in tokens)
 
 
+def _history_like_filter(query: str, alias="h"):
+    """Build a case-insensitive metadata filter for runtimes without FTS5."""
+    tokens = re.findall(r"\w+", str(query or "").lower(), flags=re.UNICODE)
+    fields = ("title", "platform", "channel", "path", "url")
+    clauses = []
+    params = []
+    for token in tokens:
+        escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(" + " OR ".join(
+            f"COALESCE({alias}.{field}, '') LIKE ? ESCAPE '\\' COLLATE NOCASE"
+            for field in fields
+        ) + ")")
+        params.extend([f"%{escaped}%"] * len(fields))
+    return " AND ".join(clauses), params
+
+
 def query_history_page(
     *,
     query: str = "",
@@ -801,9 +845,14 @@ def query_history_page(
     params: list[Any] = [snapshot_id, before_id]
     join = ""
     if fts_query:
-        join = "JOIN history_fts ON history_fts.rowid = h.id"
-        where.append("history_fts MATCH ?")
-        params.append(fts_query)
+        if _fts5_enabled():
+            join = "JOIN history_fts ON history_fts.rowid = h.id"
+            where.append("history_fts MATCH ?")
+            params.append(fts_query)
+        else:
+            like_filter, like_params = _history_like_filter(query)
+            where.append(like_filter)
+            params.extend(like_params)
     if paths:
         placeholders = ",".join("?" for _ in paths)
         where.append(f"h.path IN ({placeholders})")
@@ -838,9 +887,14 @@ def count_history_query(
     params: list[Any] = [snapshot_id]
     join = ""
     if fts_query:
-        join = "JOIN history_fts ON history_fts.rowid = h.id"
-        where.append("history_fts MATCH ?")
-        params.append(fts_query)
+        if _fts5_enabled():
+            join = "JOIN history_fts ON history_fts.rowid = h.id"
+            where.append("history_fts MATCH ?")
+            params.append(fts_query)
+        else:
+            like_filter, like_params = _history_like_filter(query)
+            where.append(like_filter)
+            params.extend(like_params)
     if paths:
         placeholders = ",".join("?" for _ in paths)
         where.append(f"h.path IN ({placeholders})")
@@ -4192,13 +4246,20 @@ def rebuild_history_indexes() -> tuple[bool, str]:
     """Rebuild the external-content History FTS index and planner statistics."""
     if not DB_PATH.is_file():
         return False, "Database file does not exist"
+    fts5_enabled = _fts5_enabled()
     with _write_lock:
         db = _connect()
         try:
-            db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+            if fts5_enabled:
+                db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
             db.execute("ANALYZE")
             db.execute("PRAGMA optimize")
             db.commit()
+            if not fts5_enabled:
+                return True, (
+                    "History FTS5 is disabled below SQLite 3.53.2; "
+                    "planner statistics optimized and bounded fallback search remains active"
+                )
             return True, "History search index and planner statistics rebuilt"
         except sqlite3.Error as exc:
             db.rollback()
@@ -4263,6 +4324,8 @@ def db_diagnostics() -> dict[str, Any]:
         "path": str(DB_PATH),
         "sqlite_runtime": runtime_status(),
     }
+    result["fts5_enabled"] = _fts5_enabled()
+    result["fts5_degraded"] = not result["fts5_enabled"]
     if not result["exists"]:
         return result
     try:

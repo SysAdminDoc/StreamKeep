@@ -496,7 +496,10 @@ def _probe_sqlite_runtime():
     record = _base_record(
         "sqlite", "SQLite", "python-runtime", status["minimum"],
         ["library-database", "backup", "search", "queue"],
-        "Use a StreamKeep build bundled with a fixed SQLite runtime.",
+        status.get(
+            "repair",
+            "Use a StreamKeep build bundled with a fixed SQLite runtime.",
+        ),
         path=sys.executable,
         version=status["version"],
         available=True,
@@ -508,6 +511,10 @@ def _probe_sqlite_runtime():
         "wal_reset_fixed": status["wal_reset_fixed"],
         "degraded": status["degraded"],
         "journal_mode": status["journal_mode"],
+        "fts5_fixed": status.get("fts5_fixed", True),
+        "fts5_supported": status.get("fts5_supported", True),
+        "fts5_degraded": status.get("fts5_degraded", False),
+        "fts5_minimum": status.get("fts5_minimum", ""),
     })
     if status["degraded"]:
         record["state"] = "degraded"

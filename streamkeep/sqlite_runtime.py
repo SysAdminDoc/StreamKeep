@@ -2,7 +2,9 @@
 
 SQLite's WAL-reset corruption fix was released in 3.51.3 and backported to
 3.50.7 and 3.44.6.  Source checkouts can remain usable on older Python builds
-by using rollback journals; frozen releases must bundle a fixed runtime.
+by using rollback journals. The FTS5 heap-overflow fix requires SQLite 3.53.2
+or newer; older source runtimes use bounded non-FTS search, while frozen
+releases must bundle both fixed surfaces.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ FIXED_SQLITE_BACKPORTS = {
     (3, 50): (3, 50, 7),
 }
 FIXED_SQLITE_DESCRIPTION = "3.51.3 or patched 3.50.7/3.44.6"
+FTS5_FIXED_SQLITE_RELEASE = (3, 53, 2)
+FTS5_FIXED_SQLITE_DESCRIPTION = "3.53.2 or newer"
 
 
 class UnsafeSQLiteRuntimeError(RuntimeError):
@@ -46,14 +50,21 @@ def wal_reset_is_fixed(version=None):
     return bool(backport and current >= backport)
 
 
+def fts5_is_fixed(version=None):
+    """Return whether *version* includes the FTS5 heap-overflow fix."""
+    current = _version_tuple(version)
+    return bool(current and current >= FTS5_FIXED_SQLITE_RELEASE)
+
+
 def runtime_status(*, version=None, frozen=None):
     """Describe the safe journal policy for this Python SQLite runtime."""
     current = _version_tuple(version)
     version_text = ".".join(str(part) for part in current) if current else "unknown"
     is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else bool(frozen)
     fixed = wal_reset_is_fixed(current)
-    supported = fixed or not is_frozen
-    degraded = not fixed and not is_frozen
+    fts5_fixed = fts5_is_fixed(current)
+    supported = (not is_frozen) or (fixed and fts5_fixed)
+    degraded = not fixed or not fts5_fixed
     if fixed:
         detail = f"SQLite {version_text} includes the WAL-reset fix; WAL is enabled."
     elif is_frozen:
@@ -67,6 +78,26 @@ def runtime_status(*, version=None, frozen=None):
             "rollback journaling is enforced. Use a Python runtime linked to "
             f"SQLite {FIXED_SQLITE_DESCRIPTION} to enable WAL."
         )
+    if not fts5_fixed:
+        fts_detail = (
+            f" SQLite {version_text} does not include the FTS5 heap-overflow "
+            f"fix; FTS5 is disabled and search uses a bounded fallback."
+        )
+        if is_frozen:
+            fts_detail += (
+                f" Frozen releases require SQLite {FTS5_FIXED_SQLITE_DESCRIPTION}."
+            )
+        else:
+            fts_detail += (
+                f" Use SQLite {FTS5_FIXED_SQLITE_DESCRIPTION} or newer to enable FTS5."
+            )
+        detail += fts_detail
+    repair = (
+        "Use a StreamKeep build bundled with SQLite "
+        f"{FTS5_FIXED_SQLITE_DESCRIPTION}."
+        if not fts5_fixed else
+        "Use a StreamKeep build bundled with a fixed SQLite runtime."
+    )
     return {
         "version": version_text,
         "version_info": list(current),
@@ -76,6 +107,11 @@ def runtime_status(*, version=None, frozen=None):
         "degraded": degraded,
         "journal_mode": "wal" if fixed else "delete",
         "minimum": FIXED_SQLITE_DESCRIPTION,
+        "fts5_fixed": fts5_fixed,
+        "fts5_supported": fts5_fixed,
+        "fts5_degraded": not fts5_fixed,
+        "fts5_minimum": FTS5_FIXED_SQLITE_DESCRIPTION,
+        "repair": repair,
         "detail": detail,
     }
 

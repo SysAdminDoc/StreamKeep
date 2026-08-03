@@ -67,6 +67,28 @@ class SearchTests(unittest.TestCase):
                 hits = search.search_transcripts('"unterminated')
             self.assertEqual(hits, [])
 
+    def test_search_falls_back_without_fts5(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            db_path = tmp / "search.db"
+            recording_dir = tmp / "recording"
+            recording_dir.mkdir()
+            (recording_dir / "captions.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nFallback search works\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(search, "DB_PATH", db_path), \
+                    mock.patch.object(
+                        search,
+                        "sqlite_runtime_status",
+                        return_value={"fts5_fixed": False},
+                    ):
+                search.index_recording(str(recording_dir))
+                hits = search.search_transcripts("fallback")
+
+            self.assertEqual([hit["text"] for hit in hits], ["Fallback search works"])
+
 
 class WebVTTParsingTests(unittest.TestCase):
     def _parse(self, body):

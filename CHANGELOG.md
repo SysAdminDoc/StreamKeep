@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a separate SQLite 3.53.2 FTS5 safety floor. Source runtimes below it
+  disable FTS5 and use bounded fallback search with degraded-mode repair
+  guidance, while frozen builds refuse unsafe runtimes. Settings and
+  diagnostics expose the FTS5 state.
+
 - Created DPAPI and portable-secret temporary files with exclusive owner-only
   permissions before writing any secret payload. Portable-secret restore now
   commits cookies, config secrets, and account credentials transactionally and

@@ -43,6 +43,7 @@ def _ready_runtime_registry(*, refresh=False):
         }
 
     return {
+        "sqlite": record("SQLite", "3.53.3", r"C:\Python\sqlite3.dll"),
         "ffmpeg": record("FFmpeg", "8.1.2", r"C:\Tools\ffmpeg.exe"),
         "curl": record("curl", "8.21.0", r"C:\Tools\curl.exe"),
         "pillow": record("Pillow", "12.3.0", r"C:\Python\PIL\__init__.py"),
