@@ -72,6 +72,10 @@ _IMPORT_CAPABILITY_INFO = {
         "automatic lifecycle cleanup",
         "Allows the imported retention policy to recycle local media automatically.",
     ),
+    "ytdlp_arg_templates": (
+        "yt-dlp argument templates",
+        "Keeps imported yt-dlp argument templates disabled until you explicitly approve them.",
+    ),
 }
 
 _STRING_CONFIG_KEYS = frozenset({
@@ -620,6 +624,14 @@ def _quarantine_import_capabilities(config):
     hold("lifecycle_cleanup", [lifecycle_path], active=lifecycle_active)
     if lifecycle_active:
         result.setdefault("lifecycle", {})["enabled"] = False
+
+    ytdlp_templates = config.get("ytdlp_arg_templates", {})
+    hold(
+        "ytdlp_arg_templates", [("ytdlp_arg_templates",)],
+        active=bool(ytdlp_templates),
+    )
+    if ytdlp_templates:
+        result["ytdlp_arg_templates"] = {}
 
     smart_profiles = config.get("smart_profiles", [])
     smart_active = bool(config.get("smart_mode") or smart_profiles)

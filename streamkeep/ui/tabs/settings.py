@@ -894,9 +894,11 @@ def build_settings_tab(win):
 
     template_hint = QLabel(
         "Named yt-dlp argument templates use one argv element per line. "
-        "They never run through a shell; command/config delegation and link "
-        "writers are rejected. Templates can be attached in Download Advanced "
-        "or a monitor channel profile."
+        "Only approved transfer, format, subtitle, and playlist options are "
+        "accepted; executable paths, plugins, output/config delegation, and "
+        "link writers are rejected. Imported templates stay disabled until "
+        "you explicitly approve them. Templates can be attached in Download "
+        "Advanced or a monitor channel profile."
     )
     template_hint.setObjectName("subtleText")
     template_hint.setWordWrap(True)

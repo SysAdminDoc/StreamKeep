@@ -143,6 +143,30 @@ def test_import_quarantines_each_risky_capability_until_approved():
     assert "theme" in diff
 
 
+def test_import_quarantines_ytdlp_templates_until_approved():
+    imported = {
+        "ytdlp_arg_templates": {
+            "Imported headers": [
+                "--add-header", "Referer: https://example.com/watch",
+            ],
+        },
+    }
+    preview = config.prepare_config_import(_envelope(imported), {})
+
+    assert preview.capabilities == ("ytdlp_arg_templates",)
+    assert preview.quarantined_config["ytdlp_arg_templates"] == {}
+    assert config.get_import_capability_info("ytdlp_arg_templates")[0] == (
+        "yt-dlp argument templates"
+    )
+
+    held = config.finalize_config_import(preview)
+    assert held["ytdlp_arg_templates"] == {}
+    activated = config.finalize_config_import(
+        preview, {"ytdlp_arg_templates"}
+    )
+    assert activated["ytdlp_arg_templates"] == imported["ytdlp_arg_templates"]
+
+
 def test_validation_failure_does_not_mutate_current_config():
     current = {
         "theme": "dark",

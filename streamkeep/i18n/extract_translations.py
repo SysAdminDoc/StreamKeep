@@ -63,6 +63,8 @@ SPANISH_CORE = {
         "Revise el uso de disco, la integridad y la limpieza recuperable.",
     ("StreamKeep", "Tune local workflows, privacy, and integrations."):
         "Ajuste los flujos locales, la privacidad y las integraciones.",
+    ("StreamKeep", "Named yt-dlp argument templates use one argv element per line. Only approved transfer, format, subtitle, and playlist options are accepted; executable paths, plugins, output/config delegation, and link writers are rejected. Imported templates stay disabled until you explicitly approve them. Templates can be attached in Download Advanced or a monitor channel profile."):
+        "Las plantillas de argumentos de yt-dlp con nombre usan un elemento argv por línea. Solo se aceptan opciones aprobadas de transferencia, formato, subtítulos y listas de reproducción; se rechazan rutas de ejecutables, plugins, delegación de salida/configuración y escritores de enlaces. Las plantillas importadas permanecen desactivadas hasta que las apruebe explícitamente. Las plantillas se pueden adjuntar en Avanzado de Descarga o en el perfil de un canal supervisado.",
     ("StreamKeep", "Checking systems"): "Comprobando sistemas",
     ("StreamKeep", "Systems ready"): "Sistemas listos",
     ("StreamKeep", "Needs attention"): "Requiere atención",

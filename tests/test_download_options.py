@@ -70,9 +70,11 @@ def test_raw_format_spec_rejects_control_characters(value):
 
 def test_ytdlp_template_args_remain_structured_and_preserve_safe_values():
     assert validate_ytdlp_template_args([
-        "--concurrent-fragments", "4", "--retry-sleep=fragment:exp=1:20",
+        "--concurrent-fragments", "4", "-N", "4",
+        "--retry-sleep=fragment:exp=1:20",
     ]) == (
-        "--concurrent-fragments", "4", "--retry-sleep=fragment:exp=1:20",
+        "--concurrent-fragments", "4", "-N", "4",
+        "--retry-sleep=fragment:exp=1:20",
     )
 
 
@@ -84,6 +86,29 @@ def test_ytdlp_template_args_remain_structured_and_preserve_safe_values():
 def test_ytdlp_template_args_reject_link_and_command_boundaries(option):
     with pytest.raises(ValueError, match="not allowed"):
         validate_ytdlp_template_args([option])
+
+
+@pytest.mark.parametrize("option", [
+    "--ffmpeg-location", "--plugin-dirs", "-P", "--paths", "-o",
+    "--cache-dir", "--update-to",
+])
+def test_ytdlp_template_args_reject_executable_path_and_update_options(option):
+    with pytest.raises(ValueError, match="not allowed"):
+        validate_ytdlp_template_args([option, "unsafe-value"])
+
+
+@pytest.mark.parametrize("args, message", [
+    (["--add-header"], "requires a value"),
+    (["--add-header", "--user-agent", "Archive"], "requires a value"),
+    (["--concurrent-fragments", "33"], "out of range"),
+    (["--referer", "file:///private/cookies"], "HTTP\\(S\\) URL"),
+    (["--format", "best video"], "invalid"),
+    (["--format-sort", "res:720;--exec"], "invalid"),
+    (["--playlist-items", "1,three"], "invalid"),
+])
+def test_ytdlp_template_args_validate_option_values(args, message):
+    with pytest.raises(ValueError, match=message):
+        validate_ytdlp_template_args(args)
 
 
 def test_ytdlp_template_args_reject_shell_strings():

@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Hardened named yt-dlp argument templates with an explicit allow-list and
+  option-specific value validation. Executable paths, plugin/config delegation,
+  output paths, update commands, and link writers are rejected; imported
+  templates are now quarantined until individually approved during config
+  import.
+
 - Added per-download dubbed-audio language selection and a clean mute mode.
   ISO 639-1 language preferences are translated into yt-dlp audio selectors
   with multistream support, while muted native and yt-dlp video outputs strip

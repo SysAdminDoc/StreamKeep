@@ -39,29 +39,54 @@ SPONSORBLOCK_CATEGORIES = {
 SPONSORBLOCK_NON_REMOVABLE = frozenset({"poi_highlight", "chapter"})
 SPONSORBLOCK_LEGACY_REMOVE = "sponsor,selfpromo,interaction"
 
-# Named/raw argument templates are deliberately narrower than yt-dlp itself.
-# Shortcut writers were the affected surface for CVE-2026-55404, while the
-# remaining options below introduce a second command/config parser or an
-# executable boundary.  Higher-level StreamKeep controls own those behaviors.
-YTDLP_TEMPLATE_DENIED_OPTIONS = frozenset({
-    "--batch-file",
-    "--config-locations",
-    "--downloader",
-    "--downloader-args",
-    "--exec",
-    "--exec-before-download",
-    "--external-downloader",
-    "--external-downloader-args",
-    "--load-info-json",
-    "--netrc-cmd",
-    "--postprocessor-args",
-    "--ppa",
-    "--use-postprocessor",
-    "--write-desktop-link",
-    "--write-link",
-    "--write-url-link",
-    "--write-webloc-link",
-    "-a",
+# Named/raw argument templates use an explicit, bounded allow-list. Options
+# that choose an executable, plugin/config source, output path, credentials,
+# network route, postprocessor, or another command boundary remain reserved
+# for typed StreamKeep controls and can never enter a template argv.
+YTDLP_TEMPLATE_VALUE_OPTIONS = {
+    "--add-header": "header",
+    "--user-agent": "text",
+    "--referer": "url",
+    "--impersonate": "token",
+    "--concurrent-fragments": "integer",
+    "-N": "integer",
+    "--retries": "retry",
+    "--fragment-retries": "retry",
+    "--retry-sleep": "retry-sleep",
+    "--throttled-rate": "rate",
+    "--limit-rate": "rate",
+    "--socket-timeout": "positive-integer",
+    "--wait-for-video": "wait-for-video",
+    "--format": "format",
+    "-f": "format",
+    "--format-sort": "format-sort",
+    "--playlist-items": "playlist-items",
+}
+YTDLP_TEMPLATE_FLAG_OPTIONS = frozenset({
+    "--geo-bypass",
+    "--no-geo-bypass",
+    "--no-playlist",
+    "--yes-playlist",
+    "--flat-playlist",
+    "--no-flat-playlist",
+    "--playlist-reverse",
+    "--playlist-random",
+    "--check-formats",
+    "--no-check-formats",
+    "--live-from-start",
+    "--no-live-from-start",
+    "--skip-unavailable-fragments",
+    "--abort-on-unavailable-fragments",
+    "--write-subs",
+    "--no-write-subs",
+    "--write-auto-subs",
+    "--no-write-auto-subs",
+    "--embed-subs",
+    "--no-embed-subs",
+})
+YTDLP_TEMPLATE_ALLOWED_OPTIONS = frozenset({
+    *YTDLP_TEMPLATE_VALUE_OPTIONS,
+    *YTDLP_TEMPLATE_FLAG_OPTIONS,
 })
 
 _AUDIO_QUALITY_RE = re.compile(
@@ -76,6 +101,16 @@ _RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
 _WAIT_FOR_VIDEO_RE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 _RETRY_SLEEP_RE = re.compile(r"[A-Za-z0-9_.:+*/=,-]+")
 _TEMPLATE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
+_TEMPLATE_INTEGER_RE = re.compile(r"[0-9]{1,6}")
+_TEMPLATE_RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
+_TEMPLATE_FORMAT_RE = re.compile(r"[A-Za-z0-9_.*+\-/=<>!&|()[\]:,?^$%{}~]+")
+_TEMPLATE_FORMAT_SORT_RE = re.compile(r"[A-Za-z0-9_:+,.*=\-]+")
+_TEMPLATE_PLAYLIST_RE = re.compile(
+    r"[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*"
+)
+_TEMPLATE_HEADER_NAME_RE = re.compile(
+    r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+"
+)
 _HEX_RE = re.compile(r"[0-9A-Fa-f]+")
 YTDLP_TRANSFER_FIELDS = (
     "concurrent_fragments",
@@ -104,12 +139,79 @@ def _safe_argument(value, label, *, max_len=1024):
     return value
 
 
-def validate_ytdlp_template_args(args):
-    """Validate a structured yt-dlp argument template.
+def _validate_ytdlp_template_value(option, value):
+    """Validate one value for an allow-listed template option."""
+    value = _safe_argument(
+        value, f"yt-dlp template value for {option}", max_len=4096
+    ).strip()
+    if not value or value.startswith("-"):
+        raise ValueError(f"yt-dlp template value for {option} is invalid")
+    kind = YTDLP_TEMPLATE_VALUE_OPTIONS[option]
+    if kind == "header":
+        name, separator, header_value = value.partition(":")
+        if (
+            not separator
+            or not _TEMPLATE_HEADER_NAME_RE.fullmatch(name.strip())
+            or not header_value.strip()
+        ):
+            raise ValueError(
+                f"yt-dlp template value for {option} must be a header"
+            )
+    elif kind == "url":
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError(
+                f"yt-dlp template value for {option} must be an HTTP(S) URL"
+            )
+    elif kind == "token":
+        if not re.fullmatch(r"[A-Za-z0-9_.+,-]+", value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind in {"integer", "positive-integer"}:
+        if not _TEMPLATE_INTEGER_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+        number = int(value)
+        minimum = 1 if kind == "positive-integer" else 0
+        maximum = 32 if option in {"--concurrent-fragments", "-N"} else 86400
+        if not minimum <= number <= maximum:
+            raise ValueError(f"yt-dlp template value for {option} is out of range")
+    elif kind == "retry":
+        if value.lower() != "infinite" and (
+            not _TEMPLATE_INTEGER_RE.fullmatch(value) or int(value) > 1000
+        ):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "retry-sleep":
+        if not _RETRY_SLEEP_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "rate":
+        if not _TEMPLATE_RATE_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+        if float(value.rstrip("bBkKmMgGtT")) <= 0:
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "wait-for-video":
+        match = _WAIT_FOR_VIDEO_RE.fullmatch(value)
+        if not match or int(match.group(1)) > 604800 or (
+            match.group(2) and int(match.group(2)) < int(match.group(1))
+        ):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "format":
+        if not _TEMPLATE_FORMAT_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "format-sort":
+        if not _TEMPLATE_FORMAT_SORT_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    elif kind == "playlist-items":
+        if not _TEMPLATE_PLAYLIST_RE.fullmatch(value):
+            raise ValueError(f"yt-dlp template value for {option} is invalid")
+    return value
 
-    Templates are argv lists, never shell strings.  Options that create
-    executable shortcut files, load more arguments/configuration, or delegate
-    to another command boundary are reserved for typed StreamKeep features.
+
+def validate_ytdlp_template_args(args):
+    """Validate a structured yt-dlp argument template against an allow-list.
+
+    Templates are argv lists, never shell strings. Every option is explicitly
+    approved and options with values validate both inline ``--name=value`` and
+    the next argv element. This rejects output/config/plugin/executable
+    boundaries before a template can be saved or attached to a job.
     """
     if isinstance(args, (str, bytes)) or not isinstance(args, (list, tuple)):
         raise ValueError("yt-dlp template arguments must be a structured list")
@@ -117,18 +219,37 @@ def validate_ytdlp_template_args(args):
         raise ValueError("yt-dlp template has too many arguments (maximum 128)")
 
     validated = []
+    pending_option = ""
     for raw_arg in args:
         arg = _safe_argument(raw_arg, "yt-dlp template argument", max_len=4096)
         if not arg:
             raise ValueError("yt-dlp template arguments cannot be empty")
-        option = arg.split("=", 1)[0].lower()
+        if pending_option:
+            if arg.startswith("-"):
+                raise ValueError(
+                    f"yt-dlp template option {pending_option} requires a value"
+                )
+            _validate_ytdlp_template_value(pending_option, arg)
+            validated.append(arg)
+            pending_option = ""
+            continue
+        option, separator, inline_value = arg.partition("=")
+        if option.startswith("--"):
+            option = option.lower()
         if option == "--":
             raise ValueError("yt-dlp template cannot end option parsing with --")
-        if option in YTDLP_TEMPLATE_DENIED_OPTIONS:
+        if option not in YTDLP_TEMPLATE_ALLOWED_OPTIONS:
             raise ValueError(f"yt-dlp template option is not allowed: {option}")
-        if option.startswith("-a") and option != "--":
-            raise ValueError("yt-dlp template option is not allowed: -a")
+        if option in YTDLP_TEMPLATE_FLAG_OPTIONS:
+            if separator:
+                raise ValueError(f"yt-dlp flag does not accept a value: {option}")
+        elif separator:
+            _validate_ytdlp_template_value(option, inline_value)
+        else:
+            pending_option = option
         validated.append(arg)
+    if pending_option:
+        raise ValueError(f"yt-dlp template option {pending_option} requires a value")
     return tuple(validated)
 
 
@@ -253,8 +374,8 @@ def validate_external_downloader_options(
     Only a fixed set of aria2c performance knobs is exposed; the argv is
     generated from validated numeric/rate values, never from free-form user
     text, so no aria2c control/RPC/exec option can be injected through this
-    surface. ``--downloader``/``--downloader-args`` are otherwise reserved
-    (see ``YTDLP_TEMPLATE_DENIED_OPTIONS``); this typed control owns them.
+    surface. ``--downloader``/``--downloader-args`` are otherwise reserved by
+    the template allow-list; this typed control owns them.
 
     yt-dlp 2026.07.04 removed aria2c support for HLS/DASH downloads
     (CVE-2026-50574).  Callers must gate the result through
