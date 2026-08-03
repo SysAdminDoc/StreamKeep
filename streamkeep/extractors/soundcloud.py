@@ -85,6 +85,11 @@ class SoundCloudExtractor(Extractor):
             title=data.get("title", ""),
             channel=self.extract_channel_id(url) or "",
             total_secs=(data.get("duration") or 0) / 1000,
+            source_id=(
+                f"track:{data.get('id')}"
+                if data.get("id") else ""
+            ),
+            webpage_url=url,
         )
         info.duration_str = fmt_duration(info.total_secs)
 
@@ -113,4 +118,4 @@ class SoundCloudExtractor(Extractor):
             f"SoundCloud: {info.title}, {len(info.qualities)} formats, "
             f"{info.duration_str}",
         )
-        return info
+        return self._canonicalize_stream_info(info, source_url=url)

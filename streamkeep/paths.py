@@ -119,7 +119,10 @@ def bind_config_dir(path):
 
 def source_archive_path(source_url):
     """Return the private stable yt-dlp archive path for a source URL."""
-    identity = str(source_url or "").strip().encode("utf-8")
+    from .utils import canonical_webpage_url
+
+    canonical = canonical_webpage_url(source_url)
+    identity = str(canonical or source_url or "").strip().encode("utf-8")
     digest = hashlib.sha256(identity).hexdigest()
     archive_dir = CONFIG_DIR / "download-archives"
     archive_dir.mkdir(parents=True, exist_ok=True)

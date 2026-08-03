@@ -48,6 +48,10 @@ class AudiusExtractor(Extractor):
             title=track.get("title", ""),
             channel=self.extract_channel_id(url) or "",
             total_secs=track.get("duration", 0),
+            source_id=(
+                f"track:{track_id}" if track_id else ""
+            ),
+            webpage_url=url,
         )
         info.duration_str = fmt_duration(info.total_secs)
 
@@ -58,4 +62,4 @@ class AudiusExtractor(Extractor):
         ))
 
         self._log(log_fn, f"Audius: {info.title}, {info.duration_str}")
-        return info
+        return self._canonicalize_stream_info(info, source_url=url)

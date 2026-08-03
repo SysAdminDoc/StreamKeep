@@ -109,6 +109,25 @@ class DownloadJobSpec:
 
     feed_url: str = ""
 
+    def __post_init__(self):
+        """Canonicalize identity at construction, not only at serialization."""
+        from .metadata import build_archival_provenance
+        from .models import StreamInfo
+
+        provenance = build_archival_provenance(
+            StreamInfo(
+                platform=self.source_platform,
+                source_id=self.source_id,
+                webpage_url=self.webpage_url,
+            ),
+            source_url=self.webpage_url,
+        )
+        object.__setattr__(
+            self, "source_platform", provenance.platform,
+        )
+        object.__setattr__(self, "source_id", provenance.source_id)
+        object.__setattr__(self, "webpage_url", provenance.webpage_url)
+
     def to_dict(self):
         """Serialize to a dict safe for JSON/SQLite storage (no secrets)."""
         d = asdict(self)

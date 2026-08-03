@@ -30,7 +30,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 _PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _PUBLISHING_TEXT_LIMIT = 256
@@ -88,6 +88,8 @@ def init_db() -> None:
                 _migrate_upload_v14(db)
             if 0 < v < 15:
                 _migrate_intelligence_v15(db)
+            if v < 16:
+                _migrate_identity_v16(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -119,6 +121,7 @@ def _apply_schema(db):
             date                TEXT NOT NULL DEFAULT '',
             platform            TEXT NOT NULL DEFAULT '',
             source_id           TEXT NOT NULL DEFAULT '',
+            webpage_url         TEXT NOT NULL DEFAULT '',
             title               TEXT NOT NULL DEFAULT '',
             channel             TEXT NOT NULL DEFAULT '',
             quality             TEXT NOT NULL DEFAULT '',
@@ -136,6 +139,8 @@ def _apply_schema(db):
         CREATE INDEX IF NOT EXISTS idx_history_channel  ON history(channel);
         CREATE INDEX IF NOT EXISTS idx_history_date     ON history(date);
         CREATE INDEX IF NOT EXISTS idx_history_url      ON history(url);
+        CREATE INDEX IF NOT EXISTS idx_history_webpage_url
+            ON history(webpage_url);
         CREATE INDEX IF NOT EXISTS idx_history_path     ON history(path);
         CREATE INDEX IF NOT EXISTS idx_history_id_date  ON history(id DESC, date);
         CREATE INDEX IF NOT EXISTS idx_history_day
@@ -669,6 +674,62 @@ def _migrate_identity_v9(db):
             )
 
 
+def _migrate_identity_v16(db):
+    """Persist canonical page URLs and repair legacy identity rows."""
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(history)").fetchall()
+    }
+    if not existing_cols:
+        return
+    if "source_id" not in existing_cols:
+        db.execute(
+            "ALTER TABLE history ADD COLUMN "
+            "source_id TEXT NOT NULL DEFAULT ''"
+        )
+    if "webpage_url" not in existing_cols:
+        db.execute(
+            "ALTER TABLE history ADD COLUMN "
+            "webpage_url TEXT NOT NULL DEFAULT ''"
+        )
+
+    from .metadata import build_archival_provenance
+    from .models import StreamInfo
+
+    rows = db.execute(
+        "SELECT id, platform, source_id, channel, url, webpage_url "
+        "FROM history"
+    ).fetchall()
+    for row in rows:
+        raw_url = str(row[5] or row[4] or "")
+        info = StreamInfo(
+            platform=str(row[1] or ""),
+            channel=str(row[3] or ""),
+            source_id=str(row[2] or ""),
+            webpage_url=raw_url,
+        )
+        provenance = build_archival_provenance(
+            info, source_url=raw_url,
+        )
+        canonical_url = provenance.webpage_url
+        if not canonical_url and raw_url:
+            # Keep the migration conservative: an unrecognized source is
+            # explicitly unknown rather than being assigned a guessed ID.
+            canonical_url = ""
+        db.execute(
+            "UPDATE history SET source_id=?, webpage_url=?, url=? WHERE id=?",
+            (
+                provenance.source_id,
+                canonical_url,
+                canonical_url or str(row[4] or ""),
+                int(row[0]),
+            ),
+        )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_webpage_url "
+        "ON history(webpage_url)"
+    )
+
+
 def _migrate_media_layout_v12(db):
     """Add the per-monitor media-server layout override."""
     existing_cols = {
@@ -1028,6 +1089,29 @@ def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
     return save_completed_recording(entry_dict)
 
 
+def _canonical_history_entry(entry_dict: dict[str, Any]) -> dict[str, Any]:
+    """Normalize history identity before it can be indexed or searched."""
+    from .metadata import build_archival_provenance
+    from .models import StreamInfo
+
+    raw = dict(entry_dict or {})
+    raw_url = str(raw.get("webpage_url", "") or raw.get("url", "") or "")
+    provenance = build_archival_provenance(
+        StreamInfo(
+            platform=str(raw.get("platform", "") or ""),
+            channel=str(raw.get("channel", "") or ""),
+            source_id=str(raw.get("source_id", "") or ""),
+            webpage_url=raw_url,
+        ),
+        source_url=raw_url,
+    )
+    raw["platform"] = provenance.platform or str(raw.get("platform", ""))
+    raw["source_id"] = provenance.source_id
+    raw["webpage_url"] = provenance.webpage_url
+    raw["url"] = provenance.webpage_url or str(raw.get("url", "") or "")
+    return raw
+
+
 def save_completed_recording(
     entry_dict: dict[str, Any],
     manifest: dict[str, Any] | None = None,
@@ -1039,13 +1123,15 @@ def save_completed_recording(
             db.execute("BEGIN IMMEDIATE")
             cur = db.execute("""
                 INSERT INTO history
-                    (date, platform, source_id, title, channel, quality, size,
-                     path, url, favorite, watched, watch_position_secs, bookmarks)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    (date, platform, source_id, webpage_url, title, channel,
+                     quality, size, path, url, favorite, watched,
+                     watch_position_secs, bookmarks)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("date", "")),
                 str(entry_dict.get("platform", "")),
                 str(entry_dict.get("source_id", "")),
+                str(entry_dict.get("webpage_url", "")),
                 str(entry_dict.get("title", "")),
                 str(entry_dict.get("channel", "")),
                 str(entry_dict.get("quality", "")),
@@ -1098,7 +1184,7 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
     are applied (unknown keys are silently ignored).
     """
     allowed = {
-        "date", "platform", "source_id", "title", "channel", "quality", "size",
+        "date", "platform", "source_id", "webpage_url", "title", "channel", "quality", "size",
         "path", "url", "favorite", "watched", "watch_position_secs",
         "bookmarks",
     }
@@ -1113,6 +1199,9 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
             v = int(bool(v))
         elif k == "watch_position_secs":
             v = float(v or 0)
+        elif k == "webpage_url":
+            from .metadata import canonical_webpage_url
+            v = canonical_webpage_url(v)
         else:
             v = str(v)
         parts.append(f"{k}=?")
@@ -1168,6 +1257,7 @@ def publish_recording(history_id: int) -> dict[str, Any] | None:
         return None
     if history_id <= 0:
         return None
+    entry_dict = _canonical_history_entry(entry_dict)
     with _write_lock:
         db = _connect()
         try:
@@ -1457,11 +1547,21 @@ def find_history_by_url(url: str) -> dict[str, Any] | None:
     """Return the most recent history entry matching *url*, or None."""
     if not url:
         return None
+    from .metadata import canonical_webpage_url
+    raw_url = str(url).strip()
+    canonical_url = canonical_webpage_url(raw_url)
+    clauses = ["url=?"]
+    params = [raw_url]
+    if canonical_url:
+        clauses = ["webpage_url=?", "url=?", "url=?"]
+        params = [canonical_url, canonical_url, raw_url]
     db = _connect(readonly=True)
     try:
         row = db.execute(
-            "SELECT * FROM history WHERE url=? ORDER BY id DESC LIMIT 1",
-            (str(url),),
+            "SELECT * FROM history "
+            f"WHERE {' OR '.join(clauses)} "
+            "ORDER BY id DESC LIMIT 1",
+            params,
         ).fetchone()
         return _row_to_history_dict(row) if row else None
     finally:
@@ -4402,16 +4502,18 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                 for h in history:
                     if not isinstance(h, dict):
                         continue
+                    h = _canonical_history_entry(h)
                     db.execute("""
                         INSERT INTO history
-                            (date, platform, source_id, title, channel, quality,
-                             size, path, url, favorite, watched,
+                            (date, platform, source_id, webpage_url, title,
+                             channel, quality, size, path, url, favorite, watched,
                              watch_position_secs, bookmarks)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """, (
                         str(h.get("date", "")),
                         str(h.get("platform", "")),
                         str(h.get("source_id", "")),
+                        str(h.get("webpage_url", "")),
                         str(h.get("title", "")),
                         str(h.get("channel", "")),
                         str(h.get("quality", "")),

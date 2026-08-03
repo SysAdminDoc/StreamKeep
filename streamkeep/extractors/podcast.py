@@ -130,14 +130,15 @@ class PodcastRSSExtractor(Extractor):
                 else:
                     dur_str = f"{parts[0]}s"
 
-            vods.append(VODInfo(
+            vods.append(self._canonicalize_vod_info(VODInfo(
                 title=title, date=date, source=enc_url,
                 is_live=False, viewers=0, duration=dur_str,
                 duration_ms=0, platform="Podcast", channel="",
                 feed_url=url,
                 source_id=source_id,
+                webpage_url=url,
                 media_type="audio",
-            ))
+            )))
 
         self._log(log_fn, f"Found {len(vods)} episode(s)")
         return vods, None  # RSS feeds are not paginated
@@ -152,9 +153,10 @@ class PodcastRSSExtractor(Extractor):
                 source_id="episode:" + hashlib.sha256(
                     url.encode("utf-8", errors="replace")
                 ).hexdigest(),
+                webpage_url=url,
             )
             info.qualities.append(QualityInfo(
                 name="audio", url=url, resolution="audio", format_type="mp4",
             ))
-            return info
+            return self._canonicalize_stream_info(info, source_url=url)
         return None  # list_vods handles the RSS feed

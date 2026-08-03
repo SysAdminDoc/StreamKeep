@@ -1185,7 +1185,7 @@ class YtDlpExtractor(Extractor):
             ),
             is_live=data.get("is_live", False),
             source_id=str(data.get("id") or ""),
-            webpage_url=url,
+            webpage_url=str(data.get("webpage_url") or url),
         )
         from ..metadata import build_archival_provenance
         provenance = build_archival_provenance(info, source_url=url)

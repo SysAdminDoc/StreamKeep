@@ -105,7 +105,7 @@ class TwitchExtractor(Extractor):
                 secs = int(secs)
             except (TypeError, ValueError):
                 secs = 0
-            vods.append(VODInfo(
+            vods.append(self._canonicalize_vod_info(VODInfo(
                 title=node.get("title") or "Untitled",
                 date=node.get("createdAt") or "",
                 source=vod_id,  # VOD ID — resolved to m3u8 in resolve()
@@ -117,7 +117,7 @@ class TwitchExtractor(Extractor):
                 channel=login,
                 source_id=f"vod:{vod_id}",
                 webpage_url=f"https://www.twitch.tv/videos/{vod_id}",
-            ))
+            )))
             last_cursor = edge.get("cursor")
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
         next_cursor = last_cursor if page_info.get("hasNextPage") else None
@@ -243,7 +243,7 @@ class TwitchExtractor(Extractor):
 
         info.duration_str = fmt_duration(info.total_secs)
         self._log(log_fn, f"Twitch VOD: {info.duration_str}, {len(info.qualities)} qualities")
-        return info
+        return self._canonicalize_stream_info(info)
 
     def _resolve_live(self, login, log_fn=None):
         self._log(log_fn, f"Resolving Twitch live stream: {login}")
@@ -294,7 +294,7 @@ class TwitchExtractor(Extractor):
 
         info.duration_str = "Live"
         self._log(log_fn, f"Twitch live: {len(info.qualities)} qualities")
-        return info
+        return self._canonicalize_stream_info(info)
 
     def download_chat(self, vod_id, output_path, log_fn=None, progress_cb=None):
         """Download the full chat replay for a VOD. Writes two files:

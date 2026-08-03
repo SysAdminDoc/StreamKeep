@@ -174,6 +174,10 @@ def recover_channel_vods(channel, year, month, log_fn=None, progress_fn=None):
                     channel=channel,
                     title=f"Recovered VOD — {s.get('date_str', 'unknown date')}",
                     url=urls[0],
+                    source_id=f"vod:{s['stream_id']}",
+                    webpage_url=(
+                        f"https://www.twitch.tv/videos/{s['stream_id']}"
+                    ),
                     qualities=[
                         QualityInfo(name="recovered", url=u, format_type="hls")
                         for u in urls

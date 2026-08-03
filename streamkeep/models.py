@@ -182,6 +182,7 @@ class HistoryEntry:
     path: str = ""
     url: str = ""
     source_id: str = ""                    # stable platform-scoped media identity
+    webpage_url: str = ""                  # canonical public page URL
     favorite: bool = False                 # exempt from lifecycle cleanup (F32)
     watched: bool = False                  # playback status (F32/F38)
     watch_position_secs: float = 0.0       # resume position (F38)
@@ -196,6 +197,7 @@ class HistoryEntry:
             "quality": self.quality, "size": self.size,
             "path": self.path, "url": self.url,
             "source_id": self.source_id,
+            "webpage_url": self.webpage_url,
             "favorite": self.favorite, "watched": self.watched,
             "watch_position_secs": self.watch_position_secs,
             "bookmarks": list(self.bookmarks or []),
@@ -214,6 +216,7 @@ class HistoryEntry:
             path=str(d.get("path", "")),
             url=str(d.get("url", "")),
             source_id=str(d.get("source_id", "")),
+            webpage_url=str(d.get("webpage_url", "") or d.get("url", "")),
             favorite=bool(d.get("favorite", False)),
             watched=bool(d.get("watched", False)),
             watch_position_secs=float(d.get("watch_position_secs", 0) or 0),

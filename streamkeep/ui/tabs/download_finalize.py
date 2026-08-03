@@ -105,6 +105,7 @@ class DownloadFinalizeMixin:
                     channel=result.get("channel", ""),
                     url=result.get("history_url", ""),
                     source_id=result.get("source_id", ""),
+                    webpage_url=result.get("webpage_url", ""),
                     archive_manifest=result.get("archive_manifest"),
                 )
             except Exception as error:

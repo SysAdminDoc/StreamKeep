@@ -193,7 +193,7 @@ class KickExtractor(Extractor):
             except (TypeError, ValueError):
                 dur_str = ""
                 dur_ms = 0
-            vods.append(VODInfo(
+            vods.append(self._canonicalize_vod_info(VODInfo(
                 title=str(v.get("session_title") or "Untitled"),
                 date=str(v.get("created_at") or ""),
                 source=str(source),
@@ -208,7 +208,7 @@ class KickExtractor(Extractor):
                     f"https://kick.com/{slug}/videos/{vod_id}"
                     if vod_id else ""
                 ),
-            ))
+            )))
         self._log(log_fn, f"Found {len(vods)} VOD(s)")
         # Page on the raw API count, not the source-filtered list: a full page
         # that contains a source-less VOD would otherwise stop pagination early
@@ -220,7 +220,13 @@ class KickExtractor(Extractor):
         """Resolve Kick URL to StreamInfo with qualities."""
         slug = self.extract_channel_id(url) or ""
         if ".m3u8" in url:
-            return self._resolve_m3u8(url, log_fn, channel=slug)
+            return self._resolve_m3u8(
+                url,
+                log_fn,
+                channel=slug,
+                source_id=f"channel:{slug.lower()}" if slug else "",
+                webpage_url=f"https://kick.com/{slug.lower()}" if slug else "",
+            )
         vod_id = self.extract_vod_id(url)
         if vod_id:
             source, title = self._v1_video(vod_id)
@@ -250,6 +256,8 @@ class KickExtractor(Extractor):
                 )
                 info = self._resolve_m3u8(
                     playback_url, log_fn, channel=slug, title=title,
+                    source_id=f"channel:{slug.lower()}",
+                    webpage_url=f"https://kick.com/{slug.lower()}",
                 )
                 if info:
                     info.is_live = True
@@ -263,6 +271,8 @@ class KickExtractor(Extractor):
                 log_fn,
                 channel=slug or vods[0].channel,
                 title=vods[0].title,
+                source_id=vods[0].source_id,
+                webpage_url=vods[0].webpage_url,
             )
         return None  # Multiple VODs handled by UI
 
@@ -310,4 +320,4 @@ class KickExtractor(Extractor):
         info.duration_str = fmt_duration(info.total_secs)
         if info.is_live and not info.duration_str:
             info.duration_str = "Live"
-        return info
+        return self._canonicalize_stream_info(info, source_url=webpage_url)

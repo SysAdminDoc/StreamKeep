@@ -1,216 +1,225 @@
 # Research — StreamKeep
-Date: 2026-07-29 — replaces all prior research.
+Date: 2026-08-02 — replaces all prior research.
 
 ## Executive Summary
 
-StreamKeep is already a capable local-first PyQt6 archive manager: it combines multi-source resolution, durable SQLite jobs, monitoring, recovery, playback, search, post-processing, automation, and a tightly scoped local API without adopting the operational weight of a server stack. Its highest-value direction is not another acquisition engine; it is making the existing archive trustworthy under concurrency, hostile manifests, expiring source credentials, browser pairing, and failed upgrades. The 2026-07-29 suite passed 1,025 tests plus 45 subtests at 55.99% coverage, and a foreground audit of all six desktop pages in System, Dark, Light, and High Contrast found no major clipping or contrast defect. The gaps below are therefore ordered around data safety and honest operability before feature breadth.
+StreamKeep v4.44.0 is a mature local-first PyQt6 archive manager: 79k LOC across 194 modules, 23.5k LOC of tests, a durable SQLite library, recursive SSRF/scheme validation on remote manifests, a loopback-only REST surface with replay proofs, and a ten-stage local release gate. The 2026-07-29 pass's P0 set (manifest confinement, execution lease, provenance, browser pairing) is **shipped and verified in source** — this pass found no regression in any of it. The strongest current shape is *capture breadth plus data safety*; the 2026-08-02 commit burst pivoted further, adding raw-protocol capture, an MSE recorder, plugin contracts and publishing surfaces. Two things now cap value. First, a residual security seam: the yt-dlp argument-template validator is a **deny-list**, and templates are the one capability an imported config does **not** quarantine — together that is arbitrary-executable execution from a shared config file. Second, StreamKeep can acquire almost anything but cannot **adopt** anything: no importer exists for an existing folder tree, a `yt-dlp --download-archive`, or another tool's library — and Pinchflat's maintainer pause ([#800](https://github.com/kieraneglin/pinchflat/issues/800), 254 reactions) has stranded a large userbase that is shopping right now. Custody, not capability, is the open field.
 
-1. Prevent a GUI and headless server from deleting or double-running each other's same-profile queue jobs (`streamkeep/ui/main_window.py`, `streamkeep/db.py`, `streamkeep/headless_service.py`).
-2. Repair the shipped browser companion's origin-bound session contract (`streamkeep/local_server.py`).
-3. Constrain every URI derived from remote HLS/DASH manifests before FFmpeg sees it (`streamkeep/paths.py`, `streamkeep/hls.py`, `streamkeep/dash.py`).
-4. Separate stable archival provenance from signed delivery URLs in public sidecars and share bundles (`streamkeep/metadata.py`, `streamkeep/postprocess/bundle_worker.py`).
-5. Give monitor quality upgrades a stable media identity and non-destructive transaction (`streamkeep/ui/tabs/monitor.py`).
-6. Add restart-safe, error-aware automatic retries over the existing failed-job ledger.
-7. Replace the one-global-cookie-file model with explicitly selected, site-bound authentication profiles.
-8. Make the implemented rotating backup routine actually schedulable and observable (`streamkeep/backup.py`).
-9. Establish one unsigned local release gate that tests source, claims, advisories, builds, and artifacts together.
-10. Prove the claimed platform surface with unsigned macOS/Linux artifacts and target-host smoke.
+Top opportunities, in priority order:
+
+1. Replace the yt-dlp template deny-list with an allow-list and quarantine imported templates (`streamkeep/download_options.py:46`, `streamkeep/config.py:555`).
+2. Raise `requirements.txt` floors to the values `requirements.lock` already pins — source installs currently get pre-fix `cryptography` and Qt.
+3. Require mutation proof on the three POST routes that skip it (`streamkeep/local_server.py:1073,1081`).
+4. Retire the unreachable Authenticode update **check** — it fails before it ever queries releases (`streamkeep/updater.py:251`).
+5. Import an existing library: folder tree, `--download-archive`, Pinchflat/TubeArchivist/ytdl-sub state, without re-downloading.
+6. Make the SQLite index rebuildable from on-disk sidecars so the filesystem is the source of truth.
+7. Deletion tombstones, so media the user deliberately removed is never re-fetched.
+8. Mid-capture manifest/token refresh on 403/410 instead of failing the job.
+9. A quality-upgrade decision engine that records a per-candidate reason and versions every replaced file.
+10. Retroactive re-templating — rename/move an existing archive when the naming scheme changes.
 
 ## Product Map
 
 ### Core workflows
 
-- Resolve a URL, inspect formats/tracks/subtitles, apply a profile, then download and finalize media plus optional chat, chapters, thumbnails, NFO, and metadata.
-- Queue, schedule, recur, pause, resume, cancel, retry, and recover jobs through the desktop, CLI, REST API, browser extension, or paired web companion.
-- Monitor channels and podcast feeds, auto-record new/live media, apply retention rules, and reconcile the local archive.
-- Search, filter, verify, rename, tag, play, clip, transcribe, analyze, export, back up, and restore the resulting library.
+- Resolve a URL through native extractors or the yt-dlp fallback, inspect formats/tracks/subtitles, apply a Smart Mode profile or automation rule, download, finalize with metadata/NFO/chapters/chat/thumbnails.
+- Queue, schedule, recur, pause, resume, cancel, retry and recover jobs from the desktop, CLI, REST API, browser extension or paired web remote; a per-profile execution lease keeps the GUI and headless service from double-running.
+- Monitor channels and podcast feeds, auto-record on go-live, apply retention and media-server layouts, reconcile the archive through the Archive Maintenance preview/apply audit.
+- Capture outside yt-dlp entirely: raw FFmpeg protocol jobs (RTSP/RTMP-listen/SRT/multicast/ICY), a guarded Streamlink engine, a DRM-free MSE recorder, extension-sniffed media requests.
+- Search, verify, tag, play, clip, transcribe, summarize, publish (gallery/RSS), upload, back up and restore.
 
 ### User personas
 
-- Personal media archivists who value durable files and metadata over a hosted service.
-- Stream, channel, and podcast collectors who need unattended capture and recovery.
-- Creators and researchers who search, clip, transcribe, or review offline material.
-- Single-owner self-hosted operators who automate StreamKeep without turning it into a multi-user media server.
+- Personal media archivists who want durable files and sidecars over a hosted service.
+- Stream/channel/podcast collectors needing unattended capture and recovery.
+- Creators and researchers who clip, transcribe or review offline material.
+- Single-owner self-hosted operators automating StreamKeep without running a media server.
 
 ### Platforms and distribution
 
-- Python 3.11+ and PyQt6; Python 3.12 is the reproducible Windows build target, while the Flatpak manifest currently uses Python 3.13 and Qt/PyQt 6.10.
-- Windows ships through a PyInstaller one-file executable; an MSIX scaffold, Flatpak manifest, browser extension, and source execution exist. There is no tested macOS artifact and no installed Flatpak smoke.
-- MIT licensed. FFmpeg/ffprobe 8.1.2 and curl 8.21 are runtime floors; full YouTube behavior requires Deno 2.3+, Node 22+, or another supported JavaScript runtime. DRM circumvention is explicitly out of scope.
+- Python 3.11+ (Windows builds on 3.12, Flatpak on 3.13), PyQt6 with `pyqt6-qt6==6.11.1` pinned in the lock. MIT.
+- Unsigned by policy: PyInstaller onedir, Inno Setup installer, WinGet manifest, Flatpak, MSIX scaffold, browser extension. No macOS artifact (existing V53).
+- Runtime floors: FFmpeg/ffprobe 8.1.2, curl 8.21.0, yt-dlp 2026.07.04, Deno 2.3+/Node 22+ for full YouTube. DRM circumvention is out of scope throughout.
 
 ### Key integrations and data flows
 
-- Native Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, podcast-RSS, HLS/DASH, and direct-media paths feed a yt-dlp fallback; gallery-dl and lux are optional engines.
-- FFmpeg/ffprobe perform capture, muxing, probing, conversion, chat rendering, and post-processing; optional mpv provides embedded playback.
-- SQLite WAL stores history, queue, monitor, failures, manifests, and FTS state; JSON retains preferences. OS credential stores, cookie files, media-server adapters, SponsorBlock, webhooks, and local-only helper services sit at explicit boundaries.
-- GUI workers use QThread/signals; headless execution uses the same database but currently has no same-profile ownership lease.
+- Native Kick/Twitch/Rumble/SoundCloud/Reddit/Audius/podcast-RSS/HLS/DASH/direct paths feed a yt-dlp fallback; gallery-dl, lux, Streamlink, yt-dlp-ytse and an optional remote `youtube_backend` are opt-in engines.
+- All seven job-construction sites build a frozen `DownloadJobSpec` and call `DownloadWorker.from_spec`.
+- SQLite (schema v9, WAL when the runtime has the reset fix) holds history, queue, monitor, failures, manifests, publishing and FTS; JSON holds preferences only; credentials live in the OS store behind `secretref:` handles.
+- Remote manifests are validated recursively (`streamkeep/hls.py:146`, `streamkeep/dash.py:145`) through `net_guard.validate_remote_url` and handed to FFmpeg with `FFMPEG_REMOTE_SAFETY`, which blacklists `file,pipe,concat,concatf,subfile,unix,data` (`streamkeep/paths.py:34`).
 
 ## Competitive Landscape
 
-### Tartube
+### Sonarr / Radarr (adjacent — the closest analog to "monitor and upgrade")
 
-- Does well: multi-site channel/library management, creator grouping, live detection, imports, and visible retry behavior.
-- Learn: explicit creator aliases, error-class-aware retries, and reviewable cross-platform duplicate candidates.
-- Avoid: dense legacy configuration and implicit dependency installation.
+- Does well: a Quality Profile is an *ordered* ladder plus `Upgrades Allowed`, an `Upgrade Until` cutoff, scored Custom Format matchers where a negative score is a hard veto, and ~29 independent accept/reject specifications each returning a **named reason**. ([TRaSH guides](https://trash-guides.info/Radarr/radarr-setup-quality-profiles/), [decision specs](https://github.com/Sonarr/Sonarr/tree/develop/src/NzbDrone.Core/DecisionEngine/Specifications))
+- Learn: the per-candidate rejection log is what makes the *arr stack trusted. StreamKeep's monitor "upgrade" path compares against `db.find_latest_history(channel=...)` rather than the same media item, records no reason, and has no versioned undo.
+- Avoid: indexer/protocol scoring and health-check sprawl that assumes a server deployment.
 
-### Tube Archivist
+### ArchiveBox / browsertrix-crawler (adjacent — custody model)
 
-- Does well: indexed offline libraries, subtitle/comment search, playlists, playback state, and media-server companions.
-- Learn: refresh into staging, validate, then atomically activate while retaining the known-good asset.
-- Avoid: YouTube-only scope, Elasticsearch/Redis operating weight, and multi-user complexity.
+- Does well: one self-describing directory per snapshot with `index.json` beside plain outputs; the SQLite index is explicitly a rebuildable cache — "all data is readable without needing to run ArchiveBox". Browsertrix normalizes URLs (ignore `www`, scheme, query order) *before* dedupe. ([ArchiveBox](https://github.com/ArchiveBox/ArchiveBox), [crawl scope](https://crawler.docs.browsertrix.com/user-guide/crawl-scope/))
+- Learn: StreamKeep already writes `.streamkeep_manifest.json` and `metadata.json` per recording — the missing half is a `rebuild` that reconstructs the library purely from them, plus URL canonicalization before the archive key is hashed.
+- Avoid: whole-page WARC custody; that is a different product.
 
-### Pinchflat, TubeSync, and ytdl-sub
+### restic / borg / Syncthing (adjacent — integrity and undo)
 
-- Do well: subscription-PVR profiles, retention, gradual retry/backoff, media-server layouts, declarative presets, JSONL automation output, and optional metrics.
-- Learn: persisted retry schedules, low-request feed reconciliation, versioned machine events, and low-cardinality observability.
-- Avoid: Docker-only deployment and YAML-only interaction as the primary product surface.
-
-### Youtarr
-
-- Does well: Plex/Jellyfin/Emby playlists, portable M3U, selected watched-state workflows, NFO, library layouts, and guarded retention.
-- Learn: expand existing V18 with previewed path/ID mapping, selected-user import, native playlists, and deletion safeguards.
-- Avoid: coupling the desktop to Docker/MariaDB or importing every server user's state.
-
-### YTPTube and MeTube
-
-- Do well: per-link conditions, presets, browser handoff, live/upcoming handling, playlist picking, and credential overrides.
-- Learn: named cookie/auth profiles selectable by job, rule, and monitor.
-- Avoid: unauthenticated public binding, anti-bot bypass services, or unbounded free-form arguments.
-
-### TwitchDownloader, BililiveRecorder, livestream_saver, and ytarchive
-
-- Do well: recoverable live fragments, damaged-container repair, resumable capture state, synchronized chat, and gap-aware live recording.
-- Learn: strengthen V36 with retained raw staging, missing-interval reports, and idempotent salvage to a new file.
-- Avoid: hard-rendering chat into every video or replacing the general architecture with a platform-specific engine.
+- Do well: structure verification is separated from data verification, and `--read-data-subset n/t` scrubs a rolling fraction so a full library is verified over time at negligible cost; Syncthing's staggered versioning gives bounded-cost undo. ([restic](https://restic.readthedocs.io/en/stable/045_working_with_repos.html), [Syncthing](https://docs.syncthing.net/users/versioning.html))
+- Learn: `verify.py` already computes SHA-256 manifests on demand — add a scheduled rolling scrub and staggered retention of anything an upgrade replaces.
+- Avoid: an auto-`--repair` path; borg flags its own as dangerous, and a media archive has no redundancy to repair from.
 
 ### Streamlink
 
-- Does well: mature plugin-based live transport and a context-specific fix for nested HLS/DASH `file://` disclosure.
-- Learn: make remote-manifest protocol confinement a prerequisite for V13.
-- Avoid: expanding into encrypted/DRM capture.
+- Does well: the reference SSAI classifier — `EXT-X-DATERANGE` with `classname == "twitch-stitched-ad"`, segment titles containing `Amazon`, and unconditional ad-treatment of prefetch segments after a discontinuity because date extrapolation is unreliable there. Ad filtering is mandatory since Twitch moved MPEG-TS → fMP4. ([plugin source](https://raw.githubusercontent.com/streamlink/streamlink/master/src/streamlink/plugins/twitch.py), [docs](https://streamlink.github.io/cli/plugins/twitch.html))
+- Learn: those exact heuristics belong in existing item V37; also its reload/attempt/timeout defaults are the model for treating a mid-capture 403 as continuation rather than failure.
+- Avoid: `--stream-passthrough-encrypted` (8.4.0) and any encrypted-segment path.
 
-### 4K Video Downloader, Downie, Stacher, Video DownloadHelper, IDM, and Audials
+### BililiveRecorder / LiveStreamDVR
 
-- Do well: polished intake, browser handoff, subscriptions, scheduling, batch workflows, conversion, and paid convenience around recurring downloads.
-- Learn: users pay for predictable setup, recovery, platform coverage, and low-friction automation more than for another format toggle.
-- Avoid: opaque subscription gating, telemetry-heavy cloud dependence, and claims that cannot be reproduced in unsigned local artifacts.
+- Do well: BililiveRecorder runs a dedicated timestamp-repair pass and states that it **cannot repair anything FFmpeg has already touched**; LiveStreamDVR deliberately writes `.ts` during capture so a crash still yields a playable file. ([repair.md](https://github.com/BililiveRecorder/website/blob/main/src/content/docs/user/repair.md), [LiveStreamDVR](https://github.com/MrBrax/LiveStreamDVR))
+- Learn: StreamKeep's `live_capture.preserve_raw_capture` already embodies half of this. The remaining lesson is ordering — never let FFmpeg be the first parser of a damaged live stream.
+- Avoid: platform-specific engine rewrites.
+
+### Parabolic / media-downloader
+
+- Do well: Parabolic bundles and self-updates Deno, ships portable and arm64 builds, and cuts timeframes with FFmpeg rather than yt-dlp's `--download-sections`; media-downloader fronts eight engines with 16 UI languages. ([Parabolic 2026.5.0](https://github.com/NickvisionApps/Parabolic/releases/tag/2026.5.0), [media-downloader](https://github.com/mhogomchungu/media-downloader))
+- Learn: a managed JS runtime is now existential — yt-dlp requires an external JS runtime for full YouTube support ([#15012](https://github.com/yt-dlp/yt-dlp/issues/15012)), and StreamKeep only *detects* Deno/Node (`streamkeep/capabilities.py:689`).
+- Avoid: implicit install-at-startup; the v4.12.1 fork bomb is the standing counter-example. Acquisition must be explicit, hash-verified and user-initiated.
+
+### TubeArchivist / Pinchflat / ytdl-sub / Youtarr
+
+- Do well: TubeArchivist rebuilds its index from embedded file metadata and ships filesystem rescan with metadata embed (v0.5.9/v0.5.10); ytdl-sub added retention sorting and fixed 4-byte-Unicode path-length truncation; Youtarr syncs watched state and generates per-channel M3U.
+- Learn: the unserved ask is migration. Youtarr [#531](https://github.com/DialmasterOrg/Youtarr/issues/531) asks to import an existing library or migrate from Pinchflat/TubeArchivist; Pinchflat [#408](https://github.com/kieraneglin/pinchflat/issues/408) (17👍) and ytdl-sub [#536](https://github.com/jmbannon/ytdl-sub/issues/536) ask for retroactive re-templating; Pinchflat [#805](https://github.com/kieraneglin/pinchflat/issues/805) and TubeSync [#431](https://github.com/meeb/tubesync/issues/431) ask not to re-download deleted media. Nobody ships any of the three.
+- Avoid: Docker-first delivery and Elasticsearch-class operating weight — the desktop posture is the differentiator.
+
+### Commercial set (4K Video Downloader+, Downie, Stacher, IDM, JDownloader)
+
+- Do well: what they **paywall** is the signal — 4K VD+ charges for channel subscriptions and Smart Mode presets; Stacher's Premium is literally "a media library"; Downie sells iCloud-synced history so the same URL is not re-downloaded on another Mac; IDM sells scheduling with connect/download/shutdown semantics. ([4K compare](https://www.4kdownload.com/products/videodownloader/compare), [Stacher](https://stacher.io/), [Downie](https://software.charliemonroe.net/downie/))
+- Learn: StreamKeep already ships subscriptions, Smart Mode, a library and power actions for free. The one paywalled idea it lacks is a portable, exportable *seen-content ledger* — which is the same primitive the importer needs.
+- Avoid: StreamFab, CleverGet, KeepStreams and the analog-hole capture category entirely; they are DRM-removal products.
 
 ## Security, Privacy, and Reliability
 
-- **[Verified] Same-profile queue loss and duplicate execution:** the GUI snapshots the queue at `streamkeep/ui/main_window.py:783-789`, and every `_persist_config()` calls `db.save_queue()` at `streamkeep/ui/main_window.py:821-836`; that method deletes the entire table before reinserting the stale in-memory list at `streamkeep/db.py:823-854`. The headless service independently recovers active rows at `streamkeep/headless_service.py:63-70` and dispatches queued work at `streamkeep/headless_service.py:187-202`, while `streamkeep/single_instance.py` guards GUI instances only. An isolated two-writer reproduction deleted a headless-enqueued row when the GUI persisted its stale snapshot. Required guardrail: one same-profile executor/lease plus row-level transactional mutations.
-- **[Verified] Browser companion cannot complete pairing:** `streamkeep/local_server.py::_handle_pair()` origin-binds the new token, while `_token_grant()` requires that `Origin` on every later request. A real browser's same-origin GET omits that header. On 2026-07-29, pairing returned 201, `GET /ping` without `Origin` returned 401 `token_invalid`, and the same request with a synthetic matching `Origin` returned 200. The shipped SPA therefore falls back to its pairing error after a successful exchange. Preserve origin binding for requests that carry an origin, but authenticate same-origin browser GETs through an invariant browsers actually send and add a real-browser regression.
-- **[Verified] Nested manifest local-file/SSRF boundary:** `streamkeep/paths.py:23-26` globally allows `file,pipe,http,https,tcp,tls,crypto`; `streamkeep/hls.py` and `streamkeep/dash.py` resolve nested URIs without scheme/host policy; `streamkeep/workers/download.py` passes remote manifests to FFmpeg with that whitelist. A local malicious HLS fixture referencing `file:C:/.../sentinel.ts` caused the exact StreamKeep FFmpeg invocation to copy the local sentinel into output. Nested HTTP can similarly bypass the top-level `streamkeep/net_guard.py` check. Validate recursive HLS variants, segments, keys, maps, renditions and DASH BaseURL/template/list/init URLs; apply SSRF/DNS-rebinding policy after every resolution; use a remote-only FFmpeg protocol whitelist that excludes `file` and `pipe`.
-- **[Verified] Credential-bearing public sidecars:** Twitch constructs `usher.ttvnw.net` URLs containing `token` and `sig` at `streamkeep/extractors/twitch.py:166-175` and `:224-233`. `streamkeep/metadata.py:17-22` writes `stream_info.url` verbatim to `metadata.json`, and `:143-146` writes it as NFO `<trailer>` alongside a remote `<thumb>`. `streamkeep/postprocess/bundle_worker.py:21-52` includes JSON/NFO in share ZIPs. A temporary reproduction confirmed both files retained a synthetic token and both were selected for export. Public metadata needs a versioned schema, canonical source ID/page URL, local thumbnail reference, query/header/cookie stripping, legacy migration, and surfaced write failures.
-- **[Verified] Quality-upgrade identity error:** `streamkeep/ui/tabs/monitor.py:1415-1442` compares a candidate against `db.find_latest_history(channel=channel_id)`, not the same media item, then marks it as an upgrade and bypasses normal duplicate handling. There is no current destructive replacement branch, so present data loss is not claimed. Before implementing replacement, persist a canonical `(platform, source_id)` through VOD, job, and history; stage and validate the new media/sidecars; atomically commit; retain the known-good version on any failure.
-- **[Verified] Update path conflicts with the mandatory unsigned distribution policy:** `README.md:216-227` and `streamkeep/updater.py` require Authenticode publisher continuity and a PFX-signed detached manifest. V35 must disable that unreachable path for unsigned builds and use explicit manual/package-manager updates plus published hashes; signing is not an acceptable release dependency.
-- **[Verified, point-in-time] Dependency posture is currently strong:** the 2026-07-29 OSV batch query returned no matches for the pinned core PyPI set. yt-dlp 2026.07.04, Pillow 12.3, PyQt6/Qt 6.11, requests 2.34.2, urllib3 2.7.0, cryptography 49, and PyInstaller 6.21 meet the researched 2026 security floors. Keep advisory scanning in the release gate; a negative query is not a permanent guarantee.
+- **[Verified] Arbitrary-executable execution through yt-dlp argument templates.** `YTDLP_TEMPLATE_DENIED_OPTIONS` (`streamkeep/download_options.py:46-65`) is a deny-list of 18 options; `validate_ytdlp_template_args` (`:102-127`) rejects only membership in that set. `--ffmpeg-location`, `--plugin-dirs`, `-P`/`--paths`, `-o`/`--output`, `--cache-dir` and `--update-to` all pass. Templates reach argv unfiltered at `streamkeep/workers/download.py:479`. `_quarantine_import_capabilities` (`streamkeep/config.py:555-634`) holds back hooks, webhooks, proxies, cookie sources, media-server auto-import, companion server, lifecycle cleanup and Smart Mode profiles — but **not** `ytdlp_arg_templates`, which is only schema-validated (`config.py:405`). A shared config plus one template selection is code execution. A deny-list cannot enclose yt-dlp's option surface.
+- **[Verified] Source installs receive pre-fix dependencies.** `requirements.txt:10` floors `cryptography>=48.0.1` while `requirements.lock:346` pins `49.0.0`; 49.0.0 is the fix for CVE-2026-39892 and CVE-2026-34073 ([changelog](https://cryptography.io/en/stable/changelog/)). `requirements.txt:4` floors `PyQt6>=6.6` while the lock pins `pyqt6-qt6==6.11.1`; 6.11.1 is the fix for [CVE-2026-6210](https://www.qt.io/blog/security-advisory-type-confusion-and-heap-buffer-overflow-vulnerability-in-qt-svg-marker-handling) and CVE-2026-9499. `urllib3` (lock 2.7.0, the fix for [GHSA-qccp-gfcp-xxvc](https://github.com/advisories/GHSA-qccp-gfcp-xxvc)) has no floor at all, and `paramiko` — imported by `streamkeep/upload/ftp.py:278` for SFTP — appears in neither file, so nothing keeps it above the SHA-1 RSA removal in 5.0.0 ([GHSA-r374-rxx8-8654](https://github.com/advisories/GHSA-r374-rxx8-8654)).
+- **[Verified] Three POST routes skip mutation proof.** `/api/media-server/preview` (`streamkeep/local_server.py:1073`), `/api/intelligence/preview` (`:1081`) and `/api/operations/export` use `_require_auth(SCOPE_STATUS)` without `mutating=True`, so `_require_mutation_proof` (`:812-849`) never runs: no `Origin`/`Sec-Fetch-Site` check, no JSON content-type enforcement, no replay nonce. `preview` enumerates filesystem layout and `export` returns a full operations report.
+- **[Verified] Session cookie omits `Secure`.** `_set_auth_cookie` (`streamkeep/local_server.py:914-917`) emits `HttpOnly; SameSite=Strict` only, and is called from `_json_response`, `_html_response` and `_bytes_response` — including error responses. LAN mode is explicitly HTTPS-only (`:421-426`), so the attribute is free to add.
+- **[Verified] Webhook/ntfy curl has no `--` separator and no URL policy.** `streamkeep/ui/main_window.py:1329-1338` and `:1367-1377` place the config-supplied URL as a trailing positional. A URL beginning with `-` is parsed by curl as an option (`-K`, `-o`), and `net_guard.validate_remote_url` is never called, so a webhook can target loopback or cloud-metadata addresses. `webhook_url` *is* import-quarantined (`config.py:571`), which caps severity.
+- **[Verified] Secret stores are briefly world-readable.** `streamkeep/secrets.py:146-159` and `streamkeep/portable_secrets.py:193-202` write the temp file under the default umask, `os.replace`, then `chmod 0o600` — the DPAPI blob / encrypted portable envelope is mode 0644 for its whole lifetime on POSIX.
+- **[Verified] Portable-secret restore applies partially on failure.** `streamkeep/portable_secrets.py:111-121` writes config secrets, then each account credential, then cookies; a failure at the cookie step returns `False` with the credential store already half-overwritten and no rollback.
+- **[Verified] FTS5 is created without a version gate.** `streamkeep/db.py:151` creates `history_fts` unconditionally. `streamkeep/sqlite_runtime.py:15` gates only on the WAL-reset fix (3.51.3); [CVE-2026-11822](https://sqlite.org/releaselog/3_53_2.html) is an FTS5 heap overflow fixed in 3.53.2. Frozen builds are safe — `packaging/sqlite_runtime.py:13` pins 3.53.3 with a SHA3-256 check — but a source install on an ambient 3.51.3–3.53.1 runtime enables FTS5 below the fix.
+- **[Verified] The update *check* is dead, not just self-replacement.** `UpdateCheckWorker.run` calls `require_authenticode(...)` as its first statement (`streamkeep/updater.py:251`), before fetching the release list. Releases are unsigned by policy, so `update_security.py:166` raises and every check ends at `_empty_payload("Update blocked: …")`. Refusing to self-replace is correct and documented; refusing to *tell the user a version exists* is not. ~360 LOC across `updater.py`/`update_security.py`/`update_runtime.py` is verified-but-unreachable.
+- **[Verified] Browser extension is over-permissioned for its stated purpose.** `browser-extension/manifest.json` requests `webRequest`, `tabs` and `host_permissions: ["<all_urls>", "http://127.0.0.1/*"]`, and `background.js:230-239` registers `onBeforeSendHeaders`/`onHeadersReceived` across `<all_urls>` — reading request/response headers on every site. Chrome Web Store's 2026 Limited Use policy (enforced from 2026-08-01) requires data handling "strictly necessary to the disclosed single purpose" ([policy update](https://developer.chrome.com/blog/cws-policy-updates-2026)). Separately, Local Network Access shipped in Chrome 142 and covers `127.0.0.0/8`; extensions are exempt *when they declare explicit loopback host permissions*, and two Chromium bugs broke that exemption before 144.0.7512.0 ([LNA](https://developer.chrome.com/blog/local-network-access)) — so `minimum_chrome_version: "144"` is warranted.
+- **[Verified] Server-side auth events leave no trace.** `log_message` is a deliberate no-op (`streamkeep/local_server.py:625`) and nothing else records auth failures or mutation rejections, so a token compromise is forensically invisible.
+- **[Verified] `feed.generate_rss` can emit non-well-formed XML.** `streamkeep/feed.py:82-83,128,147-149` uses `xml.sax.saxutils.escape`, which handles `& < >` but not C0 control characters; scraped titles reach the feed unfiltered while `safe_filename` strips controls only for paths.
+- **[Verified] Dependency posture is otherwise current.** yt-dlp 2026.07.04 is at the fix for CVE-2026-55404/50019/50023/50574; Pillow 12.3.0, FFmpeg 8.1.2 (CVE-2026-8461) and curl 8.21.0 are each exactly at their fix. Qt CVE-2026-15037 (QDom XML injection, unfixed before 6.12) is **not applicable** — there is no `QtXml`/`QDom` import anywhere in the tree.
+- **[Verified, no action] The 2026-07-29 manifest/SSRF P0 is closed.** Streamlink's [CVE-2026-44353](https://github.com/streamlink/streamlink/security/advisories) class — `file://` URIs inside remote HLS/DASH — is already defended by recursive `validate_remote_url` in `hls.py`/`dash.py` plus the remote-only FFmpeg protocol blacklist. Do not re-open.
 
 ## Architecture Assessment
 
-- **Execution boundary:** seven call paths construct `DownloadJobSpec` across GUI, CLI, headless, queue, monitor, VOD, and resume. Centralize spec creation and durable state transitions behind one queue/execution service while implementing the ownership fix; do not perform a broad rewrite of `streamkeep/ui/main_window.py` or `streamkeep/db.py`.
-- **Server boundary:** `streamkeep/local_server.py` combines token/replay/CORS/SSRF policy, routing, server lifecycle, and an embedded SPA. Split auth policy and static UI only as required to make the fixed browser contract independently testable.
-- **Provenance boundary:** `FinalizeWorker` knows `history_url` but passes only ephemeral `StreamInfo` into `MetadataSaver` (`streamkeep/workers/finalize.py:135-178`). Introduce a typed archival-provenance value rather than asking serializers to infer whether a URL is public.
-- **Recovery boundary:** `streamkeep/backup.py:229-259` implements rotating `auto_backup()`, but no production caller schedules it; its module header references nonexistent `schedule_backup()`. Wire a profile-scoped schedule with destination health, last-success/next-run state, and failure notification.
-- **Retry boundary:** build automatic retries over the durable failure ledger, not worker-local loops: persist category, attempt count, `next_attempt_at`, last reason, jittered exponential delay, `Retry-After`, and per-source circuit state. Authentication, DRM, missing media, configuration, and disk failures must stop for intervention.
-- **Credential boundary:** `streamkeep/cookies.py` exposes one global cookie file and `streamkeep/rules.py` cannot select credentials. Store only opaque profile references in jobs/rules/monitors; bind each profile to allowed sites; keep secret material in restricted files/secure storage; never fall back across sites.
-- **Reachability and claim drift:** native notifications are called by `streamkeep/ui/main_window.py:1890-1904` but remain “experimental” in `streamkeep/capabilities.py:205-208`; Flatpak metadata advertises unreachable upload/plugin surfaces; Spanish has 139 translated messages out of 1,325 while `README.md:154` presents an undifferentiated language choice. Replace token-presence capability checks with call-path/contract probes and label Spanish as core/beta rather than duplicating the blocked translation-expansion item.
-- **Testing:** the 2026-07-29 offscreen suite passed, but the shipped `streamkeep/player/` package, `streamkeep/feed.py`, and several intelligence/post-process modules have no direct coverage. Add the P0 browser, manifest, sidecar, and concurrent-writer regressions first; fold full-page theme/density/state rendering, translation compilation, lint, advisory audit, and artifact startup into one local release command because repository policy intentionally excludes GitHub Actions.
-- **UI/accessibility:** foreground rendering of all six pages across four themes at 1120×900 found consistent hierarchy, empty states, spacing, and contrast. High Contrast also has a 200% scale test. The remaining quick gap is that System theme does not consume Qt 6.10+ `QAccessibilityHints::contrastPreference`; follow OS changes live while keeping explicit user-selected themes sticky.
-- **[Needs live validation] Distribution:** Windows artifact smoke is substantive; Flatpak/MSIX checks are mostly static and macOS has no artifact. V35 already owns Windows onedir/installer work. A separate later item should build and smoke unsigned macOS x64/arm64 bundles and one portable Linux artifact, publish hashes, and make support claims conditional on those probes.
-- **Documentation:** `CLAUDE.md` still describes older tab counts, storage, styling, and dependency behavior; `README.md`, `capabilities.py`, Flatpak metadata, and locale labels disagree. The release gate should fail on machine-checkable claim drift; prose cleanup remains bounded documentation work, not a new architecture project.
-- **Existing-lane disposition:** the current operations-view item already owns human observability; the plugin-adapter item owns extension contracts/isolation; V35/V42 own Windows packaging and yt-dlp upgrade channels; the responsive web-remote item owns mobile access; blocked translation work owns additional human-quality locales. The 2026-07-29 roadmap adds prerequisites or scope notes to those lanes instead of duplicates.
+- **Custody boundary (the strategic gap):** the SQLite library is authoritative and there is no path from disk back to the DB beyond `storage.import_folders` (orphan adoption under the configured root) and the Archive Maintenance import-candidate preview. Make the filesystem the source of truth: a `rebuild` that reconstructs history, tags, manifests and archive keys from `metadata.json` + `.streamkeep_manifest.json` sidecars. That single property is also what makes importing *other* tools' libraries tractable and what removes the lock-in users have already been burned by.
+- **Identity boundary:** there is no canonical `(platform, source_id)` persisted through VOD → job → history, no URL canonicalization before the archive key is computed, and no deletion tombstone. All three of the unserved community asks (migration, re-templating, don't-re-download-deleted) reduce to this one missing value. Build it before, not after, the upgrade engine.
+- **Upgrade boundary:** `streamkeep/ui/tabs/monitor.py` compares an upgrade candidate against the channel's latest history row rather than the same media item. There is no destructive replacement branch today, so no current data loss is claimed — but a decision must be recordable (accept/reject with a named reason) and every replaced file must be versioned before that branch is ever written.
+- **Live-capture boundary:** the HLS parser is unusually complete — media/discontinuity sequence, GAP, BYTERANGE, PROGRAM-DATE-TIME, `EXT-X-PART` and `EXT-X-PRELOAD-HINT` (`streamkeep/hls.py:63,317,338-399`). Two spec gaps remain: `EXT-X-SKIP` delta playlists (mis-detects removed segments) and `EXT-X-DATERANGE`, which is now the carrier for both SSAI markers and Apple's 2026 `com.apple.hls.daterange-schedule` sidecar JSON ([What's new in HLS](https://developer.apple.com/streaming/Whats-new-HLS.pdf)). Operationally there is no 403/410 handler in `workers/download.py` — an expired Usher token mid-capture ends the job instead of triggering a re-resolve.
+- **Module boundaries:** `db.py` (4409 LOC) and `local_server.py` (2429) are the two god-modules; `ui/main_window.py:5` still carries the deferred-decomposition comment at 2760 LOC. Natural seams: `db/` split per table family behind a `db/schema.py` that owns the 15 migrations; `local_server.py`'s 40-branch `do_GET`/`do_POST` into a route table with the ~200-LOC embedded `_WEB_UI_HTML` moved to a data file.
+- **Performance:** `db._connect` (`streamkeep/db.py:43-52`) is called from 57 sites and each call runs `busy_timeout`, `foreign_keys` and a `journal_mode` round-trip plus `require_safe_runtime()`. History paging, queue polling and the monitor tick all pay it. A thread-local connection is the fix. No profiling pass over 100k-row History/Storage/Analytics rendering has been done.
+- **Dead code:** the entire in-memory share registry in `streamkeep/gallery.py:23-77` (`_shared`, `register_shared`, `generate_share_id`, `get_shared`, `all_shared`) is unreachable from `streamkeep/` — `local_server.py:1386-1448` imports only the renderers — and it keeps two misleading fallback branches alive (`gallery.py:87`, `:132`). `_PUBLISHING_ID_RE` (`streamkeep/feed.py:20`) is unused.
+- **Testing:** 121 test files; `1390 passed, 115 subtests` at **59.63%** coverage against a 47.5% floor — the floor is 12 points stale and no longer constrains anything. 26 modules have no test reference at all. The highest-risk untested set writes files and spawns subprocesses: `postprocess/clip_worker.py`, `transcribe_worker.py`, `chat_render_worker.py`, `thumb_worker.py`, `scene_worker.py`, `normalization.py`, `codecs.py`, `convert_worker.py`, `integrations/auto_editor.py`, `intelligence/summarize.py`. The whole `player/` package (1489 LOC) is untested despite a recorded use-after-free in `sync_viewer._relayout_grid`. `ui/main_window_jobs.py` — which selects the yt-dlp argument template — is untested and is the trigger for the deny-list finding above.
+- **Accessibility:** the offscreen matrices (theme × density × pseudo-locale × high contrast, plus 200% scale) are genuinely good. The pinned Qt 6.11.1 exposes `QAccessible::Switch`, the `Orientation` attribute and AT-SPI Collection support ([what's new in 6.11](https://doc.qt.io/qt-6/whatsnew611.html)) — toggles currently report as checkboxes. WCAG 2.2 AA adds 2.5.7 (a dragging alternative for the clip timeline), 2.5.8 (24×24 targets) and 2.4.11 (focus not obscured), none of which the current tests assert.
+- **i18n:** infrastructure is complete and the release gate checks catalog drift. Actual Spanish coverage is **187 of 1585 messages** (11.8%; 1393 empty) — the README's "beta" label is honest, and expansion stays correctly blocked on human translators.
+- **Distribution:** MSIX cannot install without a signed package ([MSIX behind the scenes](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)), which the no-signing policy forbids permanently — the scaffold and its blocked roadmap entry should be retired rather than carried. Flathub now additionally prohibits AI-generated or AI-assisted code with permanent bans ([requirements](https://docs.flathub.org/docs/for-app-authors/requirements)); given this repo's development method, publishing to Flathub is a policy decision the maintainer must make consciously — the Flatpak manifest remains fine for self-hosted builds either way. The `Roadmap_Blocked.md` entry for V29 (ffmpeg-8 TLS-verify toggle) is **stale**: its blocker was "V9 unbuilt", V9 shipped, and README:164 already documents opt-in self-signed TLS for RTSPS/RTMPS.
+- **Documentation structure:** `ROADMAP.md:7-11` links to `COMPLETED.md`, `RESEARCH_REPORT.md` and `ROADMAP-COMPLETED.md`, all three of which `AGENTS.md` lists under "Never create". `CLAUDE.md` still describes a 4-tab UI and states "PyQt6 and yt-dlp auto-installed" — the exact behavior removed in v4.12.1 to stop the frozen-exe fork bomb. It is the agent-facing source of truth and is actively misleading.
+- **Repo state (2026-08-02):** the ytse SABR feature landed as `a3c7317` during this pass, closing the gap where `README.md:74` documented untracked code. Two items remain: the last tag is `v4.41.0` against package v4.44.0, so v4.42–v4.44 shipped untagged and `packaging/winget_hash.py` has no tag to point at; and three stale agent worktree branches (`worktree-agent-*`) plus their `.claude/worktrees/` checkouts persist, each holding a full copy of the tree that `grep` and `ruff` will walk. Not roadmap work, but both mislead tooling.
 
 ## Rejected Ideas
 
-- **Native Android/iOS clients** — Seal/YTDLnis show demand, but a second codebase duplicates the existing paired responsive remote; fix and finish that surface first.
-- **Cloud sync or hosted accounts** — commercial products normalize them, but they expand the privacy and support boundary beyond StreamKeep's local-first purpose.
-- **Full multi-user RBAC/LDAP** — Tube Archivist-style tenancy is an architecture pivot; paired scoped clients are access grants, not users.
-- **Docker as the primary distribution** — Pinchflat/TubeSync demonstrate headless demand, but Docker-first delivery would displace the native desktop and complicate the loopback/reverse-proxy trust model.
-- **DRM capture, EME bypass, FlareSolverr, or anti-bot bypass services** — direct conflict with project policy and a high security/maintenance burden.
-- **Full WARC/OCFL/C2PA preservation stack** — IIPC/ArchiveBox patterns are useful analogies, but whole-page custody and provenance standards are outside a media downloader's scope.
-- **Elasticsearch/Redis search** — Tube Archivist's operating cost is disproportionate when StreamKeep already has local SQLite FTS and a P3 semantic-search item.
-- **Another semantic/multimodal search item** — WISE, MUVR, ModaRoute, and Digital Collections Explorer reinforce the existing P3 item; they do not justify a duplicate.
-- **Automatic metadata translation expansion** — already a P3 item, while additional human-quality UI locales are blocked; do not disguise machine output as finished localization.
-- **Generic RSS monitoring** — podcast enclosure monitoring already ships. A linked-video Atom path is not prioritized until telemetry shows direct platform polling is a material problem.
-- **Hard-rendered chat by default** — TwitchDownloader shows value in synchronized replay, but rendering every chat wastes CPU/storage; retain optional rendering and revisit a lightweight panel after player contract coverage improves.
-- **Automatic fuzzy deduplication across platforms** — Tartube's creator model is useful, but silent suppression/deletion is unsafe until stable source identity and an explicit review queue exist.
-- **Per-job “incognito” mode** — YTDLnis provides precedent, but omitting history/manifests undermines StreamKeep's recovery contract; use explicit cleanup/export controls instead.
-- **Unmeasured download/post-process pipelining** — yt-dlp issue #1918 is plausible, but StreamKeep already has concurrent jobs and separate finalization; profile contention before adding pipeline complexity.
+- **Docker-first or multi-user deployment** — eight competitors occupy that space; adopting it would displace the desktop posture that is StreamKeep's actual differentiator, and complicate the loopback trust model. (Source: OSS competitor sweep.)
+- **Native Android/iOS clients** — the existing P3 responsive web-remote item already owns mobile access; a second codebase does not.
+- **C2PA / Content Credentials** — now ISO/IEC 22144, but emitting a manifest requires a certificate chain (conflicts with no-signing) and a re-encoded capture is a derivative whose provenance StreamKeep cannot substantiate. Correct behavior is to preserve inbound manifests byte-for-byte and never generate one. ([spec.c2pa.org](https://spec.c2pa.org/))
+- **`--stream-passthrough-encrypted` / any EME or DRM path** — direct conflict with project policy. StreamFab, CleverGet, KeepStreams and Audials-style analog-hole capture are named and excluded.
+- **Apprise as a notification dependency** — 100+ services for one import is dependency bloat against an existing structured-hook + webhook surface; a documented event vocabulary reaches the same targets.
+- **Elasticsearch/Redis search** — SQLite FTS plus the existing P3 semantic-search item cover this at a fraction of the operating cost. (Tube Archivist precedent.)
+- **Another semantic/multimodal search item** — the existing P3 item stands; WISE/MUVR reinforce it rather than justify a duplicate.
+- **Bundling faster-whisper's replacement wholesale** — FFmpeg 8's `whisper` filter is attractive but is a build-flag-dependent capability; it belongs behind the runtime registry as an *alternate* backend, not a replacement. ([FFmpeg 8.0](https://linuxiac.com/ffmpeg-8-0-arrives-with-whisper-filter-vulkan-encoders/))
+- **`nativeMessaging` transport for the extension now** — immune to Local Network Access changes but costs a per-user, per-browser host-manifest install; loopback remains correct while the extension exemption holds. Structure the transport as one swappable module and revisit if Chrome narrows the exemption.
+- **Automatic fuzzy cross-platform deduplication** — unsafe until canonical source identity and an explicit review queue exist; it is downstream of the identity-boundary work, not parallel to it.
+- **PostgreSQL or an external metadata database** — requested in competitors (Youtarr #302, Pinchflat #790), but the answer for a single-user desktop app is a rebuildable index and exportable sidecars, not a second database engine.
+- **Re-opening remote-manifest scheme confinement** — already implemented and verified; listed here so a future pass does not re-investigate CVE-2026-44353 against this codebase.
 
 ## Sources
 
-### Direct OSS and adjacent projects
-
-- https://github.com/yt-dlp/yt-dlp
-- https://github.com/axcore/tartube
-- https://github.com/axcore/tartube/issues/735
-- https://github.com/tubearchivist/tubearchivist
-- https://github.com/tubearchivist/tubearchivist/issues/915
-- https://github.com/kieraneglin/pinchflat
-- https://github.com/meeb/tubesync
-- https://github.com/meeb/tubesync/issues/73
-- https://github.com/jmbannon/ytdl-sub
-- https://github.com/jmbannon/ytdl-sub/issues/746
-- https://github.com/DialmasterOrg/Youtarr/releases/tag/v1.77.0
-- https://github.com/arabcoders/ytptube/pull/641
-- https://github.com/alexta69/metube/issues/767
-- https://github.com/NickvisionApps/Parabolic
-- https://github.com/jely2002/youtube-dl-gui
-- https://github.com/mhogomchungu/media-downloader
-- https://github.com/lay295/TwitchDownloader/issues/1070
-- https://github.com/BililiveRecorder/BililiveRecorder
-- https://github.com/glubsy/livestream_saver/releases/tag/v2.0.0
-- https://github.com/Kethsar/ytarchive
-
-### Commercial products
-
-- https://www.4kdownload.com/products/videodownloader
-- https://software.charliemonroe.net/downie/
-- https://www.stacher.io/
-- https://downloadhelper.net/
-- https://www.internetdownloadmanager.com/
-- https://audials.com/en/
-
-### Community and discovery
-
-- https://www.reddit.com/r/DataHoarder/comments/xopxll/
-- https://www.reddit.com/r/DataHoarder/comments/1e5g9m2/
-- https://www.reddit.com/r/DataHoarder/comments/13tnkn0/
-- https://www.reddit.com/r/DataHoarder/comments/1dbpoaz/
-- https://news.ycombinator.com/item?id=36744395
-- https://news.ycombinator.com/item?id=44768714
-- https://stackoverflow.com/questions/tagged/yt-dlp
-- https://lobste.rs/search?q=yt-dlp&what=stories&order=newest
-- https://github.com/awesome-selfhosted/awesome-selfhosted
-- https://github.com/iipc/awesome-web-archiving
-- https://github.com/stax76/awesome-mpv
-
-### Standards, security, and dependency releases
-
-- https://github.com/streamlink/streamlink/security/advisories/GHSA-hgqw-6m45-hw5f
-- https://nvd.nist.gov/vuln/detail/CVE-2026-44353
-- https://ffmpeg.org/ffmpeg-protocols.html
-- https://www.rfc-editor.org/rfc/rfc8216
-- https://dashif.org/docs/DASH-IF-IOP-v4.2-clean.htm
-- https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
-- https://owasp-aasvs4.readthedocs.io/en/latest/8.3.1.html
-- https://jellyfin.org/docs/general/server/metadata/nfo/
-- https://github.com/yt-dlp/yt-dlp/blob/master/README.md
+### Direct OSS competitors
 - https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.04
-- https://pillow.readthedocs.io/en/stable/releasenotes/12.3.0.html
-- https://doc.qt.io/qt-6/qaccessibilityhints.html
+- https://github.com/yt-dlp/yt-dlp/issues/15012
+- https://github.com/yt-dlp/yt-dlp/issues/7271
+- https://github.com/NickvisionApps/Parabolic/releases/tag/2026.5.0
+- https://github.com/kieraneglin/pinchflat/issues/800
+- https://github.com/kieraneglin/pinchflat/issues/408
+- https://github.com/kieraneglin/pinchflat/issues/805
+- https://github.com/tubearchivist/tubearchivist/releases/tag/v0.5.9
+- https://github.com/tubearchivist/tubearchivist/issues/265
+- https://github.com/meeb/tubesync/issues/431
+- https://github.com/jmbannon/ytdl-sub/issues/536
+- https://github.com/jmbannon/ytdl-sub/issues/1483
+- https://github.com/DialmasterOrg/Youtarr/issues/531
+- https://github.com/arabcoders/ytptube
+- https://github.com/alexta69/metube/releases/tag/2026.07.27
+- https://github.com/jely2002/youtube-dl-gui/releases/tag/app-v3.2.1
+- https://github.com/mhogomchungu/media-downloader
+
+### Live capture and archiving specialists
+- https://github.com/streamlink/streamlink/releases/tag/8.4.0
+- https://streamlink.github.io/cli/plugins/twitch.html
+- https://github.com/BililiveRecorder/website/blob/main/src/content/docs/user/repair.md
+- https://github.com/MrBrax/LiveStreamDVR
+- https://github.com/Kethsar/ytarchive
+- https://github.com/DmitryScaletta/twitch-dlp
+- https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+- https://github.com/coletdjnz/yt-dlp-ytse
+
+### Adjacent domains
+- https://trash-guides.info/Radarr/radarr-setup-quality-profiles/
+- https://github.com/Sonarr/Sonarr/tree/develop/src/NzbDrone.Core/DecisionEngine/Specifications
+- https://github.com/ArchiveBox/ArchiveBox
+- https://crawler.docs.browsertrix.com/user-guide/crawl-scope/
+- https://restic.readthedocs.io/en/stable/045_working_with_repos.html
+- https://docs.syncthing.net/users/versioning.html
+- https://manual.calibre-ebook.com/plugins.html
+- https://beets.readthedocs.io/en/stable/guides/tagger.html
+- https://gpoddernet.readthedocs.io/en/latest/api/reference/events.html
+- https://docs.photoprism.app/user-guide/library/originals/
+
+### Standards and platform APIs
+- https://datatracker.ietf.org/doc/draft-pantos-hls-rfc8216bis/
+- https://developer.apple.com/streaming/Whats-new-HLS.pdf
+- https://developer.apple.com/streaming/GettingStartedWithHLSInterstitials.pdf
+- https://github.com/Podcastindex-org/podcast-namespace/blob/main/docs/1.0.md
+- https://www.rfc-editor.org/rfc/rfc9559.html
+- https://developer.chrome.com/blog/local-network-access
+- https://developer.chrome.com/blog/cws-policy-updates-2026
+- https://doc.qt.io/qt-6/whatsnew611.html
 - https://www.w3.org/TR/WCAG22/
-- https://developer.chrome.com/docs/extensions/reference/api/webRequest
-- https://www.w3.org/TR/media-source-2/
-- https://api.osv.dev/v1/querybatch
+- https://docs.flathub.org/docs/for-app-authors/requirements
+- https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes
 
-### Academic and engineering research
+### Security advisories and dependency releases
+- https://cryptography.io/en/stable/changelog/
+- https://www.qt.io/blog/security-advisory-type-confusion-and-heap-buffer-overflow-vulnerability-in-qt-svg-marker-handling
+- https://github.com/advisories/GHSA-qccp-gfcp-xxvc
+- https://github.com/advisories/GHSA-r374-rxx8-8654
+- https://sqlite.org/releaselog/3_53_2.html
+- https://github.com/streamlink/streamlink/security/advisories
+- https://pillow.readthedocs.io/en/stable/releasenotes/12.3.0.html
+- https://linuxiac.com/ffmpeg-8-0-arrives-with-whisper-filter-vulkan-encoders/
 
-- https://arxiv.org/abs/2602.12819
-- https://arxiv.org/abs/2510.21406
-- https://arxiv.org/abs/2507.13374
-- https://www.cambridge.org/core/journals/computational-humanities-research/article/digital-collections-explorer-an-opensource-multimodal-viewer-for-searching-digital-collections/D43D8DEC5B011B6E65F787323C3FFBF5
+### Community signal
+- https://news.ycombinator.com/item?id=45898407
+- https://github.com/yt-dlp/yt-dlp/issues/13831
+- https://github.com/yt-dlp/yt-dlp/issues/13650
+- https://github.com/AntennaPod/AntennaPod/issues/1946
+- https://github.com/advplyr/audiobookshelf/issues/1723
+- https://codeberg.org/janw/podcast-archiver
 
 ## Open Questions
 
-- None. Repository evidence and public sources are sufficient to implement and order the recommended work.
+- Does the maintainer intend to publish to Flathub? Flathub's 2026 requirements prohibit AI-generated or AI-assisted code with permanent bans, while this repository is developed with AI assistance. The answer determines whether the Flatpak lane is a distribution channel or a self-build convenience, and therefore whether V53's Linux artifact scope includes a Flathub submission.

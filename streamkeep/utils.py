@@ -7,6 +7,53 @@ import sys
 from pathlib import Path
 
 
+def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
+    """Return the shared canonical public page URL for a source."""
+    # The metadata module owns the privacy policy and identity derivation;
+    # this lazy bridge keeps low-level utilities usable without importing Qt.
+    from .metadata import canonical_webpage_url as _canonical_webpage_url
+
+    return _canonical_webpage_url(
+        value,
+        platform=platform,
+        source_id=source_id,
+        channel=channel,
+    )
+
+
+def canonicalize_url(value, *, platform="", source_id="", channel=""):
+    """Compatibility name for callers that need a stable URL key."""
+    return canonical_webpage_url(
+        value,
+        platform=platform,
+        source_id=source_id,
+        channel=channel,
+    )
+
+
+def canonical_media_identity(
+    platform="", source_id="", webpage_url="", channel="",
+):
+    """Return ``(platform, source_id, webpage_url)`` as one stable value."""
+    from .metadata import build_archival_provenance
+    from .models import StreamInfo
+
+    provenance = build_archival_provenance(
+        StreamInfo(
+            platform=platform,
+            source_id=source_id,
+            webpage_url=webpage_url,
+            channel=channel,
+        ),
+        source_url=webpage_url,
+    )
+    return (
+        provenance.platform,
+        provenance.source_id,
+        provenance.webpage_url,
+    )
+
+
 def free_space_bytes(path):
     """Return free bytes on the disk containing `path`, or None on error.
 

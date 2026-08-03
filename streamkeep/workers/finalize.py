@@ -200,6 +200,9 @@ class FinalizeWorker(QThread):
             "source_id": task.get(
                 "source_id", getattr(info, "source_id", "") if info else "",
             ),
+            "webpage_url": task.get(
+                "webpage_url", getattr(info, "webpage_url", "") if info else "",
+            ),
             "queue_job_id": task.get("queue_job_id", ""),
             "is_upgrade": bool(task.get("is_upgrade", False)),
             "upgrade_activated": False,

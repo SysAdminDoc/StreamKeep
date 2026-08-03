@@ -192,6 +192,7 @@ def import_folders(groups, *, db_module=None):
                 "size": _fmt_size(group.total_size),
                 "path": group.dir_path,
                 "url": provenance.get("webpage_url", ""),
+                "webpage_url": provenance.get("webpage_url", ""),
             }
             db_module.save_history_entry(entry)
             imported += 1

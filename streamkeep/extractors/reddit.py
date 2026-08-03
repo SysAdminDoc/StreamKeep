@@ -65,6 +65,7 @@ class RedditExtractor(Extractor):
             title=post.get("title", ""),
             channel=str(post.get("subreddit") or self.extract_channel_id(url) or ""),
             total_secs=rv.get("duration") or 0,
+            webpage_url=url,
         )
         info.duration_str = fmt_duration(info.total_secs)
 
@@ -90,4 +91,4 @@ class RedditExtractor(Extractor):
             f"Reddit: {info.title[:50]}, {len(info.qualities)} formats, "
             f"{info.duration_str}",
         )
-        return info
+        return self._canonicalize_stream_info(info, source_url=url)

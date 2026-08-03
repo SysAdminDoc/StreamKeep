@@ -951,6 +951,12 @@ class HeadlessJobService(QObject):
                 "source_id": str(
                     result.get("source_id", "") or job.get("source_id", "")
                 ),
+                "webpage_url": str(
+                    result.get("webpage_url", "")
+                    or job.get("webpage_url", "")
+                    or result.get("history_url", "")
+                    or job.get("url", "")
+                ),
                 "title": str(result.get("title", "") or job.get("title", "")),
                 "channel": str(result.get("channel", "") or ""),
                 "quality": str(result.get("quality_name", "") or ""),

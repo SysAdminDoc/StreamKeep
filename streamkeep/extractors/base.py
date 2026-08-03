@@ -83,3 +83,31 @@ class Extractor:
         if log_fn:
             log_fn(msg)
         logger.debug(msg)
+
+    @staticmethod
+    def _canonicalize_stream_info(info, *, source_url=""):
+        """Attach the shared, credential-free identity to a resolved stream."""
+        if info is None:
+            return info
+        from ..metadata import build_archival_provenance
+
+        provenance = build_archival_provenance(info, source_url=source_url)
+        if provenance.platform:
+            info.platform = provenance.platform
+        info.source_id = provenance.source_id
+        info.webpage_url = provenance.webpage_url
+        return info
+
+    @staticmethod
+    def _canonicalize_vod_info(info, *, source_url=""):
+        """Attach the shared, credential-free identity to a listed VOD."""
+        if info is None:
+            return info
+        from ..metadata import build_archival_provenance
+
+        provenance = build_archival_provenance(vod_info=info, source_url=source_url)
+        if provenance.platform:
+            info.platform = provenance.platform
+        info.source_id = provenance.source_id
+        info.webpage_url = provenance.webpage_url
+        return info

@@ -89,6 +89,8 @@ class RumbleExtractor(Extractor):
             title=data.get("title", ""),
             channel=self._extract_channel_from_data(data),
             is_live=data.get("duration", 0) == 0,
+            source_id=f"video:{embed_id}",
+            webpage_url=f"https://rumble.com/{embed_id}",
         )
 
         ua = data.get("ua", {})
@@ -145,4 +147,4 @@ class RumbleExtractor(Extractor):
             f"Rumble: {info.title}, {len(info.qualities)} qualities, "
             f"{info.duration_str}",
         )
-        return info
+        return self._canonicalize_stream_info(info, source_url=url)

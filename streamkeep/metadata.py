@@ -14,13 +14,18 @@ from .models import ArchivalProvenance
 
 
 METADATA_SCHEMA = "streamkeep.metadata"
-METADATA_SCHEMA_VERSION = 1
+METADATA_SCHEMA_VERSION = 2
 MAX_METADATA_BYTES = 4 * 1024 * 1024
 
 _PUBLIC_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 _TWITCH_VOD_RE = re.compile(r"/(?:vod/|videos/)(\d+)(?:\.m3u8)?", re.I)
 _TWITCH_LIVE_RE = re.compile(
     r"/api/channel/hls/([a-z0-9_]+)\.m3u8", re.I,
+)
+_KICK_VOD_RE = re.compile(r"/(?:videos?|vods?)/([^/?#]+)", re.I)
+_RUMBLE_ID_RE = re.compile(r"\b(v[a-z0-9]+)\b", re.I)
+_REDDIT_POST_RE = re.compile(
+    r"/r/([^/?#]+)/comments/([a-z0-9]+)", re.I,
 )
 _SAFE_SOURCE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}\Z")
 _SAFE_CHANNEL_RE = re.compile(r"[A-Za-z0-9_]{1,64}\Z")
@@ -55,6 +60,16 @@ _SENSITIVE_FIELDS = frozenset({
     "x_plex_token",
     "credential",
     "credentials",
+})
+
+_TRACKING_QUERY_KEYS = frozenset({
+    "fbclid", "gclid", "dclid", "gbraid", "wbraid", "msclkid",
+    "mc_cid", "mc_eid", "oly_anon_id", "oly_enc_id", "rb_clickid",
+    "s_cid", "vero_id", "wickedid", "yclid",
+})
+_VOLATILE_QUERY_KEYS = frozenset({
+    "access_token", "auth", "authorization", "expires", "expiry",
+    "key", "password", "secret", "sig", "signature", "token",
 })
 
 
@@ -102,6 +117,8 @@ def _safe_authority(parsed):
         if not literal.is_global:
             return ""
         host = str(literal)
+    if ":" not in host and host.startswith("www."):
+        host = host[4:]
     try:
         port = parsed.port
     except ValueError:
@@ -120,7 +137,11 @@ def _youtube_video_id(parsed):
         candidate = path_parts[0]
     elif _host_is(host, "youtube.com"):
         if parsed.path.rstrip("/") == "/watch":
-            candidate = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+            candidate = dict(
+                urllib.parse.parse_qsl(
+                    parsed.query, keep_blank_values=True,
+                )
+            ).get("v", "")
         elif len(path_parts) >= 2 and path_parts[0].lower() in {
             "embed", "live", "shorts",
         }:
@@ -128,6 +149,29 @@ def _youtube_video_id(parsed):
     if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", candidate or ""):
         return candidate
     return ""
+
+
+def _canonical_query(query):
+    """Normalize a page query without discarding provider parameters."""
+    try:
+        pairs = urllib.parse.parse_qsl(
+            str(query or ""), keep_blank_values=True, strict_parsing=False,
+        )
+    except ValueError:
+        return ""
+    filtered = []
+    for key, value in pairs:
+        key_text = str(key or "")
+        key_lower = key_text.lower()
+        if (
+            key_lower.startswith(("utm_", "x-amz-", "x-goog-"))
+            or key_lower in _TRACKING_QUERY_KEYS
+            or key_lower in _VOLATILE_QUERY_KEYS
+        ):
+            continue
+        filtered.append((key_text, str(value or "")))
+    filtered.sort(key=lambda item: (item[0].casefold(), item[1], item[0]))
+    return urllib.parse.urlencode(filtered, doseq=True)
 
 
 def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
@@ -163,6 +207,37 @@ def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
             ):
                 return f"https://www.twitch.tv/{path_parts[0].lower()}"
 
+        if _host_is(host, "kick.com"):
+            path_parts = [part for part in parsed.path.split("/") if part]
+            vod_match = _KICK_VOD_RE.search(parsed.path)
+            if vod_match:
+                vod_id = vod_match.group(1)
+                if len(path_parts) >= 3 and path_parts[1].lower() in {
+                    "video", "videos", "vod", "vods",
+                }:
+                    return (
+                        f"https://kick.com/{path_parts[0].lower()}"
+                        f"/videos/{vod_id}"
+                    )
+                return f"https://kick.com/video/{vod_id}"
+            if len(path_parts) == 1 and _SAFE_CHANNEL_RE.fullmatch(
+                path_parts[0]
+            ):
+                return f"https://kick.com/{path_parts[0].lower()}"
+
+        if _host_is(host, "rumble.com"):
+            match = _RUMBLE_ID_RE.search(parsed.path)
+            if match:
+                return f"https://rumble.com/{match.group(1).lower()}"
+
+        if _host_is(host, "reddit.com"):
+            match = _REDDIT_POST_RE.search(parsed.path)
+            if match:
+                return (
+                    f"https://www.reddit.com/r/{match.group(1)}"
+                    f"/comments/{match.group(2).lower()}"
+                )
+
         youtube_id = _youtube_video_id(parsed)
         if youtube_id:
             return f"https://www.youtube.com/watch?v={youtube_id}"
@@ -175,19 +250,34 @@ def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
         if _SAFE_CHANNEL_RE.fullmatch(clean_channel):
             return f"https://www.twitch.tv/{clean_channel}"
 
+    if "kick" in platform_key:
+        if clean_id.startswith("vod:") and clean_id[4:]:
+            return f"https://kick.com/video/{clean_id[4:]}"
+        if clean_id.startswith("channel:"):
+            clean_channel = clean_id.split(":", 1)[1].lower()
+        if _SAFE_CHANNEL_RE.fullmatch(clean_channel):
+            return f"https://kick.com/{clean_channel}"
+
+    if "rumble" in platform_key and clean_id.startswith("video:"):
+        rumble_id = clean_id.split(":", 1)[1].lower()
+        if _RUMBLE_ID_RE.fullmatch(rumble_id):
+            return f"https://rumble.com/{rumble_id}"
+
     if parsed is None or parsed.scheme.lower() not in {"http", "https"}:
         return ""
     authority = _safe_authority(parsed)
     if not authority:
         return ""
     path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/") or "/"
     lower_path = path.lower().rstrip("/")
     if lower_path.endswith(_MEDIA_SUFFIXES) or lower_path.rsplit("/", 1)[-1] in {
         "manifest", "playlist",
     }:
         return ""
     return urllib.parse.urlunsplit((
-        parsed.scheme.lower(), authority, path, "", "",
+        parsed.scheme.lower(), authority, path, _canonical_query(parsed.query), "",
     ))
 
 
@@ -216,6 +306,35 @@ def _derived_identity(value, platform="", channel=""):
         youtube_id = _youtube_video_id(parsed)
         if youtube_id:
             return youtube_id
+        host_lower = host.lower()
+        if _host_is(host_lower, "kick.com"):
+            match = _KICK_VOD_RE.search(parsed.path)
+            if match:
+                return f"vod:{match.group(1)}"
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) == 1 and _SAFE_CHANNEL_RE.fullmatch(parts[0]):
+                return f"channel:{parts[0].lower()}"
+        if _host_is(host_lower, "rumble.com"):
+            match = _RUMBLE_ID_RE.search(parsed.path)
+            if match:
+                return f"video:{match.group(1).lower()}"
+        reddit_match = _REDDIT_POST_RE.search(parsed.path)
+        if reddit_match and _host_is(host_lower, "reddit.com"):
+            return f"post:{reddit_match.group(2).lower()}"
+        if _host_is(host_lower, "soundcloud.com"):
+            canonical = canonical_webpage_url(text, platform="SoundCloud")
+            if canonical:
+                import hashlib
+                return "track:" + hashlib.sha256(
+                    canonical.encode("utf-8")
+                ).hexdigest()
+        if _host_is(host_lower, "audius.co"):
+            canonical = canonical_webpage_url(text, platform="Audius")
+            if canonical:
+                import hashlib
+                return "track:" + hashlib.sha256(
+                    canonical.encode("utf-8")
+                ).hexdigest()
     if "twitch" in str(platform or "").lower():
         if text.isdigit():
             return f"vod:{text}"
@@ -456,6 +575,8 @@ def normalize_metadata_payload(data):
         "schema_version": METADATA_SCHEMA_VERSION,
         "provenance": provenance.to_dict(),
         "platform": platform,
+        "source_id": provenance.source_id,
+        "webpage_url": provenance.webpage_url,
         "channel": channel,
         "title": scrub_public_text(raw.get("title", "") or ""),
         "duration": scrub_public_text(raw.get("duration", "") or ""),
