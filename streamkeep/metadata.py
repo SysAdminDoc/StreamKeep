@@ -242,7 +242,10 @@ def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
         if youtube_id:
             return f"https://www.youtube.com/watch?v={youtube_id}"
 
-    if "twitch" in platform_key:
+    if (
+        "twitch" in platform_key
+        and (parsed is None or parsed.scheme.lower() not in {"http", "https"})
+    ):
         if clean_id.startswith("vod:") and clean_id[4:].isdigit():
             return f"https://www.twitch.tv/videos/{clean_id[4:]}"
         if clean_id.startswith("channel:"):
@@ -250,7 +253,10 @@ def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
         if _SAFE_CHANNEL_RE.fullmatch(clean_channel):
             return f"https://www.twitch.tv/{clean_channel}"
 
-    if "kick" in platform_key:
+    if (
+        "kick" in platform_key
+        and (parsed is None or parsed.scheme.lower() not in {"http", "https"})
+    ):
         if clean_id.startswith("vod:") and clean_id[4:]:
             return f"https://kick.com/video/{clean_id[4:]}"
         if clean_id.startswith("channel:"):

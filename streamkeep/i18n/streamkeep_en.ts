@@ -912,12 +912,12 @@ Archive workstation</translation>
             <translation>Backend URL:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="196" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="197" />
             <source>Background finalization complete for {finished_title[:60]}.</source>
             <translation>Background finalization complete for {finished_title[:60]}.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="183" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="184" />
             <source>Background finalization was cancelled.</source>
             <translation>Background finalization was cancelled.</translation>
         </message>
@@ -2754,7 +2754,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Filters</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="185" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="186" />
             <source>Finalization failed for {finished_title[:60]}: {finalize_error or 'activation did not complete'}</source>
             <translation>Finalization failed for {finished_title[:60]}: {finalize_error or 'activation did not complete'}</translation>
         </message>
@@ -2784,7 +2784,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Finish or stop the active download before resuming.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="191" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="192" />
             <source>Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.</source>
             <translation>Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.</translation>
         </message>

@@ -909,12 +909,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="196" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="197" />
             <source>Background finalization complete for {finished_title[:60]}.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="183" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="184" />
             <source>Background finalization was cancelled.</source>
             <translation type="unfinished" />
         </message>
@@ -2744,7 +2744,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation>Filtros</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="185" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="186" />
             <source>Finalization failed for {finished_title[:60]}: {finalize_error or 'activation did not complete'}</source>
             <translation type="unfinished" />
         </message>
@@ -2774,7 +2774,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/download_finalize.py" line="191" />
+            <location filename="streamkeep/ui/tabs/download_finalize.py" line="192" />
             <source>Finished finalizing {finished_title[:60]}. {remaining} background job(s) remaining.</source>
             <translation type="unfinished" />
         </message>
