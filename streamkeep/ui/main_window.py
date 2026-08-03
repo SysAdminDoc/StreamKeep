@@ -1265,6 +1265,16 @@ class StreamKeep(
         except Exception:
             pass
 
+    def _validate_webhook_url(self, url):
+        """Return a normalized public HTTP(S) webhook URL or refuse it."""
+        from ..net_guard import RemoteURLPolicyError, validate_remote_url
+
+        try:
+            return validate_remote_url(url).url
+        except RemoteURLPolicyError as error:
+            self._log(f"[WEBHOOK] Refused unsafe URL: {error}")
+            return ""
+
     def _send_webhook(self, event, title, details=""):
         """POST a webhook notification. Auto-detects Discord, Slack,
         Telegram, and ntfy URLs and formats the payload accordingly."""
@@ -1325,12 +1335,15 @@ class StreamKeep(
         elif "ntfy.sh" in url or "/ntfy/" in url:
             body = f"{title}\n{details}".strip() if details else title
             try:
+                safe_url = self._validate_webhook_url(url)
+                if not safe_url:
+                    return
                 from ..capabilities import resolve_tool_command
                 cmd = [resolve_tool_command("curl"), "-s", "-X", "POST",
                        "-H", f"Title: StreamKeep: {event}",
                        "-H", "Priority: default",
                        "-H", f"Tags: {platform}",
-                       "-d", body, "--max-time", "10", url]
+                       "-d", body, "--max-time", "10", "--", safe_url]
                 subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -1365,11 +1378,14 @@ class StreamKeep(
     def _fire_webhook_json(self, url, payload):
         """Fire-and-forget JSON POST via curl."""
         try:
+            safe_url = self._validate_webhook_url(url)
+            if not safe_url:
+                return
             from ..capabilities import resolve_tool_command
             cmd = [resolve_tool_command("curl"), "-s", "-X", "POST",
                    "-H", "Content-Type: application/json",
                    "-d", json.dumps(payload),
-                   "--max-time", "10", url]
+                   "--max-time", "10", "--", safe_url]
             subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

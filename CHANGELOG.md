@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Hardened ntfy and JSON webhook curl calls with `--` URL termination and
+  `net_guard` validation. Unsafe private, loopback, link-local, metadata, and
+  option-like targets are logged and refused before curl starts.
+
 - Required fresh JSON mutation proof on the status-scoped media-server preview,
   intelligence preview, and operations export POST routes. The OpenAPI
   document now exposes the timestamp and one-use nonce headers for every POST
