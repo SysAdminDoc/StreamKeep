@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+import streamkeep.notifications as notifications_mod
 from streamkeep.diagnostics import (
     create_diagnostic_snapshot,
     redact_config,
@@ -172,6 +173,26 @@ class SnapshotTests(unittest.TestCase):
                 self.assertNotIn(secret, public_text)
             self.assertNotIn("Authorization:", public_text)
             self.assertNotIn("Cookie:", public_text)
+
+    def test_snapshot_includes_structured_local_server_security_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            event_log = Path(tmpdir) / "security-events.jsonl"
+            out = Path(tmpdir) / "diag.zip"
+            with mock.patch.object(notifications_mod, "SECURITY_EVENT_LOG", event_log):
+                notifications_mod.record_security_event({
+                    "route": "/api/queue?token=QUERYSECRET",
+                    "reason": "request_replayed",
+                    "client_id": "client-0123456789abcdef",
+                })
+                ok, _ = create_diagnostic_snapshot(str(out))
+
+            self.assertTrue(ok)
+            with zipfile.ZipFile(out, "r") as archive:
+                runtime = json.loads(archive.read("runtime.json"))
+            events = runtime["local_server_security_events"]
+            self.assertEqual(events[0]["route"], "/api/queue")
+            self.assertEqual(events[0]["reason"], "request_replayed")
+            self.assertNotIn("QUERYSECRET", json.dumps(runtime))
 
 
 if __name__ == "__main__":

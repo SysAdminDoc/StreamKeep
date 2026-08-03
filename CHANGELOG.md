@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a privacy-safe local-server security audit trail for failed bearer
+  validation, revoked clients, origin/scope/transport rejection, and replayed
+  mutation proofs. Events use route-only paths and client hashes, are capped
+  during bursts, surface through Notifications, and are included in diagnostic
+  snapshots without tokens, URLs, or addresses.
+
 - Added a separate SQLite 3.53.2 FTS5 safety floor. Source runtimes below it
   disable FTS5 and use bounded fallback search with degraded-mode repair
   guidance, while frozen builds refuse unsafe runtimes. Settings and

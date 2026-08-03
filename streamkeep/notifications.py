@@ -3,22 +3,141 @@
 Decoupled from the Qt UI so the main window only wires the dropdown; the
 ring buffer itself is a pure data structure that can be unit-tested.
 File persistence (F4) appends every notification to ``notifications.jsonl``
-inside the config directory.
+inside the config directory. Local-server security rejections use a separate,
+structured JSONL audit file with route and client identity redaction.
 """
 
 import json
 import os
+import re
 import threading
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from .paths import CONFIG_DIR
 
 NOTIF_LOG = CONFIG_DIR / "notifications.jsonl"
 NOTIF_LOG_MAX_BYTES = 5 * 1024 * 1024
 NOTIF_LOG_KEEP_LINES = 20000
+SECURITY_EVENT_LOG = CONFIG_DIR / "security-events.jsonl"
+SECURITY_EVENT_LOG_MAX_BYTES = 2 * 1024 * 1024
+SECURITY_EVENT_LOG_KEEP_LINES = 10000
 _NOTIF_FILE_LOCK = threading.Lock()
+_SECURITY_EVENT_FILE_LOCK = threading.Lock()
+_SECURITY_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
+_SECURITY_CLIENT_RE = re.compile(r"^client-[a-f0-9]{16}$")
+
+
+def _security_route(value):
+    """Keep an audit route while dropping authorities, queries, and fragments."""
+    raw = str(value or "/").split("?", 1)[0].split("#", 1)[0].strip()
+    try:
+        parsed = urlsplit(raw)
+        route = parsed.path or raw
+    except ValueError:
+        route = raw
+    route = re.sub(r"[\x00-\x1f\x7f]", "", route)
+    if not route.startswith("/"):
+        route = "/" + route
+    return route[:160] or "/"
+
+
+def _security_code(value, fallback):
+    code = str(value or "").strip().lower()
+    return code if _SECURITY_CODE_RE.fullmatch(code) else fallback
+
+
+def _security_client(value):
+    client = str(value or "").strip().lower()
+    return client if _SECURITY_CLIENT_RE.fullmatch(client) else "client-0000000000000000"
+
+
+def record_security_event(event):
+    """Persist and return a privacy-safe local-server security event."""
+    event = dict(event or {}) if isinstance(event, dict) else {}
+    safe = {
+        "timestamp": str(
+            event.get("timestamp") or
+            datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )[:40],
+        "route": _security_route(event.get("route")),
+        "reason": _security_code(event.get("reason"), "security_rejection"),
+        "client_id": _security_client(event.get("client_id")),
+        "outcome": _security_code(event.get("outcome"), "rejected"),
+    }
+    with _SECURITY_EVENT_FILE_LOCK:
+        try:
+            SECURITY_EVENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(SECURITY_EVENT_LOG, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(safe, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            _compact_security_event_log_locked()
+        except OSError:
+            pass
+    return safe
+
+
+def _compact_security_event_log_locked():
+    try:
+        if (
+            SECURITY_EVENT_LOG_MAX_BYTES <= 0
+            or SECURITY_EVENT_LOG_KEEP_LINES <= 0
+            or not SECURITY_EVENT_LOG.is_file()
+            or SECURITY_EVENT_LOG.stat().st_size <= SECURITY_EVENT_LOG_MAX_BYTES
+        ):
+            return
+    except OSError:
+        return
+
+    lines = deque(maxlen=max(1, int(SECURITY_EVENT_LOG_KEEP_LINES or 1)))
+    try:
+        with open(SECURITY_EVENT_LOG, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    lines.append(line.rstrip("\r\n"))
+    except OSError:
+        return
+
+    temporary = SECURITY_EVENT_LOG.with_name(SECURITY_EVENT_LOG.name + ".tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(line + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, SECURITY_EVENT_LOG)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def load_security_events(limit=200):
+    """Load the newest structured local-server security events."""
+    try:
+        limit = max(1, int(limit or 1))
+    except (TypeError, ValueError):
+        limit = 200
+    entries = deque(maxlen=limit)
+    with _SECURITY_EVENT_FILE_LOCK:
+        try:
+            if not SECURITY_EVENT_LOG.is_file():
+                return []
+            with open(SECURITY_EVENT_LOG, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        value = json.loads(line)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(value, dict):
+                        entries.append(value)
+        except OSError:
+            pass
+    return list(entries)
 
 
 @dataclass
@@ -48,6 +167,17 @@ class NotificationCenter:
             self._unread += 1
         self._persist(note, now)
         return note
+
+    def push_security_event(self, event):
+        """Raise an in-app warning for a sanitized local-server rejection."""
+        event = dict(event or {}) if isinstance(event, dict) else {}
+        reason = _security_code(event.get("reason"), "security_rejection")
+        route = _security_route(event.get("route"))
+        client_id = _security_client(event.get("client_id"))
+        return self.push(
+            f"Companion security rejection: {reason} on {route} ({client_id}).",
+            "warning",
+        )
 
     def _persist(self, note, now):
         with _NOTIF_FILE_LOCK:

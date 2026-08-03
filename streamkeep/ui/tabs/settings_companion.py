@@ -157,6 +157,12 @@ class SettingsCompanionMixin:
         if not _save_config(self._config):
             self._log("[COMPANION] Could not persist the browser extension origin pin.")
 
+    def _on_companion_security_event(self, event):
+        """Surface a rate-limited local-server rejection in Notifications."""
+        center = getattr(self, "_notifications", None)
+        if center is not None:
+            center.push_security_event(event)
+
     def _copy_text_to_clipboard(self, text, label):
         value = str(text or "").strip()
         if not value:
@@ -501,6 +507,7 @@ class SettingsCompanionMixin:
                 srv.extension_origin_pinned.connect(
                     self._on_companion_extension_origin_pinned
                 )
+                srv.security_event.connect(self._on_companion_security_event)
                 srv.failed_job_retry_requested.connect(self._retry_failed_job)
                 srv.failed_job_discard_requested.connect(self._discard_failed_job)
                 srv.start()

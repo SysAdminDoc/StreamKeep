@@ -12,7 +12,9 @@ from unittest import mock
 from PyQt6.QtCore import QCoreApplication, Qt
 
 from streamkeep import db
+import streamkeep.notifications as notifications_mod
 from streamkeep.local_server import (
+    SECURITY_EVENT_PER_CLIENT_LIMIT,
     SCOPE_QUEUE,
     SCOPE_RECOVERY,
     SCOPE_STATUS,
@@ -310,6 +312,58 @@ class LocalServerTests(unittest.TestCase):
     def test_ping_requires_bearer_token(self):
         err = self._expect_error("/ping", 401)
         self.assertEqual(err.get("err"), "token_invalid")
+
+    def test_auth_rejections_are_audited_without_token_or_query_and_rate_limited(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            event_log = Path(tmpdir) / "security-events.jsonl"
+            revoked = self.server.create_scoped_token({SCOPE_STATUS})
+            self.server.revoke_token(revoked)
+            with mock.patch.object(notifications_mod, "SECURITY_EVENT_LOG", event_log):
+                for _ in range(SECURITY_EVENT_PER_CLIENT_LIMIT + 4):
+                    error = self._expect_error(
+                        "/ping?token=QUERYSECRET",
+                        401,
+                        token=revoked,
+                    )
+                self.assertEqual(error["err"], "token_invalid")
+                events = notifications_mod.load_security_events()
+
+            self.assertEqual(len(events), SECURITY_EVENT_PER_CLIENT_LIMIT)
+            self.assertTrue(all(event["route"] == "/ping" for event in events))
+            self.assertTrue(all(event["reason"] == "token_invalid" for event in events))
+            self.assertTrue(all(event["client_id"].startswith("client-") for event in events))
+            audit_text = event_log.read_text(encoding="utf-8")
+            self.assertNotIn(revoked, audit_text)
+            self.assertNotIn("QUERYSECRET", audit_text)
+
+    def test_mutation_rejections_record_origin_and_replay_reasons(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            event_log = Path(tmpdir) / "security-events.jsonl"
+            with mock.patch.object(notifications_mod, "SECURITY_EVENT_LOG", event_log):
+                origin_error = self._expect_error(
+                    "/api/queue",
+                    403,
+                    token=self.server.token,
+                    headers={"Origin": "https://attacker.example"},
+                    method="POST",
+                    data={"url": "https://example.com/video"},
+                )
+                replay_error = self._expect_error(
+                    "/api/queue",
+                    400,
+                    token=self.server.token,
+                    method="POST",
+                    data={"url": "https://example.com/video"},
+                    freshness=False,
+                )
+                events = notifications_mod.load_security_events()
+
+            self.assertEqual(origin_error["err"], "origin_denied")
+            self.assertEqual(replay_error["err"], "request_timestamp_invalid")
+            self.assertEqual(
+                {event["reason"] for event in events},
+                {"origin_denied", "request_timestamp_invalid"},
+            )
 
     def test_loopback_rejects_spoofed_forwarding_headers(self):
         error = self._expect_error(

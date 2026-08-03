@@ -58,6 +58,7 @@ import re
 import secrets
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -66,6 +67,7 @@ from urllib.parse import parse_qs, urlsplit
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from .har import normalize_replay_headers
+from .notifications import record_security_event as _write_security_event
 
 PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
@@ -108,6 +110,51 @@ ALL_SCOPES = frozenset({SCOPE_STATUS, SCOPE_QUEUE, SCOPE_RECOVERY})
 PAIRED_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+SECURITY_EVENT_WINDOW_SECONDS = 60.0
+SECURITY_EVENT_PER_CLIENT_LIMIT = 12
+SECURITY_EVENT_TOTAL_LIMIT = 100
+
+
+class _SecurityEventRateLimiter:
+    """Bound local-server security audit writes during an attack burst."""
+
+    def __init__(
+        self, *, window_seconds=SECURITY_EVENT_WINDOW_SECONDS,
+        per_client_limit=SECURITY_EVENT_PER_CLIENT_LIMIT,
+        total_limit=SECURITY_EVENT_TOTAL_LIMIT,
+    ):
+        self.window_seconds = float(window_seconds)
+        self.per_client_limit = int(per_client_limit)
+        self.total_limit = int(total_limit)
+        self._events = deque()
+        self._lock = threading.Lock()
+
+    def allow(self, client_id):
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        with self._lock:
+            while self._events and self._events[0][0] <= cutoff:
+                self._events.popleft()
+            if len(self._events) >= self.total_limit:
+                return False
+            client_count = sum(item[1] == client_id for item in self._events)
+            if client_count >= self.per_client_limit:
+                return False
+            self._events.append((now, client_id))
+            return True
+
+
+def _redacted_client_identifier(client_address):
+    """Return a stable per-process client hash without retaining its address."""
+    try:
+        peer = str(client_address[0] or "").strip()
+    except (IndexError, TypeError):
+        peer = ""
+    peer = peer or "unknown"
+    digest = hashlib.sha256(
+        f"streamkeep-local-server-client-v1:{peer}".encode("utf-8")
+    ).hexdigest()[:16]
+    return f"client-{digest}"
 
 
 def generate_bearer_token():
@@ -263,6 +310,7 @@ class _ServerSignals(QObject):
     handoff_received = pyqtSignal(object, str)  # bounded context, action
     clip_received = pyqtSignal(str, float, float)  # url, start_secs, end_secs
     extension_origin_pinned = pyqtSignal(str)  # origin, or empty when cleared
+    security_event = pyqtSignal(object)  # sanitized auth/mutation rejection
     failed_job_retry_requested = pyqtSignal(int)
     failed_job_discard_requested = pyqtSignal(int)
 
@@ -477,6 +525,7 @@ class LocalCompanionServer:
         self.handoff_received = self._signals.handoff_received
         self.clip_received = self._signals.clip_received
         self.extension_origin_pinned = self._signals.extension_origin_pinned
+        self.security_event = self._signals.security_event
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
@@ -669,10 +718,33 @@ def _build_handler(
     external_authority = (
         urlsplit(external_origin).netloc.lower() if external_origin else ""
     )
+    security_event_limiter = _SecurityEventRateLimiter()
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args, **_kwargs):
             return
+
+        def _request_route(self):
+            raw_path = str(self.path or "/").split("?", 1)[0]
+            try:
+                return urlsplit(raw_path).path or raw_path
+            except ValueError:
+                return raw_path
+
+        def _record_security_event(self, reason):
+            client_id = _redacted_client_identifier(self.client_address)
+            if not security_event_limiter.allow(client_id):
+                return None
+            event = _write_security_event({
+                "route": self._request_route(),
+                "reason": reason,
+                "client_id": client_id,
+            })
+            try:
+                signals.security_event.emit(event)
+            except RuntimeError:
+                pass
+            return event
 
         def _host_ok(self):
             host_values = self.headers.get_all("Host", failobj=[])
@@ -760,6 +832,7 @@ def _build_handler(
 
         def _reject_bad_host(self):
             if not self._host_ok():
+                self._record_security_event("host_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "host_denied",
@@ -767,6 +840,7 @@ def _build_handler(
                 })
                 return True
             if not self._external_boundary_ok():
+                self._record_security_event("transport_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "transport_denied",
@@ -834,6 +908,7 @@ def _build_handler(
             """Check auth + optional scope. Returns True if authorized."""
             auth, error = self._token_grant()
             if auth is None:
+                self._record_security_event(error)
                 messages = {
                     "token_invalid": (
                         "The access token is missing, expired, or revoked. "
@@ -862,6 +937,7 @@ def _build_handler(
                 return False
             grant, token = auth
             if scope and scope not in grant.scopes:
+                self._record_security_event("scope_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "scope_denied",
@@ -875,6 +951,7 @@ def _build_handler(
         def _require_mutation_proof(self, token):
             origin = self.headers.get("Origin", "")
             if origin and not self._origin_ok(origin):
+                self._record_security_event("origin_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "origin_denied",
@@ -883,6 +960,7 @@ def _build_handler(
                 return False
             fetch_site = str(self.headers.get("Sec-Fetch-Site", "") or "").lower()
             if fetch_site == "cross-site":
+                self._record_security_event("cross_site_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "cross_site_denied",
@@ -891,6 +969,7 @@ def _build_handler(
                 return False
             content_type = str(self.headers.get("Content-Type", "") or "")
             if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                self._record_security_event("content_type_denied")
                 self._json_response(415, {
                     "ok": False,
                     "err": "content_type_denied",
@@ -903,6 +982,7 @@ def _build_handler(
                 self.headers.get("X-StreamKeep-Nonce", ""),
             )
             if not accepted:
+                self._record_security_event(error)
                 code = 409 if error == "request_replayed" else 400
                 self._json_response(code, {
                     "ok": False,
@@ -1026,6 +1106,7 @@ def _build_handler(
                 return
             origin = self.headers.get("Origin", "")
             if not origin or not self._origin_ok(origin):
+                self._record_security_event("origin_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "origin_denied",
@@ -1188,6 +1269,7 @@ def _build_handler(
         def _handle_pair(self):
             origin_header = self.headers.get("Origin", "")
             if origin_header and not self._origin_ok(origin_header):
+                self._record_security_event("origin_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "origin_denied",
@@ -1196,6 +1278,7 @@ def _build_handler(
                 return
             fetch_site = str(self.headers.get("Sec-Fetch-Site", "") or "").lower()
             if fetch_site == "cross-site":
+                self._record_security_event("cross_site_denied")
                 self._json_response(403, {
                     "ok": False,
                     "err": "cross_site_denied",
@@ -1207,6 +1290,7 @@ def _build_handler(
                 self.headers.get("X-StreamKeep-Nonce", ""),
             )
             if not fresh:
+                self._record_security_event(error)
                 self._json_response(400, {
                     "ok": False,
                     "err": error,
@@ -1215,11 +1299,13 @@ def _build_handler(
                 return
             content_type = str(self.headers.get("Content-Type", "") or "")
             if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                self._record_security_event("content_type_denied")
                 self._json_response(415, {"ok": False, "err": "content_type_denied"})
                 return
             data = self._read_body(max_bytes=4096)
             scopes = pairing_store.consume(data.get("code"))
             if not scopes:
+                self._record_security_event("pairing_invalid")
                 self._json_response(401, {
                     "ok": False,
                     "err": "pairing_invalid",
@@ -1230,6 +1316,7 @@ def _build_handler(
             if isinstance(requested_scopes, list):
                 scopes &= frozenset(str(scope) for scope in requested_scopes)
                 if not scopes:
+                    self._record_security_event("pairing_scope_invalid")
                     self._json_response(400, {
                         "ok": False,
                         "err": "pairing_scope_invalid",
@@ -1240,6 +1327,7 @@ def _build_handler(
             if not origin and fetch_site == "same-origin":
                 origin = self._effective_request_origin()
                 if not origin:
+                    self._record_security_event("origin_denied")
                     self._json_response(403, {
                         "ok": False,
                         "err": "origin_denied",
@@ -1251,6 +1339,7 @@ def _build_handler(
                     return
             if origin.startswith(("chrome-extension://", "moz-extension://")):
                 if not extension_origin_pinner(origin):
+                    self._record_security_event("origin_denied")
                     self._json_response(403, {
                         "ok": False,
                         "err": "origin_denied",

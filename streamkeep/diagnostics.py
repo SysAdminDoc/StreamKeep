@@ -18,6 +18,7 @@ from pathlib import Path
 from . import VERSION
 from .capabilities import get_runtime_capabilities
 from .metadata import scrub_public_text
+from .notifications import load_security_events
 from .paths import CONFIG_DIR, LOG_FILE, CRASH_LOG, PORTABLE
 
 _REDACT_PATTERNS = [
@@ -121,6 +122,7 @@ def _runtime_info():
         "config_dir": str(CONFIG_DIR),
     }
     info["runtime_capabilities"] = get_runtime_capabilities(refresh=True)
+    info["local_server_security_events"] = load_security_events(limit=200)
     return info
 
 

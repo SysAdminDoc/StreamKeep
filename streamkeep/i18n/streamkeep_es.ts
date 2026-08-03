@@ -386,7 +386,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="308" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="314" />
             <source>Access was revoked, but secure storage failed; companion stopped.</source>
             <translation type="unfinished" />
         </message>
@@ -546,7 +546,7 @@ Archive workstation</source>
             <translation>Todo</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="316" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="322" />
             <source>All clients revoked. A fresh one-time pairing code is ready.</source>
             <translation type="unfinished" />
         </message>
@@ -1050,7 +1050,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="342" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="348" />
             <source>Browser companion web remote is not available yet.</source>
             <translation type="unfinished" />
         </message>
@@ -1538,8 +1538,8 @@ Archive workstation</source>
             <translation>Compacta</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="300" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="321" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="306" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="327" />
             <source>Companion server is not running.</source>
             <translation type="unfinished" />
         </message>
@@ -1727,12 +1727,12 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="750" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="757" />
             <source>Could not arm the update step. See log.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="174" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="180" />
             <source>Could not copy {label.lower()}.</source>
             <translation type="unfinished" />
         </message>
@@ -2022,8 +2022,8 @@ Produces a .nosilence copy — the original is preserved.</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="228" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="681" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="716" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="688" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="723" />
             <source>Download &amp; install</source>
             <translation type="unfinished" />
         </message>
@@ -2141,7 +2141,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="690" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="697" />
             <source>Downloading...</source>
             <translation type="unfinished" />
         </message>
@@ -2439,7 +2439,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         </message>
         <message>
             <location filename="streamkeep/ui/notification_log_dialog.py" line="56" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="252" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="258" />
             <source>Error</source>
             <translation>Error</translation>
         </message>
@@ -2529,7 +2529,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="266" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="272" />
             <source>Expires in 5 min</source>
             <translation type="unfinished" />
         </message>
@@ -2935,7 +2935,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         </message>
         <message>
             <location filename="streamkeep/ui/intelligence_dialog.py" line="101" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="268" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="274" />
             <source>Generate</source>
             <translation type="unfinished" />
         </message>
@@ -3251,12 +3251,12 @@ https://youtu.be/*</source>
             <translation>Revise el uso de disco, la integridad y la limpieza recuperable.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="659" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="666" />
             <source>Install blocked</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="743" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="750" />
             <source>Install now</source>
             <translation type="unfinished" />
         </message>
@@ -3443,7 +3443,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="425" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="431" />
             <source>Lifecycle cleanup: {removed} recording(s) recycled.</source>
             <translation type="unfinished" />
         </message>
@@ -3595,7 +3595,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="257" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="263" />
             <source>Local listener</source>
             <translation type="unfinished" />
         </message>
@@ -3862,7 +3862,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="253" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="259" />
             <source>Needs attention</source>
             <translation>Requiere atención</translation>
         </message>
@@ -4262,8 +4262,8 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="261" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="272" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="267" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="278" />
             <source>Not running</source>
             <translation type="unfinished" />
         </message>
@@ -4309,7 +4309,7 @@ Set to 1 to disable and always use ffmpeg.</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="1367" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="260" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="266" />
             <source>Off</source>
             <translation type="unfinished" />
         </message>
@@ -4382,12 +4382,12 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="269" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="275" />
             <source>One-time code</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="324" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="330" />
             <source>One-time pairing code generated for five minutes.</source>
             <translation type="unfinished" />
         </message>
@@ -4465,7 +4465,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="345" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="351" />
             <source>Opened the browser companion web remote.</source>
             <translation type="unfinished" />
         </message>
@@ -4885,7 +4885,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="249" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="255" />
             <source>Port {srv.port}</source>
             <translation type="unfinished" />
         </message>
@@ -5256,8 +5256,8 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
         </message>
         <message>
             <location filename="streamkeep/ui/main_window.py" line="2066" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="248" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="265" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="254" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="271" />
             <source>Ready</source>
             <translation type="unfinished" />
         </message>
@@ -6553,7 +6553,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="256" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="262" />
             <source>Starting</source>
             <translation type="unfinished" />
         </message>
@@ -7265,12 +7265,12 @@ Download again?</source>
             <translation>Comprenda el crecimiento del archivo y los patrones de captura.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="687" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="694" />
             <source>Update available but no authenticated Windows asset was attached.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="713" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="720" />
             <source>Update failed: {path_or_err}</source>
             <translation type="unfinished" />
         </message>
@@ -7470,7 +7470,7 @@ Download again?</source>
             <location filename="streamkeep/player/chapter_panel.py" line="186" />
             <location filename="streamkeep/player/sync_viewer.py" line="66" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1372" />
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="271" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="277" />
             <source>Waiting</source>
             <translation type="unfinished" />
         </message>
@@ -7885,7 +7885,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="171" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="177" />
             <source>{label} copied to clipboard.</source>
             <translation type="unfinished" />
         </message>
@@ -7895,7 +7895,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_companion.py" line="163" />
+            <location filename="streamkeep/ui/tabs/settings_companion.py" line="169" />
             <source>{label} is not available yet.</source>
             <translation type="unfinished" />
         </message>
