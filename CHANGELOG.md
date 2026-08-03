@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Created DPAPI and portable-secret temporary files with exclusive owner-only
+  permissions before writing any secret payload. Portable-secret restore now
+  commits cookies, config secrets, and account credentials transactionally and
+  rolls every store back when a later write fails.
+
 - Pinned the first paired browser-extension origin per local companion server,
   persisted that pin in Settings, and rejected other extension origins even
   when they present the valid master token. Session cookies now carry

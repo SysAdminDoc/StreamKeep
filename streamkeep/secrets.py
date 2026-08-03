@@ -146,12 +146,26 @@ def _read_local_store() -> dict[str, str]:
 def _write_local_store(data: dict[str, str]) -> None:
     path = _local_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, sort_keys=True)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    tmp = path.with_name(
+        f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
+    )
+    try:
+        fd = os.open(
+            str(tmp),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     if sys.platform != "win32":
         try:
             os.chmod(path, 0o600)

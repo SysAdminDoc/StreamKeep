@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -198,6 +199,29 @@ class SecretsTests(unittest.TestCase):
                 secrets.get_secret_value("config:hf_token"),
                 "new-rotation-secret",
             )
+
+    def test_local_secret_store_opens_private_exclusive_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            calls = []
+            real_open = os.open
+
+            def capture_open(path, flags, mode=0o777, *args, **kwargs):
+                calls.append((flags, mode))
+                return real_open(path, flags, mode, *args, **kwargs)
+
+            with (
+                mock.patch.object(secrets, "_local_store_path", return_value=root / "credentials.json"),
+                mock.patch.object(secrets.os, "open", side_effect=capture_open),
+            ):
+                secrets._write_local_store({"config:test": "protected"})
+
+            self.assertEqual(len(calls), 1)
+            flags, mode = calls[0]
+            self.assertEqual(mode, 0o600)
+            self.assertTrue(flags & os.O_CREAT)
+            self.assertTrue(flags & os.O_EXCL)
+            self.assertTrue(flags & os.O_WRONLY)
 
 
 if __name__ == "__main__":

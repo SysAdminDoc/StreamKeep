@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 from pathlib import Path
@@ -103,22 +104,41 @@ def restore_portable_secret_backup(backup_path, password):
         payload = json.loads(plaintext.decode("utf-8"))
         _validate_payload(payload)
 
-        from .accounts import set_credential
-        from .config import get_last_config_error, load_config, save_config
-        from .cookies import restore_cookie_text
+        from . import accounts, config as config_module, cookies, secrets
+        from .config import get_last_config_error, save_config
         from .secrets import apply_config_secrets
 
-        config = apply_config_secrets(load_config(), payload["config_secrets"])
-        if not save_config(config):
-            return False, (
-                "Could not restore config secrets: "
-                + (get_last_config_error() or "secure storage unavailable")
-            )
-        for platform, credential in payload["accounts"].items():
-            set_credential(platform, credential)
-        ok, message = restore_cookie_text(payload["cookies"])
-        if not ok:
-            return False, message
+        snapshot = _capture_restore_snapshot(
+            accounts, config_module, cookies, secrets,
+        )
+        config = apply_config_secrets(
+            snapshot["config"], payload["config_secrets"]
+        )
+        touched_secret_ids = set(payload["config_secrets"])
+        touched_secret_ids.update(
+            f"account:{platform}" for platform in payload["accounts"]
+        )
+        _capture_secret_values(snapshot, touched_secret_ids, accounts, secrets)
+
+        try:
+            # Cookie validation and writing is the first commit step. If it
+            # fails, no config, account, or secure-store mutation has landed.
+            ok, message = cookies.restore_cookie_text(payload["cookies"])
+            if not ok:
+                _rollback_restore(snapshot, touched_secret_ids, config_module, secrets)
+                return False, message
+            if not save_config(config):
+                message = (
+                    "Could not restore config secrets: "
+                    + (get_last_config_error() or "secure storage unavailable")
+                )
+                _rollback_restore(snapshot, touched_secret_ids, config_module, secrets)
+                return False, message
+            for platform, credential in payload["accounts"].items():
+                accounts.set_credential(platform, credential)
+        except Exception as error:
+            _rollback_restore(snapshot, touched_secret_ids, config_module, secrets)
+            return False, f"Portable-secret restore failed: {error}"
         count = len(payload["config_secrets"]) + len(payload["accounts"])
         return True, f"Restored {count} credential value(s); {message}"
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
@@ -192,11 +212,100 @@ def _decode_b64(value, *, expected=None, maximum=None):
 
 def _write_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    tmp = path.with_name(
+        f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
+    )
+    try:
+        fd = os.open(
+            str(tmp),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     if os.name != "nt":
         os.chmod(path, 0o600)
+
+
+def _capture_restore_snapshot(accounts_module, config_module, cookies_module,
+                              secrets_module):
+    config_path = Path(config_module.CONFIG_FILE)
+    backup_path = config_path.with_suffix(".json.bak")
+    account_path = Path(accounts_module.DB_PATH)
+    cookie_path = Path(cookies_module.COOKIES_FILE)
+    local_store_path = Path(secrets_module._local_store_path())
+    paths = [
+        config_path,
+        config_path.with_suffix(".json.tmp"),
+        backup_path,
+        backup_path.with_suffix(".bak.tmp"),
+        account_path,
+        Path(str(account_path) + "-wal"),
+        Path(str(account_path) + "-shm"),
+        Path(str(account_path) + "-journal"),
+        cookie_path,
+        cookie_path.with_suffix(".txt.tmp"),
+        local_store_path,
+    ]
+    return {
+        "config": config_module.load_config(),
+        "files": {
+            path: (path.exists(), path.read_bytes() if path.is_file() else b"")
+            for path in paths
+        },
+        "cache": copy.deepcopy(secrets_module._SECRET_CACHE),
+        "secret_values": {},
+        "config_error": getattr(config_module, "_LAST_CONFIG_ERROR", ""),
+        "accounts": tuple(accounts_module.list_platforms()),
+    }
+
+
+def _capture_secret_values(snapshot, secret_ids, accounts_module,
+                           secrets_module):
+    for secret_id in secret_ids:
+        value = secrets_module.get_secret_value(secret_id)
+        if value not in (None, "", [], {}):
+            snapshot["secret_values"][secret_id] = copy.deepcopy(value)
+    for platform in snapshot["accounts"]:
+        secret_id = f"account:{platform}"
+        if secret_id not in secret_ids:
+            continue
+        value = accounts_module.get_credential(platform)
+        if value not in (None, "", [], {}):
+            snapshot["secret_values"][secret_id] = copy.deepcopy(value)
+
+
+def _rollback_restore(snapshot, secret_ids, config_module, secrets_module):
+    """Restore every file and secure reference touched by a failed restore."""
+    for secret_id in secret_ids:
+        try:
+            secrets_module._SECRET_CACHE.pop(secret_id, None)
+            secrets_module._keyring_delete(secret_id)
+            if secret_id in snapshot["secret_values"]:
+                secrets_module.set_secret_value(
+                    secret_id, snapshot["secret_values"][secret_id]
+                )
+        except Exception:
+            # The byte snapshots below still restore DPAPI/local stores; keep
+            # attempting every independent rollback target.
+            pass
+    for path, (existed, content) in snapshot["files"].items():
+        try:
+            if existed:
+                _write_atomic(path, content)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    secrets_module._SECRET_CACHE.clear()
+    secrets_module._SECRET_CACHE.update(snapshot["cache"])
+    config_module._LAST_CONFIG_ERROR = snapshot["config_error"]
