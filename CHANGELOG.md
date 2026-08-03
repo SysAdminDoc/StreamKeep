@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Pinned the first paired browser-extension origin per local companion server,
+  persisted that pin in Settings, and rejected other extension origins even
+  when they present the valid master token. Session cookies now carry
+  `Secure` only after the configured HTTPS reverse-proxy boundary is proven.
+
 - Hardened ntfy and JSON webhook curl calls with `--` URL termination and
   `net_guard` validation. Unsafe private, loopback, link-local, metadata, and
   option-like targets are logged and refused before curl starts.

@@ -8,6 +8,7 @@ from PyQt6.QtGui import QDesktopServices
 
 from ... import VERSION
 from ... import db as _db
+from ...config import save_config as _save_config
 from ...har import normalize_replay_headers
 from ...models import HistoryEntry
 from ...local_server import (
@@ -143,6 +144,18 @@ class SettingsCompanionMixin:
                 "Secure credential storage is unavailable; companion access stayed off."
             )
         return token
+
+    def _on_companion_extension_origin_pinned(self, origin):
+        """Persist the device-local browser extension trust pin."""
+        normalized = str(origin or "").strip()
+        if normalized:
+            self._config["companion_extension_origin"] = normalized
+            self._log(f"[COMPANION] Pinned browser extension origin {normalized}.")
+        else:
+            self._config.pop("companion_extension_origin", None)
+            self._log("[COMPANION] Browser extension origin pin cleared.")
+        if not _save_config(self._config):
+            self._log("[COMPANION] Could not persist the browser extension origin pin.")
 
     def _copy_text_to_clipboard(self, text, label):
         value = str(text or "").strip()
@@ -447,6 +460,9 @@ class SettingsCompanionMixin:
         bind_lan = bool(self._config.get("companion_bind_lan", False))
         allow_private = bool(self._config.get("companion_allow_private_network", False))
         proxy_origin = str(self._config.get("companion_proxy_origin", "") or "").strip()
+        extension_origin = str(
+            self._config.get("companion_extension_origin", "") or ""
+        ).strip()
         desired_bind = "127.0.0.1"
         running = self._companion_server is not None
         if running and (
@@ -455,6 +471,8 @@ class SettingsCompanionMixin:
             != (proxy_origin if bind_lan else "")
             or bool(getattr(self._companion_server, "allow_private_network", False))
             != allow_private
+            or str(getattr(self._companion_server, "extension_origin", "") or "")
+            != extension_origin
         ):
             force_restart = True
         if force_restart and running:
@@ -473,12 +491,16 @@ class SettingsCompanionMixin:
                     external_origin=proxy_origin,
                     master_token=master_token,
                     allow_private_network=allow_private,
+                    extension_origin=extension_origin,
                 )
                 srv.state_provider = self._api_state_snapshot
                 srv.probe_submitter = self._companion_probe
                 srv.handoff_received.connect(self._on_companion_handoff)
                 srv.url_received.connect(self._on_companion_url)
                 srv.clip_received.connect(self._on_companion_clip)
+                srv.extension_origin_pinned.connect(
+                    self._on_companion_extension_origin_pinned
+                )
                 srv.failed_job_retry_requested.connect(self._retry_failed_job)
                 srv.failed_job_discard_requested.connect(self._discard_failed_job)
                 srv.start()

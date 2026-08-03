@@ -84,7 +84,8 @@ _STRING_CONFIG_KEYS = frozenset({
     "auth_profile_id", "theme",
     "visual_density", "visual_accent",
     "language", "whisper_model", "hf_token", "dismissed_update_tag",
-    "companion_proxy_origin", "subtitle_languages", "subtitle_convert",
+    "companion_proxy_origin", "companion_extension_origin",
+    "subtitle_languages", "subtitle_convert",
     "sponsorblock_mark", "sponsorblock_remove", "sponsorblock_api",
     "ytdlp_retries", "ytdlp_fragment_retries", "ytdlp_retry_sleep",
     "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
@@ -138,6 +139,7 @@ _DICT_CONFIG_KEYS = frozenset({
 _LIST_CONFIG_KEYS = frozenset({"recent_urls", "proxy_pool", "smart_profiles"})
 _FORBIDDEN_IMPORT_KEYS = frozenset({
     "history", "monitor_channels", "download_queue", "accounts", "cookies",
+    "companion_extension_origin",
 })
 
 

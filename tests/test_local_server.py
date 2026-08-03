@@ -136,6 +136,66 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(lan_server._bind_addr, "127.0.0.1")
         self.assertEqual(advertised_url, "https://streamkeepbox.local/")
 
+    def test_lan_session_cookie_is_secure_only_after_https_boundary_proof(self):
+        with self._open("/ping", token=self.server.token) as response:
+            local_cookie = response.headers["Set-Cookie"]
+
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            external_origin="https://streamkeepbox.local",
+        )
+        lan_server.start()
+        boundary_headers = {
+            "Host": "streamkeepbox.local",
+            "Origin": "https://streamkeepbox.local",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "streamkeepbox.local",
+        }
+        try:
+            with self._open(
+                "/ping",
+                server=lan_server,
+                token=lan_server.token,
+                headers=boundary_headers,
+            ) as response:
+                secure_cookie = response.headers["Set-Cookie"]
+        finally:
+            lan_server.stop()
+
+        self.assertIn("HttpOnly", local_cookie)
+        self.assertIn("SameSite=Strict", local_cookie)
+        self.assertNotIn("Secure", local_cookie)
+        self.assertIn("HttpOnly", secure_cookie)
+        self.assertIn("SameSite=Strict", secure_cookie)
+        self.assertIn("Secure", secure_cookie)
+
+    def test_lan_error_response_keeps_authenticated_cookie_secure(self):
+        lan_server = LocalCompanionServer(
+            bind_lan=True,
+            external_origin="https://streamkeepbox.local",
+        )
+        lan_server.start()
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._open(
+                    "/api/operations/export",
+                    server=lan_server,
+                    token=lan_server.token,
+                    headers={
+                        "Host": "streamkeepbox.local",
+                        "Origin": "https://streamkeepbox.local",
+                        "X-Forwarded-Proto": "https",
+                        "X-Forwarded-Host": "streamkeepbox.local",
+                    },
+                    method="POST",
+                    data={},
+                    freshness=False,
+                )
+            self.assertEqual(ctx.exception.code, 400)
+            self.assertIn("Secure", ctx.exception.headers["Set-Cookie"])
+        finally:
+            lan_server.stop()
+
     def test_lan_mode_rejects_mismatched_forwarded_authority(self):
         lan_server = LocalCompanionServer(
             bind_lan=True,
@@ -275,6 +335,23 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertGreaterEqual(len(paired["token"]), 43)
         self.assertEqual(paired["scopes"], ["queue", "status"])
+        self.assertEqual(self.server.extension_origin, extension_origin)
+
+        master_payload, _ = self._open_json(
+            "/ping",
+            token=self.server.token,
+            headers={"Origin": extension_origin},
+        )
+        self.assertTrue(master_payload["ok"])
+        master_mismatch = self._expect_error(
+            "/ping",
+            401,
+            token=self.server.token,
+            headers={
+                "Origin": "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba"
+            },
+        )
+        self.assertEqual(master_mismatch["err"], "token_origin_mismatch")
 
         payload, _ = self._open_json(
             "/ping",
@@ -304,6 +381,52 @@ class LocalServerTests(unittest.TestCase):
             data={"code": code},
         )
         self.assertEqual(reused["err"], "pairing_invalid")
+
+    def test_persisted_extension_origin_is_enforced_for_master_token(self):
+        extension_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        server = LocalCompanionServer(extension_origin=extension_origin)
+        server.start()
+        try:
+            payload, _ = self._open_json(
+                "/ping",
+                server=server,
+                token=server.token,
+                headers={"Origin": extension_origin},
+            )
+            mismatch = self._expect_error(
+                "/ping",
+                401,
+                server=server,
+                token=server.token,
+                headers={
+                    "Origin": "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba"
+                },
+            )
+        finally:
+            server.stop()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(mismatch["err"], "token_origin_mismatch")
+
+    def test_settings_persists_and_clears_extension_origin_pin(self):
+        from types import SimpleNamespace
+
+        from streamkeep.ui.tabs import settings_companion
+
+        window = SimpleNamespace(_config={}, _log=mock.Mock())
+        extension_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        with mock.patch.object(settings_companion, "_save_config", return_value=True) as save:
+            settings_companion.SettingsCompanionMixin._on_companion_extension_origin_pinned(
+                window, extension_origin
+            )
+            self.assertEqual(
+                window._config["companion_extension_origin"], extension_origin
+            )
+            settings_companion.SettingsCompanionMixin._on_companion_extension_origin_pinned(
+                window, ""
+            )
+
+        self.assertNotIn("companion_extension_origin", window._config)
+        self.assertEqual(save.call_count, 2)
 
     def test_pairing_rejects_host_origin_and_cross_site_substitution(self):
         code = self.server.create_pairing_code()

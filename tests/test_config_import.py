@@ -24,6 +24,7 @@ def test_export_config_is_versioned_and_secret_free():
         "hf_token": "hf-private",
         "webhook_url": "https://hooks.example/private",
         "monitor_channels": [{"url": "https://example.invalid/channel"}],
+        "companion_extension_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
     })
 
     assert exported["format"] == config.CONFIG_EXPORT_FORMAT
@@ -32,6 +33,7 @@ def test_export_config_is_versioned_and_secret_free():
     assert exported["config"]["hf_token"] == ""
     assert exported["config"]["webhook_url"] == ""
     assert "monitor_channels" not in exported["config"]
+    assert "companion_extension_origin" not in exported["config"]
 
 
 @pytest.mark.parametrize("payload, message", [

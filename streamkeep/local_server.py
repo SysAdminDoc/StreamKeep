@@ -262,6 +262,7 @@ class _ServerSignals(QObject):
     url_received = pyqtSignal(str, str)   # url, action ("fetch" | "queue")
     handoff_received = pyqtSignal(object, str)  # bounded context, action
     clip_received = pyqtSignal(str, float, float)  # url, start_secs, end_secs
+    extension_origin_pinned = pyqtSignal(str)  # origin, or empty when cleared
     failed_job_retry_requested = pyqtSignal(int)
     failed_job_discard_requested = pyqtSignal(int)
 
@@ -418,6 +419,13 @@ def _normalize_origin(value, *, allow_extensions=True):
     return f"{scheme}://{authority}"
 
 
+def _normalize_extension_origin(value):
+    origin = _normalize_origin(value)
+    if origin.startswith(("chrome-extension://", "moz-extension://")):
+        return origin
+    return ""
+
+
 def _validate_external_origin(value):
     origin = _normalize_origin(value, allow_extensions=False)
     if not origin or not origin.startswith("https://"):
@@ -446,6 +454,7 @@ class LocalCompanionServer:
         master_token=None,
         external_origin="",
         allow_private_network=False,
+        extension_origin="",
     ):
         self.allow_private_network = bool(allow_private_network)
         self._token_store = TokenStore()
@@ -459,9 +468,15 @@ class LocalCompanionServer:
         self._httpd = None
         self._thread = None
         self._signals = _ServerSignals()
+        self._extension_origin_lock = threading.Lock()
+        raw_extension_origin = str(extension_origin or "").strip()
+        self._extension_origin = _normalize_extension_origin(raw_extension_origin)
+        if raw_extension_origin and not self._extension_origin:
+            raise ValueError("Stored companion extension origin is invalid.")
         self.url_received = self._signals.url_received
         self.handoff_received = self._signals.handoff_received
         self.clip_received = self._signals.clip_received
+        self.extension_origin_pinned = self._signals.extension_origin_pinned
         self.failed_job_retry_requested = self._signals.failed_job_retry_requested
         self.failed_job_discard_requested = self._signals.failed_job_discard_requested
         self.state_provider = None   # callable -> dict (F37)
@@ -493,7 +508,35 @@ class LocalCompanionServer:
         self._token_store.revoke_all()
         self.token = generate_bearer_token()
         self._token_store.add(self.token, ALL_SCOPES)
+        self._clear_extension_origin()
         return self.token
+
+    @property
+    def extension_origin(self):
+        with self._extension_origin_lock:
+            return self._extension_origin
+
+    def _get_extension_origin(self):
+        return self.extension_origin
+
+    def _pin_extension_origin(self, origin):
+        normalized = _normalize_extension_origin(origin)
+        if not normalized:
+            return False
+        with self._extension_origin_lock:
+            current = self._extension_origin
+            if current:
+                return secrets.compare_digest(current, normalized)
+            self._extension_origin = normalized
+        self.extension_origin_pinned.emit(normalized)
+        return True
+
+    def _clear_extension_origin(self):
+        with self._extension_origin_lock:
+            if not self._extension_origin:
+                return
+            self._extension_origin = ""
+        self.extension_origin_pinned.emit("")
 
     def create_scoped_token(self, scopes, *, origin="", expires_at=0.0):
         """Mint a token restricted to the given scopes."""
@@ -532,6 +575,8 @@ class LocalCompanionServer:
             replay_store=self._replay_store,
             external_origin=self.external_origin,
             allow_private_network=self.allow_private_network,
+            extension_origin_getter=self._get_extension_origin,
+            extension_origin_pinner=self._pin_extension_origin,
         )
         self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
         self.port = self._httpd.server_address[1]
@@ -607,12 +652,16 @@ def _build_handler(
     replay_store=None,
     external_origin="",
     allow_private_network=False,
+    extension_origin_getter=None,
+    extension_origin_pinner=None,
 ):
     allow_private_network = bool(allow_private_network)
     allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts())
     pairing_store = pairing_store or PairingStore()
     replay_store = replay_store or ReplayStore()
     external_origin = str(external_origin or "")
+    extension_origin_getter = extension_origin_getter or (lambda: "")
+    extension_origin_pinner = extension_origin_pinner or (lambda _origin: True)
     external_host = (
         _canonical_host(urlsplit(external_origin).hostname)
         if external_origin else ""
@@ -637,7 +686,8 @@ def _build_handler(
             if not normalized:
                 return False
             if normalized.startswith(("chrome-extension://", "moz-extension://")):
-                return True
+                pinned = _normalize_extension_origin(extension_origin_getter())
+                return not pinned or secrets.compare_digest(normalized, pinned)
             if external_origin and secrets.compare_digest(normalized, external_origin):
                 return True
             parsed = urlsplit(normalized)
@@ -738,10 +788,21 @@ def _build_handler(
             grant = token_store.check(candidate)
             if grant is None:
                 return None, "token_invalid"
+            raw_origin = str(self.headers.get("Origin", "") or "").strip()
+            request_origin = _normalize_origin(raw_origin)
+            try:
+                request_scheme = urlsplit(raw_origin).scheme.lower()
+            except ValueError:
+                request_scheme = ""
+            if request_scheme in ("chrome-extension", "moz-extension"):
+                pinned = _normalize_extension_origin(extension_origin_getter())
+                if not request_origin or (pinned and not secrets.compare_digest(
+                    request_origin, pinned
+                )):
+                    return None, "token_origin_mismatch"
             if grant.origin:
-                origin = _normalize_origin(self.headers.get("Origin", ""))
-                if origin:
-                    if not secrets.compare_digest(origin, grant.origin):
+                if request_origin:
+                    if not secrets.compare_digest(request_origin, grant.origin):
                         return None, "token_origin_mismatch"
                 else:
                     fetch_site = str(
@@ -914,10 +975,15 @@ def _build_handler(
         def _set_auth_cookie(self):
             token = str(getattr(self, "_auth_token", "") or "")
             if token:
+                cookie = (
+                    "streamkeep_session=" + token
+                    + "; Path=/; HttpOnly; SameSite=Strict"
+                )
+                if external_origin and self._external_boundary_ok():
+                    cookie += "; Secure"
                 self.send_header(
                     "Set-Cookie",
-                    "streamkeep_session=" + token
-                    + "; Path=/; HttpOnly; SameSite=Strict",
+                    cookie,
                 )
 
         def _discard_unread_body(self, max_bytes=1_048_576):
@@ -1181,6 +1247,14 @@ def _build_handler(
                             "The browser's same-origin pairing address could not "
                             "be verified."
                         ),
+                    })
+                    return
+            if origin.startswith(("chrome-extension://", "moz-extension://")):
+                if not extension_origin_pinner(origin):
+                    self._json_response(403, {
+                        "ok": False,
+                        "err": "origin_denied",
+                        "message": "Pairing origin is not approved.",
                     })
                     return
             token = generate_bearer_token()
