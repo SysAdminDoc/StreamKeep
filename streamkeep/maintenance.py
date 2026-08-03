@@ -99,6 +99,33 @@ def apply_library_adoption(
     )
 
 
+def plan_library_rebuild(root, *, db_module=db, tags_module=None, cancel_fn=None):
+    """Return a sidecar-only preview for rebuilding the local indexes."""
+    from . import tags as default_tags
+    from .rebuild import plan_library_rebuild as build_plan
+    return build_plan(
+        root,
+        db_module=db_module,
+        tags_module=tags_module or default_tags,
+        cancel_fn=cancel_fn,
+    )
+
+
+def apply_library_rebuild(
+    plan, *, db_module=db, tags_module=None, backup_fn=None, cancel_fn=None,
+):
+    """Apply a sidecar-only rebuild after backup and staged validation."""
+    from . import tags as default_tags
+    from .rebuild import apply_library_rebuild as apply_plan
+    return apply_plan(
+        plan,
+        db_module=db_module,
+        tags_module=tags_module or default_tags,
+        backup_fn=backup_fn,
+        cancel_fn=cancel_fn,
+    )
+
+
 def _normal_path(path):
     return os.path.normcase(os.path.abspath(os.path.normpath(str(path or ""))))
 

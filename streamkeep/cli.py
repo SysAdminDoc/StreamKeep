@@ -1155,6 +1155,58 @@ def _run_db_maintenance(args):
         _print_line(f"Vacuum: {'OK' if ok else 'FAILED'} - {detail}")
         if not ok:
             sys.exit(1)
+    elif action == "rebuild":
+        from .maintenance import apply_library_rebuild, plan_library_rebuild
+        from .rebuild import load_rebuild_plan, save_rebuild_plan
+
+        plan_path = Path(
+            getattr(args, "plan", "") or
+            Path(db.DB_PATH).parent / "maintenance" / "rebuild-plan.json"
+        ).expanduser()
+        try:
+            if getattr(args, "apply", False):
+                plan = load_rebuild_plan(plan_path)
+                result = apply_library_rebuild(plan, db_module=db)
+                if getattr(args, "json", False):
+                    _print_line(_json.dumps(result.__dict__, indent=2))
+                else:
+                    _print_line(
+                        f"Rebuild {result.status}: {result.rebuilt} rebuilt, "
+                        f"{result.skipped} skipped, {result.conflicts} conflict(s)."
+                    )
+                    if result.backup_path:
+                        _print_line(f"Backup: {result.backup_path}")
+                    for error in result.errors:
+                        _print_line(f"  ERROR: {error}")
+                if result.status != "completed":
+                    sys.exit(1)
+                return
+            root = getattr(args, "rebuild_from", "") or ""
+            if not root:
+                _print_line("Error: db rebuild preview requires --from <root>.")
+                sys.exit(2)
+            plan = plan_library_rebuild(root, db_module=db)
+            save_rebuild_plan(plan, plan_path)
+            if getattr(args, "json", False):
+                payload = plan.to_dict()
+                payload["plan_path"] = str(plan_path)
+                _print_line(_json.dumps(payload, indent=2, ensure_ascii=False))
+            else:
+                counts = plan.diagnostics
+                _print_line(
+                    f"Rebuild preview: {counts['rebuild']} rebuild, "
+                    f"{counts['skip']} skip, {counts['conflict']} conflict; "
+                    f"{counts['issues']} issue(s)."
+                )
+                for issue in plan.issues:
+                    _print_line(
+                        f"  {issue.get('kind', 'issue').upper():10s} "
+                        f"{issue.get('path', '')} — {issue.get('reason', '')}"
+                    )
+                _print_line(f"Plan saved to {plan_path}")
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
 
 
 def _run_startup_check(args):
@@ -2034,8 +2086,21 @@ def build_parser():
     # -- db maintenance --
     db_p = sub.add_parser("db", help="Database maintenance and diagnostics")
     db_p.add_argument("action", nargs="?", default="info",
-                      choices=["info", "check", "optimize", "checkpoint", "vacuum"],
+                      choices=["info", "check", "optimize", "checkpoint", "vacuum", "rebuild"],
                       help="Action: info (default), check, optimize, checkpoint, vacuum")
+    db_p.add_argument(
+        "--from", dest="rebuild_from", default="",
+        help="Library root for a sidecar rebuild preview",
+    )
+    db_p.add_argument(
+        "--plan", default="",
+        help="Rebuild plan path (default: config maintenance/rebuild-plan.json)",
+    )
+    db_p.add_argument(
+        "--apply", action="store_true",
+        help="Apply the saved rebuild plan instead of previewing",
+    )
+    db_p.add_argument("--json", action="store_true", help="Emit rebuild JSON")
     db_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                       help="Override the config/database directory")
 

@@ -9,6 +9,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   explicit, apply creates a backup and atomically adds history plus monitor
   archive seeds, and media files are never moved or rewritten.
 
+- Added a preview-first `db rebuild` workflow that reconstructs history,
+  sidecar-backed tags, and integrity manifests from an arbitrary on-disk
+  library. Legacy sidecars migrate forward, missing history state and
+  unsupported artifacts are reported explicitly, and apply backs up before
+  activating staged library and tag indexes without touching media.
+
 - Added canonical deletion tombstones for user, retention, and lifecycle
   removals. Recycled user media is now skipped by monitored sources, playlist
   expansion, and queue dispatch until its tombstone is cleared; the Settings

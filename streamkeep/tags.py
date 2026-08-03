@@ -8,6 +8,8 @@ Smart collections are JSON rule sets stored in ``config["collections"]``.
 """
 
 import sqlite3
+import json
+from pathlib import Path
 
 from .paths import CONFIG_DIR
 from .sqlite_runtime import connect as sqlite_connect
@@ -58,7 +60,43 @@ def get_or_create_tag(db, name, kind="user"):
     return cur.lastrowid
 
 
-def tag_recording(db, path, tag_name, kind="user"):
+def _sync_sidecar_tags(db, path):
+    """Persist recoverable tag state beside a recording when possible."""
+    sidecar = Path(path) / "metadata.json"
+    if not sidecar.is_file():
+        return
+    try:
+        from .metadata import (
+            _atomic_write_text,
+            load_metadata_sidecar,
+            normalize_metadata_payload,
+        )
+        payload = load_metadata_sidecar(sidecar)
+        if not payload:
+            return
+        payload["tags"] = [
+            {"name": name, "kind": kind}
+            for name, kind in get_tags_for_recording(db, str(path))
+        ]
+        _atomic_write_text(
+            sidecar,
+            json.dumps(
+                normalize_metadata_payload(payload),
+                indent=2,
+                ensure_ascii=False,
+            ) + "\n",
+        )
+        manifest = Path(path) / ".streamkeep_manifest.json"
+        if manifest.is_file():
+            from .verify import create_archive_manifest
+            create_archive_manifest(path, write_sidecar=True)
+    except Exception:
+        # The SQLite tag operation remains authoritative if a read-only or
+        # incomplete recording folder cannot accept a public sidecar update.
+        return
+
+
+def tag_recording(db, path, tag_name, kind="user", *, _sync_sidecar=True):
     """Add a tag to a recording (by path)."""
     tag_id = get_or_create_tag(db, tag_name, kind)
     try:
@@ -67,6 +105,8 @@ def tag_recording(db, path, tag_name, kind="user"):
             (path, tag_id),
         )
         db.commit()
+        if _sync_sidecar:
+            _sync_sidecar_tags(db, path)
     except sqlite3.IntegrityError:
         pass
 
@@ -82,6 +122,7 @@ def untag_recording(db, path, tag_name, kind="user"):
             (path, row[0]),
         )
         db.commit()
+        _sync_sidecar_tags(db, path)
 
 
 def get_tags_for_recording(db, path):
@@ -123,7 +164,10 @@ def auto_tag_recording(db, path, info=None, vod_info=None):
     # Platform tag
     platform = getattr(info, "platform", "") if info else ""
     if platform:
-        tag_recording(db, path, f"platform:{platform}", kind="system")
+        tag_recording(
+            db, path, f"platform:{platform}", kind="system",
+            _sync_sidecar=False,
+        )
 
     # Channel tag
     channel = ""
@@ -132,20 +176,32 @@ def auto_tag_recording(db, path, info=None, vod_info=None):
     elif info and getattr(info, "channel", ""):
         channel = info.channel
     if channel:
-        tag_recording(db, path, f"channel:{channel}", kind="system")
+        tag_recording(
+            db, path, f"channel:{channel}", kind="system",
+            _sync_sidecar=False,
+        )
 
     # Resolution tag
     if info:
         for q in (info.qualities or []):
             res = getattr(q, "resolution", "") or ""
             if "1080" in res:
-                tag_recording(db, path, "res:1080p", kind="system")
+                tag_recording(
+                    db, path, "res:1080p", kind="system",
+                    _sync_sidecar=False,
+                )
                 break
             elif "720" in res:
-                tag_recording(db, path, "res:720p", kind="system")
+                tag_recording(
+                    db, path, "res:720p", kind="system",
+                    _sync_sidecar=False,
+                )
                 break
             elif "480" in res:
-                tag_recording(db, path, "res:480p", kind="system")
+                tag_recording(
+                    db, path, "res:480p", kind="system",
+                    _sync_sidecar=False,
+                )
                 break
 
     # Duration bucket
@@ -153,14 +209,99 @@ def auto_tag_recording(db, path, info=None, vod_info=None):
     if total_secs and total_secs > 0:
         for threshold, label in _DURATION_BUCKETS:
             if total_secs < threshold:
-                tag_recording(db, path, f"duration:{label}", kind="system")
+                tag_recording(
+                    db, path, f"duration:{label}", kind="system",
+                    _sync_sidecar=False,
+                )
                 break
 
     # Live tag
     if info and getattr(info, "is_live", False):
-        tag_recording(db, path, "type:live", kind="system")
+        tag_recording(
+            db, path, "type:live", kind="system", _sync_sidecar=False,
+        )
     else:
-        tag_recording(db, path, "type:vod", kind="system")
+        tag_recording(
+            db, path, "type:vod", kind="system", _sync_sidecar=False,
+        )
+    _sync_sidecar_tags(db, path)
+
+
+def build_rebuilt_tags_database(target_path, records):
+    """Build a replacement tag DB from sidecar tag rows.
+
+    The live tag database is intentionally not opened here.  Rebuild apply
+    stages this file beside the library database and activates both files only
+    after they have been constructed successfully.
+    """
+    from pathlib import Path
+
+    target = Path(target_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{target}{suffix}").unlink(missing_ok=True)
+    db = sqlite_connect(str(target))
+    try:
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                name    TEXT NOT NULL,
+                kind    TEXT NOT NULL DEFAULT 'user',
+                UNIQUE(name, kind)
+            );
+            CREATE TABLE IF NOT EXISTS recording_tags (
+                recording_path TEXT NOT NULL,
+                tag_id         INTEGER NOT NULL REFERENCES tags(id),
+                PRIMARY KEY (recording_path, tag_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rt_path ON recording_tags(recording_path);
+            CREATE INDEX IF NOT EXISTS idx_rt_tag  ON recording_tags(tag_id);
+        """)
+        db.execute("BEGIN IMMEDIATE")
+        tag_ids = {}
+        for record in records or []:
+            path = str((record or {}).get("path", "") or "")
+            if not path:
+                continue
+            for row in (record or {}).get("tags", []) or []:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name", "") or "").strip()[:256]
+                kind = str(row.get("kind", "user") or "user").strip().lower()
+                if not name or kind not in {"system", "user"}:
+                    continue
+                key = (name, kind)
+                tag_id = tag_ids.get(key)
+                if tag_id is None:
+                    cursor = db.execute(
+                        "INSERT OR IGNORE INTO tags(name, kind) VALUES (?, ?)",
+                        key,
+                    )
+                    if cursor.lastrowid:
+                        tag_id = int(cursor.lastrowid)
+                    else:
+                        tag_id = int(db.execute(
+                            "SELECT id FROM tags WHERE name=? AND kind=?",
+                            key,
+                        ).fetchone()[0])
+                    tag_ids[key] = tag_id
+                db.execute(
+                    "INSERT OR IGNORE INTO recording_tags(recording_path, tag_id) "
+                    "VALUES (?, ?)",
+                    (path, tag_id),
+                )
+        db.commit()
+        return {
+            "tags": len(tag_ids),
+            "recording_tags": int(
+                db.execute("SELECT COUNT(*) FROM recording_tags").fetchone()[0]
+            ),
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 # ── Smart Collections ────────────────────────────────────────────────

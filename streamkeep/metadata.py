@@ -14,7 +14,7 @@ from pathlib import Path
 from .models import ArchivalProvenance
 
 METADATA_SCHEMA = "streamkeep.metadata"
-METADATA_SCHEMA_VERSION = 2
+METADATA_SCHEMA_VERSION = 3
 MAX_METADATA_BYTES = 4 * 1024 * 1024
 MAX_IMPORT_SIDECAR_BYTES = 32 * 1024 * 1024
 
@@ -76,6 +76,43 @@ _VOLATILE_QUERY_KEYS = frozenset({
 
 class MetadataWriteError(OSError):
     """Raised when a public sidecar cannot be written atomically."""
+
+
+def archive_key_for_provenance(provenance):
+    """Return the stable monitor/archive key represented by a provenance."""
+    platform = scrub_public_text(
+        getattr(provenance, "platform", "") or ""
+    ).strip().casefold()
+    source_id = _clean_source_id(
+        getattr(provenance, "source_id", "") or ""
+    )
+    if not platform or not source_id:
+        return ""
+    return f"{platform}::{source_id}"
+
+
+def _safe_tag_rows(value):
+    """Normalize sidecar tags without allowing arbitrary metadata growth."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    rows = []
+    seen = set()
+    for item in value[:256]:
+        if isinstance(item, dict):
+            name = scrub_public_text(item.get("name", "")).strip()
+            kind = scrub_public_text(item.get("kind", "user")).strip().lower()
+        else:
+            name = scrub_public_text(item).strip()
+            kind = "user"
+        if not name or kind not in {"system", "user"}:
+            continue
+        name = name[:256]
+        key = (name.casefold(), kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"name": name, "kind": kind})
+    return rows
 
 
 def _clean_source_id(value):
@@ -568,6 +605,9 @@ def normalize_metadata_payload(data):
         channel=channel,
     )
     provenance = ArchivalProvenance(platform, source_id, webpage_url)
+    archive_key = scrub_public_text(raw.get("archive_key", "")).strip()
+    if not archive_key:
+        archive_key = archive_key_for_provenance(provenance)
     try:
         parsed_total_secs = float(raw.get("total_secs", 0) or 0)
         total_secs = (
@@ -584,6 +624,7 @@ def normalize_metadata_payload(data):
         "platform": platform,
         "source_id": provenance.source_id,
         "webpage_url": provenance.webpage_url,
+        "archive_key": archive_key,
         "channel": channel,
         "title": scrub_public_text(raw.get("title", "") or ""),
         "duration": scrub_public_text(raw.get("duration", "") or ""),
@@ -592,6 +633,7 @@ def normalize_metadata_payload(data):
         "is_live": bool(raw.get("is_live", False)),
         "qualities": _safe_quality_rows(raw.get("qualities", [])),
         "downloaded_at": scrub_public_text(raw.get("downloaded_at", "") or ""),
+        "tags": _safe_tag_rows(raw.get("tags", [])),
     }
     for key in ("vod_date", "vod_channel", "quality"):
         if key in raw:
@@ -737,6 +779,8 @@ class MetadataSaver:
             "downloaded_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
             ),
+            "archive_key": archive_key_for_provenance(provenance),
+            "tags": list(getattr(stream_info, "tags", []) or []),
         }
         if thumbnail_path:
             raw["thumbnail"] = os.path.basename(thumbnail_path)

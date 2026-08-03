@@ -88,6 +88,56 @@ def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()
 
 
+def test_db_rebuild_parser_supports_preview_and_apply(tmp_path):
+    parser = cli.build_parser()
+    preview = parser.parse_args([
+        "db", "rebuild", "--from", str(tmp_path), "--plan", "plan.json", "--json",
+    ])
+    assert preview.action == "rebuild"
+    assert preview.rebuild_from == str(tmp_path)
+    assert preview.apply is False
+    applied = parser.parse_args([
+        "db", "rebuild", "--apply", "--plan", "plan.json", "--json",
+    ])
+    assert applied.apply is True
+
+
+def test_db_rebuild_cli_is_headless_and_reconstructs_sidecar_identity(tmp_path):
+    config_dir = tmp_path / "isolated"
+    library = tmp_path / "library" / "recording"
+    library.mkdir(parents=True)
+    (library / "video.mp4").write_bytes(b"media")
+    (library / "metadata.json").write_text(json.dumps({
+        "schema": "streamkeep.metadata",
+        "schema_version": 3,
+        "provenance": {
+            "platform": "Twitch",
+            "source_id": "vod:987",
+            "webpage_url": "https://www.twitch.tv/videos/987",
+        },
+        "title": "Rebuilt",
+        "channel": "Channel",
+    }), encoding="utf-8")
+    plan = tmp_path / "rebuild-plan.json"
+    preview = _run_launcher(
+        "db", "rebuild", "--from", library.parent, "--plan", plan, "--json",
+        "--config-dir", config_dir, appdata=tmp_path / "ambient-appdata",
+    )
+    assert preview.returncode == 0, preview.stderr
+    preview_payload = json.loads(preview.stdout)
+    assert preview_payload["diagnostics"]["rebuild"] == 1
+    assert plan.is_file()
+
+    applied = _run_launcher(
+        "db", "rebuild", "--apply", "--plan", plan, "--json",
+        "--config-dir", config_dir, appdata=tmp_path / "ambient-appdata",
+    )
+    assert applied.returncode == 0, applied.stderr
+    result = json.loads(applied.stdout)
+    assert result["status"] == "completed"
+    assert result["rebuilt"] == 1
+
+
 def test_import_library_parser_requires_preview_or_apply_and_accepts_archives():
     parser = cli.build_parser()
     preview = parser.parse_args([

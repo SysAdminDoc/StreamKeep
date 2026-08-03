@@ -1621,6 +1621,126 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
             db.close()
 
 
+def build_rebuilt_library_database(
+    target_path,
+    entries: list[dict[str, Any]],
+    manifests: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Build a replacement library DB without mutating the live database.
+
+    The target starts as a consistent SQLite snapshot of the current DB so
+    monitor and queue settings survive an index rebuild.  Only history,
+    archive manifests, and publication rows tied to the old history are
+    replaced.  The caller is responsible for atomically activating the file.
+    """
+    from pathlib import Path
+
+    target = Path(target_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{target}{suffix}").unlink(missing_ok=True)
+
+    source = None
+    staged = None
+    try:
+        if Path(DB_PATH).is_file():
+            source = _connect(readonly=True)
+            staged = sqlite_connect(
+                str(target), check_same_thread=False, timeout=10,
+            )
+            source.backup(staged)
+            staged.close()
+            staged = None
+        db = sqlite_connect(
+            str(target), check_same_thread=False, timeout=10,
+            row_factory=sqlite3.Row,
+        )
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            _apply_schema(db)
+            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            for table in ("published_recordings", "archive_manifests"):
+                try:
+                    db.execute(f"DELETE FROM {table}")
+                except sqlite3.OperationalError:
+                    pass
+            db.execute("DELETE FROM history")
+            manifest_map = manifests if isinstance(manifests, dict) else {}
+            history_ids = []
+            for entry in entries:
+                normalized = _canonical_history_entry(entry)
+                cursor = db.execute(
+                    """
+                    INSERT INTO history
+                        (date, platform, source_id, webpage_url, title, channel,
+                         quality, size, path, url, favorite, watched,
+                         watch_position_secs, bookmarks)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        str(normalized.get("date", "")),
+                        str(normalized.get("platform", "")),
+                        str(normalized.get("source_id", "")),
+                        str(normalized.get("webpage_url", "")),
+                        str(normalized.get("title", "")),
+                        str(normalized.get("channel", "")),
+                        str(normalized.get("quality", "")),
+                        str(normalized.get("size", "")),
+                        str(normalized.get("path", "")),
+                        str(normalized.get("url", "")),
+                        int(bool(normalized.get("favorite", False))),
+                        int(bool(normalized.get("watched", False))),
+                        float(normalized.get("watch_position_secs", 0) or 0),
+                        json.dumps(normalized.get("bookmarks", []) or []),
+                    ),
+                )
+                history_id = int(cursor.lastrowid)
+                history_ids.append(history_id)
+                manifest = manifest_map.get(str(normalized.get("path", "")))
+                if not isinstance(manifest, dict):
+                    continue
+                now = _utc_now_iso()
+                db.execute(
+                    """
+                    INSERT INTO archive_manifests
+                        (history_id, recording_path, manifest_json, created_at,
+                         updated_at, status, last_check_at, last_check_details)
+                    VALUES (?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        history_id,
+                        str(normalized.get("path", "")),
+                        json.dumps(
+                            manifest, ensure_ascii=False, sort_keys=True,
+                        ),
+                        str(manifest.get("created_at", now) or now),
+                        now,
+                        "rebuilt",
+                        "",
+                        "Rebuilt from on-disk integrity manifest",
+                    ),
+                )
+            _configure_history_fts(db)
+            db.commit()
+            return {
+                "history": len(history_ids),
+                "manifests": sum(
+                    isinstance(manifest_map.get(str(entry.get("path", ""))), dict)
+                    for entry in entries
+                ),
+            }
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    finally:
+        if source is not None:
+            source.close()
+        if staged is not None:
+            staged.close()
+
+
 def _publishing_id(value: Any, field: str = "share_id") -> str:
     candidate = str(value or "").strip().lower()
     if not _PUBLISHING_ID_RE.fullmatch(candidate):
