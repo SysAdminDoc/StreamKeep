@@ -8,10 +8,10 @@ or frozen exe, all config/data goes into a ``data/`` subdirectory alongside
 the executable instead of ``%APPDATA%\\StreamKeep``.
 """
 
-import os
-import sys
-import subprocess
 import hashlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 # Windows-only: hide console windows that subprocess would otherwise spawn
@@ -117,7 +117,7 @@ def bind_config_dir(path):
     return config_dir
 
 
-def source_archive_path(source_url):
+def source_archive_path(source_url, *, create=True):
     """Return the private stable yt-dlp archive path for a source URL."""
     from .utils import canonical_webpage_url
 
@@ -125,5 +125,6 @@ def source_archive_path(source_url):
     identity = str(canonical or source_url or "").strip().encode("utf-8")
     digest = hashlib.sha256(identity).hexdigest()
     archive_dir = CONFIG_DIR / "download-archives"
-    archive_dir.mkdir(parents=True, exist_ok=True)
+    if create:
+        archive_dir.mkdir(parents=True, exist_ok=True)
     return str(archive_dir / f"{digest}.txt")

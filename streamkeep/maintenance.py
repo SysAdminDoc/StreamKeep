@@ -71,6 +71,34 @@ def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def plan_library_adoption(
+    root, archive_paths=(), *, archive_source_url="", db_module=db,
+    cancel_fn=None,
+):
+    """Return the preview-first external-library adoption plan."""
+    from .importer import preview_adoption
+    return preview_adoption(
+        root,
+        archive_paths,
+        archive_source_url=archive_source_url,
+        db_module=db_module,
+        cancel_fn=cancel_fn,
+    )
+
+
+def apply_library_adoption(
+    plan, *, db_module=db, backup_fn=None, cancel_fn=None,
+):
+    """Apply an unchanged external-library plan through the maintenance API."""
+    from .importer import apply_adoption
+    return apply_adoption(
+        plan,
+        db_module=db_module,
+        backup_fn=backup_fn,
+        cancel_fn=cancel_fn,
+    )
+
+
 def _normal_path(path):
     return os.path.normcase(os.path.abspath(os.path.normpath(str(path or ""))))
 

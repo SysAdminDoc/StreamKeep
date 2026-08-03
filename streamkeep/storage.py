@@ -124,6 +124,27 @@ def scan_storage(root, max_depth=3, *, cancel_fn=None):
     return scan
 
 
+def iter_media_directories(root, *, cancel_fn=None):
+    """Yield every media-bearing directory under *root* without a depth cap."""
+    if not root or not os.path.isdir(root):
+        return
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if cancel_fn is not None and cancel_fn():
+            return
+        dirnames[:] = sorted(
+            (name for name in dirnames if not name.startswith(".")),
+            key=str.casefold,
+        )
+        media_paths = [
+            os.path.join(dirpath, filename)
+            for filename in filenames
+            if os.path.splitext(filename)[1].lower() in MEDIA_EXTS
+            and not filename.startswith(".")
+        ]
+        if media_paths:
+            yield dirpath, sorted(media_paths, key=str.casefold)
+
+
 @dataclass
 class ReconcileResult:
     importable: list = field(default_factory=list)    # list[StorageGroup]

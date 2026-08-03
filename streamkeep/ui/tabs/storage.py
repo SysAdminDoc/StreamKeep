@@ -10,13 +10,14 @@ import os
 from PyQt6.QtCore import QPoint, QThread, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
+    QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QMenu, QPushButton, QTableView, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ...maintenance import (
-    apply_maintenance, load_pending_plan, plan_maintenance, save_pending_plan,
+    apply_library_adoption, apply_maintenance, load_pending_plan,
+    plan_library_adoption, plan_maintenance, save_pending_plan,
 )
 from ... import db as _db
 from ...storage import scan_storage
@@ -69,6 +70,34 @@ class _MaintenanceWorker(QThread):
                 result = apply_maintenance(
                     self.plan, self.approved,
                     cancel_fn=self.isInterruptionRequested,
+                )
+            self.completed.emit(result)
+        except InterruptedError:
+            self.completed.emit(None)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class _AdoptionWorker(QThread):
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, root, archives, *, plan=None, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.archives = list(archives or ())
+        self.plan = plan
+
+    def run(self):
+        try:
+            if self.plan is None:
+                result = plan_library_adoption(
+                    self.root, self.archives,
+                    cancel_fn=self.isInterruptionRequested,
+                )
+            else:
+                result = apply_library_adoption(
+                    self.plan, cancel_fn=self.isInterruptionRequested,
                 )
             self.completed.emit(result)
         except InterruptedError:
@@ -200,6 +229,10 @@ def build_storage_tab(win):
     win.storage_rescan_btn.setObjectName("primary")
     win.storage_rescan_btn.clicked.connect(win._on_storage_rescan)
     act_lay.addWidget(win.storage_rescan_btn)
+    win.storage_adopt_btn = QPushButton("Adopt external library…")
+    win.storage_adopt_btn.setObjectName("secondary")
+    win.storage_adopt_btn.clicked.connect(win._on_storage_adopt)
+    act_lay.addWidget(win.storage_adopt_btn)
     win.storage_delete_btn = QPushButton("Recycle selected")
     win.storage_delete_btn.setObjectName("danger")
     win.storage_delete_btn.setEnabled(False)
@@ -259,6 +292,56 @@ def build_storage_tab(win):
     win.maintenance_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     maintenance_lay.addWidget(win.maintenance_tree)
     lay.addWidget(maintenance_card)
+
+    adoption_card = QFrame()
+    adoption_card.setObjectName("card")
+    adoption_lay = QVBoxLayout(adoption_card)
+    adoption_lay.setContentsMargins(4, 8, 4, 8)
+    adoption_lay.setSpacing(6)
+    adoption_title = QLabel("External library adoption")
+    adoption_title.setObjectName("sectionTitle")
+    adoption_lay.addWidget(adoption_title)
+    adoption_body = QLabel(
+        "Preview folders, yt-dlp archives, and sidecars before adding library rows. "
+        "Media files are never moved or rewritten."
+    )
+    adoption_body.setObjectName("sectionBody")
+    adoption_body.setWordWrap(True)
+    adoption_body.setVisible(False)
+    adoption_lay.addWidget(adoption_body)
+    adoption_actions = QHBoxLayout()
+    adoption_actions.setSpacing(8)
+    win.adoption_apply_btn = QPushButton("Apply adoption preview")
+    win.adoption_apply_btn.setEnabled(False)
+    win.adoption_apply_btn.clicked.connect(win._on_adoption_apply)
+    adoption_actions.addWidget(win.adoption_apply_btn)
+    win.adoption_cancel_btn = QPushButton("Cancel")
+    win.adoption_cancel_btn.setObjectName("ghost")
+    win.adoption_cancel_btn.setEnabled(False)
+    win.adoption_cancel_btn.clicked.connect(win._on_adoption_cancel)
+    adoption_actions.addWidget(win.adoption_cancel_btn)
+    adoption_actions.addStretch(1)
+    adoption_lay.addLayout(adoption_actions)
+    win.adoption_summary = QLabel("Choose an external library to preview adoption.")
+    win.adoption_summary.setObjectName("subtleText")
+    win.adoption_summary.setWordWrap(True)
+    win.adoption_summary.setVisible(False)
+    adoption_lay.addWidget(win.adoption_summary)
+    win.adoption_tree = QTreeWidget()
+    win.adoption_tree.setHeaderLabels(["Decision", "Path", "Reason"])
+    win.adoption_tree.setRootIsDecorated(False)
+    win.adoption_tree.setAlternatingRowColors(True)
+    win.adoption_tree.setMinimumHeight(128)
+    win.adoption_tree.setVisible(False)
+    win.adoption_tree.setAccessibleName("External library adoption preview")
+    win.adoption_tree.setAccessibleDescription(
+        "Read-only adoption decisions before adding existing recordings"
+    )
+    win.adoption_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    win.adoption_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    win.adoption_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    adoption_lay.addWidget(win.adoption_tree)
+    lay.addWidget(adoption_card)
     try:
         pending_plan = load_pending_plan()
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
@@ -511,6 +594,140 @@ class StorageTabMixin:
         self.storage_rescan_btn.setEnabled(True)
         self._log(f"[STORAGE] Scan failed: {message}")
         self._set_status("Storage scan failed. See the log for details.", "error")
+
+    def _set_adoption_running(self, running):
+        self.storage_adopt_btn.setEnabled(not running)
+        self.adoption_apply_btn.setEnabled(
+            not running and getattr(self, "_adoption_plan", None) is not None
+        )
+        self.adoption_cancel_btn.setEnabled(running)
+
+    def _on_storage_adopt(self):
+        current = getattr(self, "_adoption_worker", None)
+        if current is not None and current.isRunning():
+            return
+        root = QFileDialog.getExistingDirectory(
+            self, "Choose external library", self._storage_scan_root()
+        )
+        if not root:
+            return
+        archives, _selected = QFileDialog.getOpenFileNames(
+            self, "Select yt-dlp archive files (optional)", root,
+            "Download archives (*.txt);;All files (*.*)",
+        )
+        self._adoption_plan = None
+        self.adoption_tree.clear()
+        self.adoption_tree.setVisible(True)
+        self.adoption_summary.setVisible(True)
+        self.adoption_summary.setText("Building a read-only adoption preview…")
+        self._set_adoption_running(True)
+        self._set_status("Previewing external library adoption in the background.", "working")
+        worker = _AdoptionWorker(root, archives, parent=self)
+        worker.completed.connect(self._on_adoption_preview_done)
+        worker.failed.connect(self._on_adoption_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._adoption_worker = worker
+        worker.start()
+
+    def _on_adoption_preview_done(self, plan):
+        self._adoption_worker = None
+        if plan is None:
+            self.adoption_tree.setVisible(False)
+            self.adoption_summary.setVisible(True)
+            self.adoption_summary.setText("Adoption preview cancelled. No changes were made.")
+            self._set_adoption_running(False)
+            self._set_status("Adoption preview cancelled.", "idle")
+            return
+        self._adoption_plan = plan
+        self.adoption_tree.clear()
+        for item in plan.items:
+            row = QTreeWidgetItem([
+                str(item.get("action", "conflict")).upper(),
+                str(item.get("path", "")),
+                str(item.get("reason", "")),
+            ])
+            self.adoption_tree.addTopLevelItem(row)
+        self.adoption_tree.setVisible(bool(plan.items or plan.archive_issues))
+        counts = plan.diagnostics
+        self.adoption_summary.setVisible(True)
+        self.adoption_summary.setText(
+            f"{counts['adopt']} adopt, {counts['skip']} skip, "
+            f"{counts['conflict']} conflict; {counts['archive_entries']} archive id(s). "
+            "Conflicts are review-only and will not be resolved silently."
+        )
+        self._set_adoption_running(False)
+        self._set_status("Adoption preview ready for approval.", "success")
+
+    def _on_adoption_apply(self):
+        plan = getattr(self, "_adoption_plan", None)
+        if plan is None:
+            return
+        if not ask_premium_confirmation(
+            self,
+            title="Apply external library adoption?",
+            body=(
+                "Add only the ADOPT rows from the current preview. "
+                "StreamKeep creates a backup and never moves or rewrites media."
+            ),
+            eyebrow="ADOPTION", badge_text="Backup first", tone="warning",
+            summary_title="Existing files stay in place.",
+            summary_body="If the library changed since preview, the batch is refused.",
+            details_title="Preview", details_body=self.adoption_summary.text(),
+            primary_label="Create Backup and Apply", secondary_label="Cancel",
+            default_action="secondary", min_width=680,
+        ):
+            return
+        self._set_adoption_running(True)
+        self._set_status("Applying external library adoption in the background.", "working")
+        worker = _AdoptionWorker(
+            plan.root, plan.archive_paths, plan=plan, parent=self,
+        )
+        worker.completed.connect(self._on_adoption_apply_done)
+        worker.failed.connect(self._on_adoption_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._adoption_worker = worker
+        worker.start()
+
+    def _on_adoption_apply_done(self, result):
+        self._adoption_worker = None
+        self._adoption_plan = None
+        self._set_adoption_running(False)
+        if result is None or result.status == "cancelled":
+            self.adoption_summary.setVisible(True)
+            self.adoption_summary.setText("Adoption cancelled. No library changes were made.")
+            self._set_status("Adoption cancelled safely.", "warning")
+            return
+        self.adoption_summary.setVisible(True)
+        self.adoption_summary.setText(
+            f"Adoption {result.status}: {result.adopted} adopted, "
+            f"{result.skipped} skipped, {result.conflicts} conflict(s). "
+            f"Backup: {result.backup_path or 'not created'}."
+        )
+        for error in result.errors:
+            self._log(f"[ADOPTION] {error}")
+        tone = "success" if result.status == "completed" else "warning"
+        self._set_status(f"External library adoption {result.status}.", tone)
+        if result.status == "completed":
+            self._on_storage_rescan()
+
+    def _on_adoption_cancel(self):
+        worker = getattr(self, "_adoption_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            self.adoption_cancel_btn.setEnabled(False)
+            self.adoption_summary.setVisible(True)
+            self.adoption_summary.setText("Stopping adoption before any library changes…")
+
+    def _on_adoption_failed(self, message):
+        self._adoption_worker = None
+        self._adoption_plan = None
+        self._set_adoption_running(False)
+        self.adoption_summary.setVisible(True)
+        self.adoption_summary.setText(
+            "Adoption failed before completion. No unreported change ran."
+        )
+        self._log(f"[ADOPTION] {message}")
+        self._set_status("External library adoption failed. See the log for details.", "error")
 
     def _set_maintenance_running(self, running):
         self.maintenance_preview_btn.setEnabled(not running)

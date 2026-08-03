@@ -1431,6 +1431,13 @@ class StreamKeep(
                 storage_worker.wait(1500)
             except Exception:
                 pass
+        adoption_worker = getattr(self, "_adoption_worker", None)
+        if adoption_worker is not None and adoption_worker.isRunning():
+            try:
+                adoption_worker.requestInterruption()
+                adoption_worker.wait(1500)
+            except Exception:
+                pass
         arw = getattr(self, "_auto_record_resolve_worker", None)
         if arw is not None and arw.isRunning():
             try:

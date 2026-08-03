@@ -88,6 +88,59 @@ def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()
 
 
+def test_import_library_parser_requires_preview_or_apply_and_accepts_archives():
+    parser = cli.build_parser()
+    preview = parser.parse_args([
+        "import-library", "preview", "library",
+        "--archive", "archive.txt", "--archive-source-url",
+        "https://www.twitch.tv/channel", "--plan", "plan.json", "--json",
+    ])
+    assert preview.command == "import-library"
+    assert preview.import_action == "preview"
+    assert preview.archive == ["archive.txt"]
+    assert preview.archive_source_url == "https://www.twitch.tv/channel"
+    assert preview.plan == "plan.json"
+    applied = parser.parse_args([
+        "import-library", "apply", "--plan", "plan.json", "--json",
+    ])
+    assert applied.import_action == "apply"
+    assert applied.plan == "plan.json"
+
+
+def test_import_library_cli_preview_and_apply_are_headless(tmp_path):
+    config_dir = tmp_path / "isolated"
+    library = tmp_path / "library" / "recording"
+    library.mkdir(parents=True)
+    (library / "video.mp4").write_bytes(b"media")
+    (library / "metadata.json").write_text(json.dumps({
+        "provenance": {
+            "platform": "Twitch",
+            "source_id": "vod:123",
+            "webpage_url": "https://www.twitch.tv/videos/123",
+        },
+        "title": "Imported",
+        "channel": "channel",
+    }), encoding="utf-8")
+    plan = tmp_path / "adoption-plan.json"
+    preview = _run_launcher(
+        "--config-dir", config_dir, "import-library", "preview", library.parent,
+        "--plan", plan, "--json", appdata=tmp_path / "ambient-appdata",
+    )
+    assert preview.returncode == 0, preview.stderr
+    preview_payload = json.loads(preview.stdout)
+    assert preview_payload["diagnostics"]["adopt"] == 1
+    assert plan.is_file()
+
+    applied = _run_launcher(
+        "--config-dir", config_dir, "import-library", "apply",
+        "--plan", plan, "--json", appdata=tmp_path / "ambient-appdata",
+    )
+    assert applied.returncode == 0, applied.stderr
+    result = json.loads(applied.stdout)
+    assert result["status"] == "completed"
+    assert result["adopted"] == 1
+
+
 def test_snapshot_command_accepts_config_root_before_subcommand(tmp_path):
     config_dir = tmp_path / "isolated"
     output = tmp_path / "diagnostic.zip"

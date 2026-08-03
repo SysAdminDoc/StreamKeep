@@ -1503,6 +1503,80 @@ def save_completed_recording(
             db.close()
 
 
+def adopt_history_records(
+    entries: list[dict[str, Any]],
+    *,
+    monitor_archive_seeds: dict[str, list[str]] | None = None,
+) -> list[int]:
+    """Insert adopted history rows and monitor archive seeds atomically."""
+    canonical_entries = [_canonical_history_entry(entry) for entry in entries]
+    seeds = {
+        str(url or ""): list(dict.fromkeys(
+            str(value or "") for value in values if str(value or "")
+        ))
+        for url, values in (monitor_archive_seeds or {}).items()
+        if str(url or "").strip()
+    }
+    if not canonical_entries and not seeds:
+        return []
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            history_ids = []
+            for entry in canonical_entries:
+                cursor = conn.execute(
+                    "INSERT INTO history "
+                    "(date, platform, source_id, webpage_url, title, channel, "
+                    "quality, size, path, url, favorite, watched, "
+                    "watch_position_secs, bookmarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        str(entry.get("date", "")),
+                        str(entry.get("platform", "")),
+                        str(entry.get("source_id", "")),
+                        str(entry.get("webpage_url", "")),
+                        str(entry.get("title", "")),
+                        str(entry.get("channel", "")),
+                        str(entry.get("quality", "")),
+                        str(entry.get("size", "")),
+                        str(entry.get("path", "")),
+                        str(entry.get("url", "")),
+                        int(bool(entry.get("favorite", False))),
+                        int(bool(entry.get("watched", False))),
+                        float(entry.get("watch_position_secs", 0) or 0),
+                        json.dumps(entry.get("bookmarks", []) or []),
+                    ),
+                )
+                history_ids.append(int(cursor.lastrowid))
+
+            for channel_url, additions in seeds.items():
+                row = conn.execute(
+                    "SELECT archive_ids FROM monitor_channels WHERE url=?",
+                    (channel_url,),
+                ).fetchone()
+                if row is None:
+                    continue
+                try:
+                    existing = json.loads(row[0] or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    existing = []
+                merged = list(dict.fromkeys(
+                    [str(value) for value in existing if str(value or "")]
+                    + additions
+                ))
+                conn.execute(
+                    "UPDATE monitor_channels SET archive_ids=? WHERE url=?",
+                    (json.dumps(merged), channel_url),
+                )
+            conn.commit()
+            return history_ids
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
 def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
     """Update specific fields on a history row by id.
 

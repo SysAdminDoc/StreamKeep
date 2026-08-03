@@ -7,15 +7,16 @@ import math
 import os
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import ArchivalProvenance
 
-
 METADATA_SCHEMA = "streamkeep.metadata"
 METADATA_SCHEMA_VERSION = 2
 MAX_METADATA_BYTES = 4 * 1024 * 1024
+MAX_IMPORT_SIDECAR_BYTES = 32 * 1024 * 1024
 
 _PUBLIC_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 _TWITCH_VOD_RE = re.compile(r"/(?:vod/|videos/)(\d+)(?:\.m3u8)?", re.I)
@@ -620,6 +621,59 @@ def load_metadata_sidecar(path_or_dir):
     except (OSError, ValueError, TypeError):
         return {}
     return normalize_metadata_payload(data)
+
+
+def load_ytdlp_info_sidecar(path_or_dir):
+    """Read the bounded, public fields needed to adopt a yt-dlp sidecar."""
+    path = Path(path_or_dir)
+    if path.is_dir():
+        return {}
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_IMPORT_SIDECAR_BYTES:
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    fields = (
+        "id", "display_id", "webpage_url", "original_url", "extractor",
+        "extractor_key", "title", "channel", "channel_id", "uploader",
+        "uploader_id", "upload_date", "timestamp", "duration",
+        "duration_string", "format_note", "resolution", "height",
+        "webpage_url_domain",
+    )
+    return {
+        key: scrub_public_data(data.get(key))
+        for key in fields if key in data
+    }
+
+
+def load_nfo_sidecar(path_or_dir):
+    """Read safe identity/title fields from a Kodi/Jellyfin NFO sidecar."""
+    path = Path(path_or_dir)
+    if path.is_dir():
+        return {}
+    try:
+        raw = path.read_bytes()
+        if len(raw) > MAX_IMPORT_SIDECAR_BYTES:
+            return {}
+        root = ET.fromstring(raw)
+    except (OSError, ValueError, ET.ParseError):
+        return {}
+    values = {}
+    for element in root.iter():
+        tag = str(element.tag).rsplit("}", 1)[-1].lower()
+        text = scrub_public_text(element.text or "").strip()
+        if tag == "uniqueid" and text and "source_id" not in values:
+            values["source_id"] = text
+            values["uniqueid_type"] = scrub_public_text(
+                element.attrib.get("type", "")
+            ).strip()
+        elif tag in {"title", "studio", "director", "credits", "premiered", "url"}:
+            if text and tag not in values:
+                values[tag] = text
+    return values
 
 
 def _atomic_write_text(path, text):

@@ -1239,6 +1239,75 @@ def _run_har_import(args):
                 _print_line(f"    {header_argv[i]} {header_argv[i + 1]!r}")
 
 
+def _run_library_import(args):
+    """Preview or apply adoption of an existing media library."""
+    from . import db
+    from .maintenance import (
+        apply_library_adoption,
+        plan_library_adoption,
+    )
+    from .importer import load_adoption_plan, save_adoption_plan
+
+    db.init_db()
+    default_plan = (
+        Path(db.DB_PATH).parent / "maintenance" / "adoption-plan.json"
+    )
+    plan_path = Path(getattr(args, "plan", "") or default_plan).expanduser()
+    action = str(getattr(args, "import_action", "preview") or "preview")
+    as_json = bool(getattr(args, "json", False))
+    try:
+        if action == "preview":
+            plan = plan_library_adoption(
+                args.root,
+                getattr(args, "archive", []) or [],
+                archive_source_url=getattr(args, "archive_source_url", "") or "",
+                db_module=db,
+            )
+            save_adoption_plan(plan, plan_path)
+            if as_json:
+                payload = plan.to_dict()
+                payload["plan_path"] = str(plan_path)
+                _print_line(json.dumps(payload, indent=2, ensure_ascii=False))
+                return
+            counts = plan.diagnostics
+            _print_line(
+                f"Adoption preview: {counts['adopt']} adopt, "
+                f"{counts['skip']} skip, {counts['conflict']} conflict; "
+                f"{counts['archive_entries']} archive id(s)."
+            )
+            for item in plan.items:
+                _print_line(
+                    f"  {item.get('action', 'conflict').upper():8s} "
+                    f"{item.get('path', '')} — {item.get('reason', '')}"
+                )
+            for issue in plan.archive_issues:
+                _print_line(
+                    f"  CONFLICT archive {issue.get('path', '')}: "
+                    f"{issue.get('reason', '')}"
+                )
+            _print_line(f"Plan saved to {plan_path}")
+            return
+
+        plan = load_adoption_plan(plan_path)
+        result = apply_library_adoption(plan, db_module=db)
+        if as_json:
+            _print_line(json.dumps(result.__dict__, indent=2, ensure_ascii=False))
+        else:
+            _print_line(
+                f"Adoption {result.status}: {result.adopted} adopted, "
+                f"{result.skipped} skipped, {result.conflicts} conflict(s)."
+            )
+            if result.backup_path:
+                _print_line(f"Backup: {result.backup_path}")
+            for error in result.errors:
+                _print_line(f"  ERROR: {error}")
+        if result.status != "completed":
+            sys.exit(1)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+
 def _run_podcast_sidecars(args):
     """Discover and download an episode's transcript/chapter sidecars."""
     from .image_fetch import ImageFetchError, fetch_url_bytes
@@ -2016,6 +2085,42 @@ def build_parser():
     har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 
+    # -- external library adoption --
+    import_p = sub.add_parser(
+        "import-library",
+        aliases=["adopt"],
+        help="Preview or adopt an existing media library without moving files",
+    )
+    import_sub = import_p.add_subparsers(dest="import_action")
+    import_sub.required = True
+    import_preview = import_sub.add_parser(
+        "preview", help="Classify folders and archive ids without changing state",
+    )
+    import_preview.add_argument("root", help="Directory tree to inspect")
+    import_preview.add_argument(
+        "--archive", action="append", default=[],
+        help="yt-dlp --download-archive file (repeatable)",
+    )
+    import_preview.add_argument(
+        "--archive-source-url", default="",
+        help="Source URL that owns archive ids without a matching monitor",
+    )
+    import_preview.add_argument(
+        "--plan", default="",
+        help="Preview plan path (default: config maintenance/adoption-plan.json)",
+    )
+    import_preview.add_argument("--json", action="store_true", help="Emit the full preview as JSON")
+    import_apply = import_sub.add_parser(
+        "apply", help="Apply an unchanged preview plan",
+    )
+    import_apply.add_argument(
+        "--plan", default="",
+        help="Preview plan path (default: config maintenance/adoption-plan.json)",
+    )
+    import_apply.add_argument("--json", action="store_true", help="Emit the result as JSON")
+    import_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                          help="Override the config/database directory")
+
     # -- DRM-free MSE capture (V14) --
     mse_p = sub.add_parser(
         "mse-capture",
@@ -2363,6 +2468,8 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "import-har":
         _run_har_import(args)
+    elif args.command in ("import-library", "adopt"):
+        _run_library_import(args)
     elif args.command == "mse-capture":
         _run_mse_capture(args)
     elif args.command == "podcast-sidecars":
@@ -2394,7 +2501,8 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
-        "snapshot", "backup", "startup-check", "import-har", "podcast-sidecars",
+        "snapshot", "backup", "startup-check", "import-har", "import-library",
+        "adopt", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",

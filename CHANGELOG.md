@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added preview-first external-library adoption for arbitrary media trees,
+  yt-dlp download archives, and `.info.json`/NFO sidecars. Conflicts remain
+  explicit, apply creates a backup and atomically adds history plus monitor
+  archive seeds, and media files are never moved or rewritten.
+
 - Added canonical deletion tombstones for user, retention, and lifecycle
   removals. Recycled user media is now skipped by monitored sources, playlist
   expansion, and queue dispatch until its tombstone is cleared; the Settings
