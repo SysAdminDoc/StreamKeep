@@ -1,8 +1,11 @@
 # StreamKeep Companion (browser extension)
 
-One-click URL and DRM-free media-request handoff to the StreamKeep desktop app.
+Single purpose (store listing): hand off the current page URL, or a media
+request the user explicitly captures from the active tab, to the local
+StreamKeep desktop app. The extension does not inspect browsing traffic until
+the user starts capture for that tab.
 
-## Install (Chrome / Edge — unpacked)
+## Install (Chrome 144+ / Edge — unpacked)
 
 1. Visit `chrome://extensions`, enable **Developer mode**.
 2. Click **Load unpacked**, pick this `browser-extension/` folder.
@@ -22,7 +25,8 @@ One-click URL and DRM-free media-request handoff to the StreamKeep desktop app.
 
 ## Send a URL
 
-Open any supported page (Kick, Twitch, YouTube, Rumble, etc.), click the icon, then:
+Open any supported page (Kick, Twitch, YouTube, Rumble, etc.), click the icon,
+and then:
 
 - **Send to Fetch** — StreamKeep jumps to the Download tab and fetches immediately.
 - **Send to Queue** — Queued silently; StreamKeep shows a status toast.
@@ -30,11 +34,13 @@ Open any supported page (Kick, Twitch, YouTube, Rumble, etc.), click the icon, t
 ## Capture a media request
 
 For a protected, DRM-free manifest or direct media request, open the extension
-popup and select **Capture this tab** before starting playback. Play the media,
-then choose a discovered `.m3u8`, `.mpd`, or media URL and send it to Fetch or
-Queue. Only the active tab is captured, candidates and replay headers remain in
-session storage, and the handoff allowlist carries the request's `Referer`,
-`Origin`, `User-Agent`, `Cookie`, and `Authorization` values when present.
+popup and select **Capture this tab** before starting playback. This explicit
+action uses Chrome's temporary `activeTab` grant and installs request listeners
+only for that tab's current `http(s)` origin; navigating the tab stops capture.
+Play the media, then choose a discovered `.m3u8`, `.mpd`, or media URL and send
+it to Fetch or Queue. Candidates and replay headers remain in session storage,
+and the handoff allowlist carries the request's `Referer`, `Origin`,
+`User-Agent`, `Cookie`, and `Authorization` values when present.
 The desktop server drops all other browser headers and keeps the captured
 context transient rather than writing it to the queue database or resume files.
 Encrypted media extensions (EME/DRM) are outside this workflow.
@@ -42,6 +48,8 @@ Encrypted media extensions (EME/DRM) are outside this workflow.
 ## Security
 
 - The application server binds **strictly to 127.0.0.1**. Optional LAN access requires an explicitly configured HTTPS reverse proxy on the StreamKeep PC.
+- The extension has no broad host grant: capture is opt-in through `activeTab` and is scoped to the active tab's current origin. The loopback host permission is retained only for the desktop handoff.
+- All loopback HTTP requests are made by the background service worker; popup pages send validated messages to that worker.
 - Pairing codes are short-lived and one-use. The issued client token is origin-bound, scoped, and held only in browser session storage.
 - Every mutating request includes a fresh timestamp and cryptographic nonce; Host, Origin, and cross-site metadata are validated by the server.
 - Re-pairing uses a new code; no extension re-install is needed.

@@ -154,19 +154,22 @@ def test_browser_extension_keeps_access_session_only_and_replay_protected():
     popup = (extension / "popup.js").read_text(encoding="utf-8")
     background = (extension / "background.js").read_text(encoding="utf-8")
 
-    assert set(manifest["host_permissions"]) == {
-        "<all_urls>", "http://127.0.0.1/*",
-    }
+    assert manifest["minimum_chrome_version"] == "144"
+    assert set(manifest["host_permissions"]) == {"http://127.0.0.1/*"}
+    assert "<all_urls>" not in manifest["host_permissions"]
+    assert "tabs" not in manifest["permissions"]
     assert "webRequest" in manifest["permissions"]
-    assert 'chrome.storage.local.set({ port })' in popup
-    assert 'chrome.storage.session.set({ token: result.token })' in popup
-    assert 'chrome.storage.local.set({ port, token' not in popup
+    assert "127.0.0.1" not in popup
+    assert "fetch(" not in popup
     assert 'scopes: ["status", "queue"]' in popup
     for source in (popup, background):
         assert "chrome.storage.session.get" in source
-        assert "X-StreamKeep-Timestamp" in source
-        assert "X-StreamKeep-Nonce" in source
+    assert "X-StreamKeep-Timestamp" in background
+    assert "X-StreamKeep-Nonce" in background
     assert "onBeforeSendHeaders" in background
+    assert "activeOriginPattern" in background
+    assert '{ urls: ["<all_urls>"]' not in background
+    assert "fetch(" in background
     assert "request_headers" in popup
 
 

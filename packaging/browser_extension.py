@@ -25,7 +25,8 @@ REQUIRED_FILES = [
 ]
 ICON_SIZES = [16, 32, 48, 128]
 REQUIRED_PERMISSIONS = {"activeTab", "storage", "contextMenus", "webRequest"}
-MAX_HOST_PERMISSIONS = {"<all_urls>", "http://127.0.0.1/*"}
+REQUIRED_HOST_PERMISSIONS = {"http://127.0.0.1/*"}
+MINIMUM_CHROME_VERSION = "144"
 
 
 def validate_extension(ext_dir=None):
@@ -45,6 +46,11 @@ def validate_extension(ext_dir=None):
 
     if manifest.get("manifest_version") != 3:
         errors.append(f"Expected MV3, got manifest_version={manifest.get('manifest_version')}")
+    if manifest.get("minimum_chrome_version") != MINIMUM_CHROME_VERSION:
+        errors.append(
+            "Expected minimum_chrome_version="
+            f"{MINIMUM_CHROME_VERSION}, got {manifest.get('minimum_chrome_version')!r}"
+        )
 
     version = manifest.get("version", "")
     if not version or not all(p.isdigit() for p in version.split(".")):
@@ -56,7 +62,10 @@ def validate_extension(ext_dir=None):
         errors.append(f"Missing permissions: {missing}")
 
     host_perms = set(manifest.get("host_permissions", []))
-    extra = host_perms - MAX_HOST_PERMISSIONS
+    missing_hosts = REQUIRED_HOST_PERMISSIONS - host_perms
+    if missing_hosts:
+        errors.append(f"Missing host_permissions: {missing_hosts}")
+    extra = host_perms - REQUIRED_HOST_PERMISSIONS
     if extra:
         errors.append(f"Excessive host_permissions: {extra}")
 

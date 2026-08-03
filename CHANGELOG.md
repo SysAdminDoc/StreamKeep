@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Narrowed the browser companion to Chrome 144+ with `activeTab`-scoped,
+  user-started media capture and loopback-only host access. Popup pages now
+  route pairing and send requests through the service worker; the extension no
+  longer requests `tabs` or `<all_urls>` access, and navigating a captured tab
+  stops its request listeners.
+
 - Made startup update discovery work on unsigned builds. Stable GitHub
   releases now surface their published SHA-256 and a manual release-page
   link, while self-replacement remains limited to the operator-authenticated

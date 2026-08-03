@@ -2,16 +2,15 @@
   "manifest_version": 3,
   "name": "StreamKeep Companion",
   "version": "1.0.1",
-  "description": "One-click send of the current page URL to the StreamKeep desktop app.",
+  "description": "One-click handoff of the current page or a user-selected active-tab media request to StreamKeep.",
+  "minimum_chrome_version": "144",
   "permissions": [
     "activeTab",
     "storage",
     "contextMenus",
-    "tabs",
     "webRequest"
   ],
   "host_permissions": [
-    "<all_urls>",
     "http://127.0.0.1/*"
   ],
   "action": {

@@ -1,28 +1,77 @@
 // Service worker — registers right-click context menu and handles sends.
 
-async function companionPost(path, body) {
+function freshHeaders() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return {
+    "X-StreamKeep-Timestamp": String(Math.floor(Date.now() / 1000)),
+    "X-StreamKeep-Nonce": Array.from(
+      bytes,
+      (b) => b.toString(16).padStart(2, "0"),
+    ).join(""),
+  };
+}
+
+const COMPANION_ROUTES = new Set(["/pair", "/ping", "/send_url"]);
+
+async function companionRequest(path, method, body, portOverride = 0) {
+  if (!COMPANION_ROUTES.has(path)) {
+    return { ok: false, status: 400, message: "Unsupported companion route." };
+  }
   const [{ port }, { token }] = await Promise.all([
     chrome.storage.local.get(["port"]),
     chrome.storage.session.get(["token"]),
   ]);
-  if (!port || !token) return;
-  const url = `http://127.0.0.1:${port}${path}`;
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  const portNumber = Number(portOverride || port || 0);
+  const pairing = path === "/pair";
+  if (!portNumber || (!pairing && !token)) {
+    return { ok: false, status: 401, message: "Pair this extension with StreamKeep first." };
+  }
+  const headers = { "Content-Type": "application/json", ...freshHeaders() };
+  if (!pairing) headers.Authorization = `Bearer ${token}`;
+  const url = `http://127.0.0.1:${portNumber}${path}`;
   const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-StreamKeep-Timestamp": String(Math.floor(Date.now() / 1000)),
-      "X-StreamKeep-Nonce": Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
-    },
+    method: method || "GET",
+    headers,
     body: JSON.stringify(body),
   });
+  let data = {};
+  try { data = await resp.json(); } catch (_) { /* empty response */ }
   if (resp.status === 401) {
     console.warn("[StreamKeep] Access expired or rotated. Generate a new pairing code in Settings.");
   }
+  if (!resp.ok) {
+    return {
+      ok: false,
+      status: resp.status,
+      err: data.err || "",
+      message: data.message || `HTTP ${resp.status}`,
+    };
+  }
+  if (pairing && data.token) {
+    await chrome.storage.local.set({ port: portNumber });
+    await chrome.storage.session.set({ token: data.token });
+    delete data.token;
+  }
+  return { ok: true, status: resp.status, data };
 }
+
+async function companionPost(path, body) {
+  return companionRequest(path, "POST", body);
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "companionRequest") return false;
+  companionRequest(
+    String(message.path || ""),
+    String(message.method || "GET"),
+    message.body,
+    Number(message.port || 0),
+  )
+    .then(sendResponse)
+    .catch((error) => sendResponse({ ok: false, status: 0, message: error.message }));
+  return true;
+});
 
 const MAX_CAPTURED_MEDIA = 48;
 const MAX_PENDING_REQUESTS = 256;
@@ -46,6 +95,7 @@ const captureTabs = new Set();
 const captureMeta = {};
 const capturedMedia = {};
 const pendingRequests = new Map();
+let requestListenersRegistered = false;
 
 async function loadCaptureState() {
   if (captureStateLoaded) return;
@@ -56,6 +106,7 @@ async function loadCaptureState() {
   Object.assign(captureMeta, stored.streamkeepCaptureMeta || {});
   Object.assign(capturedMedia, stored.streamkeepCapturedMedia || {});
   captureStateLoaded = true;
+  refreshRequestListeners();
 }
 
 let persistTimer = null;
@@ -143,6 +194,43 @@ function recordMedia(tabId, details, kind, headers, mime) {
   persistCaptureState();
 }
 
+function activeOriginPattern(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    const host = parsed.hostname.includes(":")
+      ? `[${parsed.hostname}]`
+      : parsed.hostname;
+    return `${parsed.protocol}//${host}/*`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function refreshRequestListeners() {
+  if (requestListenersRegistered) {
+    chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders);
+    chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived);
+    requestListenersRegistered = false;
+  }
+  const urls = [...captureTabs]
+    .map((tabId) => activeOriginPattern(captureMeta[tabId]?.tab_url || ""))
+    .filter(Boolean);
+  if (!urls.length) return;
+  const filter = { urls: [...new Set(urls)], types: [...CAPTURE_REQUEST_TYPES] };
+  chrome.webRequest.onBeforeSendHeaders.addListener(
+    onBeforeSendHeaders,
+    filter,
+    ["requestHeaders", "extraHeaders"],
+  );
+  chrome.webRequest.onHeadersReceived.addListener(
+    onHeadersReceived,
+    filter,
+    ["responseHeaders", "extraHeaders"],
+  );
+  requestListenersRegistered = true;
+}
+
 async function onBeforeSendHeaders(details) {
   await loadCaptureState();
   if (!captureTabs.has(Number(details.tabId))) return;
@@ -187,17 +275,22 @@ async function captureMessage(message) {
   const tabId = Number(message.tabId);
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("Invalid tab id");
   if (message.type === "armCapture") {
+    if (!activeOriginPattern(message.tabUrl || "")) {
+      throw new Error("Capture requires an http(s) active tab.");
+    }
     captureTabs.add(tabId);
     captureMeta[tabId] = {
       tab_url: String(message.tabUrl || "").slice(0, 4096),
       tab_title: String(message.tabTitle || "").slice(0, 256),
     };
+    refreshRequestListeners();
     for (const key of Object.keys(capturedMedia)) {
       if (Number(key.split("|", 1)[0]) === tabId) delete capturedMedia[key];
     }
     persistCaptureState();
   } else if (message.type === "stopCapture") {
     captureTabs.delete(tabId);
+    refreshRequestListeners();
     persistCaptureState();
   } else if (message.type === "clearCapture") {
     for (const key of Object.keys(capturedMedia)) {
@@ -227,23 +320,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-chrome.webRequest.onBeforeSendHeaders.addListener(
-  onBeforeSendHeaders,
-  { urls: ["<all_urls>"], types: [...CAPTURE_REQUEST_TYPES] },
-  ["requestHeaders", "extraHeaders"],
-);
-chrome.webRequest.onHeadersReceived.addListener(
-  onHeadersReceived,
-  { urls: ["<all_urls>"], types: [...CAPTURE_REQUEST_TYPES] },
-  ["responseHeaders", "extraHeaders"],
-);
-
 chrome.tabs.onRemoved.addListener((tabId) => {
   captureTabs.delete(Number(tabId));
   delete captureMeta[tabId];
   for (const key of Object.keys(capturedMedia)) {
     if (Number(key.split("|", 1)[0]) === Number(tabId)) delete capturedMedia[key];
   }
+  refreshRequestListeners();
+  persistCaptureState();
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url || !captureTabs.has(Number(tabId))) return;
+  captureTabs.delete(Number(tabId));
+  delete captureMeta[tabId];
+  for (const key of Object.keys(capturedMedia)) {
+    if (Number(key.split("|", 1)[0]) === Number(tabId)) delete capturedMedia[key];
+  }
+  refreshRequestListeners();
   persistCaptureState();
 });
 
