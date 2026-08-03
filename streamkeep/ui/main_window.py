@@ -394,7 +394,6 @@ class StreamKeep(
         # Auto-update check — opt-in, deferred so the UI paints first and
         # so the release-API call doesn't block startup.
         self._update_check_worker = None
-        self._update_download_worker = None
         self._latest_update_payload = None
         if not self._startup_check:
             QTimer.singleShot(2500, self._maybe_check_for_updates)
@@ -2648,8 +2647,7 @@ class StreamKeep(
 
     # ── Auto-update checker ──────────────────────────────────────────
     # _maybe_check_for_updates, _on_update_check_result,
-    # _on_update_install, _on_update_download_progress,
-    # _on_update_download_done, _on_update_dismiss
+    # _on_update_manual_download, _on_update_dismiss
     #   -> streamkeep.ui.tabs.settings.SettingsTabMixin
 
 

@@ -4,6 +4,11 @@ The installed executable is the trust anchor: its valid Authenticode signer
 certificate verifies both the detached release manifest and every installable
 asset.  This keeps update verification offline and prevents a compromised
 release feed from substituting a different, merely "validly signed" binary.
+
+The startup checker deliberately has a separate public-metadata path.  It may
+show a newer release and its GitHub-published SHA-256 for manual verification,
+but these publisher-authentication helpers remain operator-only and are still
+required before any executable can be staged or replaced automatically.
 """
 
 from __future__ import annotations
@@ -57,6 +62,21 @@ def sha256_file(path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def parse_published_sha256(value) -> str:
+    """Normalize a GitHub asset digest for manual, offline verification.
+
+    GitHub exposes release asset digests as ``sha256:<hex>``.  This metadata
+    tells a user what to verify after a manual download; it is not a publisher
+    signature and must never authorize self-replacement.
+    """
+    digest = str(value or "").strip().lower()
+    if digest.startswith("sha256:"):
+        digest = digest[len("sha256:"):]
+    if not _SHA256_RE.fullmatch(digest):
+        raise UpdateSecurityError("Release asset did not publish a valid SHA-256 digest.")
+    return digest
 
 
 def certificate_sha256(certificate) -> str:
@@ -163,6 +183,7 @@ def get_authenticode_info(path):
 
 
 def require_authenticode(path, *, expected_certificate_sha256="", asset_format=""):
+    """Require the operator's publisher signature for an installable asset."""
     path = Path(path)
     expected_suffix = {"portable-exe": ".exe", "msix": ".msix"}.get(asset_format)
     if expected_suffix and path.suffix.lower() != expected_suffix:

@@ -1,9 +1,10 @@
-"""Publisher-authenticated GitHub release updater.
+"""GitHub release discovery plus the operator-only authenticated updater.
 
-Updates are accepted only when a canonical manifest is signed by the same
-certificate as the currently installed StreamKeep executable.  The selected
-asset must also have a valid Windows signature from that certificate, match
-the signed size and digest, and come from the exact repository release path.
+The startup check reads stable release metadata and can report a newer public
+release with GitHub's published SHA-256 for manual verification.  Automatic
+staging and self-replacement remain an operator-only path: a canonical
+manifest signed by the installed publisher certificate, a matching signed
+asset, and the exact repository release path are still required.
 """
 
 from __future__ import annotations
@@ -17,15 +18,17 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .update_runtime import prepare_update_transaction
 from .update_security import (
-    MANIFEST_NAME,
-    SIGNATURE_NAME,
+    REPOSITORY_PATH,
     UpdateSecurityError,
     enforce_release_progress,
+    parse_published_sha256,
+    parse_version,
     require_authenticode,
     sha256_bytes,
     sha256_file,
@@ -66,6 +69,10 @@ def _empty_payload(error=""):
         "current_version": "",
         "signer_subject": "",
         "asset": {},
+        "manual_only": False,
+        "self_replace_allowed": False,
+        "published_sha256": "",
+        "release_url": "",
     }
 
 
@@ -101,6 +108,70 @@ def _release_asset_url(release, name):
     url = str(asset.get("browser_download_url", "") or "")
     validate_release_asset_url(url, tag, name)
     return url
+
+
+def _public_release_payload(release, current_version):
+    """Return manual-install metadata without invoking publisher trust code."""
+    if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+        raise UpdateSecurityError("Update feed did not return a stable published release.")
+    tag = str(release.get("tag_name", "") or "").strip()
+    if not tag.startswith("v"):
+        raise UpdateSecurityError("Update feed tag is not a versioned release.")
+    version = tag[1:]
+    remote = parse_version(version)
+    if tag != "v" + ".".join(str(part) for part in remote):
+        raise UpdateSecurityError("Update feed tag is not a canonical semantic version.")
+    current = parse_version(str(current_version or "").lstrip("v"))
+    payload = _empty_payload()
+    payload.update({
+        "tag": tag,
+        "version": version,
+        "notes": str(release.get("body", "") or "").strip(),
+        "current_version": str(current_version or ""),
+    })
+    if remote <= current:
+        return payload
+
+    selected = None
+    for name, asset_format in (
+        ("StreamKeep.exe", "portable-exe"),
+        ("StreamKeep.msix", "msix"),
+    ):
+        if any(
+            isinstance(row, dict) and row.get("name") == name
+            for row in (release.get("assets") or [])
+        ):
+            selected = (_find_release_asset(release, name), asset_format)
+            break
+    if selected is None:
+        raise UpdateSecurityError("Release has no supported downloadable Windows asset.")
+    api_asset, asset_format = selected
+    size = api_asset.get("size")
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+        raise UpdateSecurityError("Release asset size is invalid.")
+    name = str(api_asset.get("name", "") or "")
+    url = str(api_asset.get("browser_download_url", "") or "")
+    validate_release_asset_url(url, tag, name)
+    digest = parse_published_sha256(api_asset.get("digest"))
+    release_url = (
+        f"https://github.com/{REPOSITORY_PATH}/releases/tag/"
+        f"{quote(tag, safe='')}"
+    )
+    payload.update({
+        "available": True,
+        "manual_only": True,
+        "self_replace_allowed": False,
+        "published_sha256": digest,
+        "release_url": release_url,
+        "asset": {
+            "name": name,
+            "format": asset_format,
+            "size": size,
+            "sha256": digest,
+            "url": url,
+        },
+    })
+    return payload
 
 
 def load_update_state(path):
@@ -154,7 +225,7 @@ def verify_release_document(
     current_version,
     state,
 ):
-    """Verify already-fetched release metadata and return a safe UI payload."""
+    """Verify operator-signed metadata and return a self-update payload."""
     if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
         raise UpdateSecurityError("Update feed did not return a stable published release.")
     verify_manifest_signature(manifest_bytes, signature_bytes, signer_info)
@@ -207,12 +278,21 @@ def verify_release_document(
         "current_version": current_version,
         "signer_subject": str(signer_info.get("subject", "") or ""),
         "asset": selected,
+        "manual_only": False,
+        "self_replace_allowed": True,
+        "published_sha256": selected["sha256"],
+        "release_url": (
+            f"https://github.com/{REPOSITORY_PATH}/releases/tag/"
+            f"{quote(manifest['tag'], safe='')}"
+        ),
     }
 
 
 def validate_download_payload(payload, state):
     if not isinstance(payload, dict) or not payload.get("available"):
         raise UpdateSecurityError("Verified update metadata is missing.")
+    if payload.get("manual_only"):
+        raise UpdateSecurityError("Public update metadata is manual-only.")
     sequence = payload.get("sequence")
     if sequence != state.get("highest_sequence"):
         raise UpdateSecurityError("Update metadata is not the newest verified release.")
@@ -233,7 +313,13 @@ def validate_download_payload(payload, state):
 
 
 class UpdateCheckWorker(QThread):
-    """Fetch and verify the signed release documents without blocking the UI."""
+    """Discover a public release without blocking the UI.
+
+    This worker never authenticates the running executable and never writes
+    rollback state.  Its result is display/download-page metadata only;
+    ``DownloadUpdateWorker`` and ``arm_self_replace`` enforce the separate
+    operator-authenticated path.
+    """
 
     result = pyqtSignal(dict)
 
@@ -247,31 +333,10 @@ class UpdateCheckWorker(QThread):
     def run(self):
         payload = _empty_payload()
         try:
-            current_path = Path(self._current_path()).resolve()
-            signer_info = require_authenticode(current_path, asset_format="portable-exe")
             release = json.loads(_fetch_bytes(RELEASES_URL, MAX_RELEASE_BYTES).decode("utf-8"))
-            tag = str(release.get("tag_name", "") or "")
-            if not is_newer(tag, self.current_version):
-                self.result.emit(payload)
-                return
-            manifest_url = _release_asset_url(release, MANIFEST_NAME)
-            signature_url = _release_asset_url(release, SIGNATURE_NAME)
-            manifest_bytes = _fetch_bytes(manifest_url, MAX_MANIFEST_BYTES)
-            signature_bytes = _fetch_bytes(signature_url, MAX_SIGNATURE_BYTES)
-            from .paths import CONFIG_DIR
-            state_path = CONFIG_DIR / "update-state.json"
-            state = load_update_state(state_path)
-            payload = verify_release_document(
-                release,
-                manifest_bytes,
-                signature_bytes,
-                signer_info,
-                self.current_version,
-                state,
-            )
-            record_verified_manifest(state_path, payload)
+            payload = _public_release_payload(release, self.current_version)
         except UpdateSecurityError as exc:
-            payload = _empty_payload(f"Update blocked: {exc}")
+            payload = _empty_payload(f"Update check unavailable: {exc}")
         except (
             urllib.error.URLError,
             urllib.error.HTTPError,
@@ -285,7 +350,7 @@ class UpdateCheckWorker(QThread):
 
 
 class DownloadUpdateWorker(QThread):
-    """Download and authenticate the exact asset from a verified manifest."""
+    """Download an exact asset from an operator-verified manifest only."""
 
     progress = pyqtSignal(int, str)
     done = pyqtSignal(bool, str)
@@ -421,6 +486,8 @@ def arm_self_replace(new_exe_path, release_payload):
     executable inside a tree cannot produce a consistent installation, and
     unsigned public releases have no publisher key to authorize one anyway.
     """
+    if bool((release_payload or {}).get("manual_only")):
+        return False
     target = Path(sys.executable).resolve()
     staged = Path(new_exe_path).resolve()
     helper = Path(f"{target}.update-helper.exe")

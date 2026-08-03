@@ -23,6 +23,20 @@ class _RunningProcess:
 
 
 class UpdateRuntimeTests(unittest.TestCase):
+    def test_public_metadata_cannot_create_an_update_transaction(self):
+        with self.assertRaisesRegex(ValueError, "operator-authenticated"):
+            update_runtime.prepare_update_transaction(
+                current_path="StreamKeep.exe",
+                staged_path="StreamKeep.exe.new",
+                helper_path="StreamKeep.exe.update-helper.exe",
+                config_dir="config",
+                release_payload={
+                    "available": True,
+                    "manual_only": True,
+                    "asset": {"sha256": "a" * 64},
+                },
+            )
+
     def _seed(self, root):
         root = Path(root)
         config = root / "config"

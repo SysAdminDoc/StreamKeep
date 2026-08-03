@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made startup update discovery work on unsigned builds. Stable GitHub
+  releases now surface their published SHA-256 and a manual release-page
+  link, while self-replacement remains limited to the operator-authenticated
+  manifest and signature path.
+
 - Added a privacy-safe local-server security audit trail for failed bearer
   validation, revoked clients, origin/scope/transport rejection, and replayed
   mutation proofs. Events use route-only paths and client hashes, are capped

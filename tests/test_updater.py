@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,13 @@ from unittest import mock
 
 from PyQt6.QtCore import QCoreApplication, Qt
 
-from streamkeep.updater import DownloadUpdateWorker, load_update_state
+from streamkeep.updater import (
+    DownloadUpdateWorker,
+    UpdateCheckWorker,
+    arm_self_replace,
+    load_update_state,
+    validate_download_payload,
+)
 from streamkeep.update_security import UpdateSecurityError
 
 
@@ -47,6 +54,91 @@ def _payload(binary, *, certificate="a" * 64):
             "url": "https://github.com/SysAdminDoc/StreamKeep/releases/download/v4.31.8/StreamKeep.exe",
         },
     }
+
+
+def _public_release(tag="v4.31.9", *, digest="sha256:" + "c" * 64, assets=True):
+    return {
+        "tag_name": tag,
+        "draft": False,
+        "prerelease": False,
+        "body": "Bug fixes",
+        "assets": ([{
+            "name": "StreamKeep.exe",
+            "size": 123,
+            "digest": digest,
+            "browser_download_url": (
+                f"https://github.com/SysAdminDoc/StreamKeep/releases/download/"
+                f"{tag}/StreamKeep.exe"
+            ),
+        }] if assets else []),
+    }
+
+
+class UpdaterCheckTests(unittest.TestCase):
+    def _run_check(self, release, current="4.31.8"):
+        app = QCoreApplication.instance() or QCoreApplication([])
+        worker = UpdateCheckWorker(current)
+        events = []
+        worker.result.connect(
+            events.append,
+            type=Qt.ConnectionType.DirectConnection,
+        )
+        with mock.patch(
+            "streamkeep.updater._fetch_bytes",
+            return_value=json.dumps(release).encode("utf-8"),
+        ), mock.patch("streamkeep.updater.require_authenticode") as authenticode:
+            worker.run()
+        app.processEvents()
+        self.assertEqual(len(events), 1)
+        return events[0], authenticode
+
+    def test_newer_release_is_manual_only_and_keeps_published_digest(self):
+        payload, authenticode = self._run_check(_public_release())
+        self.assertTrue(payload["available"])
+        self.assertTrue(payload["manual_only"])
+        self.assertFalse(payload["self_replace_allowed"])
+        self.assertEqual(payload["published_sha256"], "c" * 64)
+        self.assertEqual(payload["asset"]["sha256"], "c" * 64)
+        self.assertEqual(
+            payload["asset"]["url"],
+            "https://github.com/SysAdminDoc/StreamKeep/releases/download/"
+            "v4.31.9/StreamKeep.exe",
+        )
+        self.assertIn("/releases/tag/v4.31.9", payload["release_url"])
+        authenticode.assert_not_called()
+
+    def test_same_and_older_releases_are_noops_without_signature_checks(self):
+        for tag in ("v4.31.8", "v4.31.7"):
+            with self.subTest(tag=tag):
+                payload, authenticode = self._run_check(
+                    _public_release(tag, assets=False)
+                )
+                self.assertFalse(payload["available"])
+                self.assertEqual(payload["tag"], tag)
+                self.assertEqual(payload["version"], tag[1:])
+                authenticode.assert_not_called()
+
+    def test_missing_published_digest_does_not_become_an_installable_update(self):
+        payload, authenticode = self._run_check(
+            _public_release(digest="")
+        )
+        self.assertFalse(payload["available"])
+        self.assertIn("SHA-256", payload["error"])
+        authenticode.assert_not_called()
+
+    def test_public_payload_cannot_enter_download_or_self_replace_paths(self):
+        payload, _authenticode = self._run_check(_public_release())
+        with self.assertRaisesRegex(UpdateSecurityError, "manual-only"):
+            validate_download_payload(payload, {})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            staged = root / "StreamKeep.exe.new"
+            staged.write_bytes(b"new")
+            with mock.patch.object(sys, "executable", str(root / "StreamKeep.exe")), \
+                    mock.patch("streamkeep.updater.sys.frozen", True, create=True), \
+                    mock.patch("streamkeep.updater.subprocess.Popen") as popen:
+                self.assertFalse(arm_self_replace(staged, payload))
+            popen.assert_not_called()
 
 
 class UpdaterDownloadTests(unittest.TestCase):

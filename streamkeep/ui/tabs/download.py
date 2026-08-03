@@ -212,9 +212,9 @@ def build_download_tab(win):
         setattr(win, f"download_{key}_sub", detail_label)
     root.addWidget(hero)
 
-    # Update banner — shown only after a successful release-check when a
-    # newer version is available. Styled like the resume banner so users
-    # recognize it as a one-click actionable notice.
+    # Update banner — shown only after a public release check finds a newer
+    # version. The action opens the release page for manual verification;
+    # unsigned metadata never enters the install transaction.
     win.update_banner = QFrame()
     win.update_banner.setObjectName("updateBanner")
     win.update_banner.setVisible(False)
@@ -225,9 +225,9 @@ def build_download_tab(win):
     win.update_banner_label.setWordWrap(True)
     win.update_banner_label.setObjectName("updateBannerLabel")
     ub_lay.addWidget(win.update_banner_label, 1)
-    win.update_banner_install_btn = QPushButton("Download & install")
+    win.update_banner_install_btn = QPushButton("Open release page")
     win.update_banner_install_btn.setObjectName("primary")
-    win.update_banner_install_btn.clicked.connect(win._on_update_install)
+    win.update_banner_install_btn.clicked.connect(win._on_update_manual_download)
     ub_lay.addWidget(win.update_banner_install_btn)
     win.update_banner_dismiss_btn = QPushButton("Dismiss")
     win.update_banner_dismiss_btn.setObjectName("secondary")

@@ -15,6 +15,7 @@ from streamkeep.update_security import (
     UpdateSecurityError,
     canonical_json_bytes,
     certificate_sha256,
+    parse_published_sha256,
     sign_manifest_bytes,
     require_authenticode,
 )
@@ -50,6 +51,12 @@ class UpdateSecurityTests(unittest.TestCase):
             "certificate_der": base64.b64encode(der).decode("ascii"),
             "certificate_sha256": certificate_sha256(cls.cert),
         }
+
+    def test_public_digest_normalization_is_not_a_signature(self):
+        self.assertEqual(parse_published_sha256("sha256:" + "a" * 64), "a" * 64)
+        self.assertEqual(parse_published_sha256("B" * 64), "b" * 64)
+        with self.assertRaisesRegex(UpdateSecurityError, "SHA-256"):
+            parse_published_sha256("sha256:not-a-digest")
 
     def _documents(self, *, version="4.31.8", sequence=43108, asset_url=None):
         binary_digest = "c" * 64

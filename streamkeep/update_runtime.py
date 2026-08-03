@@ -1,4 +1,10 @@
-"""Atomic updater transaction, health marker, and rollback watchdog."""
+"""Atomic operator-authenticated update transaction and rollback watchdog.
+
+Public release checks only provide manual-download metadata.  This module is
+entered after the signed-manifest path has established update identity; the
+transaction guard below keeps that boundary explicit even if a caller is
+mistakenly handed public metadata.
+"""
 
 from __future__ import annotations
 
@@ -116,6 +122,13 @@ def restore_state(config_dir, snapshot_dir, entries):
 def prepare_update_transaction(
     *, current_path, staged_path, helper_path, config_dir, release_payload, timeout_seconds=90,
 ):
+    release_payload = dict(release_payload or {})
+    try:
+        sequence = int(release_payload.get("sequence", 0) or 0)
+    except (TypeError, ValueError):
+        sequence = 0
+    if not str(release_payload.get("manifest_sha256", "") or "") or sequence < 1:
+        raise ValueError("Update transaction requires operator-authenticated metadata.")
     current_path = Path(current_path).resolve()
     staged_path = Path(staged_path).resolve()
     helper_path = Path(helper_path).resolve()
@@ -153,7 +166,7 @@ def prepare_update_transaction(
         "snapshot_entries": entries,
         "health_path": str(transaction_dir / "healthy.json"),
         "manifest_sha256": str(release_payload.get("manifest_sha256", "") or ""),
-        "sequence": int(release_payload.get("sequence", 0) or 0),
+        "sequence": sequence,
         "new_version": str(release_payload.get("version", "") or ""),
         "old_version": str(release_payload.get("current_version", "") or ""),
     }

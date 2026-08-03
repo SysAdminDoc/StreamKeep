@@ -287,7 +287,7 @@ Release packages must include:
 - `packaging/` manifests when building the installer, MSIX, or Flatpak artifacts.
 - The WinGet manifest hash for the published installer, filled in with `python packaging/winget_hash.py dist/StreamKeep-<version>-setup.exe`.
 - Optional dependency notes for ffmpeg, curl, yt-dlp, PyQt6, Pillow, send2trash, websocket-client, mpv/libmpv, and platform signing tools.
-- Published SHA-256 hashes for every artifact, so an unsigned download can be verified before it is run. An update manifest is optional and only meaningful for operators running their own signing identity; the updater refuses unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and size/digest mismatches, which is precisely why the self-update path is inert for unsigned public releases.
+- Published SHA-256 hashes for every artifact, so an unsigned download can be verified before it is run. When enabled, startup update discovery works on unsigned builds too: it reports a newer stable GitHub release, its published SHA-256, and a manual release-page link. An update manifest is optional and only meaningful for operators running their own signing identity; automatic staging still refuses unsigned assets, publisher changes, path substitution, replayed sequences, downgrades, and size/digest mismatches.
 
 ## Validation
 

@@ -1,7 +1,6 @@
 """Browser companion, lifecycle, server, and update Settings handlers."""
 
 import os
-import sys
 
 from PyQt6.QtCore import QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -25,7 +24,7 @@ from ...preflight import (
     serialize_vod_picker,
     validate_probe_request,
 )
-from ...updater import DownloadUpdateWorker, UpdateCheckWorker, arm_self_replace
+from ...updater import UpdateCheckWorker
 from ..widgets import (
     ask_premium_confirmation,
     show_premium_message,
@@ -634,11 +633,6 @@ class SettingsCompanionMixin:
         Runs once per launch, on a short delay so the UI paints first."""
         if not bool(self._config.get("check_for_updates", False)):
             return
-        # Only meaningful in a packaged exe — in a source checkout the
-        # updater refuses the self-replace anyway. Skip the network call
-        # entirely so source-checkout users don't see a banner.
-        if not (getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")):
-            return
         if getattr(self, "_update_check_worker", None) is not None:
             return
         worker = UpdateCheckWorker(VERSION)
@@ -663,7 +657,7 @@ class SettingsCompanionMixin:
                 self.update_banner_label.setText(error)
                 self.update_banner.setVisible(True)
                 self.update_banner_install_btn.setEnabled(False)
-                self.update_banner_install_btn.setText("Install blocked")
+                self.update_banner_install_btn.setText("Open release page")
             return
         if not payload or not payload.get("available"):
             return
@@ -679,82 +673,35 @@ class SettingsCompanionMixin:
             label = f"StreamKeep {tag} is available (you're on v{VERSION})"
             if first_note:
                 label = f"{label} — {first_note}"
-            signer = str(payload.get("signer_subject", "") or "")
-            if signer:
-                label = f"{label} — publisher verified"
+            digest = str(
+                payload.get("published_sha256")
+                or (payload.get("asset") or {}).get("sha256", "")
+                or ""
+            )
+            if digest:
+                label = (
+                    f"{label} — download manually and verify the published "
+                    f"SHA-256: {digest}. Use your package manager when applicable."
+                )
             self.update_banner_label.setText(label)
             self.update_banner.setVisible(True)
             self.update_banner_install_btn.setEnabled(True)
-            self.update_banner_install_btn.setText("Download & install")
+            self.update_banner_install_btn.setText("Open release page")
         self._notify_center(f"Update available: StreamKeep {tag}", "info")
 
-    def _on_update_install(self):
+    def _on_update_manual_download(self):
+        """Open the fixed release page; public metadata is never installed here."""
         payload = getattr(self, "_latest_update_payload", None) or {}
-        if not payload.get("asset"):
-            self._set_status("Update available but no authenticated Windows asset was attached.", "warning")
+        url = str(payload.get("release_url", "") or "")
+        if not url:
+            url = str((payload.get("asset") or {}).get("url", "") or "")
+        if not url.startswith("https://github.com/SysAdminDoc/StreamKeep/releases/"):
+            self._set_status("The release link was not valid.", "error")
             return
-        self.update_banner_install_btn.setEnabled(False)
-        self.update_banner_install_btn.setText("Downloading...")
-        worker = DownloadUpdateWorker(payload)
-        worker.progress.connect(self._on_update_download_progress)
-        worker.done.connect(self._on_update_download_done)
-        self._update_download_worker = worker
-        worker.start()
-
-    def _on_update_download_progress(self, pct, status):
-        if hasattr(self, "update_banner_install_btn"):
-            self.update_banner_install_btn.setText(
-                f"Downloading {status}" if status else f"Downloading {pct}%"
-            )
-
-    def _on_update_download_done(self, ok, path_or_err):
-        worker = getattr(self, "_update_download_worker", None)
-        if worker is not None and not worker.isRunning():
-            try:
-                worker.wait(200)
-            except Exception:
-                pass
-        self._update_download_worker = None
-        if not ok:
-            self._log(f"[UPDATE] {path_or_err}")
-            self._set_status(f"Update failed: {path_or_err}", "error")
-            if hasattr(self, "update_banner_install_btn"):
-                self.update_banner_install_btn.setEnabled(True)
-                self.update_banner_install_btn.setText("Download & install")
-            return
-        # Download complete — confirm self-replace + relaunch.
-        if not ask_premium_confirmation(
-            self,
-            title="Install the downloaded update?",
-            body="StreamKeep will close, install the publisher-authenticated build, and relaunch automatically.",
-            eyebrow="UPDATER",
-            badge_text="Restart required",
-            tone="warning",
-            summary_title="Any active download or recording will be interrupted.",
-            summary_body="Install now when you are ready for the app to restart itself.",
-            details_title="What happens next",
-            details_body=(
-                "1. StreamKeep closes.\n"
-                "2. Migration-sensitive state is snapshotted.\n"
-                "3. The signed build replaces the current executable.\n"
-                "4. If startup health confirmation fails, the previous build and state are restored."
-            ),
-            primary_label="Install and relaunch",
-            secondary_label="Not now",
-            default_action="secondary",
-            min_width=620,
-        ):
-            self._log("[UPDATE] User cancelled the install step.")
-            if hasattr(self, "update_banner_install_btn"):
-                self.update_banner_install_btn.setEnabled(True)
-                self.update_banner_install_btn.setText("Install now")
-            return
-        if arm_self_replace(path_or_err, self._latest_update_payload or {}):
-            self._log("[UPDATE] Armed self-replace, quitting now.")
-            from PyQt6.QtWidgets import QApplication
-            QApplication.quit()
+        if QDesktopServices.openUrl(QUrl(url)):
+            self._set_status("Opened the release page for manual verification.", "success")
         else:
-            self._set_status("Could not arm the update step. See log.", "error")
+            self._set_status("Could not open the release page.", "error")
 
     def _on_update_dismiss(self):
         payload = getattr(self, "_latest_update_payload", None) or {}
