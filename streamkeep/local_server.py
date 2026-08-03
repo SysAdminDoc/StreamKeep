@@ -1072,13 +1072,13 @@ def _build_handler(
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_upload_cancel()
             elif path == "/api/media-server/preview":
-                if self._require_auth(SCOPE_STATUS):
+                if self._require_auth(SCOPE_STATUS, mutating=True):
                     self._handle_api_media_server_preview()
             elif path == "/api/media-server/export":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_api_media_server_export()
             elif path == "/api/intelligence/preview":
-                if self._require_auth(SCOPE_STATUS):
+                if self._require_auth(SCOPE_STATUS, mutating=True):
                     self._handle_api_intelligence_preview()
             elif path == "/api/intelligence/summary":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
@@ -1114,7 +1114,7 @@ def _build_handler(
                 if self._require_auth(SCOPE_RECOVERY, mutating=True):
                     self._handle_api_operations_action()
             elif path == "/api/operations/export":
-                if self._require_auth(SCOPE_STATUS):
+                if self._require_auth(SCOPE_STATUS, mutating=True):
                     self._handle_api_operations_export()
             else:
                 self._json_response(404, {"ok": False, "err": "not_found"})

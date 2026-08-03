@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Required fresh JSON mutation proof on the status-scoped media-server preview,
+  intelligence preview, and operations export POST routes. The OpenAPI
+  document now exposes the timestamp and one-use nonce headers for every POST
+  operation.
+
 - Raised source dependency floors to match the hashed runtime lock: Qt 6.11.1,
   cryptography 49.0.0, urllib3 2.7.0, and Paramiko 5.0.0 for optional SFTP.
   The capability registry now blocks unsupported Paramiko versions with repair

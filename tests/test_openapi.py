@@ -26,6 +26,25 @@ class OpenApiSpecTests(unittest.TestCase):
         ]
         self.assertIn("Sec-Fetch-Site: same-origin", auth_description)
 
+    def test_post_operations_document_mutation_proof_headers(self):
+        spec = openapi.build_openapi_spec()
+        parameters = spec["components"]["parameters"]
+        self.assertEqual(parameters["MutationTimestamp"]["in"], "header")
+        self.assertEqual(parameters["MutationNonce"]["in"], "header")
+        for path, item in spec["paths"].items():
+            operation = item.get("post")
+            if operation is None:
+                continue
+            with self.subTest(path=path):
+                refs = {
+                    parameter["$ref"]
+                    for parameter in operation.get("parameters", [])
+                }
+                self.assertIn(
+                    "#/components/parameters/MutationTimestamp", refs
+                )
+                self.assertIn("#/components/parameters/MutationNonce", refs)
+
     def test_spec_version_tracks_package_version(self):
         from streamkeep import VERSION
         self.assertEqual(openapi.build_openapi_spec()["info"]["version"], VERSION)

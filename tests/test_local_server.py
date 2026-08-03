@@ -483,6 +483,44 @@ class LocalServerTests(unittest.TestCase):
                 )
                 self.assertEqual(error["err"], "request_timestamp_invalid")
 
+    def test_status_scope_post_routes_require_mutation_proof(self):
+        cases = (
+            "/api/media-server/preview",
+            "/api/intelligence/preview",
+            "/api/operations/export",
+        )
+        for path in cases:
+            with self.subTest(path=path, proof="nonce"):
+                error = self._expect_error(
+                    path,
+                    400,
+                    token=self.server.token,
+                    method="POST",
+                    data={},
+                    freshness=False,
+                )
+                self.assertEqual(error["err"], "request_timestamp_invalid")
+            with self.subTest(path=path, proof="content-type"):
+                error = self._expect_error(
+                    path,
+                    415,
+                    token=self.server.token,
+                    method="POST",
+                    headers={"Content-Type": "text/plain"},
+                    data={},
+                )
+                self.assertEqual(error["err"], "content_type_denied")
+            with self.subTest(path=path, proof="cross-site"):
+                error = self._expect_error(
+                    path,
+                    403,
+                    token=self.server.token,
+                    method="POST",
+                    headers={"Sec-Fetch-Site": "cross-site"},
+                    data={},
+                )
+                self.assertEqual(error["err"], "cross_site_denied")
+
     def test_mutation_rejects_cross_site_fetch_metadata_and_stale_timestamp(self):
         cross_site = self._expect_error(
             "/send_url",

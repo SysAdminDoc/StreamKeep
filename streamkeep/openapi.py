@@ -148,6 +148,26 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                     ),
                 }
             },
+            "parameters": {
+                "MutationTimestamp": {
+                    "name": "X-StreamKeep-Timestamp",
+                    "in": "header",
+                    "required": True,
+                    "schema": {"type": "integer", "format": "int64"},
+                    "description": "Current Unix timestamp in seconds.",
+                },
+                "MutationNonce": {
+                    "name": "X-StreamKeep-Nonce",
+                    "in": "header",
+                    "required": True,
+                    "schema": {
+                        "type": "string",
+                        "minLength": 22,
+                        "maxLength": 128,
+                    },
+                    "description": "One-use replay nonce for this request.",
+                },
+            },
             "schemas": {
                 "Error": _ok_error_schema(),
                 "Job": _job_schema(),
@@ -1132,6 +1152,14 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
             },
         },
     }
+    mutation_parameters = [
+        {"$ref": "#/components/parameters/MutationTimestamp"},
+        {"$ref": "#/components/parameters/MutationNonce"},
+    ]
+    for path_item in spec["paths"].values():
+        operation = path_item.get("post")
+        if operation is not None:
+            operation["parameters"] = list(mutation_parameters)
     return spec
 
 
