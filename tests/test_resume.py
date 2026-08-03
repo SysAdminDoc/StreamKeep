@@ -143,6 +143,17 @@ class ResumeTests(unittest.TestCase):
                     "media_sequence": 947210,
                     "discontinuity_sequence": 31,
                     "playlist_segment_count": 12,
+                    "refresh_elapsed_secs": 17.5,
+                    "refresh_events": [
+                        {
+                            "attempt": 1,
+                            "status": 403,
+                            "source": "hls",
+                            "reason": "expired manifest/token",
+                            "codec_changed": True,
+                            "unexpected": "discard me",
+                        },
+                    ],
                 }),
                 encoding="utf-8",
             )
@@ -152,6 +163,9 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(state.media_sequence, 947210)
             self.assertEqual(state.discontinuity_sequence, 31)
             self.assertEqual(state.playlist_segment_count, 12)
+            self.assertEqual(state.refresh_elapsed_secs, 17.5)
+            self.assertEqual(state.refresh_events[0]["status"], 403)
+            self.assertNotIn("unexpected", state.refresh_events[0])
 
     def test_hls_identity_negative_values_clamp(self):
         with tempfile.TemporaryDirectory() as tmpdir:

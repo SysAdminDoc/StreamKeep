@@ -2,11 +2,13 @@
 HTTP Range fallback and yt-dlp direct download mode."""
 
 import logging
+import json
 import os
 import re
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from glob import glob
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -20,6 +22,12 @@ from ..capabilities import (
     require_capability,
     resolve_tool_command,
 )
+from ..capture_refresh import (
+    MAX_REFRESH_ATTEMPTS,
+    describe_transition,
+    detect_manifest_expiry,
+    jittered_refresh_delay,
+)
 from ..http import guarded_curl, http_head_details, parallel_http_download
 from ..net_guard import (
     GuardedHTTPProxy,
@@ -27,6 +35,7 @@ from ..net_guard import (
     validate_remote_url,
 )
 from ..paths import (
+    FFMPEG_LOCAL_SAFETY,
     FFMPEG_FILTERED_HLS_INPUT_SAFETY,
     FFMPEG_REMOTE_INPUT_SAFETY,
     FFMPEG_REMOTE_SAFETY,
@@ -158,6 +167,21 @@ class DownloadWorker(QThread):
         self._twitch_ssai_manifest_path = ""
         self._twitch_ssai_refresher = None
         self._last_failure_reason = ""
+        # Native HLS/DASH delivery refresh. The public source identity stays
+        # fixed while the short-lived playlist/track URLs are replaced after
+        # a bounded 403/410 recovery. Failed attempts are kept as separate
+        # parts so a successful refresh can produce one final recording.
+        self.manifest_refresh_max = MAX_REFRESH_ATTEMPTS
+        self.manifest_refresh_attempts = 0
+        self.refresh_events = []
+        self._manifest_refresh_resolver = None
+        self._refresh_capable = False
+        self._refresh_outfile = ""
+        self._refresh_staging_dir = ""
+        self._refresh_parts = []
+        self._refresh_next_part = 0
+        self._refresh_had_failure = False
+        self._capture_elapsed_secs = 0.0
         # Resume sidecar state. When set the worker keeps it fresh on
         # segment completion and clears it on a clean finish. Callers
         # (main_window) attach this via `attach_resume_state` just before
@@ -197,6 +221,15 @@ class DownloadWorker(QThread):
             return
         self._resume_state = state
         if state is not None:
+            self.refresh_events = list(
+                getattr(state, "refresh_events", []) or []
+            )[-16:]
+            try:
+                self._capture_elapsed_secs = max(
+                    0.0, float(getattr(state, "refresh_elapsed_secs", 0.0) or 0.0)
+                )
+            except (TypeError, ValueError):
+                self._capture_elapsed_secs = 0.0
             # Pull shape from the worker so the sidecar is self-contained.
             state.playlist_url = self.playlist_url
             state.platform = self.source_platform or state.platform
@@ -255,6 +288,10 @@ class DownloadWorker(QThread):
             state.playlist_segment_count = int(
                 self.hls_playlist_segment_count or 0
             )
+            state.refresh_events = list(self.refresh_events[-16:])
+            state.refresh_elapsed_secs = max(
+                0.0, float(self._capture_elapsed_secs or 0.0)
+            )
             state.output_dir = self.output_dir
             state.segments = [list(s) for s in self.segments]
             if self.format_type == "ytdlp_direct" and self.segments:
@@ -290,6 +327,541 @@ class DownloadWorker(QThread):
         self.hls_playlist_segment_count = len(
             getattr(playlist, "segments", []) or []
         )
+
+    def set_manifest_refresh_resolver(self, resolver):
+        """Inject a delivery resolver for headless integrations and tests.
+
+        Production workers resolve ``webpage_url`` through the extractor
+        registry.  A callback is intentionally narrow: it returns either a
+        mapping with ``playlist_url``, ``audio_url`` and ``selected_tracks``
+        or a three-item tuple.  No callback result is persisted directly.
+        """
+        self._manifest_refresh_resolver = resolver
+
+    def _refresh_source_url(self):
+        """Return the stable page URL used to obtain fresh delivery URLs."""
+        source = str(self.webpage_url or self.ytdlp_source or "").strip()
+        if source:
+            return source
+        platform = str(self.source_platform or "").casefold()
+        source_id = str(self.source_id or "").strip()
+        if platform == "twitch":
+            if source_id.startswith("vod:"):
+                return f"https://www.twitch.tv/videos/{source_id[4:]}"
+            if source_id.startswith("channel:"):
+                return f"https://www.twitch.tv/{source_id[8:]}"
+        if platform == "kick":
+            if source_id.startswith("vod:"):
+                return f"https://kick.com/video/{source_id[4:]}"
+            if source_id.startswith("channel:"):
+                return f"https://kick.com/{source_id[8:]}"
+        return ""
+
+    def _manifest_refresh_kind(self, url=None):
+        """Return the refreshable manifest kind for this native job."""
+        if self._uses_ytdlp_download():
+            return ""
+        candidate = str(url or self.playlist_url or "")
+        kind = self._manifest_kind(candidate)
+        if kind:
+            return kind
+        format_type = str(self.format_type or "").casefold()
+        if format_type.startswith("hls"):
+            return "hls"
+        if format_type.startswith("dash"):
+            return "dash"
+        return ""
+
+    def _manifest_refresh_available(self):
+        return bool(
+            self._manifest_refresh_kind()
+            and (
+                callable(getattr(self, "_manifest_refresh_resolver", None))
+                or self._refresh_source_url()
+            )
+        )
+
+    @staticmethod
+    def _quality_track_records(quality):
+        return [
+            DownloadWorker._track_record(track)
+            for track in (getattr(quality, "tracks", []) or [])
+        ]
+
+    def _choose_refreshed_quality(self, info):
+        """Select the same representation from a freshly resolved source."""
+        qualities = [
+            quality for quality in (getattr(info, "qualities", []) or [])
+            if str(getattr(quality, "url", "") or "").strip()
+        ]
+        if not qualities:
+            return None
+        old_tracks = [
+            self._track_record(track) for track in (self.selected_tracks or [])
+        ]
+        old_primary = next(
+            (track for track in old_tracks if track.get("kind") == "video"),
+            old_tracks[0] if old_tracks else {},
+        )
+        old_resolution = str(old_primary.get("resolution") or "")
+        old_codec = str(old_primary.get("codec") or "")
+        old_name = str(getattr(self, "quality_name", "") or "")
+
+        def score(quality):
+            value = 0
+            if str(getattr(quality, "format_type", "") or "") == str(
+                self.format_type or ""
+            ):
+                value += 1000
+            if old_resolution and str(
+                getattr(quality, "resolution", "") or ""
+            ) == old_resolution:
+                value += 500
+            fresh_tracks = self._quality_track_records(quality)
+            if old_codec and any(
+                str(track.get("codec") or "") == old_codec
+                for track in fresh_tracks
+            ):
+                value += 250
+            if old_name and str(getattr(quality, "name", "") or "") == old_name:
+                value += 200
+            if str(getattr(quality, "audio_url", "") or "") == str(
+                self.audio_url or ""
+            ):
+                value += 25
+            value += min(100, int(getattr(quality, "bandwidth", 0) or 0) // 1_000_000)
+            return value
+
+        return max(qualities, key=score)
+
+    def _refresh_selected_tracks(self, quality):
+        """Map the prior track choices onto the refreshed quality."""
+        from ..models import default_media_tracks
+
+        fresh_tracks = list(getattr(quality, "tracks", []) or [])
+        if not self.selected_tracks:
+            return [
+                self._track_record(track)
+                for track in default_media_tracks(quality)
+            ]
+        selected = []
+        for old in self.selected_tracks:
+            old_record = self._track_record(old)
+            candidates = [
+                track for track in fresh_tracks
+                if str(getattr(track, "kind", ""))
+                == str(old_record.get("kind", ""))
+            ]
+            exact = next(
+                (
+                    track for track in candidates
+                    if old_record.get("id")
+                    and str(getattr(track, "id", ""))
+                    == str(old_record.get("id"))
+                ),
+                None,
+            )
+            if exact is None:
+                exact = next(
+                    (
+                        track for track in candidates
+                        if str(getattr(track, "codec", "") or "")
+                        == str(old_record.get("codec", "") or "")
+                        and str(getattr(track, "resolution", "") or "")
+                        == str(old_record.get("resolution", "") or "")
+                    ),
+                    candidates[0] if candidates else None,
+                )
+            selected.append(
+                self._track_record(exact if exact is not None else old_record)
+            )
+        return selected
+
+    def _resolve_fresh_delivery(self):
+        """Resolve the stable source and return fresh delivery fields."""
+        resolver = getattr(self, "_manifest_refresh_resolver", None)
+        if callable(resolver):
+            result = resolver(self)
+            if isinstance(result, dict):
+                return (
+                    str(result.get("playlist_url") or ""),
+                    str(result.get("audio_url") or ""),
+                    list(result.get("selected_tracks") or []),
+                    str(result.get("source") or self._manifest_refresh_kind()),
+                    result.get("playlist"),
+                )
+            if isinstance(result, (tuple, list)) and len(result) >= 3:
+                source_kind = self._manifest_refresh_kind()
+                fresh_quality = None
+                if len(result) >= 4:
+                    if isinstance(result[3], str):
+                        source_kind = result[3] or source_kind
+                    else:
+                        fresh_quality = result[3]
+                if len(result) >= 5:
+                    fresh_quality = result[4]
+                return (
+                    str(result[0] or ""),
+                    str(result[1] or ""),
+                    list(result[2] or []),
+                    source_kind,
+                    fresh_quality,
+                )
+            raise ValueError(
+                "manifest refresh resolver returned no delivery URLs"
+            )
+
+        source = self._refresh_source_url()
+        if not source:
+            raise ValueError("the download has no stable source page to re-resolve")
+        from ..extractors import Extractor
+
+        extractor = Extractor.detect(source)
+        if extractor is None:
+            raise ValueError("no extractor can re-resolve the stable source page")
+        for name in (
+            "request_headers", "cookies_browser", "auth_profile_id", "proxy",
+        ):
+            if hasattr(extractor, name):
+                setattr(extractor, name, getattr(self, name, ""))
+        info = extractor.resolve(
+            source,
+            log_fn=lambda message: self.log.emit(
+                f"[REFRESH] {sanitize_failure_reason(message)}"
+            ),
+        )
+        if info is None:
+            raise ValueError("the extractor could not resolve a fresh playlist")
+        quality = self._choose_refreshed_quality(info)
+        if quality is None:
+            new_url = str(getattr(info, "url", "") or "")
+            if not new_url:
+                raise ValueError("the refreshed source has no playable URL")
+            return (
+                new_url, "", list(self.selected_tracks or []),
+                self._manifest_refresh_kind(new_url), None,
+            )
+        return (
+            str(getattr(quality, "url", "") or ""),
+            str(getattr(quality, "audio_url", "") or ""),
+            self._refresh_selected_tracks(quality),
+            self._manifest_refresh_kind(getattr(quality, "url", "")),
+            quality,
+        )
+
+    def _fetch_refresh_identity(self, url, kind):
+        """Fetch a fresh manifest identity through the active guard."""
+        if kind != "hls" or self._guarded_proxy is None or not url:
+            return None
+        try:
+            from ..hls import parse_hls_media_playlist
+
+            body = guarded_curl(url, self._guarded_proxy.url, timeout=20)
+            if body and body.lstrip().startswith("#EXTM3U"):
+                return parse_hls_media_playlist(body, url)
+        except Exception as error:  # noqa: BLE001 - diagnostics must not abort refresh
+            self.log.emit(f"[REFRESH] Could not inspect fresh HLS identity: {error}")
+        return None
+
+    def _persist_refresh_state(self):
+        state = self._resume_state
+        if state is None:
+            return
+        state.playlist_url = self.playlist_url or state.playlist_url
+        state.audio_url = self.audio_url or ""
+        state.selected_tracks = [
+            self._track_record(track) for track in (self.selected_tracks or [])
+        ]
+        state.playlist_validator = self.hls_playlist_validator or ""
+        state.media_sequence = int(self.hls_media_sequence or 0)
+        state.discontinuity_sequence = int(
+            self.hls_discontinuity_sequence or 0
+        )
+        state.playlist_segment_count = int(
+            self.hls_playlist_segment_count or 0
+        )
+        state.refresh_events = list(self.refresh_events[-16:])
+        state.refresh_elapsed_secs = max(0.0, float(self._capture_elapsed_secs or 0.0))
+        save_resume_state(state)
+
+    def _wait_refresh_delay(self, delay):
+        remaining = max(0.0, float(delay or 0.0))
+        while remaining > 0:
+            if self._cancel:
+                return False
+            interval = min(0.25, remaining)
+            time.sleep(interval)
+            remaining -= interval
+        return not self._cancel
+
+    def _refresh_delivery_urls(self, status):
+        """Boundedly re-resolve and replace the current delivery URLs."""
+        max_attempts = max(1, int(getattr(self, "manifest_refresh_max", 3) or 3))
+        while self.manifest_refresh_attempts < max_attempts:
+            self.manifest_refresh_attempts += 1
+            attempt = self.manifest_refresh_attempts
+            delay = jittered_refresh_delay(attempt)
+            self.log.emit(
+                f"[REFRESH] HTTP {int(status or 0)} expired the delivery URL; "
+                f"re-resolving ({attempt}/{max_attempts}) after {delay:.2f}s"
+            )
+            if not self._wait_refresh_delay(delay):
+                return False
+            old_tracks = list(self.selected_tracks or [])
+            old_media = self.hls_media_sequence
+            old_disc = self.hls_discontinuity_sequence
+            try:
+                (
+                    fresh_url, fresh_audio, fresh_tracks, source_kind,
+                    fresh_quality,
+                ) = self._resolve_fresh_delivery()
+                if not fresh_url:
+                    raise ValueError("fresh resolver returned an empty playlist URL")
+                validate_remote_url(fresh_url)
+                if fresh_audio:
+                    validate_remote_url(fresh_audio)
+                for track in fresh_tracks:
+                    track_url = self._track_record(track).get("url")
+                    if track_url:
+                        validate_remote_url(track_url)
+                fresh_identity = self._fetch_refresh_identity(
+                    fresh_url, source_kind or self._manifest_refresh_kind(fresh_url)
+                )
+                transition = describe_transition(
+                    previous_tracks=old_tracks,
+                    fresh_tracks=fresh_tracks,
+                    previous_media_sequence=old_media,
+                    fresh_media_sequence=(
+                        getattr(fresh_identity, "media_sequence", 0)
+                        if fresh_identity is not None else 0
+                    ),
+                    previous_discontinuity_sequence=old_disc,
+                    fresh_discontinuity_sequence=(
+                        getattr(fresh_identity, "discontinuity_sequence", 0)
+                        if fresh_identity is not None else 0
+                    ),
+                )
+                self.playlist_url = fresh_url
+                self.audio_url = fresh_audio
+                self.selected_tracks = list(fresh_tracks or [])
+                if fresh_identity is not None:
+                    self.set_hls_playlist_identity(fresh_identity)
+                elif fresh_quality is not None:
+                    # The representation tracks still provide codec seam
+                    # information when a media identity fetch is unavailable.
+                    self.hls_playlist_validator = ""
+                self._stop_guarded_transport()
+                if not self._ensure_guarded_transport():
+                    raise ValueError("fresh manifest failed guarded preflight")
+                if not self._prepare_twitch_ssai_manifest():
+                    raise ValueError("fresh Twitch manifest could not be staged")
+                event = {
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "attempt": attempt,
+                    "status": int(status or 0),
+                    "source": source_kind or self._manifest_refresh_kind(),
+                    "reason": "expired manifest/token",
+                    **transition,
+                }
+                self.refresh_events = [*self.refresh_events[-15:], event]
+                self._persist_refresh_state()
+                details = []
+                if transition.get("discontinuity"):
+                    details.append("discontinuity seam recorded")
+                if transition.get("codec_changed"):
+                    details.append("codec change recorded")
+                suffix = f" ({'; '.join(details)})" if details else ""
+                self.log.emit(
+                    f"[REFRESH] Delivery URL refreshed for the same recording"
+                    f"{suffix}"
+                )
+                return True
+            except Exception as error:  # noqa: BLE001 - bounded retry boundary
+                self.log.emit(
+                    f"[REFRESH] Re-resolve attempt {attempt}/{max_attempts} "
+                    f"failed: {sanitize_failure_reason(error)}"
+                )
+                if self._cancel:
+                    return False
+        self.log.emit(
+            f"[REFRESH GIVE UP] Manifest/token refresh exhausted after "
+            f"{max_attempts} attempt(s)"
+        )
+        return False
+
+    def _begin_refresh_staging(self, outfile):
+        self._refresh_outfile = str(outfile)
+        self._refresh_staging_dir = f"{outfile}.streamkeep-refresh"
+        self._refresh_parts = []
+        self._refresh_next_part = 0
+        try:
+            staging = Path(self._refresh_staging_dir)
+            staging.mkdir(parents=True, exist_ok=True)
+            suffix = Path(outfile).suffix.casefold()
+            candidates = [
+                path for path in staging.iterdir()
+                if path.is_file() and path.suffix.casefold() == suffix
+                and path.name.startswith("part-")
+            ]
+            candidates.sort(key=lambda path: path.name.casefold())
+            self._refresh_parts = [str(path) for path in candidates]
+            for path in candidates:
+                match = re.search(r"part-(\d+)", path.name)
+                if match:
+                    self._refresh_next_part = max(
+                        self._refresh_next_part, int(match.group(1)) + 1
+                    )
+            if candidates:
+                self._refresh_had_failure = True
+        except OSError as error:
+            self._refresh_capable = False
+            self.log.emit(f"[REFRESH] Could not create staging area: {error}")
+
+    def _next_refresh_part(self):
+        suffix = Path(self._refresh_outfile).suffix or ".mp4"
+        path = Path(self._refresh_staging_dir) / (
+            f"part-{self._refresh_next_part:04d}{suffix}"
+        )
+        self._refresh_next_part += 1
+        return str(path)
+
+    def _retain_refresh_part(self, path):
+        try:
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                if path not in self._refresh_parts:
+                    self._refresh_parts.append(path)
+                self._refresh_had_failure = True
+                return True
+        except OSError:
+            pass
+        return False
+
+    def _write_refresh_report(self, outfile, parts):
+        if not self.refresh_events:
+            return
+        report = {
+            "version": 1,
+            "recording": os.path.basename(str(outfile)),
+            "events": list(self.refresh_events[-16:]),
+            "parts": [os.path.basename(str(path)) for path in parts],
+        }
+        path = f"{outfile}.streamkeep-refresh.json"
+        tmp = f"{path}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(report, handle, indent=2, ensure_ascii=False)
+                handle.write("\n")
+            os.replace(tmp, path)
+        except OSError as error:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            self.log.emit(f"[REFRESH] Could not write seam report: {error}")
+
+    def _cleanup_refresh_staging(self):
+        try:
+            staging = Path(self._refresh_staging_dir)
+            for child in staging.iterdir():
+                if child.is_file() or child.is_symlink():
+                    child.unlink()
+            staging.rmdir()
+        except (OSError, ValueError):
+            pass
+
+    def _stitch_refresh_parts(self, outfile, parts):
+        """Remux refresh parts into the original output path."""
+        if len(parts) == 1:
+            try:
+                os.replace(parts[0], outfile)
+                return os.path.isfile(outfile) and os.path.getsize(outfile) > 0
+            except OSError as error:
+                self._last_failure_reason = f"refresh part adoption failed: {error}"
+                return False
+        list_path = Path(self._refresh_staging_dir) / "concat.txt"
+        try:
+            list_path.write_text(
+                "".join(
+                    "file '{}'\n".format(
+                        str(Path(path)).replace("'", r"'\''")
+                    )
+                    for path in parts
+                ),
+                encoding="utf-8",
+            )
+            ffmpeg = self._ffmpeg_path or resolve_tool_command("ffmpeg")
+            suffix = Path(outfile).suffix or ".mp4"
+            remux_path = str(
+                Path(outfile).with_name(
+                    f".{Path(outfile).stem}.streamkeep-remux{suffix}"
+                )
+            )
+            command = [
+                ffmpeg, *FFMPEG_LOCAL_SAFETY,
+                "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(list_path),
+                "-c", "copy", remux_path,
+            ]
+            with self._proc_lock:
+                self._proc = subprocess.Popen(
+                    command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    text=True, bufsize=1, encoding="utf-8", errors="replace",
+                    creationflags=_CREATE_NO_WINDOW,
+                    env=self._guarded_child_env(),
+                )
+            output_lines = []
+            for line in self._proc.stderr:
+                line = line.strip()
+                if line:
+                    output_lines.append(line)
+            self._proc.stderr.close()
+            self._proc.wait()
+            if (
+                self._proc.returncode == 0
+                and os.path.isfile(remux_path)
+                and os.path.getsize(remux_path) > 0
+            ):
+                os.replace(remux_path, outfile)
+                return True
+            self._last_failure_reason = (
+                "refresh seam remux failed: "
+                + ("\n".join(output_lines[-3:]) or "ffmpeg returned no diagnostic")
+            )
+        except (OSError, CapabilityUnavailableError, ValueError) as error:
+            self._last_failure_reason = f"refresh seam remux failed: {error}"
+        finally:
+            try:
+                if os.path.exists(str(list_path)):
+                    os.remove(str(list_path))
+            except OSError:
+                pass
+            try:
+                if "remux_path" in locals() and os.path.exists(remux_path):
+                    os.remove(remux_path)
+            except OSError:
+                pass
+        self.log.emit(
+            f"[REFRESH GIVE UP] Could not stitch refreshed capture parts: "
+            f"{sanitize_failure_reason(self._last_failure_reason)}"
+        )
+        return False
+
+    def _finish_refresh_capture(self, outfile, current_part):
+        if current_part and current_part not in self._refresh_parts:
+            self._refresh_parts.append(current_part)
+        parts = [path for path in self._refresh_parts if os.path.isfile(path)]
+        if not parts:
+            return False
+        if not self._stitch_refresh_parts(outfile, parts):
+            return False
+        self._write_refresh_report(outfile, parts)
+        self._cleanup_refresh_staging()
+        self.log.emit(
+            f"[REFRESH] Finalized one continuous recording from {len(parts)} "
+            "capture part(s)"
+        )
+        return True
 
     def cancel(self):
         self._cancel = True
@@ -1914,26 +2486,52 @@ class DownloadWorker(QThread):
                     return
                 continue  # next segment (but live is always single-seg)
 
-            # Build ffmpeg command with optional audio merge.
-            cmd = self._build_ffmpeg_download_cmd(outfile, start, duration)
+            # A refresh-capable native capture writes each attempt into a
+            # private part.  This lets a token refresh preserve bytes already
+            # captured instead of overwriting the only output file.
+            self._refresh_capable = self._manifest_refresh_available()
+            if self._refresh_capable:
+                self._begin_refresh_staging(outfile)
 
-            # Retry loop for transient ffmpeg failures
-            attempts = self.max_retries + 1
+            # Retry loop for transient ffmpeg failures. Ordinary failures use
+            # the configured retry budget; 403/410 refreshes have their own
+            # smaller bounded budget and jittered delay.
             last_error = ""
             segment_done_flag = False
-            for attempt in range(attempts):
+            attempts_used = 0
+            ordinary_retries = 0
+            refresh_exhausted = False
+            while True:
                 if self._cancel:
                     return
-                if attempt > 0:
-                    backoff = min(2 ** attempt, 60)  # cap at 60s
+                if ordinary_retries > 0:
+                    backoff = min(2 ** ordinary_retries, 60)  # cap at 60s
                     self.log.emit(
-                        f"[RETRY {attempt}/{self.max_retries}] {label} "
+                        f"[RETRY {ordinary_retries}/{self.max_retries}] {label} "
                         f"(waiting {backoff}s)"
                     )
                     for _ in range(backoff * 2):
                         if self._cancel:
                             return
                         time.sleep(0.5)
+                attempts_used += 1
+                attempt_outfile = (
+                    self._next_refresh_part()
+                    if self._refresh_capable else outfile
+                )
+                attempt_elapsed_base = (
+                    max(0.0, float(self._capture_elapsed_secs or 0.0))
+                    if self._refresh_capable
+                    and (self.manifest_refresh_attempts or self.refresh_events)
+                    else 0.0
+                )
+                attempt_start = start + attempt_elapsed_base
+                attempt_duration = duration
+                if duration > 0 and attempt_elapsed_base:
+                    attempt_duration = max(1, duration - attempt_elapsed_base)
+                cmd = self._build_ffmpeg_download_cmd(
+                    attempt_outfile, attempt_start, attempt_duration,
+                )
                 try:
                     # stdout is discarded — ffmpeg writes all progress to
                     # stderr. If stdout were piped without being drained,
@@ -1963,6 +2561,11 @@ class DownloadWorker(QThread):
                                 except (ValueError, IndexError):
                                     continue
                                 elapsed = h * 3600 + m * 60 + s
+                                if self._refresh_capable:
+                                    self._capture_elapsed_secs = max(
+                                        self._capture_elapsed_secs,
+                                        attempt_elapsed_base + elapsed,
+                                    )
                                 pct = (
                                     0 if is_live_capture
                                     else min(99, int((elapsed / max(duration, 1)) * 100))
@@ -1989,9 +2592,14 @@ class DownloadWorker(QThread):
 
                     self._proc.wait()
                     if self._cancel:
-                        if is_live_capture and os.path.exists(outfile):
-                            size = os.path.getsize(outfile)
+                        if is_live_capture and os.path.exists(attempt_outfile):
+                            size = os.path.getsize(attempt_outfile)
                             if size > 1024:
+                                if self._refresh_capable:
+                                    self._retain_refresh_part(attempt_outfile)
+                                    self._finish_refresh_capture(
+                                        outfile, attempt_outfile,
+                                    )
                                 self.segment_done.emit(seg_idx, fmt_size(size))
                                 self.log.emit(
                                     f"[STOP] Kept partial live capture {label} - "
@@ -2003,15 +2611,24 @@ class DownloadWorker(QThread):
                                 if self._resume_state is not None:
                                     self._resume_state = None
                                     clear_resume_state(self.output_dir)
-                        elif os.path.exists(outfile):
+                        elif os.path.exists(attempt_outfile):
                             try:
-                                os.remove(outfile)
+                                os.remove(attempt_outfile)
                             except OSError:
                                 pass
                         return
 
-                    if (self._proc.returncode == 0 and os.path.exists(outfile)
-                            and os.path.getsize(outfile) > 0):
+                    if (
+                        self._proc.returncode == 0
+                        and os.path.exists(attempt_outfile)
+                        and os.path.getsize(attempt_outfile) > 0
+                    ):
+                        if self._refresh_capable:
+                            if not self._finish_refresh_capture(
+                                outfile, attempt_outfile,
+                            ):
+                                last_error = self._last_failure_reason
+                                break
                         size = os.path.getsize(outfile)
                         self.progress.emit(seg_idx, 100, "Complete")
                         self.segment_done.emit(seg_idx, fmt_size(size))
@@ -2020,15 +2637,47 @@ class DownloadWorker(QThread):
                         segment_done_flag = True
                         break
                     else:
-                        if os.path.exists(outfile) and os.path.getsize(outfile) == 0:
+                        if (
+                            os.path.exists(attempt_outfile)
+                            and os.path.getsize(attempt_outfile) == 0
+                        ):
                             try:
-                                os.remove(outfile)
+                                os.remove(attempt_outfile)
                             except OSError:
                                 pass
-                        last_error = "\n".join(output_lines[-5:]) or f"ffmpeg exit {self._proc.returncode}"
-                        self.log.emit(f"[FAIL attempt {attempt + 1}/{attempts}] {label}")
+                        last_error = (
+                            "\n".join(output_lines[-5:])
+                            or f"ffmpeg exit {self._proc.returncode}"
+                        )
+                        self.log.emit(
+                            f"[FAIL attempt {attempts_used}] {label}"
+                        )
+                        expiry = detect_manifest_expiry(output_lines)
+                        if expiry is not None and self._refresh_capable:
+                            self._retain_refresh_part(attempt_outfile)
+                            if self._refresh_delivery_urls(expiry.status):
+                                continue
+                            refresh_exhausted = True
+                            last_error = (
+                                f"Manifest/token refresh exhausted after "
+                                f"{self.manifest_refresh_attempts} attempt(s) "
+                                f"for HTTP {expiry.status}"
+                            )
+                            break
+                        if self._refresh_capable and is_live_capture:
+                            self._retain_refresh_part(attempt_outfile)
+                        elif self._refresh_capable:
+                            try:
+                                if os.path.exists(attempt_outfile):
+                                    os.remove(attempt_outfile)
+                            except OSError:
+                                pass
                         if is_live_capture:
                             break
+                        if ordinary_retries >= self.max_retries:
+                            break
+                        ordinary_retries += 1
+                        continue
 
                 except FileNotFoundError:
                     logger.error("ffmpeg not found in PATH for segment %d (%s)", seg_idx, label)
@@ -2043,17 +2692,46 @@ class DownloadWorker(QThread):
                 except Exception as e:
                     logger.error("Unexpected error for segment %d (%s): %s", seg_idx, label, e)
                     last_error = str(e)
-                    self.log.emit(f"[ERROR attempt {attempt + 1}/{attempts}] {label}: {e}")
+                    self.log.emit(
+                        f"[ERROR attempt {attempts_used}] {label}: {e}"
+                    )
+                    if is_live_capture or ordinary_retries >= self.max_retries:
+                        break
+                    ordinary_retries += 1
 
             if not segment_done_flag and not self._cancel:
-                if (is_live_capture and os.path.exists(outfile)
-                        and os.path.getsize(outfile) > 0):
+                partial_outfile = (
+                    outfile if not self._refresh_capable
+                    else (
+                        self._refresh_parts[-1]
+                        if self._refresh_parts else ""
+                    )
+                )
+                if (
+                    is_live_capture
+                    and not refresh_exhausted
+                    and partial_outfile
+                    and os.path.exists(partial_outfile)
+                    and os.path.getsize(partial_outfile) > 0
+                ):
                     # A live capture that ended on an ffmpeg error but left a
                     # usable recording is a completed partial, not a failure —
                     # finalize it (mirrors the exit-0 path above). Without this
                     # the worker emitted neither `all_done` nor `error`, hanging
                     # the CLI/headless callers indefinitely and leaving GUI/queue
                     # jobs stuck in the "downloading" state forever.
+                    if self._refresh_capable:
+                        self._retain_refresh_part(partial_outfile)
+                        if not self._finish_refresh_capture(
+                            outfile, partial_outfile,
+                        ):
+                            all_succeeded = False
+                            self.error.emit(
+                                seg_idx,
+                                self._last_failure_reason
+                                or "Could not finalize refreshed capture",
+                            )
+                            continue
                     size = os.path.getsize(outfile)
                     self.progress.emit(seg_idx, 100, "Complete")
                     self.segment_done.emit(seg_idx, fmt_size(size))
@@ -2068,7 +2746,7 @@ class DownloadWorker(QThread):
                         logger.error("All retries exhausted for segment %d (%s): %s", seg_idx, label, last_error[:120])
                         self.error.emit(
                             seg_idx,
-                            f"Failed after {attempts} attempt(s): {last_error[:120]}",
+                            f"Failed after {attempts_used} attempt(s): {last_error[:120]}",
                         )
                         self.log.emit(f"[GIVE UP] {label} — all retries exhausted")
                     else:

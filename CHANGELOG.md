@@ -15,6 +15,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   unsupported artifacts are reported explicitly, and apply backs up before
   activating staged library and tag indexes without touching media.
 
+- Added bounded mid-capture HLS/DASH delivery refresh. A 403/410 playlist or
+  segment failure now re-resolves the stable source page with jittered limits,
+  preserves the existing resume sidecar and capture offset, remuxes refreshed
+  parts into one recording, and writes a credential-free seam report when a
+  discontinuity or codec change is observed.
+
 - Added canonical deletion tombstones for user, retention, and lifecycle
   removals. Recycled user media is now skipped by monitored sources, playlist
   expansion, and queue dispatch until its tombstone is cleared; the Settings

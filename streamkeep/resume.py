@@ -64,6 +64,16 @@ def _sanitize_int_range(value, minimum, maximum, default=0):
     return max(minimum, min(maximum, parsed))
 
 
+def _sanitize_float_range(value, minimum, maximum, default=0.0):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if not math.isfinite(parsed):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def _sanitize_segments(value):
     if not isinstance(value, (list, tuple)):
         return []
@@ -136,6 +146,43 @@ def _sanitize_selected_tracks(value):
     return cleaned
 
 
+def _sanitize_refresh_events(value):
+    """Keep refresh diagnostics bounded and free of delivery credentials."""
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    for raw in value[:16]:
+        if not isinstance(raw, dict):
+            continue
+        event = {
+            "attempt": _sanitize_int_range(raw.get("attempt", 0), 0, 16),
+            "status": _sanitize_int_range(raw.get("status", 0), 0, 999),
+            "source": _sanitize_text(raw.get("source", ""), max_len=32),
+            "reason": _sanitize_text(raw.get("reason", ""), max_len=128),
+            "discontinuity": _sanitize_bool(raw.get("discontinuity", False)),
+            "codec_changed": _sanitize_bool(raw.get("codec_changed", False)),
+            "media_window_advanced": _sanitize_bool(
+                raw.get("media_window_advanced", False)
+            ),
+            "media_sequence_before": _sanitize_int_range(
+                raw.get("media_sequence_before", 0), 0, 10**15
+            ),
+            "media_sequence_after": _sanitize_int_range(
+                raw.get("media_sequence_after", 0), 0, 10**15
+            ),
+            "discontinuity_sequence_before": _sanitize_int_range(
+                raw.get("discontinuity_sequence_before", 0), 0, 10**15
+            ),
+            "discontinuity_sequence_after": _sanitize_int_range(
+                raw.get("discontinuity_sequence_after", 0), 0, 10**15
+            ),
+        }
+        if raw.get("at"):
+            event["at"] = _sanitize_timestamp(raw.get("at"))
+        cleaned.append(event)
+    return cleaned
+
+
 def _sanitize_resume_payload(data, output_dir):
     if not isinstance(data, dict):
         return None
@@ -167,6 +214,12 @@ def _sanitize_resume_payload(data, output_dir):
         ),
         "playlist_segment_count": _sanitize_int_range(
             data.get("playlist_segment_count", 0), 0, MAX_SEGMENTS
+        ),
+        "refresh_events": _sanitize_refresh_events(
+            data.get("refresh_events", [])
+        ),
+        "refresh_elapsed_secs": _sanitize_float_range(
+            data.get("refresh_elapsed_secs", 0.0), 0.0, 10**9
         ),
         "selected_tracks": _sanitize_selected_tracks(
             data.get("selected_tracks", [])

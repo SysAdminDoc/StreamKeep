@@ -287,6 +287,11 @@ class ResumeState:
     media_sequence: int = 0               # EXT-X-MEDIA-SEQUENCE at download start
     discontinuity_sequence: int = 0       # EXT-X-DISCONTINUITY-SEQUENCE at start
     playlist_segment_count: int = 0       # segments present when resume was written
+    # Credential-free diagnostics from bounded mid-capture delivery refreshes.
+    # Delivery URLs never belong in this list; the active playlist_url above
+    # is refreshed in place for compatibility with the existing resume flow.
+    refresh_events: list[dict[str, object]] = field(default_factory=list)
+    refresh_elapsed_secs: float = 0.0
     selected_tracks: list[dict[str, object]] = field(default_factory=list)
     ytdlp_source: str = ""
     ytdlp_format: str = ""
