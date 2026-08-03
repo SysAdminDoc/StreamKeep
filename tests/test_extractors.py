@@ -668,6 +668,8 @@ class TestRumbleExtractorResolve(unittest.TestCase):
         self.assertEqual(info.platform, "Rumble")
         self.assertEqual(info.title, "My Rumble Video")
         self.assertEqual(info.channel, "mychannel")
+        self.assertEqual(info.source_id, "video:vabcde")
+        self.assertEqual(info.webpage_url, "https://rumble.com/vabcde")
         self.assertEqual(len(info.qualities), 2)
         self.assertFalse(info.is_live)
         self.assertEqual(info.total_secs, 600)
@@ -845,6 +847,11 @@ class TestSoundCloudExtractorResolve(unittest.TestCase):
         self.assertEqual(len(info.qualities), 1)
         self.assertEqual(info.qualities[0].format_type, "mp4")
         self.assertEqual(info.channel, "artist")
+        self.assertTrue(info.source_id.startswith("track:"))
+        self.assertEqual(
+            info.webpage_url,
+            "https://soundcloud.com/artist/cool-track",
+        )
 
     @patch(f"{_SOUNDCLOUD}.curl_json")
     @patch(f"{_SOUNDCLOUD}.curl")
@@ -1030,6 +1037,11 @@ class TestRedditExtractorResolve(unittest.TestCase):
         self.assertEqual(info.platform, "Reddit")
         self.assertEqual(info.title, "Cool clip")
         self.assertEqual(info.channel, "gaming")
+        self.assertEqual(info.source_id, "post:abc123")
+        self.assertEqual(
+            info.webpage_url,
+            "https://www.reddit.com/r/gaming/comments/abc123",
+        )
         self.assertEqual(len(info.qualities), 2)
 
     @patch(f"{_REDDIT}.curl_json")
@@ -1187,6 +1199,11 @@ class TestAudiusExtractorResolve(unittest.TestCase):
         self.assertEqual(info.platform, "Audius")
         self.assertEqual(info.title, "Chill Beats")
         self.assertEqual(info.total_secs, 240)
+        self.assertEqual(info.source_id, "track:track123")
+        self.assertEqual(
+            info.webpage_url,
+            "https://audius.co/artist/chill-beats",
+        )
         self.assertEqual(len(info.qualities), 1)
         self.assertIn("stream", info.qualities[0].name)
         self.assertIn("track123", info.qualities[0].url)

@@ -1117,6 +1117,7 @@ def save_completed_recording(
     manifest: dict[str, Any] | None = None,
 ) -> int | None:
     """Atomically persist completed history and its optional manifest."""
+    entry_dict = _canonical_history_entry(entry_dict)
     with _write_lock:
         db = _connect()
         try:
@@ -1257,7 +1258,6 @@ def publish_recording(history_id: int) -> dict[str, Any] | None:
         return None
     if history_id <= 0:
         return None
-    entry_dict = _canonical_history_entry(entry_dict)
     with _write_lock:
         db = _connect()
         try:

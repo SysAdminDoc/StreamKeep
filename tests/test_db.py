@@ -136,6 +136,81 @@ class DbMigrationTests(unittest.TestCase):
             self.assertEqual(found["source_id"], "vod:123456")
             self.assertIsNone(wrong_platform)
 
+    def test_v16_migration_persists_canonical_url_and_leaves_unknown_id_blank(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("""
+                CREATE TABLE history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT '',
+                    source_id TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    channel TEXT NOT NULL DEFAULT '',
+                    quality TEXT NOT NULL DEFAULT '',
+                    size TEXT NOT NULL DEFAULT '',
+                    path TEXT NOT NULL DEFAULT '',
+                    url TEXT NOT NULL DEFAULT '',
+                    favorite INTEGER NOT NULL DEFAULT 0,
+                    watched INTEGER NOT NULL DEFAULT 0,
+                    watch_position_secs REAL NOT NULL DEFAULT 0.0,
+                    bookmarks TEXT NOT NULL DEFAULT '[]'
+                )
+            """)
+            conn.execute(
+                "INSERT INTO history(platform, title, url) VALUES(?,?,?)",
+                (
+                    "Direct",
+                    "Unknown page",
+                    "https://WWW.Example.com/watch?b=2&utm_source=test&a=1",
+                ),
+            )
+            conn.execute("PRAGMA user_version = 15")
+            conn.commit()
+            conn.close()
+
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                row = db.find_history_by_url(
+                    "https://example.com/watch?a=1&b=2"
+                )
+
+            self.assertIsNotNone(row)
+            self.assertEqual(row["source_id"], "")
+            self.assertEqual(
+                row["webpage_url"],
+                "https://example.com/watch?a=1&b=2",
+            )
+
+    def test_history_persistence_deduplicates_three_url_forms_by_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                for index, url in enumerate((
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "HTTP://YOUTUBE.COM/watch?utm_source=x&v=dQw4w9WgXcQ",
+                    "https://youtu.be/dQw4w9WgXcQ?si=shared",
+                )):
+                    db.save_history_entry({
+                        "title": f"Copy {index}",
+                        "platform": "yt-dlp",
+                        "url": url,
+                    })
+                found = db.find_history_by_identity(
+                    "yt-dlp", "dQw4w9WgXcQ"
+                )
+
+            self.assertIsNotNone(found)
+            self.assertEqual(
+                found["webpage_url"],
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            )
+            self.assertEqual(found["source_id"], "dQw4w9WgXcQ")
+
     def test_monitor_argument_template_attachment_persists(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"

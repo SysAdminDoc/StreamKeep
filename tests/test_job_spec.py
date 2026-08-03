@@ -15,6 +15,22 @@ def test_default_spec_roundtrips():
     assert restored.parallel_connections == 4
 
 
+def test_identity_is_canonical_at_spec_construction_and_persistence():
+    spec = DownloadJobSpec(
+        source_platform="yt-dlp",
+        webpage_url=(
+            "HTTP://WWW.YOUTUBE.COM/watch?feature=share&"
+            "v=dQw4w9WgXcQ&utm_campaign=button"
+        ),
+    )
+    assert spec.source_platform == "yt-dlp"
+    assert spec.source_id == "dQw4w9WgXcQ"
+    assert spec.webpage_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    payload = spec.to_dict()
+    assert payload["source_id"] == "dQw4w9WgXcQ"
+    assert payload["webpage_url"] == spec.webpage_url
+
+
 def test_spec_is_frozen():
     spec = DownloadJobSpec()
     with pytest.raises(AttributeError):

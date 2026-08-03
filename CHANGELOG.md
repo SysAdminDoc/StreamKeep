@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Persisted a canonical media identity and public page URL across native
+  extractors, immutable jobs, history rows, and metadata sidecars. URL keys now
+  normalize host, tracking, query order, and provider-specific page forms;
+  existing history rows migrate conservatively and leave unrecoverable IDs
+  unknown.
+
 - Narrowed the browser companion to Chrome 144+ with `activeTab`-scoped,
   user-started media capture and loopback-only host access. Popup pages now
   route pairing and send requests through the service worker; the extension no

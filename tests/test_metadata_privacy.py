@@ -15,6 +15,7 @@ from streamkeep.metadata import (
     load_metadata_sidecar,
 )
 from streamkeep.models import QualityInfo, StreamInfo
+from streamkeep.paths import source_archive_path
 from streamkeep.postprocess.bundle_worker import BundleWorker
 
 
@@ -49,6 +50,52 @@ def _twitch_info():
 
 
 class PublicMetadataTests(unittest.TestCase):
+    def test_canonical_identity_ignores_tracking_and_url_form(self):
+        urls = (
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            "&utm_source=share&feature=share",
+            "HTTP://YOUTUBE.COM/watch?feature=share&v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?si=shared",
+        )
+        provenances = [
+            build_archival_provenance(
+                StreamInfo(platform="yt-dlp", webpage_url=url)
+            )
+            for url in urls
+        ]
+        self.assertEqual(
+            {(p.platform, p.source_id, p.webpage_url) for p in provenances},
+            {
+                (
+                    "yt-dlp",
+                    "dQw4w9WgXcQ",
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                )
+            },
+        )
+
+    def test_generic_page_query_is_sorted_and_archive_key_is_stable(self):
+        self.assertEqual(
+            canonical_webpage_url(
+                "https://WWW.Example.com/watch?b=2&utm_medium=email&a=1#top"
+            ),
+            "https://example.com/watch?a=1&b=2",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch("streamkeep.paths.CONFIG_DIR", Path(tmpdir)):
+                first = Path(
+                    source_archive_path(
+                        "https://www.youtube.com/watch?"
+                        "v=dQw4w9WgXcQ&utm_source=share"
+                    )
+                ).name
+                second = Path(
+                    source_archive_path(
+                        "https://youtu.be/dQw4w9WgXcQ?si=shared"
+                    )
+                ).name
+        self.assertEqual(first, second)
+
     def test_signed_twitch_delivery_url_becomes_stable_provenance(self):
         provenance = build_archival_provenance(_twitch_info())
 
