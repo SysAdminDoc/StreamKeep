@@ -7,7 +7,11 @@ from pathlib import Path
 
 
 _REQUIREMENT = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)")
+_SOURCE_REQUIREMENT = re.compile(
+    r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?\s*>=\s*([0-9][0-9A-Za-z.\-]*)"
+)
 _HASH = re.compile(r"--hash=sha256:[0-9a-f]{64}(?:\s*\\)?$")
+_VERSION = re.compile(r"[0-9]+(?:[.\-][0-9]+)*")
 
 
 def canonical_name(name):
@@ -55,4 +59,49 @@ def validate_hashed_lock(path):
             errors.append(f"{package} has no SHA-256 hash")
     if not found:
         errors.append("lock contains no exact requirements")
+    return errors
+
+
+def source_requirement_floors(path):
+    """Return direct ``requirements.txt`` package floors by canonical name."""
+    path = Path(path)
+    floors = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        match = _SOURCE_REQUIREMENT.match(line)
+        if match is None:
+            continue
+        name = canonical_name(match.group(1))
+        version = match.group(2)
+        previous = floors.get(name)
+        if previous is not None and previous != version:
+            raise ValueError(
+                f"Duplicate source requirement with different floors: {name}"
+            )
+        floors[name] = version
+    return dict(sorted(floors.items()))
+
+
+def _version_tuple(value):
+    match = _VERSION.fullmatch(str(value or "").replace("-", "."))
+    if not match:
+        return ()
+    return tuple(int(part) for part in match.group(0).split("."))
+
+
+def validate_source_floors(requirements_path, lock_path):
+    """Return errors when direct source floors exceed or evade the lock."""
+    locked = dict(locked_packages(lock_path))
+    errors = []
+    for name, floor in source_requirement_floors(requirements_path).items():
+        pinned = locked.get(name)
+        if pinned is None:
+            errors.append(f"{name} has a source floor but is not pinned in the lock")
+            continue
+        if not _version_tuple(pinned) >= _version_tuple(floor):
+            errors.append(
+                f"{name} source floor {floor} exceeds locked version {pinned}"
+            )
     return errors

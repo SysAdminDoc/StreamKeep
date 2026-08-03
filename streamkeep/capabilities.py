@@ -22,6 +22,7 @@ from .sqlite_runtime import runtime_status as sqlite_runtime_status
 MINIMUM_VERSIONS = {
     "yt_dlp": "2026.07.04",
     "pillow": "12.3.0",
+    "paramiko": "5.0.0",
     "curl": "8.21.0",
     "ffmpeg": "8.1.2",
     "ffprobe": "8.1.2",
@@ -453,6 +454,11 @@ def _probe_registry():
         ["thumbnail-decode", "chat-render", "image-export"],
         "Install Pillow 12.3.0 or newer from the signed StreamKeep dependency set.",
     )
+    paramiko = _probe_module(
+        "paramiko", "Paramiko", "paramiko", MINIMUM_VERSIONS["paramiko"],
+        ["sftp-upload"],
+        "Install Paramiko 5.0.0 or newer from the signed StreamKeep dependency set.",
+    )
     curl = _probe_executable(
         "curl", ["curl"], ["--version"], MINIMUM_VERSIONS["curl"],
         ["https-fetch", "range-download", "webhook"],
@@ -478,6 +484,7 @@ def _probe_registry():
         "javascript": javascript,
         "youtube": youtube,
         "pillow": pillow,
+        "paramiko": paramiko,
         "curl": curl,
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,

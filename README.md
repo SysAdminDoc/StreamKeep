@@ -234,8 +234,8 @@ it after a successful remux.
 - Python 3.11 or newer.
 - FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
 - curl 8.21.0 or newer in `PATH`.
-- Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` for authenticated portable-secret backups.
-- The pinned Python security floors are yt-dlp 2026.07.04 and Pillow 12.3.0. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; the installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
+- Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` 49.0.0 or newer for authenticated portable-secret backups. Optional SFTP delivery requires Paramiko 5.0.0 or newer and rejects older runtimes through the capability registry.
+- The pinned Python security floors are yt-dlp 2026.07.04, Pillow 12.3.0, urllib3 2.7.0, and the Qt 6.11.1 runtime component. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; the installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
 - StreamKeep records the exact path, version, provenance, and enabled capabilities for each runtime dependency. Settings, onboarding, and diagnostic snapshots expose that registry; missing or below-floor tools block only the dependent operation and include repair guidance. Startup never installs packages implicitly.
 - Optional: `mpv`/`libmpv` for embedded playback, browser cookies libraries for cookie import, Streamlink 8.4+ (`py -m pip install "streamlink>=8.4,<9"`) for guarded Twitch/Kick live capture, `gallery-dl` (`pip install -U gallery-dl`) for the `gallery` subcommand (image galleries and social-media posts — Twitter/X, Instagram, Pixiv, boorus, and more), and `lux` (`go install github.com/iawia002/lux@latest`) for the `lux` subcommand (Chinese platforms — Bilibili, Douyin, Youku, and more). Optional engines are never bundled or installed at startup; Streamlink is used only after enabling its live-capture toggle and sharing StreamKeep's guarded proxy.
 
@@ -302,7 +302,8 @@ python packaging/release_gate.py --list    # show the stages
 
 Stages run cheapest-first and stop at the first failure, which the gate names
 explicitly: `compileall`, `pyflakes`, `translations` (deterministic extraction
-plus catalog compilation), `tests`, `capability-claims` (every shipped claim
+plus catalog compilation), `dependency-floors` (direct source floors cannot
+exceed the hashed runtime lock), `tests`, `capability-claims` (every shipped claim
 has a reachable, tested path and a matching README token), `release-claims`
 (documentation must not promise a signing story this project does not have,
 and must label partial translations), `advisories` (pip-audit over the

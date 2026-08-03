@@ -112,7 +112,7 @@ class SnapshotTests(unittest.TestCase):
                     set(capabilities),
                     {
                         "sqlite", "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
-                        "pillow", "curl", "ffmpeg", "ffprobe",
+                        "pillow", "paramiko", "curl", "ffmpeg", "ffprobe",
                     },
                 )
                 for record in capabilities.values():

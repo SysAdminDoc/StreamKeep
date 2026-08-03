@@ -62,6 +62,7 @@ def test_pyinstaller_spec_includes_release_assets():
     spec = (ROOT / "StreamKeep.spec").read_text(encoding="utf-8")
     compact = spec.replace(" ", "")
     assert "datas=datas" in compact
+    assert "collect_submodules('paramiko')" in spec
     for required in (
         "assets",
         "browser-extension",
@@ -227,6 +228,34 @@ def test_release_locks_are_exact_hashed_and_build_lock_is_runtime_superset():
     assert len(runtime) >= 20
     assert all(build.get(name) == version for name, version in runtime.items())
     assert build["pyinstaller"] == "6.21.0"
+
+
+def test_source_requirement_floors_match_the_runtime_lock():
+    from locked_requirements import source_requirement_floors, validate_source_floors
+
+    requirements = ROOT / "requirements.txt"
+    lock = ROOT / "requirements.lock"
+    floors = source_requirement_floors(requirements)
+    assert validate_source_floors(requirements, lock) == []
+    assert floors["cryptography"] == "49.0.0"
+    assert floors["paramiko"] == "5.0.0"
+    assert floors["pyqt6-qt6"] == "6.11.1"
+    assert floors["urllib3"] == "2.7.0"
+
+
+def test_source_requirement_floor_checker_rejects_lock_drift(tmp_path):
+    from locked_requirements import validate_source_floors
+
+    requirements = tmp_path / "requirements.txt"
+    lock = tmp_path / "requirements.lock"
+    requirements.write_text("urllib3>=2.8.0\n", encoding="utf-8")
+    lock.write_text(
+        "urllib3==2.7.0 \\\n    --hash=sha256:" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_source_floors(requirements, lock)
+    assert errors == ["urllib3 source floor 2.8.0 exceeds locked version 2.7.0"]
 
 
 def test_lock_driven_sbom_and_license_inventory_are_deterministic(

@@ -55,6 +55,7 @@ def collect_tree(relative, dest):
 
 hiddenimports = []
 hiddenimports += collect_submodules('streamkeep')
+hiddenimports += collect_submodules('paramiko')
 hiddenimports += collect_submodules('yt_dlp')
 hiddenimports += collect_submodules('yt_dlp_ejs')
 

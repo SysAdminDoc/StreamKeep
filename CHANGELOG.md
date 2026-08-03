@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Raised source dependency floors to match the hashed runtime lock: Qt 6.11.1,
+  cryptography 49.0.0, urllib3 2.7.0, and Paramiko 5.0.0 for optional SFTP.
+  The capability registry now blocks unsupported Paramiko versions with repair
+  guidance, and the release gate fails when a direct source floor exceeds its
+  lock pin.
+
 - Hardened named yt-dlp argument templates with an explicit allow-list and
   option-specific value validation. Executable paths, plugin/config delegation,
   output paths, update commands, and link writers are rejected; imported

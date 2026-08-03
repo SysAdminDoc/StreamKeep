@@ -29,6 +29,7 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertEqual(capabilities.MINIMUM_VERSIONS, {
             "yt_dlp": "2026.07.04",
             "pillow": "12.3.0",
+            "paramiko": "5.0.0",
             "curl": "8.21.0",
             "ffmpeg": "8.1.2",
             "ffprobe": "8.1.2",
@@ -40,6 +41,23 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertTrue(capabilities.version_at_least("ffmpeg 8.1.2-full", "8.1.2"))
         self.assertFalse(capabilities.version_at_least("curl 8.19.0", "8.21.0"))
         self.assertFalse(capabilities.version_at_least("unknown", "8.21.0"))
+
+    def test_paramiko_below_floor_is_unsafe_with_repair_guidance(self):
+        spec = type("Spec", (), {"origin": r"C:\Python\paramiko\__init__.py"})()
+        with mock.patch.object(
+            capabilities.importlib.util, "find_spec", return_value=spec
+        ), mock.patch.object(
+            capabilities.importlib.metadata, "version", return_value="4.0.0"
+        ):
+            record = capabilities._probe_module(
+                "paramiko", "Paramiko", "paramiko", "5.0.0",
+                ["sftp-upload"], "Install Paramiko 5.0.0 or newer.",
+            )
+
+        self.assertTrue(record["available"])
+        self.assertFalse(record["supported"])
+        self.assertEqual(record["minimum"], "5.0.0")
+        self.assertIn("Install Paramiko 5.0.0", capabilities.format_capability_problem(record))
 
     def test_unsafe_tool_is_blocked_with_repair_guidance(self):
         unsafe = _record(

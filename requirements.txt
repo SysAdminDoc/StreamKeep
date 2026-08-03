@@ -1,11 +1,15 @@
 # Core runtime dependencies for source checkouts.
 # Requires Python 3.11+ (3.10 EOL Oct 2026; yt-dlp minimum is 3.11).
-PyQt6>=6.6
+PyQt6>=6.11.0
+# Pin the Qt runtime floor independently of the PyQt6 wrapper version.
+PyQt6-Qt6>=6.11.1
 Pillow>=12.3.0
 yt-dlp[default]>=2026.07.04
 send2trash>=1.8
 websocket-client>=1.7
 keyring>=25.0
 argon2-cffi>=25.1.0
-cryptography>=48.0.1
+cryptography>=49.0.0
 defusedxml>=0.7.1
+urllib3>=2.7.0
+paramiko>=5.0.0

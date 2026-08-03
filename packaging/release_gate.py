@@ -121,6 +121,16 @@ def stage_translations() -> tuple[bool, str]:
     return ok, detail
 
 
+def stage_dependency_floors() -> tuple[bool, str]:
+    """Ensure source dependency floors cannot undercut the hashed lock."""
+    from locked_requirements import validate_source_floors
+
+    problems = validate_source_floors(
+        ROOT / "requirements.txt", ROOT / "requirements.lock"
+    )
+    return (not problems), "\n".join(problems)
+
+
 def stage_tests() -> tuple[bool, str]:
     return _run([
         sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
@@ -205,6 +215,7 @@ STAGES = (
     ("compileall", stage_compileall),
     ("pyflakes", stage_pyflakes),
     ("translations", stage_translations),
+    ("dependency-floors", stage_dependency_floors),
     ("tests", stage_tests),
     ("capability-claims", stage_capability_claims),
     ("release-claims", stage_release_claims),

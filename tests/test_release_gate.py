@@ -90,6 +90,10 @@ class StageDriverTests(unittest.TestCase):
     def test_listing_stages_exits_cleanly(self):
         self.assertEqual(gate.main(["--list"]), 0)
 
+    def test_dependency_floor_stage_passes_for_the_checked_in_lock(self):
+        ok, detail = gate.stage_dependency_floors()
+        self.assertTrue(ok, detail)
+
     def test_no_stage_introduces_signing_or_ci(self):
         # The gate is local and unsigned by policy; nothing in it may shell out
         # to a signing tool or a CI runner.

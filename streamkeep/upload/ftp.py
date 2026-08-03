@@ -12,19 +12,19 @@ import ftplib
 import os
 import ssl
 
+from ..capabilities import CapabilityUnavailableError, require_capability
 from .base import UploadDestination
 
 _CHUNK_SIZE = 1024 * 1024
 
 
-def _paramiko_available():
-    """Return whether Paramiko can be imported without importing it eagerly."""
-    import importlib.util
-
+def _require_paramiko():
+    """Return a registry-backed SFTP readiness result with repair guidance."""
     try:
-        return importlib.util.find_spec("paramiko") is not None
-    except (ImportError, ValueError):
-        return False
+        require_capability("paramiko", refresh=True)
+    except CapabilityUnavailableError as error:
+        return False, str(error)
+    return True, ""
 
 
 class FTPDestination(UploadDestination):
@@ -152,8 +152,9 @@ class FTPDestination(UploadDestination):
         )
         if err:
             return False, err
-        if not _paramiko_available():
-            return False, "paramiko not installed for SFTP. Run: pip install paramiko"
+        ready, capability_error = _require_paramiko()
+        if not ready:
+            return False, capability_error
 
         client = None
         sftp = None
@@ -222,8 +223,9 @@ class FTPDestination(UploadDestination):
             settings, err = self._resolve_settings(default_port=22, label="SFTP")
             if err:
                 return False, err
-            if not _paramiko_available():
-                return False, "paramiko not installed"
+            ready, capability_error = _require_paramiko()
+            if not ready:
+                return False, capability_error
             client = None
             try:
                 client = self._connect_sftp_client(settings)
