@@ -68,6 +68,8 @@ class DownloadWorker(QThread):
         self.ytdlp_container = "mp4"
         self.ytdlp_audio_format = ""
         self.ytdlp_audio_quality = ""
+        self.dub_lang = ""
+        self.mute = False
         self.request_headers = {}
         self.cookies_browser = ""
         # Opaque site-bound authentication profile ID (V50). The worker
@@ -211,6 +213,8 @@ class DownloadWorker(QThread):
             state.ytdlp_container = self.ytdlp_container or "mp4"
             state.ytdlp_audio_format = self.ytdlp_audio_format or ""
             state.ytdlp_audio_quality = self.ytdlp_audio_quality or ""
+            state.dub_lang = self.dub_lang or ""
+            state.mute = bool(self.mute)
             state.download_subs = bool(self.download_subs)
             state.capture_youtube_chat = bool(self.capture_youtube_chat)
             state.subtitle_languages = self.subtitle_languages or ""
@@ -302,6 +306,7 @@ class DownloadWorker(QThread):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
+            resolve_dubbed_format_spec,
             validate_hls_key_override,
             validate_sponsorblock_options, validate_subtitle_options,
             validate_external_downloader_options,
@@ -317,6 +322,8 @@ class DownloadWorker(QThread):
             container=self.ytdlp_container,
             audio_format=self.ytdlp_audio_format,
             audio_quality=self.ytdlp_audio_quality,
+            dub_lang=self.dub_lang,
+            mute=self.mute,
         )
         subtitle_options = validate_subtitle_options(
             enabled=self.download_subs,
@@ -356,15 +363,25 @@ class DownloadWorker(QThread):
             splits=self.ytdlp_aria2c_splits,
             min_split_size=self.ytdlp_aria2c_min_split_size,
         )
-        format_spec = options["format_spec"]
-        if options["audio_format"] and not self.ytdlp_format:
+        format_spec = resolve_dubbed_format_spec(
+            format_spec=options["format_spec"],
+            audio_format=options["audio_format"],
+            dub_lang=options["dub_lang"],
+        )
+        if not format_spec and options["audio_format"]:
             format_spec = "bestaudio/best"
+        if options["mute"] and not format_spec:
+            # Prefer a video-only representation. The postprocessor args below
+            # also strip audio from custom/combined format expressions.
+            format_spec = "bestvideo/best"
         if not format_spec and not hls_key_options["value"]:
             raise ValueError("yt-dlp format specification is empty")
 
         cmd = list(["yt-dlp"] if export else ytdlp_command())
         if format_spec:
             cmd.extend(["-f", format_spec])
+        if options["dub_lang"]:
+            cmd.append("--audio-multistreams")
         cmd.extend([
             "--no-part",
             "--newline",
@@ -388,6 +405,14 @@ class DownloadWorker(QThread):
             cmd.extend([
                 "--merge-output-format", options["container"],
                 "--remux-video", options["container"],
+            ])
+        if options["mute"]:
+            # yt-dlp owns the merge/remux lifecycle; pass -an to every ffmpeg
+            # output stage it can invoke so a combined source cannot leave an
+            # empty or silent audio stream behind.
+            cmd.extend([
+                "--postprocessor-args", "Merger+ffmpeg_o:-an",
+                "--postprocessor-args", "VideoRemuxer+ffmpeg_o:-an",
             ])
         # Site-bound authentication profile (V50) decides first; without a
         # covering profile no credential is attached at all.
@@ -561,7 +586,12 @@ class DownloadWorker(QThread):
         return bool(
             self.format_type == "ytdlp_direct"
             and self.ytdlp_source
-            and (self.ytdlp_format or self.ytdlp_audio_format)
+            and (
+                self.ytdlp_format
+                or self.ytdlp_audio_format
+                or self.dub_lang
+                or self.mute
+            )
         )
 
     @staticmethod
@@ -858,11 +888,12 @@ class DownloadWorker(QThread):
                 executable, *FFMPEG_REMOTE_SAFETY,
                 "-hide_banner", "-loglevel", "info",
                 *self._ffmpeg_input_args(self.playlist_url),
-                "-c", "copy", "-f", "segment",
+                "-c", "copy", *( ["-an"] if self.mute else [] ),
+                "-f", "segment",
                 "-segment_time", str(int(self.chunk_length_secs)),
                 "-reset_timestamps", "1", "-strftime", "0", "-y", base,
             ]
-        if self.audio_url:
+        if self.audio_url and not self.mute:
             if self.format_type == "mp4":
                 return [
                     executable, *FFMPEG_REMOTE_SAFETY,
@@ -884,7 +915,8 @@ class DownloadWorker(QThread):
                 executable, *FFMPEG_REMOTE_SAFETY,
                 "-hide_banner", "-loglevel", "info",
                 *self._ffmpeg_input_args(self.playlist_url),
-                "-c", "copy", "-y", outfile,
+                "-c", "copy", *( ["-an"] if self.mute else [] ),
+                "-y", outfile,
             ]
         else:
             cmd = [
@@ -893,6 +925,8 @@ class DownloadWorker(QThread):
                 *self._ffmpeg_input_args(self.playlist_url, start=start),
                 "-c", "copy",
             ]
+        if self.mute:
+            cmd.append("-an")
         if not is_live_capture:
             cmd.extend(["-t", str(duration)])
         cmd.extend(["-y", outfile])
@@ -913,6 +947,10 @@ class DownloadWorker(QThread):
         self, outfile, start, duration, *, executable,
     ):
         records = [self._track_record(track) for track in self.selected_tracks]
+        if self.mute:
+            records = [record for record in records if record.get("kind") != "audio"]
+            if not any(record.get("kind") == "video" for record in records):
+                raise ValueError("Mute mode requires a selected video track")
         if len(records) > 32:
             raise ValueError("at most 32 media tracks can be muxed")
         allowed = {"video": "v", "audio": "a", "subtitle": "s"}
@@ -979,6 +1017,8 @@ class DownloadWorker(QThread):
             cmd.extend(["-c:a", "copy"])
         if any(record["kind"] == "subtitle" for record in records):
             cmd.extend(["-c:s", "mov_text"])
+        if self.mute:
+            cmd.append("-an")
         if duration > 0:
             cmd.extend(["-t", str(duration)])
         if duration <= 0 and self.chunk_length_secs > 0:

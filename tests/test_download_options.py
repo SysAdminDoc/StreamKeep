@@ -6,6 +6,7 @@ from streamkeep.download_options import (
     format_command_argv, is_aria2c_compatible_source,
     normalize_ytdlp_arg_templates,
     parse_ytdlp_template_text, resolve_ytdlp_arg_template,
+    resolve_dubbed_format_spec,
     sanitize_download_target_url,
     validate_download_options, validate_external_downloader_options,
     validate_hls_key_override,
@@ -134,6 +135,38 @@ def test_audio_quality_rejects_invalid_values(value):
 def test_audio_quality_requires_extract_mode():
     with pytest.raises(ValueError, match="requires audio-extract"):
         validate_download_options(audio_quality="128K")
+
+
+def test_dubbed_audio_language_selects_audio_branch_and_normalizes_code():
+    options = validate_download_options(dub_lang="EN")
+
+    assert options["dub_lang"] == "en"
+    assert options["mute"] is False
+    assert resolve_dubbed_format_spec(
+        format_spec=options["format_spec"],
+        audio_format=options["audio_format"],
+        dub_lang=options["dub_lang"],
+    ) == "bv*+ba[language^=en]/bv*+ba/b"
+
+
+@pytest.mark.parametrize("value", ["english", "e", "en;--exec", "en\n"])
+def test_dubbed_audio_language_rejects_unsafe_codes(value):
+    with pytest.raises(ValueError, match="Dubbed audio language"):
+        validate_download_options(dub_lang=value)
+
+
+def test_dubbed_audio_language_requires_audio_selector_in_custom_format():
+    with pytest.raises(ValueError, match="audio selector"):
+        validate_download_options(format_spec="137+251", dub_lang="es")
+
+
+def test_mute_is_video_only_and_cannot_combine_with_audio_controls():
+    options = validate_download_options(mute=True)
+    assert options["mute"] is True
+    with pytest.raises(ValueError, match="Mute mode"):
+        validate_download_options(mute=True, audio_format="mp3")
+    with pytest.raises(ValueError, match="Mute mode"):
+        validate_download_options(mute=True, dub_lang="en")
 
 
 def test_subtitle_language_expression_is_preserved_verbatim():

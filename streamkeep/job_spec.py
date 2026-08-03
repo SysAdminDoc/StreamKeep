@@ -37,6 +37,11 @@ class DownloadJobSpec:
     ytdlp_container: str = "mp4"
     ytdlp_audio_format: str = ""
     ytdlp_audio_quality: str = ""
+    # Per-download output preferences (V40). ``dub_lang`` selects a matching
+    # yt-dlp audio representation; ``mute`` strips audio from native and
+    # yt-dlp video outputs.
+    dub_lang: str = ""
+    mute: bool = False
     # Browser-captured replay headers live only for the active job.  They are
     # deliberately omitted from serialized specs and resume sidecars.
     request_headers: tuple[tuple[str, str], ...] = ()
@@ -172,6 +177,8 @@ class DownloadJobSpec:
         worker.ytdlp_container = self.ytdlp_container
         worker.ytdlp_audio_format = self.ytdlp_audio_format
         worker.ytdlp_audio_quality = self.ytdlp_audio_quality
+        worker.dub_lang = self.dub_lang
+        worker.mute = self.mute
         worker.request_headers = dict(self.request_headers)
         worker.cookies_browser = self.cookies_browser
         worker.auth_profile_id = self.auth_profile_id
@@ -239,6 +246,8 @@ class DownloadJobSpec:
             ytdlp_container=worker.ytdlp_container or "mp4",
             ytdlp_audio_format=worker.ytdlp_audio_format or "",
             ytdlp_audio_quality=worker.ytdlp_audio_quality or "",
+            dub_lang=getattr(worker, "dub_lang", "") or "",
+            mute=bool(getattr(worker, "mute", False)),
             request_headers=tuple(
                 (str(name), str(value))
                 for name, value in getattr(worker, "request_headers", {}).items()

@@ -1787,6 +1787,8 @@ class DownloadQueueMixin:
                 state.ytdlp_container = worker.ytdlp_container or "mp4"
                 state.ytdlp_audio_format = worker.ytdlp_audio_format or ""
                 state.ytdlp_audio_quality = worker.ytdlp_audio_quality or ""
+                state.dub_lang = worker.dub_lang or ""
+                state.mute = bool(worker.mute)
                 state.download_subs = bool(worker.download_subs)
                 state.capture_youtube_chat = bool(worker.capture_youtube_chat)
                 state.subtitle_languages = worker.subtitle_languages or ""

@@ -143,7 +143,8 @@ def _run_download(args):
         sys.exit(1)
 
     from .download_options import (
-        validate_download_options, validate_external_downloader_options,
+        resolve_dubbed_format_spec, validate_download_options,
+        validate_external_downloader_options,
         validate_sponsorblock_options,
         validate_subtitle_options, validate_ytdlp_transfer_options,
     )
@@ -179,6 +180,7 @@ def _run_download(args):
         getattr(args, "container", ""),
         getattr(args, "audio_format", ""),
         getattr(args, "audio_quality", ""),
+        getattr(args, "dub_lang", ""),
         subtitle_requested,
         sponsorblock_requested,
         transfer_requested,
@@ -195,6 +197,8 @@ def _run_download(args):
             container=getattr(args, "container", ""),
             audio_format=getattr(args, "audio_format", ""),
             audio_quality=getattr(args, "audio_quality", ""),
+            dub_lang=getattr(args, "dub_lang", ""),
+            mute=getattr(args, "mute", False),
         )
         subtitle_options = validate_subtitle_options(
             enabled=subtitle_requested,
@@ -447,12 +451,25 @@ def _run_download(args):
             ytdlp_source=qi.ytdlp_source,
             ytdlp_format=(
                 output_options["format_spec"]
-                or ("bestaudio/best" if output_options["audio_format"] else qi.ytdlp_format)
+                or (
+                    resolve_dubbed_format_spec(
+                        audio_format=output_options["audio_format"],
+                        dub_lang=output_options["dub_lang"],
+                    )
+                    if output_options["dub_lang"]
+                    else (
+                        "bestaudio/best"
+                        if output_options["audio_format"]
+                        else qi.ytdlp_format
+                    )
+                )
             ),
             ytdlp_format_sort=output_options["format_sort"],
             ytdlp_container=output_options["container"],
             ytdlp_audio_format=output_options["audio_format"],
             ytdlp_audio_quality=output_options["audio_quality"],
+            dub_lang=output_options["dub_lang"],
+            mute=output_options["mute"],
             download_subs=subtitle_options["enabled"],
             capture_youtube_chat=bool(getattr(args, "youtube_chat", False)),
             subtitle_languages=subtitle_options["languages"],
@@ -1701,6 +1718,14 @@ def build_parser():
         help="Audio encoder quality (0-10 or bitrate such as 128K)",
     )
     dl.add_argument(
+        "--dub-lang", default="",
+        help="Prefer a dubbed yt-dlp audio track (ISO 639-1 code, e.g. en)",
+    )
+    dl.add_argument(
+        "--mute", action="store_true",
+        help="Strip audio and write a video-only output",
+    )
+    dl.add_argument(
         "--arg-template", default="",
         help="Named structured yt-dlp argument template from Settings",
     )
@@ -2290,12 +2315,14 @@ def run_cli(argv=None):
         for name in (
             "format_spec", "format_sort", "format_sort_preset", "container",
             "audio_format", "audio_quality", "sub_langs", "convert_subs",
-            "sub_delivery",
+            "sub_delivery", "dub_lang",
         ):
             if not hasattr(args, name):
                 setattr(args, name, "")
         if not hasattr(args, "auto_subs"):
             args.auto_subs = False
+        if not hasattr(args, "mute"):
+            args.mute = False
         for name, default in (
             ("concurrent_fragments", 0),
             ("retries", ""),

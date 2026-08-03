@@ -67,6 +67,11 @@ YTDLP_TEMPLATE_DENIED_OPTIONS = frozenset({
 _AUDIO_QUALITY_RE = re.compile(
     r"(?:10|[0-9](?:\.\d+)?)|(?:[1-9][0-9]*(?:\.[0-9]+)?[kKmM])"
 )
+_DUB_LANG_RE = re.compile(r"[A-Za-z]{2}(?:-[A-Za-z]{2})?")
+_AUDIO_SELECTOR_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:ba|bestaudio)(?:\*)?(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 _RATE_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?[bBkKmMgGtT]?")
 _WAIT_FOR_VIDEO_RE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 _RETRY_SLEEP_RE = re.compile(r"[A-Za-z0-9_.:+*/=,-]+")
@@ -312,6 +317,47 @@ def resolve_format_sort(*, preset="", custom=""):
     return custom
 
 
+def resolve_dubbed_format_spec(*, format_spec="", audio_format="", dub_lang=""):
+    """Add a bounded language preference to a yt-dlp audio selector.
+
+    yt-dlp exposes the audio ``language`` field to format selectors.  A
+    language preference therefore belongs on the audio branch of the format
+    expression rather than in an extractor-specific command argument.  When
+    a caller supplies a raw expression, require an explicit ``ba`` or
+    ``bestaudio`` branch so a numeric format id cannot silently defeat the
+    requested language.
+    """
+    language = _safe_argument(
+        dub_lang, "Dubbed audio language", max_len=5
+    ).strip()
+    if not language:
+        return str(format_spec or "")
+    if not _DUB_LANG_RE.fullmatch(language):
+        raise ValueError(
+            "Dubbed audio language must be an ISO 639-1 code such as en or es"
+        )
+    language = language.lower()
+    expression = str(format_spec or "")
+    marker = f"[language^={language}]"
+    if marker in expression.lower():
+        return expression
+    if not expression:
+        if audio_format:
+            return f"bestaudio{marker}/bestaudio"
+        return f"bv*+ba{marker}/bv*+ba/b"
+    match = _AUDIO_SELECTOR_RE.search(expression)
+    if not match:
+        raise ValueError(
+            "Dubbed audio language requires a format expression with an "
+            "audio selector such as ba"
+        )
+    return (
+        expression[:match.end()]
+        + marker
+        + expression[match.end():]
+    )
+
+
 def validate_download_options(
     *,
     format_spec="",
@@ -320,6 +366,8 @@ def validate_download_options(
     container="",
     audio_format="",
     audio_quality="",
+    dub_lang="",
+    mute=False,
 ):
     """Validate and normalize yt-dlp format/output settings.
 
@@ -354,8 +402,26 @@ def validate_download_options(
             numeric_quality = None
         if numeric_quality is not None and not 0 <= numeric_quality <= 10:
             raise ValueError("Numeric audio quality must be between 0 and 10")
+    normalized_dub_lang = _safe_argument(
+        dub_lang, "Dubbed audio language", max_len=5
+    ).strip().lower()
+    if normalized_dub_lang and not _DUB_LANG_RE.fullmatch(normalized_dub_lang):
+        raise ValueError(
+            "Dubbed audio language must be an ISO 639-1 code such as en or es"
+        )
+    mute = bool(mute)
+    if mute and (normalized_audio or quality or normalized_dub_lang):
+        raise ValueError(
+            "Mute mode cannot be combined with audio extraction or dubbed audio"
+        )
+    normalized_format = _safe_argument(format_spec, "Format specification")
+    resolve_dubbed_format_spec(
+        format_spec=normalized_format,
+        audio_format=normalized_audio,
+        dub_lang=normalized_dub_lang,
+    )
     return {
-        "format_spec": _safe_argument(format_spec, "Format specification"),
+        "format_spec": normalized_format,
         "format_sort": resolve_format_sort(
             preset=format_sort_preset,
             custom=format_sort,
@@ -363,6 +429,8 @@ def validate_download_options(
         "container": normalized_container,
         "audio_format": normalized_audio,
         "audio_quality": quality,
+        "dub_lang": normalized_dub_lang,
+        "mute": mute,
     }
 
 

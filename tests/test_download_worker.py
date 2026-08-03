@@ -568,6 +568,58 @@ def test_ytdlp_audio_cmd_extracts_requested_codec_and_quality(tmp_path):
     assert "--remux-video" not in cmd
 
 
+def test_ytdlp_cmd_selects_dubbed_audio_language_and_multistreams(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker.ytdlp_format = ""
+    worker.dub_lang = "es"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("-f") + 1] == "bv*+ba[language^=es]/bv*+ba/b"
+    assert "--audio-multistreams" in cmd
+
+
+def test_ytdlp_mute_passes_video_only_ffmpeg_postprocessor_args(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker.mute = True
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    postprocessor_args = [
+        cmd[index + 1]
+        for index, value in enumerate(cmd[:-1])
+        if value == "--postprocessor-args"
+    ]
+    assert "-an" in " ".join(postprocessor_args)
+    assert "-x" not in cmd
+
+
+def test_native_mute_strips_audio_input_and_output_mapping(tmp_path):
+    worker = DownloadWorker(
+        "https://video.example.com/video.m3u8",
+        [(0, "capture", 0, 30)],
+        str(tmp_path),
+        "hls",
+    )
+    worker.audio_url = "https://audio.example.com/audio.m3u8"
+    worker.mute = True
+
+    cmd = worker._build_ffmpeg_download_cmd(
+        str(tmp_path / "capture.mp4"), 0, 30, executable="ffmpeg"
+    )
+
+    assert "-an" in cmd
+    assert "1:a:0" not in cmd
+
+
 def test_ytdlp_subtitle_cmd_supports_two_languages_conversion_and_embed(
     tmp_path, monkeypatch
 ):

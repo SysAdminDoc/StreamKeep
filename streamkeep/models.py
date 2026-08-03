@@ -291,6 +291,8 @@ class ResumeState:
     ytdlp_container: str = "mp4"
     ytdlp_audio_format: str = ""
     ytdlp_audio_quality: str = ""
+    dub_lang: str = ""
+    mute: bool = False
     download_subs: bool = False
     capture_youtube_chat: bool = False
     subtitle_languages: str = ""

@@ -842,7 +842,7 @@ class DownloadSingleMixin:
             self._log(f"[SMART] Applied profile: {smart_job['_smart_profile']}")
         ytdlp_override_keys = {
             "format_spec", "format_sort_preset", "container",
-            "audio_format", "audio_quality", "subtitle_mode",
+            "audio_format", "audio_quality", "dub_lang", "subtitle_mode",
             "sponsorblock_mode",
         }
         ytdlp_override_keys.update(
@@ -872,7 +872,8 @@ class DownloadSingleMixin:
                 validate_hls_key_override,
                 resolve_ytdlp_arg_template,
                 resolve_ytdlp_transfer_options,
-                validate_download_options, validate_sponsorblock_options,
+                resolve_dubbed_format_spec, validate_download_options,
+                validate_sponsorblock_options,
                 validate_subtitle_options,
             )
             ytdlp_options = validate_download_options(
@@ -881,6 +882,8 @@ class DownloadSingleMixin:
                 container=_dl_overrides.get("container", ""),
                 audio_format=_dl_overrides.get("audio_format", ""),
                 audio_quality=_dl_overrides.get("audio_quality", ""),
+                dub_lang=_dl_overrides.get("dub_lang", ""),
+                mute=_dl_overrides.get("mute", False),
             )
             subtitle_mode = _dl_overrides.get("subtitle_mode", "")
             if subtitle_mode == "disabled":
@@ -974,7 +977,13 @@ class DownloadSingleMixin:
             )
             return False
 
-        if ytdlp_options["format_spec"]:
+        if ytdlp_options["dub_lang"]:
+            ytdlp_format = resolve_dubbed_format_spec(
+                format_spec=ytdlp_options["format_spec"],
+                audio_format=ytdlp_options["audio_format"],
+                dub_lang=ytdlp_options["dub_lang"],
+            )
+        elif ytdlp_options["format_spec"]:
             ytdlp_format = ytdlp_options["format_spec"]
         elif ytdlp_options["audio_format"]:
             ytdlp_format = "bestaudio/best"
@@ -1154,6 +1163,8 @@ class DownloadSingleMixin:
             ytdlp_container=ytdlp_options["container"],
             ytdlp_audio_format=ytdlp_options["audio_format"],
             ytdlp_audio_quality=ytdlp_options["audio_quality"],
+            dub_lang=ytdlp_options["dub_lang"],
+            mute=ytdlp_options["mute"],
             request_headers=tuple(
                 getattr(self, "_companion_request_headers", {}).items()
             ),
@@ -1214,9 +1225,13 @@ class DownloadSingleMixin:
             )
         if audio_url:
             self._log("Audio merge: enabled (video-only format detected)")
+        if ytdlp_options["mute"] and fmt_type != "ytdlp_direct":
+            self._log("[OUTPUT] Mute: video-only native output")
         if fmt_type == "ytdlp_direct":
             self._log("Download mode: yt-dlp direct (handles URL refresh + format merge)")
-            if ytdlp_options["audio_format"]:
+            if ytdlp_options["mute"]:
+                self._log("[OUTPUT] Mute: video-only output")
+            elif ytdlp_options["audio_format"]:
                 detail = ytdlp_options["audio_format"]
                 if ytdlp_options["audio_quality"]:
                     detail += f" @ {ytdlp_options['audio_quality']}"
@@ -1224,6 +1239,10 @@ class DownloadSingleMixin:
             else:
                 self._log(
                     f"[OUTPUT] Video container: {ytdlp_options['container']}"
+                )
+            if ytdlp_options["dub_lang"]:
+                self._log(
+                    f"[OUTPUT] Dubbed audio language: {ytdlp_options['dub_lang']}"
                 )
             if ytdlp_options["format_sort"]:
                 self._log(f"[OUTPUT] Format sort: {ytdlp_options['format_sort']}")

@@ -62,6 +62,8 @@ def test_full_roundtrip_with_all_fields():
         output_dir="/tmp/test",
         format_type="ytdlp_direct",
         twitch_unmute=True,
+        dub_lang="es",
+        mute=True,
         ytdlp_source="https://youtube.com/watch?v=abc",
         ytdlp_format="bv*+ba/b",
         ytdlp_container="mkv",
@@ -90,6 +92,8 @@ def test_full_roundtrip_with_all_fields():
     assert restored.playlist_url == spec.playlist_url
     assert restored.ytdlp_format == spec.ytdlp_format
     assert restored.twitch_unmute is True
+    assert restored.dub_lang == "es"
+    assert restored.mute is True
     assert restored.ytdlp_concurrent_fragments == 4
     assert restored.sponsorblock_mark == "intro,outro"
     assert restored.ytdlp_template_args == ("--no-part",)

@@ -185,6 +185,10 @@ def _sanitize_resume_payload(data, output_dir):
         "ytdlp_audio_quality": _sanitize_text(
             data.get("ytdlp_audio_quality", ""), max_len=32
         ),
+        "dub_lang": _sanitize_text(
+            data.get("dub_lang", ""), max_len=5
+        ),
+        "mute": _sanitize_bool(data.get("mute", False)),
         "download_subs": _sanitize_bool(data.get("download_subs", False)),
         "capture_youtube_chat": _sanitize_bool(
             data.get("capture_youtube_chat", False)

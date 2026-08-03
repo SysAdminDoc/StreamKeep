@@ -32,6 +32,8 @@ def _window_with_advanced_controls():
     win.adv_audio_combo = QComboBox()
     win.adv_audio_combo.addItem("video", userData="")
     win.adv_audio_quality_input = QLineEdit()
+    win.adv_dub_lang_input = QLineEdit()
+    win.adv_mute_check = QCheckBox()
     win.adv_subtitle_mode_combo = QComboBox()
     win.adv_subtitle_mode_combo.addItem("global", userData="")
     win.adv_subtitle_mode_combo.addItem("disabled", userData="disabled")
@@ -231,3 +233,13 @@ def test_reset_adv_overrides_clears_fields_and_modified_marker():
     assert win.adv_rate_input.text() == ""
     assert win.adv_hls_key_input.text() == ""
     assert win.adv_overrides_action.text() == OVERRIDES_LABEL
+
+
+def test_audio_output_overrides_round_trip_dub_language_and_mute():
+    win = _window_with_advanced_controls()
+    win.adv_dub_lang_input.setText("es")
+    assert get_adv_overrides(win)["dub_lang"] == "es"
+
+    win.adv_dub_lang_input.clear()
+    win.adv_mute_check.setChecked(True)
+    assert get_adv_overrides(win)["mute"] is True

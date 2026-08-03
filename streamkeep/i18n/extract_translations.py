@@ -141,6 +141,12 @@ SPANISH_CORE = {
     ("StreamKeep", "{free_gb:.0f} GB free"): "{free_gb:.0f} GB libres",
     ("StreamKeep", "Per-download overrides"):
         "Ajustes específicos de la descarga",
+    ("StreamKeep", "dub language: en"): "idioma doblado: en",
+    ("StreamKeep", "Mute (video only)"): "Silenciar (solo vídeo)",
+    ("StreamKeep", "Strip audio from the output while keeping the video track"):
+        "Quite el audio de la salida y conserve la pista de vídeo",
+    ("StreamKeep", "Prefer a dubbed yt-dlp audio track using an ISO 639-1 code such as en or es"):
+        "Prefiera una pista de audio doblada de yt-dlp con un código ISO 639-1 como en o es",
     ("StreamKeep", "Download Selected"): "Descargar selección",
     ("StreamKeep", "Download All Checked"): "Descargar todos los marcados",
     ("StreamKeep", "Quality:"): "Calidad:",

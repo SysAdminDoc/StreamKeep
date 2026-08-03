@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added per-download dubbed-audio language selection and a clean mute mode.
+  ISO 639-1 language preferences are translated into yt-dlp audio selectors
+  with multistream support, while muted native and yt-dlp video outputs strip
+  audio mappings and pass ``-an`` through FFmpeg post-processing. Both choices
+  are validated, persisted in job/resume state, exposed in the Advanced panel,
+  and available through the download CLI.
+
 - Added opt-in Twitch VOD audio recovery. Finished Twitch HLS playlists can
   probe same-format ``-muted`` fragment URLs through the guarded transport and
   substitute reachable unmuted fragments; unavailable sources remain muted and

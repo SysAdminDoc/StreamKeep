@@ -758,6 +758,17 @@ def build_download_tab(win):
     )
     win.adv_audio_quality_input.setEnabled(False)
     audio_row.addWidget(win.adv_audio_quality_input, 1)
+    win.adv_dub_lang_input = QLineEdit()
+    win.adv_dub_lang_input.setPlaceholderText("dub language: en")
+    win.adv_dub_lang_input.setToolTip(
+        "Prefer a dubbed yt-dlp audio track using an ISO 639-1 code such as en or es"
+    )
+    audio_row.addWidget(win.adv_dub_lang_input, 1)
+    win.adv_mute_check = QCheckBox("Mute (video only)")
+    win.adv_mute_check.setToolTip(
+        "Strip audio from the output while keeping the video track"
+    )
+    audio_row.addWidget(win.adv_mute_check)
     adv_lay.addLayout(audio_row, 8, 1)
 
     adv_lay.addWidget(QLabel("Subtitles:"), 9, 0)
@@ -1022,12 +1033,30 @@ def build_download_tab(win):
     win.adv_audio_combo.currentIndexChanged.connect(
         lambda _: _update_adv_badge()
     )
-    win.adv_audio_combo.currentIndexChanged.connect(
-        lambda _: win.adv_audio_quality_input.setEnabled(
-            bool(win.adv_audio_combo.currentData())
+    def _refresh_adv_audio_controls():
+        muted = win.adv_mute_check.isChecked()
+        if muted:
+            # Keep the payload internally coherent if the user toggles mute
+            # after choosing an audio extraction or dubbed-language override.
+            if win.adv_audio_combo.currentData():
+                win.adv_audio_combo.setCurrentIndex(0)
+            win.adv_audio_quality_input.clear()
+            win.adv_dub_lang_input.clear()
+        win.adv_audio_combo.setEnabled(not muted)
+        win.adv_audio_quality_input.setEnabled(
+            not muted and bool(win.adv_audio_combo.currentData())
         )
+        win.adv_dub_lang_input.setEnabled(not muted)
+
+    win.adv_audio_combo.currentIndexChanged.connect(
+        lambda _: _refresh_adv_audio_controls()
+    )
+    win.adv_mute_check.toggled.connect(
+        lambda _: _refresh_adv_audio_controls()
     )
     win.adv_audio_quality_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_dub_lang_input.textChanged.connect(lambda _: _update_adv_badge())
+    win.adv_mute_check.toggled.connect(lambda _: _update_adv_badge())
     win.adv_hls_key_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_hls_iv_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_subtitle_mode_combo.currentIndexChanged.connect(

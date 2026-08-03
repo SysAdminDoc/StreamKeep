@@ -208,6 +208,8 @@ class MainWindowJobsMixin:
                 ytdlp_container=state.ytdlp_container or "mp4",
                 ytdlp_audio_format=state.ytdlp_audio_format or "",
                 ytdlp_audio_quality=state.ytdlp_audio_quality or "",
+                dub_lang=getattr(state, "dub_lang", "") or "",
+                mute=bool(getattr(state, "mute", False)),
                 download_subs=bool(state.download_subs),
                 capture_youtube_chat=bool(state.capture_youtube_chat),
                 subtitle_languages=state.subtitle_languages or "",
