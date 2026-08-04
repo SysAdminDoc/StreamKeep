@@ -1214,6 +1214,10 @@ def _run_operations(args):
             f"  {row.kind:<8} {row.state:<12} {row.source or 'Unknown':<16} "
             f"{row.title or row.item_id}"
         )
+        if row.kind == "failure" and row.remediation.get("message"):
+            _print_line(f"    What to do: {row.remediation['message']}")
+            if row.remediation.get("action"):
+                _print_line(f"    Action: {row.remediation['action']}")
 
 
 def _run_snapshot(args):

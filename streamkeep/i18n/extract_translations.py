@@ -19,7 +19,10 @@ from xml.sax.saxutils import escape as _xml_escape
 ROOT = Path(__file__).resolve().parents[2]
 I18N_DIR = Path(__file__).parent
 SOURCE_DIRS = (ROOT / "streamkeep" / "ui", ROOT / "streamkeep" / "player")
-SOURCE_FILES = (ROOT / "streamkeep" / "local_server.py",)
+SOURCE_FILES = (
+    ROOT / "streamkeep" / "local_server.py",
+    ROOT / "streamkeep" / "retry.py",
+)
 
 FIRST_ARG_CALLS = {
     "QLabel", "QPushButton", "QCheckBox", "QGroupBox", "QRadioButton",
@@ -34,6 +37,7 @@ ALL_ARG_CALLS = {
 }
 LIST_ARG_CALLS = {"addItems", "setHorizontalHeaderLabels", "setHeaderLabels"}
 WEB_CALLS = {"_web_text"}
+REMEDIATION_CALLS = {"_remediation_text"}
 
 
 @dataclass(frozen=True)
@@ -368,6 +372,48 @@ WEB_SPANISH = {
     ("WebRemote", "live"): "en directo",
 }
 
+REMEDIATION_SPANISH = {
+    ("FailureRemediation", "Free space in the archive destination, then retry the job."):
+        "Libere espacio en el destino del archivo y vuelva a intentarlo.",
+    ("FailureRemediation", "Open Storage settings"): "Abrir la configuración de almacenamiento",
+    ("FailureRemediation", "Choose a writable archive destination or fix its permissions, then retry."):
+        "Elija un destino de archivo escribible o corrija sus permisos y vuelva a intentarlo.",
+    ("FailureRemediation", "This source is protected; use an allowed DRM-free source or skip the job."):
+        "Este origen está protegido; use un origen permitido sin DRM o omita la tarea.",
+    ("FailureRemediation", "Refresh the saved cookies or credentials, then retry the job."):
+        "Actualice las cookies o credenciales guardadas y vuelva a intentarlo.",
+    ("FailureRemediation", "Open Credentials settings"):
+        "Abrir la configuración de credenciales",
+    ("FailureRemediation", "Confirm the source is still available; removed media cannot be retried."):
+        "Confirme que el origen siga disponible; el contenido eliminado no se puede reintentar.",
+    ("FailureRemediation", "Review the download and source settings, then retry the job."):
+        "Revise la configuración de descarga y del origen y vuelva a intentarlo.",
+    ("FailureRemediation", "Open Download settings"):
+        "Abrir la configuración de descargas",
+    ("FailureRemediation", "Wait for the service rate limit to clear, then retry the job."):
+        "Espere a que se despeje el límite de solicitudes del servicio y vuelva a intentarlo.",
+    ("FailureRemediation", "Wait for the source service to recover, then retry the job."):
+        "Espere a que el servicio de origen se recupere y vuelva a intentarlo.",
+    ("FailureRemediation", "Check the connection and retry; the source may need more time to respond."):
+        "Compruebe la conexión y vuelva a intentarlo; el origen puede necesitar más tiempo para responder.",
+    ("FailureRemediation", "Check the network connection or proxy, then retry the job."):
+        "Compruebe la conexión de red o el proxy y vuelva a intentarlo.",
+    ("FailureRemediation", "Open Network settings"):
+        "Abrir la configuración de red",
+    ("FailureRemediation", "No safe remediation is known; inspect the reason before retrying."):
+        "No se conoce una solución segura; revise el motivo antes de reintentar.",
+    ("FailureRemediation", "Check YouTube health and its required runtime, then retry the job."):
+        "Compruebe el estado de YouTube y su entorno requerido y vuelva a intentarlo.",
+    ("FailureRemediation", "Open YouTube health in Settings"):
+        "Abrir el estado de YouTube en Configuración",
+}
+
+SPANISH_TRANSLATIONS = {
+    **SPANISH_CORE,
+    **WEB_SPANISH,
+    **REMEDIATION_SPANISH,
+}
+
 
 def _call_name(node: ast.Call) -> str:
     func = node.func
@@ -440,6 +486,12 @@ def extract_messages() -> tuple[set[Message], dict[Message, set[tuple[str, int]]
                     _template(node.args[0]), path=relative,
                 )
                 continue
+            if name in REMEDIATION_CALLS and node.args:
+                _add(
+                    messages, locations, "FailureRemediation", node,
+                    _template(node.args[0]), path=relative,
+                )
+                continue
             if name in {"tr", "tr_n", "tr_format"} and node.args:
                 source = _template(node.args[0])
                 context = "StreamKeep"
@@ -485,9 +537,7 @@ def extract_messages() -> tuple[set[Message], dict[Message, set[tuple[str, int]]
     # Explicit dynamic contexts cannot always be inferred from a variable
     # passed to ``tr``.  The maintained core translations are catalog sources
     # too, so lrelease always receives those status/plural messages.
-    for (context, source), translation in {
-        **SPANISH_CORE, **WEB_SPANISH,
-    }.items():
+    for (context, source), translation in SPANISH_TRANSLATIONS.items():
         messages.add(Message(context, source, isinstance(translation, tuple)))
     return messages, locations
 
@@ -537,11 +587,7 @@ def _catalog_bytes(language: str) -> bytes:
                     )
                 )
             lines.append(_xml_leaf(3, "source", message.source))
-            translation = (
-                WEB_SPANISH.get((message.context, message.source))
-                if message.context == "WebRemote"
-                else SPANISH_CORE.get((message.context, message.source))
-            )
+            translation = SPANISH_TRANSLATIONS.get((message.context, message.source))
             if language == "en":
                 translation = (message.source, message.source) if message.numerus else message.source
             if message.numerus:
@@ -588,7 +634,9 @@ def main() -> int:
         print("Translation catalogs are stale; run python -m streamkeep.i18n.extract_translations")
         return 1
     messages, _ = extract_messages()
-    print(f"Translation catalogs cover {len(messages)} extracted UI/player messages.")
+    print(
+        f"Translation catalogs cover {len(messages)} extracted UI/player/operator messages."
+    )
     return 0
 
 

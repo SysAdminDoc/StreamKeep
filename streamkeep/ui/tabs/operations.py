@@ -26,6 +26,7 @@ from ...operations import (
     retry_failure_ids,
     write_operations_report,
 )
+from ...i18n import tr
 from ...utils import fmt_size
 from ..widgets import make_metric_card, set_accessible, style_table
 
@@ -102,6 +103,15 @@ def _refresh_operations(win):
     table.clearContents()
     table.setRowCount(len(result.rows))
     for row_index, row in enumerate(result.rows):
+        remediation = row.remediation if row.kind == "failure" else {}
+        remediation_text = (
+            tr(remediation["message"], context="FailureRemediation")
+            if remediation.get("message") else "—"
+        )
+        if remediation.get("action"):
+            remediation_text += " (" + tr(
+                remediation["action"], context="FailureRemediation"
+            ) + ")"
         values = (
             row.kind,
             row.item_id,
@@ -110,6 +120,7 @@ def _refresh_operations(win):
             row.state or "—",
             row.stage or "—",
             row.retry_reason or "—",
+            remediation_text,
             row.next_run_at or "—",
             (
                 f"{fmt_size(row.size_bytes)} / {_format_duration(row.duration_seconds)}"
@@ -295,9 +306,12 @@ def build_operations_tab(win):
     win.operations_summary.setWordWrap(True)
     lay.addWidget(win.operations_summary)
 
-    win.operations_table = QTableWidget(0, 9)
+    win.operations_table = QTableWidget(0, 10)
     win.operations_table.setHorizontalHeaderLabels(
-        ["Kind", "ID", "Title", "Source", "State", "Stage", "Retry reason", "Next run", "Estimate"]
+        [
+            "Kind", "ID", "Title", "Source", "State", "Stage", "Retry reason",
+            "What to do", "Next run", "Estimate",
+        ]
     )
     win.operations_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     win.operations_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -311,8 +325,9 @@ def build_operations_tab(win):
     header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-    header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
     header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
     style_table(
         win.operations_table,
         42,
@@ -358,4 +373,3 @@ def build_operations_tab(win):
 
     _refresh_operations(win)
     return page
-

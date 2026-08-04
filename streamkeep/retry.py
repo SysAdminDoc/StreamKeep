@@ -36,6 +36,124 @@ _HTTP_STATUS_RE = re.compile(
 )
 
 
+def _remediation_text(source: str) -> str:
+    """Mark operator guidance for extraction into the shared i18n catalog."""
+    return source
+
+
+_FAILURE_REMEDIATIONS = {
+    "disk": {
+        "message": _remediation_text(
+            "Free space in the archive destination, then retry the job."
+        ),
+        "action": _remediation_text("Open Storage settings"),
+        "target": "storage",
+    },
+    "permission": {
+        "message": _remediation_text(
+            "Choose a writable archive destination or fix its permissions, then retry."
+        ),
+        "action": _remediation_text("Open Storage settings"),
+        "target": "storage",
+    },
+    "drm": {
+        "message": _remediation_text(
+            "This source is protected; use an allowed DRM-free source or skip the job."
+        ),
+        "action": "",
+        "target": "",
+    },
+    "authentication": {
+        "message": _remediation_text(
+            "Refresh the saved cookies or credentials, then retry the job."
+        ),
+        "action": _remediation_text("Open Credentials settings"),
+        "target": "settings.credentials",
+    },
+    "missing_media": {
+        "message": _remediation_text(
+            "Confirm the source is still available; removed media cannot be retried."
+        ),
+        "action": "",
+        "target": "",
+    },
+    "invalid_config": {
+        "message": _remediation_text(
+            "Review the download and source settings, then retry the job."
+        ),
+        "action": _remediation_text("Open Download settings"),
+        "target": "settings.downloads",
+    },
+    "rate_limit": {
+        "message": _remediation_text(
+            "Wait for the service rate limit to clear, then retry the job."
+        ),
+        "action": "",
+        "target": "",
+    },
+    "server": {
+        "message": _remediation_text(
+            "Wait for the source service to recover, then retry the job."
+        ),
+        "action": "",
+        "target": "",
+    },
+    "timeout": {
+        "message": _remediation_text(
+            "Check the connection and retry; the source may need more time to respond."
+        ),
+        "action": "",
+        "target": "",
+    },
+    "network": {
+        "message": _remediation_text(
+            "Check the network connection or proxy, then retry the job."
+        ),
+        "action": _remediation_text("Open Network settings"),
+        "target": "settings.network",
+    },
+    "unknown": {
+        "message": _remediation_text(
+            "No safe remediation is known; inspect the reason before retrying."
+        ),
+        "action": "",
+        "target": "",
+    },
+}
+
+_YOUTUBE_CAPABILITY_HINTS = (
+    "yt-dlp", "yt_dlp", "youtube", "sabr", "po-token", "po_token",
+    "deno", "javascript runtime", "js runtime",
+)
+
+
+def failure_remediation(category: object, *, reason: object = "") -> dict[str, str]:
+    """Return bounded, URL/path-free operator guidance for a failure category."""
+    normalized = str(category or "unknown").strip().casefold()
+    if normalized not in _FAILURE_REMEDIATIONS:
+        normalized = "unknown"
+    source = _FAILURE_REMEDIATIONS[normalized]
+    if (
+        normalized == "invalid_config"
+        and any(
+            marker in str(reason or "").casefold()
+            for marker in _YOUTUBE_CAPABILITY_HINTS
+        )
+    ):
+        source = {
+            "message": _remediation_text(
+                "Check YouTube health and its required runtime, then retry the job."
+            ),
+            "action": _remediation_text("Open YouTube health in Settings"),
+            "target": "settings.youtube",
+        }
+    return {
+        "message": str(source["message"]),
+        "action": str(source["action"]),
+        "target": str(source["target"]),
+    }
+
+
 @dataclass(frozen=True)
 class RetryDecision:
     """One normalized failure classification."""

@@ -53,6 +53,8 @@ def test_operations_query_is_paged_filterable_and_reports_summary(tmp_path):
         assert [row.item_id for row in failures.rows] == [str(failure_id)]
         assert failures.rows[0].stage == "finalize"
         assert "secret-value" not in failures.rows[0].retry_reason
+        assert failures.rows[0].failure_category == "unknown"
+        assert failures.rows[0].remediation["message"]
 
         report = operations.export_operations_report({"source": "twitch"})
         report_text = json.dumps(report)
@@ -60,6 +62,14 @@ def test_operations_query_is_paged_filterable_and_reports_summary(tmp_path):
         assert "https://example.test" not in report_text
         assert "private-output" not in report_text
         assert "secret-value" not in report_text
+        assert report["rows"][1]["remediation"]["message"]
+
+        csv_path = db_path.parent / "operations.csv"
+        operations.write_operations_report(csv_path, {"state": "failed"})
+        csv_text = csv_path.read_text(encoding="utf-8")
+        assert "remediation_message" in csv_text
+        assert "https://" not in csv_text
+        assert "private-output" not in csv_text
 
         path_title = db.save_failed_job(
             url="https://example.test/path-title",

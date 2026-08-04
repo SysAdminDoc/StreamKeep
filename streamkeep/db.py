@@ -5675,7 +5675,12 @@ def _iso_epoch(value: object) -> float:
 
 def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
     """Project a failure into the credential-free operations API shape."""
-    from .retry import sanitize_failure_reason
+    from .retry import failure_remediation, sanitize_failure_reason
+
+    category = str(row.get("category", "unknown") or "unknown")
+    last_reason = sanitize_failure_reason(
+        row.get("last_reason") or row.get("error", "")
+    )
 
     return {
         "id": int(row.get("id", 0) or 0),
@@ -5685,7 +5690,7 @@ def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
             row.get("source_label", ""), limit=120
         ),
         "stage": str(row.get("stage", "") or ""),
-        "category": str(row.get("category", "unknown") or "unknown"),
+        "category": category,
         "status": str(row.get("status", "") or ""),
         "retryable": bool(row.get("retryable", False)),
         "auto_retry": bool(row.get("auto_retry", False)),
@@ -5694,9 +5699,8 @@ def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
         "next_attempt_at": str(row.get("next_attempt_at", "") or ""),
         "last_retry_at": str(row.get("last_retry_at", "") or ""),
         "updated_at": str(row.get("updated_at", "") or ""),
-        "last_reason": sanitize_failure_reason(
-            row.get("last_reason") or row.get("error", "")
-        ),
+        "last_reason": last_reason,
+        "remediation": failure_remediation(category, reason=last_reason),
         "resume_available": bool(
             row.get("resume_available", False) or row.get("resume_sidecar", "")
         ),

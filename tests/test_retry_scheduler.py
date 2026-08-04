@@ -9,6 +9,7 @@ from unittest import mock
 from streamkeep import db
 from streamkeep.retry import (
     classify_failure,
+    failure_remediation,
     iso_timestamp,
     parse_retry_after,
     retry_delay_seconds,
@@ -18,6 +19,30 @@ from streamkeep.retry import (
 
 
 class RetryPolicyTests(unittest.TestCase):
+    def test_failure_remediation_is_bounded_and_category_specific(self):
+        categories = {
+            "disk", "permission", "drm", "authentication", "missing_media",
+            "invalid_config", "rate_limit", "server", "timeout", "network",
+            "unknown",
+        }
+        for category in categories:
+            with self.subTest(category=category):
+                remediation = failure_remediation(category)
+                self.assertTrue(remediation["message"])
+                self.assertNotIn("://", remediation["message"])
+                self.assertNotIn("\\", remediation["message"])
+                self.assertNotIn("/", remediation["message"])
+        unknown = failure_remediation("future-category")
+        self.assertIn("No safe remediation", unknown["message"])
+
+    def test_youtube_capability_failure_opens_health_guidance(self):
+        remediation = failure_remediation(
+            "invalid_config", reason="yt-dlp JavaScript runtime is unavailable"
+        )
+        self.assertEqual(remediation["target"], "settings.youtube")
+        self.assertIn("YouTube", remediation["message"])
+        self.assertTrue(remediation["action"])
+
     def test_failure_categories_choose_retry_or_intervention(self):
         cases = {
             "network": ("connection reset by peer", True),

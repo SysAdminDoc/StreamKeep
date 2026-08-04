@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added category-specific remediation guidance for failed jobs. The queue and
+  operations surfaces show the next safe step, the CLI and authenticated API
+  expose the same URL/path-free guidance, and available actions jump to the
+  relevant Storage, credentials, download, network, or YouTube health surface.
+
 - Internationalized the embedded web remote through the shared Qt catalog,
   selecting the page language from `Accept-Language` or `?lang=` and falling
   back to English for unfinished translations.

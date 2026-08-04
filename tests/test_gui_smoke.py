@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFrame,
-    QLineEdit, QPlainTextEdit, QSlider, QSplitter, QTextEdit,
+    QLabel, QLineEdit, QPlainTextEdit, QSlider, QSplitter, QTextEdit,
 )
 
 from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, QualityInfo
@@ -267,6 +267,31 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window._download_queue[0]["speed"] == "18.7 MB/s"
             assert window._download_queue[0]["eta"] == "00:01:24"
             assert window._queue_progress_bars[id(window._download_queue[0])].value() == 62
+            failed_id = main_window._db.save_failed_job(
+                url="https://example.com/failed",
+                platform="Example",
+                title="Failed item",
+                stage="fetch",
+                error="No space left on device",
+                output_dir=str(tmp_path / "recordings"),
+                queue_data={"url": "https://example.com/failed"},
+                auto_retry=False,
+                status="intervention",
+            )
+            window._download_queue = [{
+                "status": "failed",
+                "platform": "Example",
+                "title": "Failed item",
+                "added": "now",
+                "url": "https://example.com/failed",
+                "failure_id": failed_id,
+            }]
+            window._refresh_queue_table()
+            remediation_hint = window.queue_table.cellWidget(0, 2).findChild(
+                QLabel, "queueFailureRemediation"
+            )
+            assert remediation_hint is not None
+            assert "Free space" in remediation_hint.text()
             window._download_queue = []
             window._refresh_queue_table()
             assert window._format_activity_message(

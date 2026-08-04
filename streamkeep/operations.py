@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 from . import db
 from .diagnostics import redact_text
-from .retry import sanitize_failure_reason
+from .retry import failure_remediation, sanitize_failure_reason
 
 MAX_PAGE_SIZE = 200
 MAX_EXPORT_ROWS = 10_000
@@ -84,7 +84,9 @@ class OperationRow:
     source: str
     state: str
     stage: str
+    failure_category: str
     retry_reason: str
+    remediation: dict[str, str]
     next_run_at: str
     updated_at: str
     created_at: str
@@ -101,7 +103,9 @@ class OperationRow:
             "source": self.source,
             "state": self.state,
             "stage": self.stage,
+            "category": self.failure_category,
             "retry_reason": self.retry_reason,
+            "remediation": dict(self.remediation),
             "next_run_at": self.next_run_at,
             "updated_at": self.updated_at,
             "created_at": self.created_at,
@@ -120,7 +124,9 @@ class OperationRow:
             "source": self.source,
             "state": self.state,
             "stage": self.stage,
+            "category": self.failure_category,
             "retry_reason": self.retry_reason,
+            "remediation": dict(self.remediation),
             "next_run_at": self.next_run_at,
             "updated_at": self.updated_at,
             "retry_count": self.retry_count,
@@ -193,6 +199,7 @@ WITH operation_rows AS (
         q.platform AS source,
         q.status AS state,
         '' AS stage,
+        '' AS failure_category,
         '' AS retry_reason,
         CASE WHEN json_valid(q.data)
              THEN COALESCE(json_extract(q.data, '$.start_at'), '')
@@ -219,6 +226,7 @@ WITH operation_rows AS (
         COALESCE(NULLIF(f.source_label, ''), f.platform) AS source,
         f.status AS state,
         f.stage AS stage,
+        f.category AS failure_category,
         COALESCE(NULLIF(f.last_reason, ''), f.error) AS retry_reason,
         f.next_attempt_at AS next_run_at,
         f.updated_at AS updated_at,
@@ -236,6 +244,7 @@ WITH operation_rows AS (
         m.platform AS source,
         'configured' AS state,
         'monitor' AS stage,
+        '' AS failure_category,
         '' AS retry_reason,
         '' AS next_run_at,
         '' AS updated_at,
@@ -301,7 +310,12 @@ def _row_from_sql(row) -> OperationRow:
         source=_safe_text(row["source"], 120),
         state=_safe_text(row["state"], 64),
         stage=_safe_text(row["stage"], 64),
+        failure_category=_safe_text(row["failure_category"], 64),
         retry_reason=sanitize_failure_reason(row["retry_reason"], limit=500),
+        remediation=failure_remediation(
+            row["failure_category"],
+            reason=row["retry_reason"],
+        ),
         next_run_at=_safe_text(row["next_run_at"], 80),
         updated_at=_safe_text(row["updated_at"], 80),
         created_at=_safe_text(row["created_at"], 80),
@@ -484,14 +498,27 @@ def write_operations_report(
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() == ".csv":
         fields = [
-            "kind", "id", "title", "source", "state", "stage", "retry_reason",
+            "kind", "id", "title", "source", "state", "stage", "category",
+            "retry_reason", "remediation_message", "remediation_action",
+            "remediation_target",
             "next_run_at", "updated_at", "retry_count", "retryable",
             "size_bytes", "duration_seconds",
         ]
         with path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
-            writer.writerows(report["rows"])
+            writer.writerows(
+                {
+                    **{
+                        key: value for key, value in row.items()
+                        if key != "remediation"
+                    },
+                    "remediation_message": row["remediation"]["message"],
+                    "remediation_action": row["remediation"]["action"],
+                    "remediation_target": row["remediation"]["target"],
+                }
+                for row in report["rows"]
+            )
     else:
         path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     return report

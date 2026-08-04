@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -41,7 +41,8 @@ from ...upgrade import (
     prepare_upgrade_staging,
     quality_rank,
 )
-from ...i18n import TranslatableDialog
+from ...i18n import TranslatableDialog, tr
+from ...retry import failure_remediation
 from ..widgets import ask_premium_confirmation, ask_premium_text_input
 
 
@@ -1454,20 +1455,55 @@ class DownloadQueueMixin:
         layout.addLayout(copy, 1)
         return frame
 
-    def _queue_status_widget(self, status, display_status, color):
+    def _failure_remediation_for_item(self, item):
+        if str(item.get("status", "") or "") != "failed":
+            return {}
+        try:
+            failure_id = int(item.get("failure_id", 0) or 0)
+        except (TypeError, ValueError):
+            failure_id = 0
+        failure = _db.load_failed_job(failure_id) if failure_id else None
+        if not failure:
+            return {}
+        remediation = failure_remediation(
+            failure.get("category", "unknown"),
+            reason=failure.get("last_reason") or failure.get("error", ""),
+        )
+        return {
+            **remediation,
+            "message": tr(
+                remediation["message"], context="FailureRemediation"
+            ),
+            "action": tr(
+                remediation["action"], context="FailureRemediation"
+            ) if remediation["action"] else "",
+        }
+
+    def _queue_status_widget(
+        self, status, display_status, color, remediation=None,
+    ):
         frame = QFrame()
         frame.setObjectName("queueStatus")
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(8, 0, 4, 0)
-        layout.setSpacing(7)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(8, 3, 4, 3)
+        layout.setSpacing(2)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(7)
         dot = QLabel("●")
         dot.setStyleSheet(f"color: {color}; font-size: 11px;")
         text = QLabel(display_status)
         text.setObjectName("queueStatusText")
         text.setToolTip(status.replace("_", " ").strip().title())
-        layout.addWidget(dot)
-        layout.addWidget(text)
-        layout.addStretch(1)
+        status_row.addWidget(dot)
+        status_row.addWidget(text)
+        status_row.addStretch(1)
+        layout.addLayout(status_row)
+        if remediation and remediation.get("message"):
+            hint = QLabel(remediation["message"])
+            hint.setObjectName("queueFailureRemediation")
+            hint.setWordWrap(True)
+            hint.setToolTip(remediation["message"])
+            layout.addWidget(hint)
         return frame
 
     def _queue_progress_widget(self, item):
@@ -1699,8 +1735,11 @@ class DownloadQueueMixin:
             source.setToolTip(str(item.get("url", "") or ""))
             source.setForeground(QColor(CAT["muted"]))
             self.queue_table.setItem(row, 1, source)
+            remediation = self._failure_remediation_for_item(item)
             self.queue_table.setCellWidget(
-                row, 2, self._queue_status_widget(status, display_status, color)
+                row, 2, self._queue_status_widget(
+                    status, display_status, color, remediation
+                )
             )
             progress_shell, progress, progress_label = self._queue_progress_widget(item)
             self._queue_progress_bars[id(item)] = progress
@@ -1766,6 +1805,8 @@ class DownloadQueueMixin:
         retry_failure = None
         cancel_retry = None
         discard_failure = None
+        remediation_action = None
+        remediation = {}
         failure_id = int(item.get("failure_id", 0) or 0)
         if item.get("status") == "failed" and failure_id:
             failure_header = menu.addAction(f"Failure #{failure_id}")
@@ -1776,6 +1817,9 @@ class DownloadQueueMixin:
                 category = str(failure.get("category", "unknown") or "unknown")
                 reason = str(
                     failure.get("last_reason") or failure.get("error") or ""
+                )
+                remediation = failure_remediation(
+                    category, reason=reason
                 )
                 category_line = menu.addAction(
                     f"Category: {category.replace('_', ' ').title()}"
@@ -1789,6 +1833,17 @@ class DownloadQueueMixin:
                 if reason:
                     reason_line = menu.addAction(f"Reason: {reason[:100]}")
                     reason_line.setEnabled(False)
+                if remediation.get("message"):
+                    advice_line = menu.addAction(
+                        "What to do: " + tr(
+                            remediation["message"], context="FailureRemediation"
+                        )
+                    )
+                    advice_line.setEnabled(False)
+                if remediation.get("action"):
+                    remediation_action = menu.addAction(
+                        tr(remediation["action"], context="FailureRemediation")
+                    )
             if failure and failure.get("auto_retry"):
                 cancel_retry = menu.addAction("Cancel automatic retry")
             discard_failure = menu.addAction("Discard failure")
@@ -1808,6 +1863,9 @@ class DownloadQueueMixin:
             return
         if discard_failure is not None and chosen == discard_failure:
             self._discard_failed_job(failure_id)
+            return
+        if remediation_action is not None and chosen == remediation_action:
+            self._open_failure_remediation(remediation.get("target", ""))
             return
         new_rec = ""
         if chosen == one_shot:
@@ -2310,6 +2368,51 @@ class DownloadQueueMixin:
             "Automatic retry cancelled; the failure remains available.",
             "success",
         )
+        return True
+
+    def _open_failure_remediation(self, target):
+        """Navigate to the settings surface associated with failure advice."""
+        window = self.window()
+        switch_tab = getattr(window, "_switch_tab", None)
+        tab_names = getattr(window, "_tab_names", ())
+        if not callable(switch_tab):
+            return False
+        if target == "storage":
+            try:
+                index = tab_names.index("Storage")
+            except ValueError:
+                return False
+            switch_tab(index, focus_page=True)
+            return True
+        if not str(target).startswith("settings."):
+            return False
+        try:
+            settings_index = tab_names.index("Settings")
+        except ValueError:
+            return False
+        switch_tab(settings_index, focus_page=True)
+        nav_index = {
+            "settings.credentials": 1,
+            "settings.downloads": 2,
+            "settings.network": 2,
+            "settings.youtube": 2,
+        }.get(target)
+        buttons = getattr(window, "settings_nav_buttons", ())
+        if nav_index is not None and nav_index < len(buttons):
+            QTimer.singleShot(0, buttons[nav_index].click)
+        if target == "settings.youtube":
+            health_button = getattr(window, "youtube_health_btn", None)
+            if health_button is not None:
+                def focus_youtube_health():
+                    parent = health_button.parentWidget()
+                    while parent is not None:
+                        if hasattr(parent, "ensureWidgetVisible"):
+                            parent.ensureWidgetVisible(health_button, 12, 12)
+                            break
+                        parent = parent.parentWidget()
+                    health_button.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+                QTimer.singleShot(0, focus_youtube_health)
         return True
 
     def _discard_failed_job(self, job_id):
