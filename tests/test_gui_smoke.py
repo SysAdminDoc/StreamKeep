@@ -649,3 +649,47 @@ def test_playlist_expand_worker_skips_user_tombstoned_entries(qt_application):
 
     qt_application.processEvents()
     assert emitted == [[]]
+
+
+def test_close_waits_for_maintenance_worker_before_teardown(qt_application):
+    from PyQt6.QtCore import QThread
+    from PyQt6.QtWidgets import QMainWindow
+    import streamkeep.ui.main_window as main_window
+
+    class StubMaintenanceWorker(QThread):
+        def run(self):
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+
+    class TimerStub:
+        def stop(self):
+            return None
+
+    window = main_window.StreamKeep.__new__(main_window.StreamKeep)
+    QMainWindow.__init__(window)
+    window._maintenance_worker = StubMaintenanceWorker()
+    window._queue_contexts = {}
+    window._queue_execution_enabled = False
+    window._persist_config = lambda: None
+    window.monitor = type("MonitorStub", (), {"_timer": TimerStub()})()
+    window._scheduler_timer = TimerStub()
+    window._config_save_timer = TimerStub()
+    window._executor_lease_timer = TimerStub()
+    window.clipboard_monitor = TimerStub()
+    window._tray_icon = None
+    window._disk_monitor = None
+    window._backup_worker = None
+
+    worker = window._maintenance_worker
+    worker.start()
+    try:
+        assert window.close()
+        qt_application.processEvents()
+        assert not worker.isRunning()
+        assert not window.isVisible()
+    finally:
+        if worker.isRunning():
+            worker.requestInterruption()
+            worker.wait(1500)
+        window.deleteLater()
+        qt_application.processEvents()

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Joined maintenance and re-template workers to the window close lifecycle;
+  shutdown now interrupts and waits for audited batches and defers close until
+  an unresponsive batch finishes.
+
 - Hardened NFO sidecar parsing with `defusedxml`, named parser issues in adopt
   and rebuild previews, and removed every direct stdlib `ElementTree` import
   from `streamkeep/`.

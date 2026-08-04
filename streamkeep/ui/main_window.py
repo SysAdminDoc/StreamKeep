@@ -1446,6 +1446,20 @@ class StreamKeep(
                 adoption_worker.wait(1500)
             except Exception:
                 pass
+        maintenance_worker = getattr(self, "_maintenance_worker", None)
+        if maintenance_worker is not None and maintenance_worker.isRunning():
+            try:
+                maintenance_worker.requestInterruption()
+                if not maintenance_worker.wait(1500):
+                    event.ignore()
+                    if not getattr(self, "_close_after_maintenance", False):
+                        self._close_after_maintenance = True
+                        maintenance_worker.finished.connect(self.close)
+                        if not maintenance_worker.isRunning():
+                            QTimer.singleShot(0, self.close)
+                    return
+            except Exception:
+                pass
         arw = getattr(self, "_auto_record_resolve_worker", None)
         if arw is not None and arw.isRunning():
             try:
