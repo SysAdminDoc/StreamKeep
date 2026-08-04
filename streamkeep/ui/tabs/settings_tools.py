@@ -92,6 +92,39 @@ class SettingsToolsMixin:
             config=getattr(self, "_config", None),
         )
 
+    def _settings_browse_file(self, line_edit, title="Select file"):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            title,
+            line_edit.text(),
+            "Whisper model (*.bin *.gguf);;All files (*)",
+        )
+        if path:
+            line_edit.setText(path)
+
+    def _refresh_transcription_runtime_controls(self):
+        """Refresh the visible FFmpeg whisper capability diagnostic."""
+        label = getattr(self, "whisper_ffmpeg_status", None)
+        if label is None:
+            return
+        from ...capabilities import get_runtime_capabilities
+
+        registry = get_runtime_capabilities(
+            refresh=True, config=getattr(self, "_config", None),
+        )
+        self._runtime_registry_snapshot = registry
+        record = registry.get("ffmpeg_whisper", {})
+        if record.get("supported"):
+            label.setText(
+                f"Ready: FFmpeg {record.get('version') or 'unknown'} exposes "
+                f"whisper and will use {record.get('model_path')}."
+            )
+        else:
+            label.setText(
+                str(record.get("detail") or "FFmpeg whisper backend unavailable.")
+            )
+        label.setToolTip(str(record.get("repair") or ""))
+
     @staticmethod
     def _plugin_state_label(report):
         if report.get("error") or not report.get("compatible"):

@@ -5,6 +5,7 @@ Backend priority (F29):
   1. WhisperX (word-level timestamps, optional speaker diarization)
   2. faster-whisper (fast, good quality, CPU + CUDA)
   3. whisper-cli / whisper.cpp / main binary in PATH
+  4. FFmpeg's whisper filter when its capability and model path are ready
 
 When no runtime is available, the worker emits a clear log message
 and exits — never silent failure.
@@ -39,7 +40,15 @@ def _whisperx_available():
         return False
 
 
-def is_available():
+def _ffmpeg_whisper_capability(config=None, *, refresh=False):
+    from ..capabilities import get_runtime_capabilities
+
+    return get_runtime_capabilities(
+        refresh=refresh, config=config,
+    ).get("ffmpeg_whisper", {})
+
+
+def is_available(config=None):
     """Which Whisper runtime (if any) is usable right now."""
     if _whisperx_available():
         return "whisperx"
@@ -52,6 +61,8 @@ def is_available():
     for name in ("whisper-cli", "whisper.cpp", "main"):
         if shutil.which(name):
             return name
+    if _ffmpeg_whisper_capability(config).get("supported"):
+        return "ffmpeg-whisper"
     return ""
 
 
@@ -107,7 +118,7 @@ class TranscribeWorker(QThread):
 
     def __init__(self, media_path, *, model_name="tiny", language=None,
                  silence_gap_secs=12.0, enable_diarization=False,
-                 hf_token=""):
+                 hf_token="", config=None, ffmpeg_model_path=""):
         super().__init__()
         self.media_path = media_path
         self.model_name = model_name
@@ -115,6 +126,9 @@ class TranscribeWorker(QThread):
         self.silence_gap_secs = float(silence_gap_secs)
         self.enable_diarization = bool(enable_diarization)
         self.hf_token = hf_token or ""
+        self.config = dict(config or {})
+        if ffmpeg_model_path:
+            self.config["whisper_model_path"] = str(ffmpeg_model_path)
         self._cancel = False
 
     def cancel(self):
@@ -124,12 +138,13 @@ class TranscribeWorker(QThread):
         if not self.media_path or not os.path.exists(self.media_path):
             self.done.emit(False, "Source file missing.")
             return
-        runtime = is_available()
+        runtime = is_available(self.config)
         if not runtime:
             self.done.emit(
                 False,
                 "No Whisper runtime found. Install with "
-                "`pip install faster-whisper` or place whisper.cpp in PATH.",
+                "`pip install faster-whisper`, place whisper.cpp in PATH, "
+                "or configure a local FFmpeg whisper model in Settings.",
             )
             return
         try:
@@ -137,6 +152,8 @@ class TranscribeWorker(QThread):
                 segments = self._run_whisperx()
             elif runtime == "faster-whisper":
                 segments = self._run_faster_whisper()
+            elif runtime == "ffmpeg-whisper":
+                segments = self._run_ffmpeg_whisper()
             else:
                 segments = self._run_whisper_cpp(runtime)
         except Exception as e:
@@ -306,22 +323,64 @@ class TranscribeWorker(QThread):
                 os.remove(srt_out)
             except OSError:
                 pass
-        # Parse the .srt.
-        out = []
-        for chunk in text.strip().split("\n\n"):
-            lines = chunk.strip().splitlines()
-            if len(lines) < 3:
-                continue
-            # "HH:MM:SS,mmm --> HH:MM:SS,mmm"
+        return _parse_srt(text)
+
+    def _run_ffmpeg_whisper(self):
+        """Run FFmpeg's optional whisper filter and parse its SRT output."""
+        capability = _ffmpeg_whisper_capability(self.config, refresh=True)
+        if not capability.get("supported"):
+            detail = capability.get("detail") or "the filter or model is unavailable"
+            raise RuntimeError(f"FFmpeg whisper backend unavailable: {detail}")
+        command = list(capability.get("command") or [])
+        ffmpeg_path = str(command[0] if command else capability.get("ffmpeg_path") or "")
+        model_path = str(capability.get("model_path") or "")
+        if not ffmpeg_path or not model_path:
+            raise RuntimeError("FFmpeg whisper capability has no executable or model path")
+
+        self.progress.emit(5, "Running FFmpeg whisper filter...")
+        media_dir = os.path.dirname(os.path.abspath(self.media_path)) or "."
+        fd, srt_out = tempfile.mkstemp(
+            prefix=".streamkeep_ffmpeg_whisper_", suffix=".srt", dir=media_dir,
+        )
+        os.close(fd)
+        try:
+            os.remove(srt_out)
+        except OSError:
+            pass
+        language = _escape_filter_value(self.language or "auto")
+        filter_graph = (
+            "aformat=sample_rates=16000:channel_layouts=mono,"
+            f"whisper=model='{_escape_filter_value(model_path)}':"
+            f"language='{language}':queue=3000:"
+            f"destination='{_escape_filter_value(srt_out)}':format=srt"
+        )
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner", "-nostdin", "-y",
+            "-i", self.media_path,
+            "-vn", "-af", filter_graph,
+            "-f", "null", "-",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True,
+                creationflags=_CREATE_NO_WINDOW, timeout=60 * 60,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    proc.stderr.strip()[:240] or "non-zero exit"
+                )
             try:
-                left, right = lines[1].split(" --> ", 1)
-                start = _srt_to_secs(left.strip())
-                end = _srt_to_secs(right.strip())
-            except (ValueError, IndexError):
-                continue
-            body = " ".join(lines[2:]).strip()
-            out.append({"start": start, "end": end, "text": body})
-        return out
+                with open(srt_out, "r", encoding="utf-8", errors="replace") as handle:
+                    text = handle.read()
+            except OSError as error:
+                raise RuntimeError(f"Could not read {srt_out}: {error}") from error
+        finally:
+            try:
+                os.remove(srt_out)
+            except OSError:
+                pass
+        return _parse_srt(text)
 
     def _write_outputs(self, base, segments):
         """Write .srt, .vtt, .json, and chapters.auto.txt."""
@@ -368,6 +427,34 @@ class TranscribeWorker(QThread):
         _write_text_atomically(
             base + ".chapters.auto.txt", "".join(chapter_lines),
         )
+
+
+def _escape_filter_value(value):
+    """Escape a local path/value for an FFmpeg filtergraph option."""
+    escaped = str(value).replace("\\", "\\\\")
+    for char in (":", "'", ",", ";", "[", "]"):
+        escaped = escaped.replace(char, "\\" + char)
+    return escaped
+
+
+def _parse_srt(text):
+    """Return the stable segment shape shared by whisper backends."""
+    out = []
+    for chunk in str(text or "").replace("\r\n", "\n").strip().split("\n\n"):
+        lines = chunk.strip().splitlines()
+        if len(lines) < 3:
+            continue
+        # "HH:MM:SS,mmm --> HH:MM:SS,mmm"
+        try:
+            left, right = lines[1].split(" --> ", 1)
+            start = _srt_to_secs(left.strip())
+            end = _srt_to_secs(right.strip())
+        except (ValueError, IndexError):
+            continue
+        body = " ".join(lines[2:]).strip()
+        if body:
+            out.append({"start": start, "end": end, "text": body})
+    return out
 
 
 def _srt_to_secs(stamp):

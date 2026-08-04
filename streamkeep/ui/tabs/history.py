@@ -1152,10 +1152,12 @@ class HistoryTabMixin:
     def _start_transcribe_for_dir(self, src_dir):
         """Pick the biggest video in the folder and launch TranscribeWorker."""
         from ...postprocess import TranscribeWorker, whisper_available
-        if not whisper_available():
+        runtime = whisper_available(config=self._config)
+        if not runtime:
             self._set_status(
                 "No Whisper runtime installed. Install `faster-whisper` "
-                "or put whisper.cpp in PATH.",
+                "or put whisper.cpp in PATH, or configure a local FFmpeg "
+                "whisper model in Settings.",
                 "warning",
             )
             self._log("[TRANSCRIBE] No runtime found. See status bar.")
@@ -1191,12 +1193,13 @@ class HistoryTabMixin:
             media, model_name=model,
             enable_diarization=bool(self._config.get("enable_diarization")),
             hf_token=str(self._config.get("hf_token", "") or ""),
+            config=self._config,
         )
         worker.progress.connect(self._on_transcribe_progress)
         worker.done.connect(self._on_transcribe_done)
         self._transcribe_worker = worker
         self._set_status(
-            f"Transcribing {os.path.basename(media)} with Whisper ({model})...",
+            f"Transcribing {os.path.basename(media)} with {runtime} ({model})...",
             "processing",
         )
         worker.start()

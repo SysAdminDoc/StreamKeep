@@ -25,8 +25,8 @@ def _ready_ytdlp_status():
     }
 
 
-def _ready_runtime_registry(*, refresh=False):
-    del refresh
+def _ready_runtime_registry(*, refresh=False, config=None):
+    del refresh, config
 
     def record(name, version, path):
         return {

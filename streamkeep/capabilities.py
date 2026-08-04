@@ -393,10 +393,15 @@ def get_runtime_capabilities(*, refresh=False, config=None):
     global _CACHE, _CACHE_KEY
     from .javascript_runtime import read_runtime_preference
 
-    cache_key = read_runtime_preference(config)
+    whisper_model_path = str(
+        (config or {}).get("whisper_model_path", "") or ""
+    ).strip()
+    cache_key = (read_runtime_preference(config), whisper_model_path)
     with _CACHE_LOCK:
         if _CACHE is None or refresh or _CACHE_KEY != cache_key:
-            _CACHE = _probe_registry(preference=cache_key)
+            _CACHE = _probe_registry(
+                preference=cache_key[0], whisper_model_path=cache_key[1],
+            )
             _CACHE_KEY = cache_key
         return copy.deepcopy(_CACHE)
 
@@ -409,33 +414,33 @@ def invalidate_runtime_capabilities_cache():
         _CACHE_KEY = None
 
 
-def get_capability(name, *, refresh=False):
-    registry = get_runtime_capabilities(refresh=refresh)
+def get_capability(name, *, refresh=False, config=None):
+    registry = get_runtime_capabilities(refresh=refresh, config=config)
     record = registry.get(str(name))
     if record is None:
         raise KeyError(f"unknown runtime capability: {name}")
     return record
 
 
-def require_capability(name, *, refresh=False):
-    record = get_capability(name, refresh=refresh)
+def require_capability(name, *, refresh=False, config=None):
+    record = get_capability(name, refresh=refresh, config=config)
     if not record.get("supported"):
         raise CapabilityUnavailableError(record)
     return record
 
 
-def resolve_tool_command(name, *, refresh=False):
+def resolve_tool_command(name, *, refresh=False, config=None):
     """Return the exact supported executable path for a PATH-backed tool."""
-    record = require_capability(name, refresh=refresh)
+    record = require_capability(name, refresh=refresh, config=config)
     command = record.get("command") or []
     if not command:
         raise CapabilityUnavailableError(record)
     return str(command[0])
 
 
-def resolve_command_prefix(name, *, refresh=False):
+def resolve_command_prefix(name, *, refresh=False, config=None):
     """Return an exact command prefix for a supported module/executable."""
-    record = require_capability(name, refresh=refresh)
+    record = require_capability(name, refresh=refresh, config=config)
     command = record.get("command") or []
     if not command:
         raise CapabilityUnavailableError(record)
@@ -466,7 +471,7 @@ def capability_state(record):
     return "unsafe" if record.get("available") else "missing"
 
 
-def _probe_registry(*, preference="path"):
+def _probe_registry(*, preference="path", whisper_model_path=""):
     sqlite = _probe_sqlite_runtime()
     yt_dlp = _probe_yt_dlp()
     pillow = _probe_module(
@@ -501,6 +506,7 @@ def _probe_registry(*, preference="path"):
         ["media-download", "decode", "transcode", "mux"],
         "Install FFmpeg 8.1.2 or newer and ensure that executable is first in PATH.",
     )
+    ffmpeg_whisper = _probe_ffmpeg_whisper(ffmpeg, whisper_model_path)
     ffprobe = _probe_executable(
         "ffprobe", ["ffprobe"], ["-version"], MINIMUM_VERSIONS["ffprobe"],
         ["media-inspection", "duration-probe"],
@@ -523,6 +529,7 @@ def _probe_registry(*, preference="path"):
         "boto3": boto3,
         "curl": curl,
         "ffmpeg": ffmpeg,
+        "ffmpeg_whisper": ffmpeg_whisper,
         "ffprobe": ffprobe,
     }
 
@@ -907,18 +914,97 @@ def _probe_executable(
     )
 
 
-def _run_version_command(path, args):
+def _probe_ffmpeg_whisper(ffmpeg, model_path):
+    """Probe FFmpeg's optional whisper filter without starting a job."""
+    minimum = MINIMUM_VERSIONS["ffmpeg"]
+    repair = (
+        f"Install FFmpeg {minimum} or newer with the whisper filter and "
+        "configure a local whisper.cpp model file in Settings."
+    )
+    ffmpeg_path = str(ffmpeg.get("path") or "")
+    command = list(ffmpeg.get("command") or [])
+    model_path = str(model_path or "").strip()
+    model_path = os.path.abspath(os.path.expanduser(model_path)) if model_path else ""
+    available = bool(ffmpeg.get("available"))
+    filter_available = False
+    supported = False
+    detail = ""
+    filter_output = ""
+
+    if not available:
+        detail = "The resolved FFmpeg executable is unavailable."
+    elif not ffmpeg.get("supported"):
+        detail = (
+            f"FFmpeg {ffmpeg.get('version') or 'unknown'} does not meet the "
+            f"{minimum} whisper-filter floor."
+        )
+    else:
+        filter_output, returncode = _run_capture_command(
+            ffmpeg_path, ["-hide_banner", "-filters"], timeout=5,
+        )
+        if returncode != 0:
+            detail = "Could not inspect the resolved FFmpeg filter registry."
+        elif not _filter_listing_contains(filter_output, "whisper"):
+            detail = "The resolved FFmpeg build does not expose the whisper filter."
+        else:
+            filter_available = True
+            if not model_path:
+                detail = "Configure a local whisper.cpp model path in Settings."
+            elif not Path(model_path).is_file():
+                detail = f"Configured Whisper model was not found: {model_path}"
+            else:
+                supported = True
+                detail = f"whisper filter ready with model {model_path}"
+
+    if ffmpeg.get("supported") and not filter_available:
+        available = False
+
+    record = _base_record(
+        "ffmpeg_whisper", "FFmpeg whisper filter", "ffmpeg-filter", minimum,
+        ["transcription", "transcript-sidecars"], repair,
+        path=ffmpeg_path,
+        version=ffmpeg.get("version", ""),
+        available=available,
+        supported=supported,
+        command=command,
+        provenance=ffmpeg.get("provenance", "missing"),
+        detail=detail,
+    )
+    record.update({
+        "filter": "whisper",
+        "filter_available": filter_available,
+        "model_path": model_path,
+        "ffmpeg_path": ffmpeg_path,
+    })
+    return record
+
+
+def _filter_listing_contains(output, filter_name):
+    """Match a filter name column, not a description mentioning the name."""
+    expected = str(filter_name)
+    for line in str(output or "").splitlines():
+        fields = line.strip().split()
+        if len(fields) >= 3 and fields[1] == expected:
+            return True
+    return False
+
+
+def _run_capture_command(path, args, *, timeout=5):
     try:
         result = subprocess.run(
-            [path, *args], capture_output=True, text=True, timeout=5,
+            [path, *args], capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace", creationflags=_CREATE_NO_WINDOW,
         )
         output = "\n".join(
             part.strip() for part in (result.stdout, result.stderr) if part.strip()
         )
         return output, int(result.returncode)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):
         return "", -1
+
+
+def _run_version_command(path, args):
+    return _run_capture_command(path, args, timeout=5)
 
 
 def _probe_managed_javascript_runtime():

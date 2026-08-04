@@ -368,7 +368,7 @@ def build_settings_tab(win):
         "Local Toolchain",
         "StreamKeep relies on these binaries for robust downloads.",
     )
-    registry = get_runtime_capabilities(refresh=True)
+    registry = get_runtime_capabilities(refresh=True, config=win._config)
     win._runtime_registry_snapshot = registry
     ffmpeg = registry["ffmpeg"]
     curl = registry["curl"]
@@ -1252,6 +1252,36 @@ def build_settings_tab(win):
     whisper_row.addWidget(QLabel("(used by Transcribe... in History)"))
     whisper_row.addStretch(1)
     network_lay.addLayout(whisper_row)
+
+    ffmpeg_whisper_row = QHBoxLayout()
+    ffmpeg_whisper_row.setSpacing(8)
+    ffmpeg_whisper_row.addWidget(QLabel("FFmpeg whisper model:"))
+    win.whisper_ffmpeg_model_input = QLineEdit(
+        str(win._config.get("whisper_model_path", "") or "")
+    )
+    win.whisper_ffmpeg_model_input.setClearButtonEnabled(True)
+    win.whisper_ffmpeg_model_input.setPlaceholderText(
+        "Optional local whisper.cpp .bin model path"
+    )
+    win.whisper_ffmpeg_model_input.setToolTip(
+        "Enables the FFmpeg whisper fallback only when the resolved FFmpeg "
+        "build exposes the filter and this local model file exists."
+    )
+    ffmpeg_whisper_row.addWidget(win.whisper_ffmpeg_model_input, 1)
+    ffmpeg_whisper_browse = QPushButton("Browse")
+    ffmpeg_whisper_browse.setObjectName("secondary")
+    ffmpeg_whisper_browse.clicked.connect(
+        lambda: win._settings_browse_file(
+            win.whisper_ffmpeg_model_input, "Select Whisper model"
+        )
+    )
+    ffmpeg_whisper_row.addWidget(ffmpeg_whisper_browse)
+    network_lay.addLayout(ffmpeg_whisper_row)
+    win.whisper_ffmpeg_status = QLabel("")
+    win.whisper_ffmpeg_status.setObjectName("subtleText")
+    win.whisper_ffmpeg_status.setWordWrap(True)
+    network_lay.addWidget(win.whisper_ffmpeg_status)
+    win._refresh_transcription_runtime_controls()
 
     # Speaker diarization (F29)
     diarize_row = QHBoxLayout()

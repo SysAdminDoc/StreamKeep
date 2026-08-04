@@ -127,6 +127,32 @@ def test_whisper_cpp_command_and_intermediate_cleanup(tmp_path, qt_application):
     assert not Path(calls[0][calls[0].index("-of") + 1] + ".srt").exists()
 
 
+def test_whisper_backend_order_keeps_existing_runtime_ahead_of_ffmpeg():
+    ready = {"supported": True}
+    with mock.patch.object(
+        transcribe_worker, "_whisperx_available", return_value=False,
+    ), mock.patch.dict(
+        sys.modules, {"faster_whisper": None},
+    ), mock.patch.object(
+        transcribe_worker.shutil, "which",
+        side_effect=lambda name: "whisper-cli" if name == "whisper-cli" else None,
+    ), mock.patch.object(
+        transcribe_worker, "_ffmpeg_whisper_capability", return_value=ready,
+    ):
+        assert transcribe_worker.is_available({}) == "whisper-cli"
+
+    with mock.patch.object(
+        transcribe_worker, "_whisperx_available", return_value=False,
+    ), mock.patch.dict(
+        sys.modules, {"faster_whisper": None},
+    ), mock.patch.object(
+        transcribe_worker.shutil, "which", return_value=None,
+    ), mock.patch.object(
+        transcribe_worker, "_ffmpeg_whisper_capability", return_value=ready,
+    ):
+        assert transcribe_worker.is_available({}) == "ffmpeg-whisper"
+
+
 def test_whisper_cpp_failure_removes_partial_intermediate(tmp_path, qt_application):
     media = tmp_path / "input.wav"
     media.write_bytes(b"audio")
@@ -142,6 +168,68 @@ def test_whisper_cpp_failure_removes_partial_intermediate(tmp_path, qt_applicati
             worker._run_whisper_cpp("whisper-cli")
 
     assert not Path(str(media.with_suffix("")) + ".wspcpp.srt").exists()
+
+
+def test_ffmpeg_whisper_command_parses_srt_and_cleans_intermediate(
+    tmp_path, qt_application,
+):
+    media = tmp_path / "input.wav"
+    model = tmp_path / "ggml-base.bin"
+    media.write_bytes(b"audio")
+    model.write_bytes(b"model")
+    worker = transcribe_worker.TranscribeWorker(
+        str(media),
+        config={"whisper_model_path": str(model)},
+    )
+    calls = []
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        graph = cmd[cmd.index("-af") + 1]
+        encoded = graph.split("destination='", 1)[1].split("'", 1)[0]
+        destination = encoded.replace("\\:", ":").replace("\\\\", "\\")
+        Path(destination).write_text(
+            "1\n00:00:01,000 --> 00:00:02,500\nhello\n",
+            encoding="utf-8",
+        )
+        return _CompletedProcess(stdout="", stderr="")
+
+    capability = {
+        "supported": True,
+        "command": ["ffmpeg"],
+        "model_path": str(model),
+        "ffmpeg_path": "ffmpeg",
+    }
+    with mock.patch.object(
+        transcribe_worker, "_ffmpeg_whisper_capability", return_value=capability,
+    ), mock.patch.object(transcribe_worker.subprocess, "run", side_effect=fake_run):
+        segments = worker._run_ffmpeg_whisper()
+
+    assert segments == [{"start": 1.0, "end": 2.5, "text": "hello"}]
+    assert calls[0][0] == "ffmpeg"
+    assert "whisper=model=" in calls[0][calls[0].index("-af") + 1]
+    assert "format=srt" in calls[0][calls[0].index("-af") + 1]
+    assert "-nostdin" in calls[0]
+    assert not list(tmp_path.glob(".streamkeep_ffmpeg_whisper_*.srt"))
+
+
+def test_ffmpeg_whisper_backend_uses_shared_sidecar_outputs(tmp_path, qt_application):
+    media = tmp_path / "recording.wav"
+    media.write_bytes(b"audio")
+    worker = transcribe_worker.TranscribeWorker(str(media))
+    done = _signal_values(worker.done)
+    segments = [{"start": 0.0, "end": 1.0, "text": "hello"}]
+
+    with mock.patch.object(
+        transcribe_worker, "is_available", return_value="ffmpeg-whisper",
+    ), mock.patch.object(
+        worker, "_run_ffmpeg_whisper", return_value=segments,
+    ):
+        worker.run()
+
+    assert done == [(True, str(media.with_suffix("")))]
+    for suffix in (".srt", ".vtt", ".transcript.json", ".chapters.auto.txt"):
+        assert (tmp_path / f"recording{suffix}").is_file()
 
 
 def test_transcribe_output_failure_removes_new_sidecars(tmp_path, qt_application):

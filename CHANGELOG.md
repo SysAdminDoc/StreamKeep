@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a capability-gated FFmpeg whisper transcription fallback. Settings can
+  configure a local whisper.cpp model path when the resolved FFmpeg build
+  exposes the filter; WhisperX, faster-whisper, and whisper.cpp remain ahead of
+  it in the backend order, and all paths share the same transcript sidecars.
+
 - Added versioned, data-only YAML source adapters with guarded JSON/HTML field
   mapping, VOD pagination, live checks, hot reload, diagnostics, and config
   import quarantine. Adapter requests and returned media URLs use the existing

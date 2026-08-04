@@ -1029,6 +1029,10 @@ class SettingsPreferencesMixin:
             }
         if hasattr(self, "whisper_model_combo"):
             self._config["whisper_model"] = str(self.whisper_model_combo.currentData() or "tiny")
+        if hasattr(self, "whisper_ffmpeg_model_input"):
+            self._config["whisper_model_path"] = (
+                self.whisper_ffmpeg_model_input.text().strip()
+            )
         if hasattr(self, "diarize_check"):
             self._config["enable_diarization"] = bool(self.diarize_check.isChecked())
         if hasattr(self, "hf_token_input"):
@@ -1219,6 +1223,7 @@ class SettingsPreferencesMixin:
             self._set_status("Settings not saved: secure credential storage unavailable.", "error")
             return
         self._refresh_download_summary()
+        self._refresh_transcription_runtime_controls()
         self._set_status("Settings saved and applied to future downloads.", "success")
 
     # ── Theme ────────────────────────────────────────────────────────

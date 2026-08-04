@@ -176,6 +176,45 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertTrue(record["supported"])
         self.assertEqual(record["command"], [record["path"]])
 
+    def test_ffmpeg_whisper_probe_requires_filter_and_model_path(self):
+        ffmpeg = _record(
+            "ffmpeg", version="8.1.2", minimum="8.1.2",
+            path=r"C:\Tools\ffmpeg.exe",
+        )
+        with mock.patch.object(
+            capabilities, "_run_capture_command",
+            return_value=(" .. whisper A->A Transcribe audio using whisper.cpp.", 0),
+        ), mock.patch.object(capabilities.Path, "is_file", return_value=True):
+            ready = capabilities._probe_ffmpeg_whisper(
+                ffmpeg, r"C:\Models\ggml-base.bin",
+            )
+
+        self.assertTrue(ready["supported"])
+        self.assertEqual(ready["filter"], "whisper")
+        self.assertEqual(ready["command"], [r"C:\Tools\ffmpeg.exe"])
+        self.assertTrue(ready["model_path"])
+
+        with mock.patch.object(
+            capabilities, "_run_capture_command",
+            return_value=(" .. volume A->A Volume adjustment.", 0),
+        ), mock.patch.object(capabilities.Path, "is_file", return_value=True):
+            absent = capabilities._probe_ffmpeg_whisper(
+                ffmpeg, r"C:\Models\ggml-base.bin",
+            )
+
+        self.assertFalse(absent["supported"])
+        self.assertFalse(absent["available"])
+        self.assertIn("does not expose the whisper filter", absent["detail"])
+
+        with mock.patch.object(
+            capabilities, "_run_capture_command",
+            return_value=(" .. whisper A->A Transcribe audio using whisper.cpp.", 0),
+        ):
+            missing_model = capabilities._probe_ffmpeg_whisper(ffmpeg, "")
+
+        self.assertFalse(missing_model["supported"])
+        self.assertIn("Configure a local whisper.cpp model path", missing_model["detail"])
+
     def test_javascript_selection_is_deno_first_and_deterministic(self):
         calls = []
 
