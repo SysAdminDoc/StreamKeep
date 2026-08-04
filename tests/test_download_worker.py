@@ -123,6 +123,55 @@ def test_output_path_preflight_emits_before_transport_start(tmp_path, monkeypatc
     ensure_ffmpeg.assert_not_called()
 
 
+class _CancelProcess:
+    def __init__(self, *, ignores_graceful=False):
+        self.ignores_graceful = ignores_graceful
+        self.events = []
+        self.alive = True
+
+    def poll(self):
+        return None if self.alive else 0
+
+    def send_signal(self, _signal):
+        self.events.append("graceful")
+        if not self.ignores_graceful:
+            self.alive = False
+
+    def terminate(self):
+        self.events.append("terminate")
+
+    def kill(self):
+        self.events.append("kill")
+        self.alive = False
+
+
+def test_cancel_allows_ffmpeg_to_finish_before_escalation(tmp_path):
+    worker = DownloadWorker(
+        "https://example.com/live.m3u8", [(0, "live", 0, 0)], str(tmp_path),
+    )
+    worker.graceful_stop_timeout = 0.05
+    process = _CancelProcess()
+    worker._proc = process
+
+    worker.cancel()
+
+    assert process.events == ["graceful"]
+
+
+def test_cancel_escalates_after_graceful_timeout(tmp_path):
+    worker = DownloadWorker(
+        "https://example.com/live.m3u8", [(0, "live", 0, 0)], str(tmp_path),
+    )
+    worker.graceful_stop_timeout = 0.01
+    worker.force_stop_timeout = 0.01
+    process = _CancelProcess(ignores_graceful=True)
+    worker._proc = process
+
+    worker.cancel()
+
+    assert process.events == ["graceful", "terminate", "kill"]
+
+
 def _live_worker(tmp_path):
     """A yt-dlp worker configured like an in-progress live capture."""
     worker = DownloadWorker(

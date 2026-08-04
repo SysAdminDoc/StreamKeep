@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made capture cancellation signal ffmpeg/yt-dlp gracefully in an isolated
+  process group, wait for the container to close, and escalate through
+  terminate/kill only when the process ignores the stop request.
+
 - Made FTP/SFTP resume distinguish an absent remote partial from permission,
   transport, and unsupported-size-probe failures. Only explicit not-found
   responses start at byte zero; other probe failures stop the transfer with a

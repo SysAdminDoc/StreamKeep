@@ -5,6 +5,7 @@ import logging
 import json
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import time
@@ -167,6 +168,8 @@ class DownloadWorker(QThread):
         self._proc = None
         self._ffmpeg_path = ""
         self._proc_lock = __import__("threading").Lock()
+        self.graceful_stop_timeout = 5.0
+        self.force_stop_timeout = 1.0
         self._guarded_proxy = None
         self._guarded_transport_ready = False
         # Twitch SSAI (V37): FFmpeg reads a generated local media playlist so
@@ -880,6 +883,18 @@ class DownloadWorker(QThread):
         except (OSError, ValueError):
             pass
 
+    def _child_process_kwargs(self):
+        """Return isolated child-process settings with signal delivery enabled."""
+        flags = _CREATE_NO_WINDOW
+        kwargs = {"creationflags": flags, "env": self._guarded_child_env()}
+        if os.name == "nt":
+            kwargs["creationflags"] |= getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        else:
+            kwargs["start_new_session"] = True
+        return kwargs
+
     def _stitch_refresh_parts(self, outfile, parts):
         """Remux refresh parts into the original output path."""
         if len(parts) == 1:
@@ -917,8 +932,7 @@ class DownloadWorker(QThread):
                 self._proc = subprocess.Popen(
                     command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     text=True, bufsize=1, encoding="utf-8", errors="replace",
-                    creationflags=_CREATE_NO_WINDOW,
-                    env=self._guarded_child_env(),
+                    **self._child_process_kwargs(),
                 )
             output_lines = []
             for line in self._proc.stderr:
@@ -973,14 +987,76 @@ class DownloadWorker(QThread):
         )
         return True
 
+    @staticmethod
+    def _process_is_running(process):
+        try:
+            return process.poll() is None
+        except (AttributeError, OSError):
+            return False
+
+    def _send_graceful_stop(self, process):
+        """Ask ffmpeg/yt-dlp to finish its container before force-stopping."""
+        try:
+            if os.name == "nt":
+                process.send_signal(
+                    getattr(signal, "CTRL_BREAK_EVENT", signal.SIGINT)
+                )
+            elif hasattr(os, "killpg") and getattr(process, "pid", None):
+                os.killpg(os.getpgid(process.pid), signal.SIGINT)
+            else:
+                process.send_signal(signal.SIGINT)
+            self.log.emit("[STOP] Requested graceful capture shutdown")
+            return True
+        except (AttributeError, OSError, ValueError):
+            stdin = getattr(process, "stdin", None)
+            if stdin is None:
+                return False
+            try:
+                try:
+                    stdin.write("q\n")
+                except TypeError:
+                    stdin.write(b"q\n")
+                stdin.flush()
+                self.log.emit("[STOP] Sent ffmpeg quit request")
+                return True
+            except (AttributeError, OSError, TypeError, ValueError):
+                return False
+
+    def _wait_for_process_exit(self, process, timeout):
+        deadline = time.monotonic() + max(0.0, float(timeout or 0.0))
+        while self._process_is_running(process) and time.monotonic() < deadline:
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        return not self._process_is_running(process)
+
+    def _force_stop_process(self, process):
+        if not self._process_is_running(process):
+            return
+        try:
+            process.terminate()
+            self.log.emit("[STOP] Graceful shutdown timed out; terminating capture")
+        except (AttributeError, OSError):
+            pass
+        if self._wait_for_process_exit(process, self.force_stop_timeout):
+            return
+        try:
+            process.kill()
+            self.log.emit("[STOP] Capture ignored terminate; killed process")
+        except (AttributeError, OSError):
+            pass
+
+    def _stop_active_process(self, process):
+        if not self._send_graceful_stop(process):
+            self._force_stop_process(process)
+            return
+        if not self._wait_for_process_exit(process, self.graceful_stop_timeout):
+            self._force_stop_process(process)
+
     def cancel(self):
         self._cancel = True
         with self._proc_lock:
-            if self._proc and self._proc.poll() is None:
-                try:
-                    self._proc.terminate()
-                except OSError:
-                    pass
+            process = self._proc
+        if process is not None and self._process_is_running(process):
+            self._stop_active_process(process)
 
     def _build_ytdlp_download_cmd(
         self, outfile, impersonate=False, *, export=False, use_sabr=False,
@@ -2003,8 +2079,7 @@ class DownloadWorker(QThread):
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1, encoding="utf-8", errors="replace",
-                    creationflags=_CREATE_NO_WINDOW,
-                    env=self._guarded_child_env(),
+                    **self._child_process_kwargs(),
                 )
             output_lines = []
             try:
@@ -2559,8 +2634,7 @@ class DownloadWorker(QThread):
                             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             text=True, bufsize=1, encoding="utf-8",
                             errors="replace",
-                            creationflags=_CREATE_NO_WINDOW,
-                            env=self._guarded_child_env(),
+                            **self._child_process_kwargs(),
                         )
                     for line in self._proc.stderr:
                         line = line.strip()
@@ -2672,8 +2746,7 @@ class DownloadWorker(QThread):
                             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             text=True, bufsize=1, encoding="utf-8",
                             errors="replace",
-                            creationflags=_CREATE_NO_WINDOW,
-                            env=self._guarded_child_env(),
+                            **self._child_process_kwargs(),
                         )
                     output_lines = []
                     try:
