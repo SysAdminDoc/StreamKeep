@@ -401,7 +401,9 @@ class DownloadWorker(QThread):
             self.set_hls_playlist_identity(playlist)
         self._merge_hls_markers(getattr(playlist, "dateranges", []) or [])
 
-    def _record_hls_schedule(self, url, body):
+    def _record_hls_schedule(self, url, body, markers=None):
+        if markers is not None:
+            self._merge_hls_markers(markers)
         target = str(url or "")
         if not target or any(
             str(item.get("uri", "")) == target
@@ -1433,6 +1435,7 @@ class DownloadWorker(QThread):
                         on_manifest=lambda current, body, root=safe_url:
                         self._record_hls_manifest(current, body, root),
                         on_schedule=self._record_hls_schedule,
+                        on_schedule_markers=self._record_hls_schedule,
                     )
                     self._write_hls_marker_sidecar()
                 elif kind == "dash":

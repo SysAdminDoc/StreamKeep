@@ -1,0 +1,17 @@
+{
+  "DATERANGES": [
+    {
+      "ID": "nested-marker-1",
+      "CLASS": "com.example.nested-marker",
+      "X-SCHEDULE-OFFSET": 2,
+      "DURATION": 4,
+      "SCTE35-OUT": "0x10"
+    },
+    {
+      "ID": "nested-marker-2",
+      "CLASS": "com.example.nested-marker",
+      "START-DATE": "2026-08-01T12:00:40Z",
+      "DURATION": 5
+    }
+  ]
+}

@@ -460,6 +460,101 @@ https://video.example.com/720p.m3u8
         self.assertEqual(schedules[0][0], schedule)
         self.assertIn('"events"', schedules[0][1])
 
+    def test_nested_daterange_schedule_markers_are_parsed_and_offset_resolved(self):
+        root = "https://origin.example.com/live/media.m3u8"
+        schedule = "https://origin.example.com/live/schedules/dateranges.json"
+        nested = "https://origin.example.com/live/schedules/nested/dateranges.json"
+        documents = {
+            root: _read("daterange_interstitial.m3u8"),
+            schedule: _read("daterange_schedule.json"),
+            nested: _read("daterange_schedule_nested.json"),
+        }
+        fetched = []
+        archived = []
+        markers = []
+
+        def fetch(url):
+            fetched.append(url)
+            return documents.get(url)
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            preflight_hls_manifest_tree(
+                root,
+                fetch,
+                on_schedule=lambda url, body: archived.append((url, body)),
+                on_schedule_markers=lambda _url, _body, rows: markers.extend(rows),
+            )
+
+        self.assertEqual(fetched, [root, schedule, nested])
+        self.assertEqual([item[0] for item in archived], [schedule, nested])
+        by_id = {str(row["id"]): row for row in markers}
+        self.assertEqual(
+            set(by_id),
+            {"schedule-json-1", "json-marker-2", "nested-marker-1", "nested-marker-2"},
+        )
+        self.assertEqual(by_id["schedule-json-1"]["start_date"], "2026-08-01T12:00:23.500000Z")
+        self.assertEqual(by_id["nested-marker-1"]["start_date"], "2026-08-01T12:00:25.500000Z")
+        self.assertEqual(by_id["schedule-json-1"]["attributes"]["DURATION"], 12)
+        self.assertEqual(by_id["schedule-json-1"]["attributes"]["SCTE35-OUT"], "0xABCD")
+        self.assertIn('"DATERANGES"', archived[0][1])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(
+                MetadataSaver.write_hls_markers(
+                    tmpdir, markers, schedules=archived, file_base="hls",
+                )
+            )
+            sidecar = json.loads(
+                (Path(tmpdir) / "hls.markers.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(
+            {str(row["id"]) for row in sidecar["markers"]}, set(by_id),
+        )
+
+    def test_nested_schedule_cycles_are_bounded_and_preload_types_are_distinct(self):
+        root = "https://origin.example.com/live/media.m3u8"
+        schedule = "https://origin.example.com/live/schedules/dateranges.json"
+        documents = {
+            root: (
+                "#EXTM3U\n"
+                "#EXT-X-DATERANGE:ID=\"schedule\",CLASS=\"com.apple.hls.daterange-schedule\","
+                "START-DATE=\"2026-08-01T12:00:00Z\",X-URI=\"schedules/dateranges.json\"\n"
+                "#EXT-X-PRELOAD-HINT:TYPE=KEY,URI=\"keys/key.bin\"\n"
+                "#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"parts/part.m4s\"\n"
+            ),
+            schedule: (
+                '{"DATERANGES":[{"ID":"cycle","CLASS":"com.apple.hls.daterange-schedule",'
+                '"START-DATE":"2026-08-01T12:00:01Z",'
+                '"X-URI":"../schedules/dateranges.json"}]}'
+            ),
+        }
+        fetched = []
+
+        def fetch(url):
+            fetched.append(url)
+            return documents.get(url)
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            references = validate_hls_manifest(
+                documents[root], root,
+            )
+            preflight_hls_manifest_tree(root, fetch)
+
+        self.assertEqual(
+            references.preload_keys,
+            ("https://origin.example.com/live/keys/key.bin",),
+        )
+        self.assertEqual(
+            references.preload_parts,
+            ("https://origin.example.com/live/parts/part.m4s",),
+        )
+        self.assertEqual(fetched, [root, schedule])
+
 
 class HLSMediaPlaylistTests(unittest.TestCase):
     def test_media_playlist_duration_and_segments(self):

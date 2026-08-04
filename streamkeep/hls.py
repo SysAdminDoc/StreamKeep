@@ -1,7 +1,9 @@
 """HLS m3u8 parsing."""
 
+import json
 import re
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from urllib.parse import urljoin
 
 from .models import HLSMediaPlaylist, HLSSegment, MediaTrackInfo, QualityInfo
@@ -50,6 +52,19 @@ class HLSManifestReferences:
     # child media playlist. Keeping it separate lets callers archive it while
     # ensuring an interstitial asset can never become a primary input.
     schedule_uris: tuple = ()
+    # Each entry carries the schedule document's parent start for resolving
+    # X-SCHEDULE-OFFSET in the fetched JSON document.
+    schedule_contexts: tuple = ()
+    preload_keys: tuple = ()
+    preload_parts: tuple = ()
+
+
+@dataclass(frozen=True)
+class HLSScheduleDocument:
+    """Parsed marker rows and nested schedule references from one document."""
+
+    markers: tuple = ()
+    references: tuple = ()
 
 
 _HLS_PLAYLIST_URI_TAGS = frozenset({
@@ -99,6 +114,9 @@ def validate_hls_manifest(
     playlist_seen = set()
     schedule_seen = set()
     schedule_uris = []
+    schedule_contexts = []
+    preload_keys = []
+    preload_parts = []
     pending_playlist = False
 
     def add(raw_value, *, playlist=False):
@@ -149,6 +167,9 @@ def validate_hls_manifest(
                     if target and target not in schedule_seen:
                         schedule_seen.add(target)
                         schedule_uris.append(target)
+                        schedule_contexts.append(
+                            (target, str(attrs.get("START-DATE", "") or ""))
+                        )
                 continue
             if not separator or tag not in _HLS_URI_ATTRIBUTE_TAGS:
                 continue
@@ -159,6 +180,18 @@ def validate_hls_manifest(
             if attrs.get("SERVER-URI"):
                 uri_values.append(attrs["SERVER-URI"])
             for uri_value in uri_values:
+                if tag == "#EXT-X-PRELOAD-HINT":
+                    target = add(uri_value)
+                    hint_type = attrs.get("TYPE", "").upper()
+                    if hint_type == "KEY" and target and target not in preload_keys:
+                        preload_keys.append(target)
+                    elif (
+                        hint_type in {"PART", "MAP"}
+                        and target
+                        and target not in preload_parts
+                    ):
+                        preload_parts.append(target)
+                    continue
                 is_playlist = tag in _HLS_PLAYLIST_URI_TAGS
                 if tag == "#EXT-X-MEDIA":
                     is_playlist = attrs.get("TYPE", "").upper() in {
@@ -170,7 +203,12 @@ def validate_hls_manifest(
         pending_playlist = False
 
     return HLSManifestReferences(
-        tuple(resources), tuple(playlists), tuple(schedule_uris),
+        resources=tuple(resources),
+        playlists=tuple(playlists),
+        schedule_uris=tuple(schedule_uris),
+        schedule_contexts=tuple(schedule_contexts),
+        preload_keys=tuple(preload_keys),
+        preload_parts=tuple(preload_parts),
     )
 
 
@@ -181,16 +219,21 @@ def preflight_hls_manifest_tree(
     allow_private_network=False,
     max_depth=8,
     max_manifests=128,
+    max_schedule_depth=8,
+    max_schedules=128,
     on_manifest=None,
     on_schedule=None,
+    on_schedule_markers=None,
 ):
     """Fetch and validate a bounded recursive HLS playlist graph.
 
     ``on_manifest`` receives ``(url, body)`` after the body has passed the
     URI policy.  Daterange schedules are fetched through the same guarded
     ``fetch_text`` callback and delivered to ``on_schedule`` as
-    ``(url, body)``. Both callbacks are observation hooks; they cannot widen
-    the set of URLs that the graph walker will fetch.
+    ``(url, body)``. ``on_schedule_markers`` receives ``(url, body,
+    markers)`` after a JSON schedule has been parsed. All callbacks are
+    observation hooks; they cannot widen the set of URLs that the graph
+    walker will fetch.
     """
     root = validate_remote_url(
         url, allow_private_network=allow_private_network,
@@ -198,6 +241,50 @@ def preflight_hls_manifest_tree(
     pending = [(root, 0)]
     seen = []
     seen_set = set()
+    pending_schedules = []
+    queued_schedules = set()
+    seen_schedules = set()
+
+    def queue_schedule(schedule_url, parent_start, depth):
+        if schedule_url in queued_schedules or schedule_url in seen_schedules:
+            return
+        if depth > max_schedule_depth:
+            raise RemoteURLPolicyError(
+                "HLS daterange schedule graph exceeds the recursion limit"
+            )
+        queued_schedules.add(schedule_url)
+        pending_schedules.append((schedule_url, parent_start, depth))
+
+    def drain_schedules():
+        while pending_schedules:
+            schedule_url, parent_start, depth = pending_schedules.pop(0)
+            if schedule_url in seen_schedules:
+                continue
+            if len(seen_schedules) >= max_schedules:
+                raise RemoteURLPolicyError(
+                    "HLS daterange schedule graph exceeds the schedule limit"
+                )
+            schedule_body = fetch_text(schedule_url)
+            if schedule_body is None:
+                continue
+            seen_schedules.add(schedule_url)
+            parsed = parse_hls_schedule_document(
+                schedule_body,
+                schedule_url,
+                parent_start_date=parent_start,
+                allow_private_network=allow_private_network,
+            )
+            if on_schedule is not None:
+                on_schedule(schedule_url, schedule_body)
+            if on_schedule_markers is not None:
+                on_schedule_markers(
+                    schedule_url, schedule_body, parsed.markers,
+                )
+            for nested_url, nested_parent_start in parsed.references:
+                queue_schedule(
+                    nested_url, nested_parent_start or parent_start, depth + 1,
+                )
+
     while pending:
         current, depth = pending.pop(0)
         if current in seen_set:
@@ -220,10 +307,10 @@ def preflight_hls_manifest_tree(
         )
         if on_manifest is not None:
             on_manifest(current, body)
+        contexts = dict(references.schedule_contexts)
         for schedule_url in references.schedule_uris:
-            schedule_body = fetch_text(schedule_url)
-            if schedule_body is not None and on_schedule is not None:
-                on_schedule(schedule_url, schedule_body)
+            queue_schedule(schedule_url, contexts.get(schedule_url, ""), 0)
+        drain_schedules()
         if references.playlists and depth >= max_depth:
             raise RemoteURLPolicyError(
                 "HLS playlist graph exceeds the recursion limit"
@@ -382,14 +469,147 @@ def parse_hls_duration(body):
     return total_secs, start_time, seg_count
 
 
+def _normalize_daterange_attributes(value):
+    if isinstance(value, dict):
+        return {
+            str(key).upper(): item
+            for key, item in value.items()
+        }
+    return _parse_attributes(value)
+
+
+def _attribute_text(attrs, key):
+    value = attrs.get(key, "")
+    return "" if value is None else str(value)
+
+
+def _resolve_schedule_offset(parent_start_date, raw_offset):
+    """Resolve a JSON schedule's decimal offset against its parent start."""
+    parent = str(parent_start_date or "").strip()
+    if not parent or raw_offset is None or isinstance(raw_offset, bool):
+        return ""
+    try:
+        offset = float(raw_offset)
+        start = datetime.fromisoformat(parent.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if offset != offset or offset in {float("inf"), float("-inf")}:
+        return ""
+    resolved = (start + timedelta(seconds=offset)).isoformat()
+    if resolved.endswith("+00:00"):
+        return resolved[:-6] + "Z"
+    return resolved
+
+
+def _schedule_daterange_items(payload):
+    if isinstance(payload, dict):
+        raw_items = next(
+            (
+                value for key, value in payload.items()
+                if str(key).upper() == "DATERANGES"
+            ),
+            None,
+        )
+    elif isinstance(payload, list):
+        raw_items = payload
+    else:
+        return ()
+    if isinstance(raw_items, dict):
+        raw_items = list(raw_items.values())
+    if not isinstance(raw_items, list):
+        return ()
+    items = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        wrapped = next(
+            (
+                value for key, value in item.items()
+                if str(key).upper() == "DATERANGE"
+                and isinstance(value, dict)
+            ),
+            None,
+        )
+        items.append(wrapped if wrapped is not None else item)
+    return tuple(items)
+
+
+def parse_hls_schedule_document(
+    body,
+    base_url="",
+    *,
+    parent_start_date="",
+    allow_private_network=False,
+):
+    """Parse a guarded HLS DATERANGES JSON document.
+
+    Schedule attributes retain their JSON scalar types in ``attributes``;
+    in particular, numeric durations and offsets remain numbers while SCTE
+    hexadecimal sequences remain strings. Nested schedule URIs are normalized
+    and policy-checked before they are returned to the graph walker.
+    """
+    try:
+        payload = json.loads(str(body or ""))
+    except (TypeError, ValueError):
+        return HLSScheduleDocument()
+
+    markers = []
+    references = []
+    reference_seen = set()
+    for raw_item in _schedule_daterange_items(payload):
+        attrs = _normalize_daterange_attributes(raw_item)
+        class_name = _attribute_text(attrs, "CLASS")
+        if not class_name:
+            # CLASS is required by the schedule document contract. Ignore
+            # unrelated JSON records in otherwise valid archive documents.
+            continue
+        raw_start = _attribute_text(attrs, "START-DATE").strip()
+        raw_offset = attrs.get("X-SCHEDULE-OFFSET")
+        has_offset = raw_offset is not None and str(raw_offset).strip() != ""
+        if bool(raw_start) == bool(has_offset):
+            # Exactly one of START-DATE and X-SCHEDULE-OFFSET is required.
+            continue
+        start_date = raw_start
+        if has_offset:
+            start_date = _resolve_schedule_offset(
+                parent_start_date, raw_offset,
+            )
+            if not start_date:
+                continue
+        marker = _parse_daterange(attrs, base_url)
+        if marker is None:
+            continue
+        if has_offset:
+            marker["start_date"] = start_date
+        markers.append(marker)
+
+        if marker["is_schedule"] and marker["x_uri_raw"]:
+            nested_url = validate_remote_url(
+                marker["x_uri_raw"],
+                base_url=base_url,
+                allow_private_network=allow_private_network,
+            ).url
+            if nested_url not in reference_seen:
+                reference_seen.add(nested_url)
+                references.append((nested_url, start_date))
+    return HLSScheduleDocument(
+        markers=tuple(markers), references=tuple(references),
+    )
+
+
+# Name the parser after the HLS feature as well as its document shape so
+# integrations written against either terminology remain straightforward.
+parse_hls_daterange_schedule = parse_hls_schedule_document
+
+
 def _parse_daterange(value, base_url=""):
     """Return a lossless, sidecar-ready representation of DATERANGE."""
-    attrs = _parse_attributes(value)
+    attrs = _normalize_daterange_attributes(value)
     if not attrs:
         return None
-    class_name = attrs.get("CLASS", "")
-    asset_uri_raw = attrs.get("X-ASSET-URI", "")
-    asset_list = attrs.get("X-ASSET-LIST", "")
+    class_name = _attribute_text(attrs, "CLASS")
+    asset_uri_raw = _attribute_text(attrs, "X-ASSET-URI")
+    asset_list = _attribute_text(attrs, "X-ASSET-LIST")
     is_interstitial = bool(asset_uri_raw or asset_list) or (
         class_name.casefold() == "com.apple.hls.interstitial"
     )
@@ -399,21 +619,21 @@ def _parse_daterange(value, base_url=""):
     )
     return {
         "type": "interstitial" if is_interstitial else "daterange",
-        "id": attrs.get("ID", ""),
+        "id": _attribute_text(attrs, "ID"),
         # Keep CLASS verbatim; unknown vendor classes are part of the public
         # marker contract and must not be normalized away.
         "class": class_name,
-        "start_date": attrs.get("START-DATE", ""),
-        "end_date": attrs.get("END-DATE", ""),
+        "start_date": _attribute_text(attrs, "START-DATE"),
+        "end_date": _attribute_text(attrs, "END-DATE"),
         "duration": duration,
         "planned_duration": planned_duration,
-        "scte35_out": attrs.get("SCTE35-OUT", ""),
-        "scte35_in": attrs.get("SCTE35-IN", ""),
+        "scte35_out": _attribute_text(attrs, "SCTE35-OUT"),
+        "scte35_in": _attribute_text(attrs, "SCTE35-IN"),
         "asset_uri": _resolve(base_url, asset_uri_raw),
         "asset_uri_raw": asset_uri_raw,
         "asset_list": asset_list,
-        "x_uri": _resolve(base_url, attrs.get("X-URI", "")),
-        "x_uri_raw": attrs.get("X-URI", ""),
+        "x_uri": _resolve(base_url, _attribute_text(attrs, "X-URI")),
+        "x_uri_raw": _attribute_text(attrs, "X-URI"),
         "is_schedule": class_name.casefold()
         == "com.apple.hls.daterange-schedule",
         # This is deliberately retained in addition to the typed convenience

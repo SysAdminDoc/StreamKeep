@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Parsed guarded HLS DATERANGES schedule documents into marker sidecars,
+  resolving nested X-SCHEDULE-OFFSET rows with bounded cycle-safe traversal,
+  preserving JSON scalar types and verbatim schedule bodies, and classifying
+  low-latency preload hints by KEY versus PART/MAP.
+
 - Made capture cancellation signal ffmpeg/yt-dlp gracefully in an isolated
   process group, wait for the container to close, and escalate through
   terminate/kill only when the process ignores the stop request.

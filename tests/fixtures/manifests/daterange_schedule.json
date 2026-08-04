@@ -1,0 +1,19 @@
+{
+  "DATERANGES": [
+    {
+      "ID": "schedule-json-1",
+      "CLASS": "com.apple.hls.daterange-schedule",
+      "X-SCHEDULE-OFFSET": 5.5,
+      "DURATION": 12,
+      "SCTE35-OUT": "0xABCD",
+      "X-URI": "nested/dateranges.json"
+    },
+    {
+      "ID": "json-marker-2",
+      "CLASS": "com.example.schedule-marker",
+      "START-DATE": "2026-08-01T12:00:30Z",
+      "DURATION": 3.25,
+      "SCTE35-IN": "0x01"
+    }
+  ]
+}
