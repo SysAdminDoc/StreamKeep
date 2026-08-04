@@ -1,3 +1,9 @@
+import json
+import os
+import shlex
+import subprocess
+import sys
+
 import pytest
 
 from streamkeep.download_options import (
@@ -142,13 +148,52 @@ def test_named_ytdlp_templates_reject_command_boundaries(args):
         normalize_ytdlp_arg_templates({"Unsafe": args})
 
 
-def test_command_export_quotes_each_argv_element_for_windows():
+def test_command_export_escapes_cmd_metacharacters_for_windows():
+    url = "https://example.com/a b?x=one&y=two|three^four>five"
     command = format_command_argv(
-        ["yt-dlp", "--add-header", "Referer: https://example.com/a b"],
+        ["yt-dlp", url],
         windows=True,
     )
-    assert command.startswith("yt-dlp --add-header ")
-    assert '"Referer: https://example.com/a b"' in command
+    assert command.startswith("yt-dlp ")
+    assert '"https://example.com/a b?x=one&y=two|three^four>five"' in command
+
+    unquoted = format_command_argv(
+        ["yt-dlp", "https://example.com/a?x=one&y=two|three^four>five"],
+        windows=True,
+    )
+    assert "^&" in unquoted
+    assert "^|" in unquoted
+    assert "^^" in unquoted
+    assert "^>" in unquoted
+
+
+def test_command_export_round_trips_through_cmd_and_posix_parsers():
+    url = "https://example.com/a b?x=one&y=two|three^four>five"
+    argv = ["yt-dlp", url]
+    assert shlex.split(format_command_argv(argv, windows=False)) == argv
+    if os.name != "nt":
+        pytest.skip("cmd.exe round-trip is Windows-specific")
+
+    probe = (
+        "import json,sys; print(json.dumps(sys.argv[1:], ensure_ascii=False))"
+    )
+    command = format_command_argv([sys.executable, "-c", probe, url], windows=True)
+    # Pass the command as a raw CreateProcess command line.  Supplying the
+    # `/c` payload as a list item makes Python's C-runtime quoting add
+    # backslashes before its embedded quotes, unlike a pasted shell command.
+    result = subprocess.run(
+        f"cmd.exe /d /s /c {command}",
+        capture_output=True,
+        text=True,
+        check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert json.loads(result.stdout.strip()) == [url]
+
+
+def test_command_export_rejects_line_break_injection():
+    with pytest.raises(ValueError, match="line breaks"):
+        format_command_argv(["yt-dlp", "https://example.com/a\nwhoami"], windows=True)
 
 
 @pytest.mark.parametrize("value", ["-1", "11", "lossless", "0\n--exec x"])

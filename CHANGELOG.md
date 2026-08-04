@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made copied download commands safe to paste into Windows `cmd.exe`,
+  escaping metacharacters while preserving exact argv round-trips on Windows
+  and POSIX shells.
+
 - Cleared browser replay headers as queued service jobs become terminal,
   including pre-dispatch cancellation, tombstone skips, retry cancellation, and
   finalizer exits, and bounded the in-memory header cache with oldest-first

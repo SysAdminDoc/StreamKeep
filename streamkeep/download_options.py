@@ -302,15 +302,35 @@ def resolve_ytdlp_arg_template(templates, name):
 
 
 def format_command_argv(argv, *, windows=None):
-    """Format a generated argv for the host shell without evaluating it."""
+    """Format a generated argv for the host shell without evaluating it.
+
+    ``subprocess.list2cmdline`` follows the Windows C-runtime argv rules, but
+    it does not protect cmd.exe metacharacters when an unquoted URL is pasted
+    at a prompt.  Escape those characters after C-runtime serialization so
+    cmd.exe removes the caret and the target process still receives the
+    original argv value.
+    """
     if isinstance(argv, (str, bytes)) or not isinstance(argv, (list, tuple)):
         raise ValueError("command must be a structured argument list")
     values = [str(value) for value in argv]
     if not values or any(not value for value in values):
         raise ValueError("command arguments cannot be empty")
+    if any("\r" in value or "\n" in value for value in values):
+        raise ValueError("command arguments cannot contain line breaks")
     if windows is None:
         windows = os.name == "nt"
-    return subprocess.list2cmdline(values) if windows else shlex.join(values)
+    if not windows:
+        return shlex.join(values)
+    command = subprocess.list2cmdline(values)
+    escaped = []
+    quoted = False
+    for character in command:
+        if character == '"':
+            quoted = not quoted
+        if not quoted and character in "&|<>^()":
+            escaped.append("^")
+        escaped.append(character)
+    return "".join(escaped)
 
 
 EXTERNAL_DOWNLOADERS = ("", "aria2c")
