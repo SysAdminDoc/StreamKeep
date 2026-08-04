@@ -27,6 +27,33 @@ from .utils import (
     render_template_strict,
 )
 
+MAX_MAINTENANCE_PLAN_BYTES = 64 * 1024 * 1024
+_PLAN_FIELDS = frozenset({
+    "plan_id", "created_at", "root", "history_snapshot_id",
+    "history_fingerprint", "actions", "diagnostics",
+})
+_ACTION_FIELDS = frozenset({
+    "action_id", "kind", "label", "detail", "payload",
+})
+
+
+def _validate_object_keys(value, allowed, label):
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    unexpected = sorted(set(value) - allowed)
+    if unexpected:
+        raise ValueError(
+            f"{label} has unexpected field(s): {', '.join(map(str, unexpected))}"
+        )
+
+
+def _require_fields(value, fields, label):
+    missing = sorted(field for field in fields if field not in value)
+    if missing:
+        raise ValueError(
+            f"{label} is missing required field(s): {', '.join(missing)}"
+        )
+
 
 @dataclass
 class MaintenanceAction:
@@ -52,14 +79,48 @@ class MaintenancePlan:
 
     @classmethod
     def from_dict(cls, value):
+        _validate_object_keys(value, _PLAN_FIELDS, "maintenance plan")
+        _require_fields(
+            value,
+            {"plan_id", "created_at", "root", "history_snapshot_id",
+             "history_fingerprint"},
+            "maintenance plan",
+        )
+        raw_actions = value.get("actions", [])
+        if not isinstance(raw_actions, list):
+            raise ValueError("maintenance plan actions must be a list")
+        actions = []
+        for index, item in enumerate(raw_actions):
+            label = f"maintenance action {index}"
+            _validate_object_keys(item, _ACTION_FIELDS, label)
+            _require_fields(item, {"action_id", "kind", "label", "detail"}, label)
+            payload = item.get("payload", {})
+            if not isinstance(payload, dict):
+                raise ValueError(f"{label} payload must be an object")
+            actions.append(MaintenanceAction(
+                action_id=str(item["action_id"]),
+                kind=str(item["kind"]),
+                label=str(item["label"]),
+                detail=str(item["detail"]),
+                payload=dict(payload),
+            ))
+        diagnostics = value.get("diagnostics", {})
+        if not isinstance(diagnostics, dict):
+            raise ValueError("maintenance plan diagnostics must be an object")
+        try:
+            history_snapshot_id = int(value["history_snapshot_id"])
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "maintenance plan history_snapshot_id must be an integer"
+            ) from error
         return cls(
             plan_id=str(value["plan_id"]),
             created_at=str(value["created_at"]),
             root=str(value["root"]),
-            history_snapshot_id=int(value["history_snapshot_id"]),
+            history_snapshot_id=history_snapshot_id,
             history_fingerprint=str(value["history_fingerprint"]),
-            actions=[MaintenanceAction(**item) for item in value.get("actions", [])],
-            diagnostics=dict(value.get("diagnostics", {})),
+            actions=actions,
+            diagnostics=dict(diagnostics),
         )
 
 
@@ -339,7 +400,9 @@ def _retemplate_diagnostics(
         total_gb = usage.total / (1024 ** 3)
     except OSError:
         free_gb = total_gb = -1.0
-    backup_dir = config.get("archive_backup_dir") or str(CONFIG_DIR / "backups")
+    backup_dir = config.get("archive_backup_dir") or str(
+        Path(root) / ".streamkeep-backups"
+    )
     warning_gb = float(config.get("archive_disk_warning_gb", 20) or 20)
     critical_gb = float(config.get("archive_disk_critical_gb", 5) or 5)
     disk_status = (
@@ -480,9 +543,17 @@ def save_retemplate_plan(plan, path):
     return _save_plan_file(plan, path)
 
 
-def load_retemplate_plan(path):
+def _load_maintenance_plan_file(path):
     path = Path(path).expanduser()
-    return MaintenancePlan.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    if path.stat().st_size > MAX_MAINTENANCE_PLAN_BYTES:
+        raise ValueError("maintenance plan is too large")
+    return MaintenancePlan.from_dict(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
+def load_retemplate_plan(path):
+    return _load_maintenance_plan_file(path)
 
 
 def _restore_retemplate_stage(temp_path, old_path, new_path, file_renames, finalized):
@@ -500,16 +571,75 @@ def _restore_retemplate_stage(temp_path, old_path, new_path, file_renames, final
         os.replace(stage, destination)
 
 
+def _validate_retemplate_plan(plan):
+    if not isinstance(plan, MaintenancePlan):
+        raise ValueError("re-template plan has an invalid type")
+    root = Path(str(plan.root or "")).expanduser().resolve(strict=False)
+    if not root.is_dir():
+        raise ValueError(f"re-template plan root is not a directory: {root}")
+    if not isinstance(plan.diagnostics, dict):
+        raise ValueError("re-template plan diagnostics must be an object")
+    backup_dir = Path(
+        str(plan.diagnostics.get("backup_dir") or root / ".streamkeep-backups")
+    ).expanduser().resolve(strict=False)
+    if not _path_is_within(backup_dir, root):
+        raise ValueError(
+            f"re-template backup directory is outside plan root: {backup_dir}"
+        )
+    for index, action in enumerate(plan.actions):
+        if not isinstance(action, MaintenanceAction):
+            raise ValueError(f"re-template action {index} has an invalid type")
+        if not isinstance(action.payload, dict):
+            raise ValueError(f"re-template action {index} payload must be an object")
+        try:
+            expected_id = _action(
+                action.kind, action.label, action.detail, action.payload
+            ).action_id
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"re-template action {index} cannot derive an action id"
+            ) from error
+        if str(action.action_id) != expected_id:
+            raise ValueError(
+                f"re-template action {index} action_id does not match its payload"
+            )
+        if action.kind != "retemplate" or action.payload.get("status") != "ready":
+            continue
+        for path_field in ("old_path", "new_path"):
+            raw_path = str(action.payload.get(path_field) or "").strip()
+            if not raw_path:
+                raise ValueError(
+                    f"re-template action {index} has no {path_field}"
+                )
+            resolved = Path(raw_path).expanduser().resolve(strict=False)
+            if not _path_is_within(resolved, root):
+                raise ValueError(
+                    f"re-template action {index} {path_field} is outside plan root: "
+                    f"{resolved}"
+                )
+    return root, backup_dir
+
+
 def _apply_retemplate_action(
-    action, *, db_module, tags_module, ledger_path=None, plan_id=""
+    action, *, db_module, tags_module, ledger_path=None, plan_id="", plan_root=None
 ):
     payload = action.payload
-    old_path = Path(str(payload.get("old_path") or ""))
-    new_path = Path(str(payload.get("new_path") or ""))
+    old_path = Path(str(payload.get("old_path") or "")).expanduser().resolve(
+        strict=False
+    )
+    new_path = Path(str(payload.get("new_path") or "")).expanduser().resolve(
+        strict=False
+    )
     history_id = int(payload.get("history_id") or 0)
     file_renames = list(payload.get("file_renames") or [])
     if payload.get("status") != "ready":
         raise RuntimeError(str(payload.get("reason") or "action is not ready"))
+    if plan_root is not None:
+        for path_field, path in (("old_path", old_path), ("new_path", new_path)):
+            if not _path_is_within(path, plan_root):
+                raise RuntimeError(
+                    f"{path_field} is outside the re-template plan root"
+                )
     if not old_path.is_dir() or old_path.is_symlink():
         raise RuntimeError("source recording directory is no longer available")
     if new_path.exists() and _normal_path(new_path) != _normal_path(old_path):
@@ -654,6 +784,14 @@ def apply_retemplate(
     """Apply approved re-template moves as independently rollback-safe units."""
     from . import tags as default_tags
 
+    try:
+        plan_root, backup_dir = _validate_retemplate_plan(plan)
+    except (OSError, TypeError, ValueError) as error:
+        return MaintenanceResult(
+            "invalid_plan",
+            skipped=len(getattr(plan, "actions", []) or []),
+            errors=[str(error)],
+        )
     approved = set(approved_action_ids or ())
     selected = [
         action for action in plan.actions
@@ -673,8 +811,6 @@ def apply_retemplate(
                 "kind": "retemplate"}, ledger_path=ledger)
         return result
     if selected:
-        backup_dir = Path(plan.diagnostics.get("backup_dir") or
-                          Path(config_dir or CONFIG_DIR) / "backups")
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_file = backup_dir / f"maintenance-{plan.plan_id}.skbackup"
         create = backup_fn or backup.create_backup
@@ -696,7 +832,7 @@ def apply_retemplate(
         try:
             _apply_retemplate_action(
                 action, db_module=db_module, tags_module=tags_module,
-                ledger_path=ledger, plan_id=plan.plan_id,
+                ledger_path=ledger, plan_id=plan.plan_id, plan_root=plan_root,
             )
             result.applied += 1
             _audit({"event": "action_applied", "at": _utc_now(),
@@ -898,7 +1034,7 @@ def load_pending_plan(*, config_dir=None):
     path = pending_plan_path(config_dir)
     if not path.is_file():
         return None
-    return MaintenancePlan.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    return _load_maintenance_plan_file(path)
 
 
 def _audit(record, *, ledger_path):

@@ -4,11 +4,11 @@ from unittest import mock
 
 import pytest
 
-from streamkeep import db, tags
+from streamkeep import db, maintenance, tags
 from streamkeep.maintenance import (
     _order_file_renames, apply_maintenance, apply_retemplate, load_pending_plan,
-    finalize_interrupted_retemplates, plan_maintenance, plan_retemplate,
-    save_pending_plan,
+    finalize_interrupted_retemplates, load_retemplate_plan, plan_maintenance,
+    plan_retemplate, save_pending_plan,
 )
 from streamkeep.storage import scan_storage
 from streamkeep.utils import TemplateRenderError
@@ -153,6 +153,78 @@ def test_apply_detects_in_place_history_changes_after_preview(tmp_path, monkeypa
     assert result.status == "stale"
 
 
+def test_retemplate_apply_validates_containment_and_action_ids(tmp_path, monkeypatch):
+    database = tmp_path / "library.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    db.init_db()
+    root = tmp_path / "archive"
+    old = _recording(root, "legacy")
+    history_id = _history(old)
+    plan = plan_retemplate(
+        root, "{title}", "{title}",
+        config={"archive_backup_dir": str(root / "backups")},
+    )
+    action = next(item for item in plan.actions if item.kind == "retemplate")
+    action.payload["old_path"] = str(tmp_path / "outside")
+    action.action_id = maintenance._action(
+        action.kind, action.label, action.detail, action.payload
+    ).action_id
+    backup_fn = mock.Mock(return_value=(True, "unused"))
+
+    result = apply_retemplate(
+        plan, [action.action_id], backup_fn=backup_fn,
+        ledger_path=tmp_path / "audit.jsonl", config_dir=tmp_path / "state",
+    )
+
+    assert result.status == "invalid_plan"
+    assert "outside plan root" in result.errors[0]
+    assert not backup_fn.called
+    assert old.is_dir()
+    assert db.load_history()[0]["id"] == history_id
+
+    fresh = plan_retemplate(
+        root, "{title}", "{title}",
+        config={"archive_backup_dir": str(root / "backups")},
+    )
+    fresh_action = next(item for item in fresh.actions if item.kind == "retemplate")
+    fresh_action.payload["new_path"] = str(root / "tampered")
+    result = apply_retemplate(
+        fresh, [fresh_action.action_id], backup_fn=backup_fn,
+        ledger_path=tmp_path / "audit-ids.jsonl", config_dir=tmp_path / "state",
+    )
+    assert result.status == "invalid_plan"
+    assert "action_id" in result.errors[0]
+    assert not backup_fn.called
+
+    fresh = plan_retemplate(
+        root, "{title}", "{title}",
+        config={"archive_backup_dir": str(root / "backups")},
+    )
+    fresh.diagnostics["backup_dir"] = str(tmp_path / "outside-backups")
+    result = apply_retemplate(
+        fresh, [item.action_id for item in fresh.actions if item.kind == "retemplate"],
+        backup_fn=backup_fn, ledger_path=tmp_path / "audit-backup.jsonl",
+        config_dir=tmp_path / "state",
+    )
+    assert result.status == "invalid_plan"
+    assert "backup directory" in result.errors[0]
+    assert not backup_fn.called
+
+
+def test_maintenance_plan_loader_rejects_unknown_keys_and_oversize_files(
+    tmp_path, monkeypatch,
+):
+    plan_path = tmp_path / "retemplate-plan.json"
+    plan_path.write_text(json.dumps({"unexpected": True}), encoding="utf-8")
+    with pytest.raises(ValueError, match="unexpected field"):
+        load_retemplate_plan(plan_path)
+
+    plan_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(maintenance, "MAX_MAINTENANCE_PLAN_BYTES", 1)
+    with pytest.raises(ValueError, match="too large"):
+        load_retemplate_plan(plan_path)
+
+
 def test_cancelled_apply_stops_between_atomic_actions(tmp_path, monkeypatch):
     database = tmp_path / "library.db"
     monkeypatch.setattr(db, "DB_PATH", database)
@@ -203,7 +275,7 @@ def test_retemplate_preview_and_apply_moves_the_complete_recording_unit(
     published = db.publish_recording(history_id)
     plan = plan_retemplate(
         root, "{channel}/{year}", "{title}",
-        config={"archive_backup_dir": str(tmp_path / "backups")},
+        config={"archive_backup_dir": str(root / "backups")},
     )
     action = next(item for item in plan.actions if item.kind == "retemplate")
     assert action.payload["new_path"] == str(root / "alpha" / "2026")
@@ -265,6 +337,9 @@ def test_retemplate_overlapping_renames_preserve_both_source_files(
         {"old": "clip.mp4", "new": "Title.mp4"},
         {"old": "Title.mp4", "new": "Title_002.mp4"},
     ]
+    action.action_id = maintenance._action(
+        action.kind, action.label, action.detail, action.payload
+    ).action_id
 
     result = apply_retemplate(
         plan, [action.action_id], backup_fn=_backup,
@@ -378,7 +453,7 @@ def test_interrupted_retemplate_is_recovered_on_database_startup(
     history_id = _history(old)
     plan = plan_retemplate(
         root, "{channel}/{year}", "{title}",
-        config={"archive_backup_dir": str(tmp_path / "backups")},
+        config={"archive_backup_dir": str(root / "backups")},
     )
     action = next(item for item in plan.actions if item.kind == "retemplate")
     new = Path(action.payload["new_path"])

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Hardened re-template plans with bounded schema validation, re-derived action
+  IDs, archive-root containment for source/destination and backups, and named
+  invalid-plan refusals before any backup or move.
+
 - Replaced rebuild staleness checks based on SQLite file bytes with read-only
   content fingerprints for history rows and tag assignments, so committed
   WAL-resident changes now refuse a stale apply.

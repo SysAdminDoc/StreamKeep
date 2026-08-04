@@ -178,6 +178,9 @@ after creating a backup. Recording directories move together with media,
 metadata, notes, manifests, and matching media sidecars; history, tags, and
 stable publication links follow the move. Reserved Windows names, unresolved
 fields, collisions, and unsafe long paths are refused rather than rewritten.
+Re-template backups default to the hidden `.streamkeep-backups` directory
+under the selected archive root, and configured backup directories must stay
+inside that root.
 
 Smart Mode is a saved, ordered list of URL profiles shared by the desktop
 download form, queue, CLI, and local REST server. Enable it in Settings or
