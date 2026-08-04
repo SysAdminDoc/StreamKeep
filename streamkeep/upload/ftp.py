@@ -18,6 +18,32 @@ from .base import UploadDestination
 _CHUNK_SIZE = 1024 * 1024
 
 
+class RemoteSizeProbeError(RuntimeError):
+    """The remote partial-file size could not be read safely."""
+
+    code = "remote_size_probe_failed"
+
+
+class RemoteSizeProbeUnavailableError(RemoteSizeProbeError):
+    """The destination does not support the size operation used for resume."""
+
+    code = "remote_size_probe_unavailable"
+
+
+_MISSING_REMOTE_MARKERS = (
+    "not found", "no such file", "does not exist", "file unavailable",
+    "cannot find", "failed to open",
+)
+_PERMISSION_REMOTE_MARKERS = (
+    "permission", "access denied", "not permitted", "prohibited",
+    "unauthorized", "forbidden",
+)
+_UNSUPPORTED_SIZE_MARKERS = (
+    "not implemented", "unsupported", "not supported", "unknown command", "not understood",
+    "command unavailable", "size not allowed",
+)
+
+
 def _require_paramiko():
     """Return a registry-backed SFTP readiness result with repair guidance."""
     try:
@@ -142,9 +168,38 @@ class FTPDestination(UploadDestination):
     def _remote_size(ftp, remote_path):
         try:
             value = ftp.size(remote_path)
-            return max(0, int(value or 0))
-        except Exception:
-            return 0
+            if value is None:
+                raise RemoteSizeProbeUnavailableError(
+                    "Remote resume is unavailable: FTP SIZE probe returned no size"
+                )
+            return max(0, int(value))
+        except RemoteSizeProbeError:
+            raise
+        except Exception as error:
+            if isinstance(error, FileNotFoundError):
+                return 0
+            text = str(error or "").strip().casefold()
+            code = ""
+            first = text.split(None, 1)[0] if text else ""
+            if len(first) == 3 and first.isdigit():
+                code = first
+            if (
+                code in {"500", "501", "502", "503", "504"}
+                or any(marker in text for marker in _UNSUPPORTED_SIZE_MARKERS)
+            ):
+                raise RemoteSizeProbeUnavailableError(
+                    f"Remote resume is unavailable: FTP SIZE probe is not "
+                    f"supported ({error})"
+                ) from error
+            if (
+                code in {"450", "550"}
+                and not any(marker in text for marker in _PERMISSION_REMOTE_MARKERS)
+                and any(marker in text for marker in _MISSING_REMOTE_MARKERS)
+            ):
+                return 0
+            raise RemoteSizeProbeError(
+                f"Remote resume size probe failed: {error}"
+            ) from error
 
     def _upload_sftp(self, file_path, progress_cb):
         settings, err = self._resolve_settings(
@@ -213,9 +268,44 @@ class FTPDestination(UploadDestination):
     @staticmethod
     def _sftp_size(sftp, remote_path):
         try:
-            return max(0, int(sftp.stat(remote_path).st_size or 0))
-        except Exception:
-            return 0
+            attributes = sftp.stat(remote_path)
+            value = getattr(attributes, "st_size", None)
+            if value is None:
+                raise RemoteSizeProbeUnavailableError(
+                    "Remote resume is unavailable: SFTP stat returned no size"
+                )
+            return max(0, int(value))
+        except RemoteSizeProbeError:
+            raise
+        except Exception as error:
+            text = str(error or "").strip().casefold()
+            code = None
+            for attr in ("errno", "code"):
+                try:
+                    value = getattr(error, attr, None)
+                    if value is not None:
+                        code = int(value)
+                        break
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if code is None and getattr(error, "args", None):
+                try:
+                    code = int(error.args[0])
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if code == 2 or any(marker in text for marker in _MISSING_REMOTE_MARKERS):
+                return 0
+            if (
+                code == 8
+                or any(marker in text for marker in _UNSUPPORTED_SIZE_MARKERS)
+            ):
+                raise RemoteSizeProbeUnavailableError(
+                    f"Remote resume is unavailable: SFTP stat probe is not "
+                    f"supported ({error})"
+                ) from error
+            raise RemoteSizeProbeError(
+                f"Remote resume size probe failed: {error}"
+            ) from error
 
     def test_connection(self):
         transport = self._transport()

@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made FTP/SFTP resume distinguish an absent remote partial from permission,
+  transport, and unsupported-size-probe failures. Only explicit not-found
+  responses start at byte zero; other probe failures stop the transfer with a
+  diagnostic instead of silently restarting.
+
 - Added a shared output-path preflight for templated downloads, native and
   yt-dlp workers, finalization, and media-server imports. Full paths are
   checked before writes, sidecar candidates are included, and Unicode path

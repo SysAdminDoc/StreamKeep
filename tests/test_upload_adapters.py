@@ -8,7 +8,11 @@ from pathlib import Path
 from unittest import mock
 
 from streamkeep.capabilities import CapabilityUnavailableError
-from streamkeep.upload.ftp import FTPDestination
+from streamkeep.upload.ftp import (
+    FTPDestination,
+    RemoteSizeProbeError,
+    RemoteSizeProbeUnavailableError,
+)
 from streamkeep.upload.s3 import S3Destination
 
 
@@ -59,6 +63,29 @@ class _FakeFTP:
 
     def close(self):
         self.closed = True
+
+
+class _ResumeFTP:
+    def __init__(self, *, size=0, size_error=None):
+        self.size_value = size
+        self.size_error = size_error
+        self.rest = None
+        self.renamed = None
+        self.written = b""
+
+    def size(self, _remote_path):
+        if self.size_error is not None:
+            raise self.size_error
+        return self.size_value
+
+    def storbinary(self, _command, file_obj, blocksize=65536, callback=None, rest=None):
+        self.rest = rest
+        self.written = file_obj.read()
+        if callback is not None:
+            callback(self.written)
+
+    def rename(self, partial_path, remote_path):
+        self.renamed = (partial_path, remote_path)
 
 
 class UploadAdapterTests(unittest.TestCase):
@@ -125,6 +152,89 @@ class UploadAdapterTests(unittest.TestCase):
         assert name == "" and "control" in err
         name, err = FTPDestination._safe_remote_filename("..")
         assert name == "" and err
+
+    def test_ftp_resume_missing_partial_starts_at_zero(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "clip.bin"
+            file_path.write_bytes(b"streamkeep")
+            ftp = _ResumeFTP(
+                size_error=ftplib.error_perm("550 No such file"),
+            )
+            dest = FTPDestination({"host": "ftp.example.com"})
+
+            ok, _message = dest._upload_ftp_resumable(
+                ftp, str(file_path), "/clip.bin", None, "FTPS",
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(ftp.rest, 0)
+        self.assertEqual(ftp.written, b"streamkeep")
+        self.assertEqual(ftp.renamed, ("/clip.bin.part", "/clip.bin"))
+
+    def test_ftp_resume_surfaces_permission_and_connection_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "clip.bin"
+            file_path.write_bytes(b"streamkeep")
+            for probe_error in (
+                ftplib.error_perm("550 Permission denied"),
+                ConnectionError("connection reset"),
+            ):
+                with self.subTest(probe_error=str(probe_error)):
+                    ftp = _ResumeFTP(size_error=probe_error)
+                    dest = FTPDestination({"host": "ftp.example.com"})
+                    with self.assertRaises(RemoteSizeProbeError) as raised:
+                        dest._upload_ftp_resumable(
+                            ftp, str(file_path), "/clip.bin", None, "FTPS",
+                        )
+                    self.assertIn(str(probe_error), str(raised.exception))
+                    self.assertIsNone(ftp.rest)
+
+    def test_ftp_resume_reports_unsupported_size_probe(self):
+        ftp = _ResumeFTP(
+            size_error=ftplib.error_perm("502 Command not implemented"),
+        )
+        with self.assertRaises(RemoteSizeProbeUnavailableError):
+            FTPDestination._remote_size(ftp, "/clip.bin.part")
+
+    def test_sftp_resume_distinguishes_absent_permission_and_broken_probe(self):
+        absent = mock.Mock()
+        absent.stat.side_effect = FileNotFoundError(2, "No such file")
+        self.assertEqual(FTPDestination._sftp_size(absent, "/clip.bin.part"), 0)
+
+        for probe_error in (
+            PermissionError(13, "Permission denied"),
+            ConnectionError("connection reset"),
+        ):
+            with self.subTest(probe_error=str(probe_error)):
+                broken = mock.Mock()
+                broken.stat.side_effect = probe_error
+                with self.assertRaises(RemoteSizeProbeError) as raised:
+                    FTPDestination._sftp_size(broken, "/clip.bin.part")
+                self.assertIn(str(probe_error), str(raised.exception))
+
+        unsupported = mock.Mock()
+        unsupported.stat.side_effect = OSError(8, "Operation not supported")
+        with self.assertRaises(RemoteSizeProbeUnavailableError):
+            FTPDestination._sftp_size(unsupported, "/clip.bin.part")
+
+    def test_ftps_upload_reports_probe_failure_without_restarting(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "clip.bin"
+            file_path.write_bytes(b"streamkeep")
+            ftp = mock.Mock()
+            ftp.size.side_effect = ftplib.error_perm("550 Permission denied")
+            dest = FTPDestination({
+                "transport": "ftps",
+                "host": "ftp.example.com",
+                "username": "alice",
+                "password": "secret",
+            })
+            with mock.patch.object(dest, "_new_ftps_client", return_value=ftp):
+                ok, message = dest.upload(str(file_path))
+
+        self.assertFalse(ok)
+        self.assertIn("Remote resume size probe failed", message)
+        ftp.storbinary.assert_not_called()
 
     def test_ftp_connection_reports_invalid_port_cleanly(self):
         dest = FTPDestination({"host": "ftp.example.com", "port": "not-a-port"})
