@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.45.0" date="2026-08-03">
+      <description><p>Gallery-dl image sets can now be ingested into the local library with public metadata, optional CBZ or ZIP packaging, and safe cover rendering; local semantic search and opt-in metadata translation also ship in this release.</p></description>
+    </release>
     <release version="4.44.0" date="2026-08-02">
       <description><p>Failed downloads now retry themselves on transient errors and survive a restart; credentials become named profiles bound to the sites they may authenticate; automatic rotating backups are schedulable and observable; live captures report dropped fragments and preserve raw footage for salvage; and audio downloads get their album-artist filled in. Windows now ships as a fast-starting directory install with an unsigned installer instead of a 520 MB single file.</p></description>
     </release>

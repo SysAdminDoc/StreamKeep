@@ -2,7 +2,7 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [Unreleased]
+## [4.45.0] - 2026-08-03
 
 - Added opt-in gallery-dl image-set ingest. `--ingest` registers new image
   sets with public metadata and idempotent History rows, while `--package cbz`
