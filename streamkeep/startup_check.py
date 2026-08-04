@@ -242,6 +242,9 @@ def run_startup_check(*, ready_file, fixture="empty"):
                 app = QApplication.instance()
                 if app is not None:
                     app.processEvents()
+                    window.deleteLater()
+                    app.processEvents()
+                window = None
             except Exception as exc:
                 payload["close_error"] = f"{type(exc).__name__}: {exc}"
                 payload["ready"] = False

@@ -752,11 +752,21 @@ class _FocusRevealFilter(QObject):
     def __init__(self, scroll):
         super().__init__(scroll)
         self.scroll = scroll
+        self._pending_widget = None
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setSingleShot(True)
+        self._reveal_timer.timeout.connect(self._reveal_pending)
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.FocusIn and isinstance(watched, QWidget):
-            QTimer.singleShot(0, lambda: self._reveal(watched))
+            self._pending_widget = watched
+            self._reveal_timer.start(0)
         return False
+
+    def _reveal_pending(self):
+        widget = self._pending_widget
+        self._pending_widget = None
+        self._reveal(widget)
 
     def _reveal(self, widget):
         try:

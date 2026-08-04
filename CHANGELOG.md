@@ -11,6 +11,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   reachable in compact layouts, and System theme follows live OS contrast
   preference changes.
 
+- Made the offscreen startup contract tear down Qt windows explicitly before
+  SIP interpreter shutdown, eliminating the packaged/source access violation
+  while retaining the invisible one-window smoke guarantees.
+
 - Updated native HLS handling for RFC 8216bis delta playlists and DATERANGE.
   Retained segments are merged across `EXT-X-SKIP`, SCTE-35 and unknown
   vendor classes survive in `hls.markers.json`, interstitial assets remain

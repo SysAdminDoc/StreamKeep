@@ -800,7 +800,8 @@ def apply_visual_system(theme="dark", density="cozy", accent="", app=None):
     density = str(density or "cozy")
     _active_density = dict(DENSITIES.get(density, DENSITY_COZY))
     _active_theme = theme
-    _bind_system_accessibility_observer(app)
+    if theme == "system":
+        _bind_system_accessibility_observer(app)
     resolved_theme = _resolve_system_theme(app) if theme == "system" else theme
     CAT.clear()
     CAT.update(THEMES.get(resolved_theme, STREAMKEEP_DARK))
