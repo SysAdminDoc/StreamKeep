@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Replaced rebuild staleness checks based on SQLite file bytes with read-only
+  content fingerprints for history rows and tag assignments, so committed
+  WAL-resident changes now refuse a stale apply.
+
 - Made rebuild database swaps crash-recoverable with an fsynced marker,
   startup rollback, and orphaned staging cleanup before the database opens.
 

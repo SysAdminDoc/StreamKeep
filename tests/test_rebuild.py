@@ -95,6 +95,43 @@ def test_init_db_recovers_interrupted_rebuild_swap(tmp_path):
         assert not stage_dir.exists()
 
 
+def test_rebuild_apply_rejects_history_inserted_after_preview(tmp_path):
+    root = tmp_path / "library"
+    recording = root / "Twitch" / "StaleChannel" / "recording"
+    recording.mkdir(parents=True)
+    (recording / "recording.mp4").write_bytes(b"media")
+    MetadataSaver.save(str(recording), _info())
+    library_db = tmp_path / "config" / "library.db"
+    tags_db = tmp_path / "config" / "tags.db"
+    with mock.patch.object(db, "DB_PATH", library_db), mock.patch.object(
+        tags, "DB_PATH", tags_db,
+    ):
+        db.init_db()
+        plan = plan_library_rebuild(root, db_module=db, tags_module=tags)
+        db.save_history_entry({
+            "date": "2026-08-03T00:00:00Z",
+            "platform": "Twitch",
+            "source_id": "vod:stale",
+            "webpage_url": "https://www.twitch.tv/videos/stale",
+            "title": "Inserted after preview",
+            "channel": "StaleChannel",
+            "path": str(recording),
+        })
+        backup_fn = mock.Mock(return_value=(True, "unused"))
+
+        result = apply_library_rebuild(
+            plan,
+            db_module=db,
+            tags_module=tags,
+            backup_fn=backup_fn,
+        )
+
+        assert result.status == "stale"
+        assert "changed after preview" in result.errors[0]
+        backup_fn.assert_not_called()
+        assert db.history_count() == 1
+
+
 def test_preview_then_apply_rebuilds_history_tags_and_manifest(tmp_path):
     root = tmp_path / "library"
     recording = root / "Twitch" / "RebuildChannel" / "recording"

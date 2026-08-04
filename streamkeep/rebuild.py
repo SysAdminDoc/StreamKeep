@@ -32,6 +32,7 @@ from .metadata import (
 )
 from .models import StreamInfo
 from .storage import MEDIA_EXTS, _fmt_size
+from .sqlite_runtime import connect as sqlite_connect
 from .verify import MANIFEST_FILENAME, MANIFEST_VERSION
 
 
@@ -41,6 +42,11 @@ REBUILD_SWAP_MARKER = ".streamkeep-rebuild-swap.json"
 _REBUILD_STAGE_PREFIX = ".streamkeep-rebuild-"
 _MEDIA_EXTS = set(MEDIA_EXTS) | {".m4v"}
 _SIDECAR_SUFFIXES = (".info.json", ".nfo")
+_HISTORY_FINGERPRINT_FIELDS = (
+    "id", "date", "platform", "source_id", "webpage_url", "title",
+    "channel", "quality", "size", "path", "url", "favorite", "watched",
+    "watch_position_secs", "bookmarks",
+)
 
 
 def _utc_now():
@@ -585,25 +591,68 @@ def _collect_candidates(root, cancel_fn=None):
     return candidates, sidecarless
 
 
-def _database_fingerprint(db_module=_db, tags_module=_tags):
-    rows = []
-    for path in (Path(db_module.DB_PATH), Path(tags_module.DB_PATH)):
-        row = {"path": str(path)}
-        try:
-            stat = path.stat()
-            row.update({
-                "size": int(stat.st_size),
-                "mtime_ns": int(
-                    getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))
-                ),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            })
-        except OSError:
-            row["missing"] = True
-        rows.append(row)
+def _json_fingerprint(value):
     return hashlib.sha256(
-        json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
     ).hexdigest()
+
+
+def _history_content(db_module):
+    path = Path(db_module.DB_PATH)
+    if not path.is_file():
+        return {"missing": True}
+    rows = db_module.load_history()
+    return {
+        "rows": [
+            {
+                field: row.get(field)
+                for field in _HISTORY_FINGERPRINT_FIELDS
+            }
+            for row in rows
+        ],
+    }
+
+
+def _tag_content(tags_module):
+    path = Path(tags_module.DB_PATH)
+    if not path.is_file():
+        return {"missing": True}
+    database = path.expanduser().resolve(strict=False)
+    connection = sqlite_connect(
+        f"{database.as_uri()}?mode=ro",
+        uri=True,
+        readonly=True,
+        configure_journal=False,
+    )
+    try:
+        rows = connection.execute("""
+            SELECT t.name, t.kind, rt.recording_path
+            FROM tags t
+            LEFT JOIN recording_tags rt ON rt.tag_id = t.id
+            ORDER BY t.kind, t.name, rt.recording_path
+        """).fetchall()
+        return {
+            "rows": [
+                [value if value is not None else "" for value in row]
+                for row in rows
+            ],
+        }
+    finally:
+        connection.close()
+
+
+def _database_fingerprint(db_module=_db, tags_module=_tags):
+    content = [
+        {"path": str(Path(db_module.DB_PATH)), "history": _history_content(db_module)},
+        {"path": str(Path(tags_module.DB_PATH)), "tags": _tag_content(tags_module)},
+    ]
+    return _json_fingerprint(content)
 
 
 @dataclass
