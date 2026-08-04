@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
+from xml.etree import ElementTree
 
 from streamkeep import db, feed, gallery
 
@@ -97,3 +98,22 @@ def test_rss_validates_base_url_and_uses_media_mime_type(tmp_path):
             pass
         else:
             raise AssertionError(f"accepted invalid RSS base URL: {base_url!r}")
+
+
+def test_rss_removes_xml_forbidden_controls_before_escaping():
+    forbidden_controls = "".join(
+        chr(code) for code in range(0x20) if code not in (0x09, 0x0A, 0x0D)
+    )
+    title = f"Episode{forbidden_controls} & < > \" '"
+    xml = feed.generate_rss(
+        [{"share_id": "a" * 32, "title": title}],
+        "https://media.example",
+    )
+
+    root = ElementTree.fromstring(xml)
+    assert root.findtext("./channel/item/title") == "Episode & < > \" '"
+    gallery_html = gallery.render_share_html(
+        "a" * 32,
+        info={"title": title, "media": "episode.mp3"},
+    )
+    assert "Episode &amp; &lt; &gt; &quot; &#39;" in gallery_html

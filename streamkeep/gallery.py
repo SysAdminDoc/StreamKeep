@@ -14,6 +14,7 @@ import mimetypes
 import os
 
 from .theme import CAT
+from .utils import sanitize_xml_text
 
 _MAX_RANGE_CHUNK = 8 * 1024 * 1024  # 8 MB per Range-request read
 
@@ -270,7 +271,7 @@ def serve_media_range(media_path, range_header=None):
 
 def _esc(s):
     """Basic HTML escape."""
-    s = str(s or "")
+    s = sanitize_xml_text(s)
     return (
         s
         .replace("&", "&amp;")

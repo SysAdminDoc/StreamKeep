@@ -17,6 +17,7 @@ from xml.sax.saxutils import escape
 from urllib.parse import urlsplit
 
 from .metadata import load_metadata_sidecar
+from .utils import sanitize_xml_text
 
 
 _MIME_OVERRIDES = {
@@ -30,7 +31,14 @@ _MIME_OVERRIDES = {
 
 def _escape_xml_attribute(value):
     """Escape a value used inside a double-quoted XML attribute."""
-    return escape(str(value or ""), {'"': "&quot;", "'": "&apos;"})
+    return escape(
+        sanitize_xml_text(value), {'"': "&quot;", "'": "&apos;"}
+    )
+
+
+def _escape_xml_text(value):
+    """Escape sanitized XML element text."""
+    return escape(sanitize_xml_text(value))
 
 
 def _podcast_metadata_for_entry(entry):
@@ -53,18 +61,18 @@ def _podcast_item_xml(metadata):
         name = _escape_xml_attribute(season.get("name", ""))
         attr = f' name="{name}"' if name else ""
         lines.append(
-            f"      <podcast:season{attr}>{escape(str(season['number']))}</podcast:season>"
+            f"      <podcast:season{attr}>{_escape_xml_text(season['number'])}</podcast:season>"
         )
     episode = metadata.get("episode")
     if isinstance(episode, dict) and episode.get("number") not in (None, ""):
         display = _escape_xml_attribute(episode.get("display", ""))
         attr = f' display="{display}"' if display else ""
         lines.append(
-            f"      <podcast:episode{attr}>{escape(str(episode['number']))}</podcast:episode>"
+            f"      <podcast:episode{attr}>{_escape_xml_text(episode['number'])}</podcast:episode>"
         )
     medium = str(metadata.get("medium", "") or "")
     if medium:
-        lines.append(f"      <podcast:medium>{escape(medium)}</podcast:medium>")
+        lines.append(f"      <podcast:medium>{_escape_xml_text(medium)}</podcast:medium>")
     for person in metadata.get("person", []) if isinstance(metadata.get("person", []), list) else []:
         if not isinstance(person, dict) or not person.get("name"):
             continue
@@ -74,7 +82,7 @@ def _podcast_item_xml(metadata):
                 attrs.append(f'{key}="{_escape_xml_attribute(person[key])}"')
         attr_text = f" {' '.join(attrs)}" if attrs else ""
         lines.append(
-            f"      <podcast:person{attr_text}>{escape(str(person['name']))}</podcast:person>"
+            f"      <podcast:person{attr_text}>{_escape_xml_text(person['name'])}</podcast:person>"
         )
     for soundbite in metadata.get("soundbite", []) if isinstance(metadata.get("soundbite", []), list) else []:
         if not isinstance(soundbite, dict):
@@ -86,21 +94,21 @@ def _podcast_item_xml(metadata):
             continue
         lines.append(
             f'      <podcast:soundbite startTime="{start:g}" duration="{duration:g}">'
-            f"{escape(str(soundbite.get('title', '') or ''))}</podcast:soundbite>"
+            f"{_escape_xml_text(soundbite.get('title', '') or '')}</podcast:soundbite>"
         )
     for funding in metadata.get("funding", []) if isinstance(metadata.get("funding", []), list) else []:
         if not isinstance(funding, dict) or not funding.get("url"):
             continue
         lines.append(
             f'      <podcast:funding url="{_escape_xml_attribute(funding["url"])}">'
-            f"{escape(str(funding.get('text', '') or ''))}</podcast:funding>"
+            f"{_escape_xml_text(funding.get('text', '') or '')}</podcast:funding>"
         )
     license_row = metadata.get("license")
     if isinstance(license_row, dict) and license_row.get("name"):
         url = _escape_xml_attribute(license_row.get("url", ""))
         attr = f' url="{url}"' if url else ""
         lines.append(
-            f"      <podcast:license{attr}>{escape(str(license_row['name']))}</podcast:license>"
+            f"      <podcast:license{attr}>{_escape_xml_text(license_row['name'])}</podcast:license>"
         )
     for location in metadata.get("location", []) if isinstance(metadata.get("location", []), list) else []:
         if not isinstance(location, dict) or not location.get("name"):
@@ -111,7 +119,7 @@ def _podcast_item_xml(metadata):
                 attrs.append(f'{key}="{_escape_xml_attribute(location[key])}"')
         attr_text = f" {' '.join(attrs)}" if attrs else ""
         lines.append(
-            f"      <podcast:location{attr_text}>{escape(str(location['name']))}</podcast:location>"
+            f"      <podcast:location{attr_text}>{_escape_xml_text(location['name'])}</podcast:location>"
         )
     for txt in metadata.get("txt", []) if isinstance(metadata.get("txt", []), list) else []:
         if not isinstance(txt, dict) or not txt.get("value"):
@@ -119,7 +127,7 @@ def _podcast_item_xml(metadata):
         purpose = _escape_xml_attribute(txt.get("purpose", ""))
         attr = f' purpose="{purpose}"' if purpose else ""
         lines.append(
-            f"      <podcast:txt{attr}>{escape(str(txt['value']))}</podcast:txt>"
+            f"      <podcast:txt{attr}>{_escape_xml_text(txt['value'])}</podcast:txt>"
         )
     for image in metadata.get("artwork", []) if isinstance(metadata.get("artwork", []), list) else []:
         if not isinstance(image, dict) or not image.get("href"):
@@ -192,8 +200,8 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
         sid = str(e.get("share_id", "") or "").strip()
         if not sid:
             continue
-        etitle = escape(str(e.get("title", "Untitled") or "Untitled"))
-        echannel = escape(str(e.get("channel", "") or ""))
+        etitle = _escape_xml_text(e.get("title", "Untitled") or "Untitled")
+        echannel = _escape_xml_text(e.get("channel", "") or "")
         edate = str(e.get("date", "") or "")
         media_url = f"{base_url}/media/{sid}" if sid else ""
         try:
@@ -238,7 +246,7 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
       <title>{etitle}</title>
       <description>{echannel}</description>
       <pubDate>{pub_date}</pubDate>
-      <guid isPermaLink="false">{escape(str(sid))}</guid>"""
+      <guid isPermaLink="false">{_escape_xml_text(sid)}</guid>"""
 
         items_xml += _podcast_item_xml(podcast_metadata)
 
@@ -257,11 +265,11 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
     channel_podcast = ""
     if len(podcast_guids) == 1:
         channel_podcast += (
-            f"\n    <podcast:guid>{escape(next(iter(podcast_guids)))}</podcast:guid>"
+            f"\n    <podcast:guid>{_escape_xml_text(next(iter(podcast_guids)))}</podcast:guid>"
         )
     if len(podcast_mediums) == 1:
         channel_podcast += (
-            f"\n    <podcast:medium>{escape(next(iter(podcast_mediums)))}</podcast:medium>"
+            f"\n    <podcast:medium>{_escape_xml_text(next(iter(podcast_mediums)))}</podcast:medium>"
         )
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -270,9 +278,9 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
      xmlns:atom="http://www.w3.org/2005/Atom"
      xmlns:podcast="https://podcastindex.org/namespace/1.0">
   <channel>
-    <title>{escape(feed_title)}</title>
-    <description>{escape(feed_desc)}</description>
-    <link>{escape(base_url)}</link>
+    <title>{_escape_xml_text(feed_title)}</title>
+    <description>{_escape_xml_text(feed_desc)}</description>
+    <link>{_escape_xml_text(base_url)}</link>
     <generator>StreamKeep</generator>
     <lastBuildDate>{datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")}</lastBuildDate>
 {channel_podcast}

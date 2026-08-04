@@ -8,6 +8,25 @@ import string
 from pathlib import Path
 
 
+def sanitize_xml_text(value):
+    """Remove characters that XML 1.0 cannot represent.
+
+    The same sanitized text is safe to pass through the XML and HTML
+    escapers used by the publishing renderers. XML permits tab, line feed,
+    carriage return, and the Unicode ranges below; all other code points are
+    omitted so strict XML consumers can parse scraped metadata reliably.
+    """
+    text = str(value or "")
+    return "".join(
+        char
+        for char in text
+        if char in "\t\n\r"
+        or 0x20 <= ord(char) <= 0xD7FF
+        or 0xE000 <= ord(char) <= 0xFFFD
+        or 0x10000 <= ord(char) <= 0x10FFFF
+    )
+
+
 def canonical_webpage_url(value, *, platform="", source_id="", channel=""):
     """Return the shared canonical public page URL for a source."""
     # The metadata module owns the privacy policy and identity derivation;

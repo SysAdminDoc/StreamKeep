@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Sanitized XML 1.0-forbidden characters from feed and gallery metadata before
+  escaping, preserving existing entity escaping while keeping strict podcast
+  clients parseable when scraped titles contain C0 controls.
+
 - Removed the obsolete in-memory gallery share registry. Gallery and share
   pages now consume explicit database-backed publishing entries, and the
   unused feed publishing-ID constant is gone.
