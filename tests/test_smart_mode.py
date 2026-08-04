@@ -46,6 +46,29 @@ def test_profile_glob_and_regex_fail_closed():
     )
 
 
+@pytest.mark.parametrize(
+    ("expression", "url"),
+    [
+        (r"^https://cdn\.Example\.com/\S+\Z", "https://cdn.example.com/video"),
+        (r"^https://cdn\.Example\.com/\D+\Z", "https://cdn.example.com/video"),
+        (r"^https://cdn\.Example\.com/\W+\Z", "https://cdn.example.com/!!!"),
+        (r"^https://cdn\.Example\.com/ab\Bcd\Z", "https://cdn.example.com/abcd"),
+        (r"^https://cdn\.Example\.com/video\Z", "https://cdn.example.com/video"),
+    ],
+)
+def test_regex_escapes_round_trip_and_match_case_insensitively(expression, url):
+    pattern = "re:" + expression
+
+    assert smart_mode.normalize_pattern(pattern) == pattern
+    assert smart_mode.profile_matches(_profile("regex", [pattern]), url)
+
+
+def test_regex_patterns_use_all_url_candidates_like_globs():
+    profile = _profile("regex", [r"re:^example\.org/items/\d+\Z"])
+
+    assert smart_mode.profile_matches(profile, "https://example.org/items/12")
+
+
 def test_apply_preserves_explicit_values_and_records_safe_name():
     config = {
         "smart_mode": True,

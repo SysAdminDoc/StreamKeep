@@ -60,8 +60,7 @@ def normalize_pattern(value):
     pattern = _text(value, limit=MAX_PATTERN_CHARS)
     if not pattern:
         return ""
-    pattern = pattern.lower()
-    if pattern.startswith("re:"):
+    if pattern[:3].casefold() == "re:":
         expression = pattern[3:].strip()
         if not expression or len(expression) > 1024:
             return ""
@@ -70,6 +69,7 @@ def normalize_pattern(value):
         except re.error:
             return ""
         return "re:" + expression
+    pattern = pattern.lower()
     return pattern.rstrip("/") or pattern
 
 
@@ -255,11 +255,13 @@ def profile_matches(profile, url):
     candidates = _url_candidates(url)
     if not candidates:
         return False
-    raw = candidates[0]
     for pattern in normalized["patterns"]:
         if pattern.startswith("re:"):
             try:
-                if re.search(pattern[3:], raw, re.IGNORECASE):
+                if any(
+                    re.search(pattern[3:], candidate, re.IGNORECASE)
+                    for candidate in candidates
+                ):
                     return True
             except re.error:
                 continue
@@ -363,4 +365,3 @@ def quality_index(qualities, preference):
 # integrations without exposing implementation details.
 apply_profile_to_job = apply_smart_profile_to_job
 choose_quality_index = quality_index
-

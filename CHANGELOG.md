@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Preserved Smart Mode regular-expression bodies while normalizing their
+  prefixes, and matched regex patterns against the same URL candidates as
+  glob patterns.
+
 - Hardened re-template plans with bounded schema validation, re-derived action
   IDs, archive-root containment for source/destination and backups, and named
   invalid-plan refusals before any backup or move.
