@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added an append-only re-template swap journal and startup finalizer. An
+  interrupted directory move is now reversed or retained from the durable
+  history decision, with empty staging parents cleaned and storage visibility
+  restored after restart.
+
 - Joined maintenance and re-template workers to the window close lifecycle;
   shutdown now interrupts and waits for audited batches and defers close until
   an unresponsive batch finishes.

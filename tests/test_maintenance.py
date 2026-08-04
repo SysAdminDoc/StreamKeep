@@ -1,13 +1,16 @@
 import json
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from streamkeep import db, tags
 from streamkeep.maintenance import (
     _order_file_renames, apply_maintenance, apply_retemplate, load_pending_plan,
-    plan_maintenance, plan_retemplate, save_pending_plan,
+    finalize_interrupted_retemplates, plan_maintenance, plan_retemplate,
+    save_pending_plan,
 )
+from streamkeep.storage import scan_storage
 from streamkeep.utils import TemplateRenderError
 
 
@@ -358,3 +361,70 @@ def test_retemplate_cancel_and_database_failure_leave_each_item_untouched(
     assert result.failed == 1
     assert second.exists()
     assert next(row for row in db.load_history() if row["id"] == second_id)["path"] == str(second)
+
+
+def test_interrupted_retemplate_is_recovered_on_database_startup(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "library.db"
+    state = tmp_path / "state"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    monkeypatch.setattr(db, "CONFIG_DIR", state)
+    import streamkeep.maintenance as maintenance
+    monkeypatch.setattr(maintenance, "CONFIG_DIR", state)
+    db.init_db()
+    root = tmp_path / "archive"
+    old = _recording(root, "legacy")
+    history_id = _history(old)
+    plan = plan_retemplate(
+        root, "{channel}/{year}", "{title}",
+        config={"archive_backup_dir": str(tmp_path / "backups")},
+    )
+    action = next(item for item in plan.actions if item.kind == "retemplate")
+    new = Path(action.payload["new_path"])
+    real_replace = maintenance.os.replace
+    calls = 0
+
+    def interrupt_between_directory_swaps(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt("simulated process loss")
+        return real_replace(source, destination)
+
+    ledger = state / "maintenance" / "audit.jsonl"
+    with mock.patch.object(
+        maintenance.os, "replace", side_effect=interrupt_between_directory_swaps,
+    ), pytest.raises(KeyboardInterrupt):
+        apply_retemplate(
+            plan, [action.action_id], backup_fn=_backup,
+            ledger_path=ledger, config_dir=state,
+        )
+
+    assert not old.exists()
+    assert not new.exists()
+    staged = list(old.parent.glob(".streamkeep-retemplate-*"))
+    assert len(staged) == 1
+    records = [
+        json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()
+    ]
+    assert records[0]["event"] == "apply_started"
+    assert next(
+        record for record in records
+        if record["event"] == "retemplate_swap_started"
+    )["history_id"] == history_id
+
+    # init_db is the real startup hook used after a process restart.
+    db.init_db()
+    visible = [path for path in (old, new) if path.is_dir()]
+    assert visible == [old]
+    assert not staged[0].exists()
+    assert [group.dir_path for group in scan_storage(str(root)).groups] == [
+        str(old)
+    ]
+    assert db.load_history()[0]["path"] == str(old)
+    recovered = [
+        json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record["event"] == "retemplate_recovered" for record in recovered)
+    assert finalize_interrupted_retemplates(config_dir=state) is False

@@ -500,7 +500,9 @@ def _restore_retemplate_stage(temp_path, old_path, new_path, file_renames, final
         os.replace(stage, destination)
 
 
-def _apply_retemplate_action(action, *, db_module, tags_module):
+def _apply_retemplate_action(
+    action, *, db_module, tags_module, ledger_path=None, plan_id=""
+):
     payload = action.payload
     old_path = Path(str(payload.get("old_path") or ""))
     new_path = Path(str(payload.get("new_path") or ""))
@@ -551,6 +553,19 @@ def _apply_retemplate_action(action, *, db_module, tags_module):
     db_committed = False
     manifest = None
     try:
+        if ledger_path is not None:
+            _audit({
+                "event": "retemplate_swap_started",
+                "at": _utc_now(),
+                "plan_id": str(plan_id or ""),
+                "action_id": action.action_id,
+                "history_id": history_id,
+                "old_path": str(old_path),
+                "new_path": str(new_path),
+                "temporary": str(temporary),
+                "file_renames": file_renames,
+                "had_manifest": old_sidecar_bytes is not None,
+            }, ledger_path=ledger_path)
         os.replace(old_path, temporary)
         for pair in file_renames:
             os.replace(temporary / pair["old"], temporary / pair["new"])
@@ -573,6 +588,16 @@ def _apply_retemplate_action(action, *, db_module, tags_module):
         else:
             db_module.update_history_entry(history_id, {"path": str(new_path)})
         db_committed = True
+        if ledger_path is not None:
+            _audit({
+                "event": "retemplate_swap_finished",
+                "at": _utc_now(),
+                "plan_id": str(plan_id or ""),
+                "action_id": action.action_id,
+                "history_id": history_id,
+                "old_path": str(old_path),
+                "new_path": str(new_path),
+            }, ledger_path=ledger_path)
         return {
             "old_path": str(old_path), "new_path": str(new_path),
             "file_renames": file_renames,
@@ -670,7 +695,8 @@ def apply_retemplate(
             break
         try:
             _apply_retemplate_action(
-                action, db_module=db_module, tags_module=tags_module
+                action, db_module=db_module, tags_module=tags_module,
+                ledger_path=ledger, plan_id=plan.plan_id,
             )
             result.applied += 1
             _audit({"event": "action_applied", "at": _utc_now(),
@@ -882,6 +908,154 @@ def _audit(record, *, ledger_path):
         handle.write(json.dumps(record, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _retemplate_journal_key(record):
+    plan_id = str(record.get("plan_id") or "")
+    action_id = str(record.get("action_id") or "")
+    return (plan_id, action_id) if plan_id and action_id else None
+
+
+def _retemplate_history_paths(db_module):
+    try:
+        return {
+            int(row.get("id")): str(row.get("path") or "")
+            for row in db_module.load_history()
+            if row.get("id") is not None
+        }
+    except Exception:
+        return {}
+
+
+def _cleanup_retemplate_parents(path, stop):
+    current = Path(path)
+    stop = Path(stop)
+    try:
+        common = Path(os.path.commonpath((str(current), str(stop))))
+    except (OSError, ValueError):
+        common = stop
+    while current != common and current != current.parent:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _restore_retemplate_manifest(path, had_manifest):
+    manifest = Path(path) / ".streamkeep_manifest.json"
+    if had_manifest:
+        from .verify import create_archive_manifest
+        create_archive_manifest(path, write_sidecar=True)
+    else:
+        manifest.unlink(missing_ok=True)
+
+
+def _recover_retemplate_record(record, history_paths, *, db_module, tags_module=None):
+    old_path = Path(str(record.get("old_path") or ""))
+    new_path = Path(str(record.get("new_path") or ""))
+    temporary = Path(str(record.get("temporary") or ""))
+    if not old_path or not new_path or not temporary:
+        raise RuntimeError("re-template journal is missing a path")
+    if not temporary.name.startswith(".streamkeep-retemplate-"):
+        raise RuntimeError("re-template journal has an unsafe staging path")
+    if _normal_path(temporary.parent) != _normal_path(old_path.parent):
+        raise RuntimeError("re-template journal has an unsafe staging parent")
+    file_renames = list(record.get("file_renames") or ())
+    history_id = int(record.get("history_id") or 0)
+    history_path = str(history_paths.get(history_id) or "")
+    old_key = _normal_path(old_path)
+    new_key = _normal_path(new_path)
+    if old_path.is_dir() and not temporary.exists() and not new_path.exists():
+        return {"status": "completed", "decision": "no_swap"}
+    if old_path.exists() and (temporary.exists() or new_path.exists()):
+        raise RuntimeError("re-template recovery found duplicate recording paths")
+    if temporary.exists() and new_path.exists():
+        raise RuntimeError("re-template recovery found staging and destination")
+    if history_path and _normal_path(history_path) == new_key:
+        if not new_path.is_dir() or temporary.exists():
+            raise RuntimeError("history points to an incomplete re-template")
+        return {"status": "completed", "decision": "kept_destination"}
+    if history_path and _normal_path(history_path) != old_key:
+        raise RuntimeError("history points outside the re-template pair")
+
+    if new_path.is_dir() and not temporary.exists():
+        if tags_module is None:
+            from . import tags as tags_module
+        tags_module.relocate_recording_tags(str(new_path), str(old_path))
+        _restore_retemplate_stage(
+            temporary, old_path, new_path, file_renames, True,
+        )
+        _restore_retemplate_manifest(
+            old_path, bool(record.get("had_manifest", False)),
+        )
+        _cleanup_retemplate_parents(new_path.parent, old_path.parent)
+        return {"status": "completed", "decision": "reversed_destination"}
+    if temporary.is_dir():
+        _restore_retemplate_stage(
+            temporary, old_path, new_path, file_renames, False,
+        )
+        _cleanup_retemplate_parents(new_path.parent, old_path.parent)
+        return {"status": "completed", "decision": "reversed_staging"}
+    raise RuntimeError("re-template journal has no recoverable path")
+
+
+def finalize_interrupted_retemplates(
+    *, config_dir=None, db_module=db, tags_module=None,
+):
+    """Recover journaled re-template swaps left by an interrupted process.
+
+    The append-only start record is written before the first directory swap.
+    A destination is retained only when the history row already points to it;
+    otherwise the staged or finalized directory is restored to its old path.
+    """
+    ledger = audit_path(config_dir)
+    if not ledger.is_file():
+        return False
+    states = {}
+    try:
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            key = _retemplate_journal_key(record)
+            if key is None:
+                continue
+            if record.get("event") in {
+                "retemplate_swap_started", "retemplate_swap_finished",
+                "action_applied", "action_failed", "retemplate_recovered",
+            }:
+                states[key] = record
+    except OSError:
+        return False
+
+    pending = [
+        record for record in states.values()
+        if record.get("event") == "retemplate_swap_started"
+    ]
+    if not pending:
+        return False
+    history_paths = _retemplate_history_paths(db_module)
+    recovered = False
+    for record in pending:
+        try:
+            result = _recover_retemplate_record(
+                record, history_paths, db_module=db_module,
+                tags_module=tags_module,
+            )
+        except (OSError, RuntimeError, ValueError):
+            continue
+        _audit({
+            "event": "retemplate_recovered",
+            "at": _utc_now(),
+            "plan_id": record.get("plan_id", ""),
+            "action_id": record.get("action_id", ""),
+            "history_id": record.get("history_id", 0),
+            **result,
+        }, ledger_path=ledger)
+        recovered = True
+    return recovered
 
 
 def apply_maintenance(

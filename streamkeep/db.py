@@ -160,6 +160,13 @@ def init_db() -> None:
         raise
     finally:
         db.close()
+    # Repair an interrupted re-template after the schema is open so recovery
+    # can compare the durable history path with the staged filesystem move.
+    try:
+        from .maintenance import finalize_interrupted_retemplates
+        finalize_interrupted_retemplates(config_dir=CONFIG_DIR)
+    except Exception:
+        pass
 
 
 def _apply_schema(db):
