@@ -34,6 +34,12 @@ class PreflightError(ValueError):
     """Raised when a probe or queue selection cannot be trusted."""
 
 
+class ProbeBusyError(PreflightError):
+    """Raised when the bounded headless probe pool has no free slot."""
+
+    retry_after_seconds = 1
+
+
 def _bounded_text(value: Any, field: str, limit: int = MAX_TEXT_LENGTH) -> str:
     if value is None:
         return ""
@@ -682,6 +688,7 @@ def collect_probe_result(
     worker_factory,
     *,
     timeout_seconds: float = 45.0,
+    on_timeout=None,
 ) -> tuple[str, Any]:
     """Run a FetchWorker-like object and return kind plus resolved value.
 
@@ -712,17 +719,27 @@ def collect_probe_result(
     worker.error.connect(failed, direct)
     worker.start()
     completed = event.wait(
-        max(1.0, min(120.0, float(timeout_seconds or 45.0)))
+        max(0.01, min(120.0, float(timeout_seconds or 45.0)))
     )
     if not completed:
         try:
             worker.requestInterruption()
         except Exception:
             pass
+        stopped = False
         try:
-            worker.wait(2000)
+            stopped = bool(worker.wait(2000))
         except Exception:
             pass
+        try:
+            finished = bool(worker.isFinished())
+        except Exception:
+            try:
+                finished = not bool(worker.isRunning())
+            except Exception:
+                finished = stopped
+        if not finished and on_timeout is not None:
+            on_timeout(worker)
         raise PreflightError("probe timed out")
     try:
         if worker.isRunning():

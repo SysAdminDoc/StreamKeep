@@ -1013,7 +1013,7 @@ def _build_handler(
                 "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
             )
 
-        def _json_response(self, code, obj):
+        def _json_response(self, code, obj, *, headers=None):
             # Early auth/origin/Host rejections happen before endpoint handlers
             # read the JSON body. Draining a bounded body avoids a Windows TCP
             # reset that can otherwise hide the response from the client.
@@ -1024,6 +1024,8 @@ def _build_handler(
             self._security_headers()
             self._set_auth_cookie()
             self.send_header("Content-Type", "application/json")
+            for name, value in (headers or {}).items():
+                self.send_header(str(name), str(value))
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -2152,7 +2154,11 @@ def _build_handler(
             self._json_response(200, {"ok": True, "job_id": job_id, "job": job})
 
         def _handle_api_validate(self):
-            from .preflight import PreflightError, validate_probe_request
+            from .preflight import (
+                PreflightError,
+                ProbeBusyError,
+                validate_probe_request,
+            )
 
             try:
                 data = validate_probe_request(self._read_body())
@@ -2188,6 +2194,19 @@ def _build_handler(
                 return
             try:
                 response = probe_submitter(data)
+            except ProbeBusyError as error:
+                self._json_response(
+                    429,
+                    {
+                        "ok": False,
+                        "err": "probe_busy",
+                        "message": str(error),
+                    },
+                    headers={
+                        "Retry-After": str(error.retry_after_seconds),
+                    },
+                )
+                return
             except PreflightError as error:
                 self._json_response(
                     400, {"ok": False, "err": "probe_failed", "message": str(error)}

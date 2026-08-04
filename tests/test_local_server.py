@@ -20,6 +20,7 @@ from streamkeep.local_server import (
     SCOPE_STATUS,
     LocalCompanionServer,
 )
+from streamkeep.preflight import ProbeBusyError
 
 
 class LocalServerTests(unittest.TestCase):
@@ -921,6 +922,31 @@ class LocalServerTests(unittest.TestCase):
             received["queue"]["background_audio_id"],
             "background-audio:0:0",
         )
+
+    def test_validation_probe_capacity_returns_retryable_429(self):
+        def busy(_data):
+            raise ProbeBusyError("probe capacity is full; retry shortly")
+
+        server = LocalCompanionServer()
+        server.probe_submitter = busy
+        server.start()
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._open(
+                    "/api/validate",
+                    server=server,
+                    token=server.token,
+                    method="POST",
+                    data={"url": "https://example.com/video"},
+                )
+            error = ctx.exception
+            body = json.loads(error.read().decode("utf-8"))
+        finally:
+            server.stop()
+
+        self.assertEqual(error.code, 429)
+        self.assertEqual(error.headers.get("Retry-After"), "1")
+        self.assertEqual(body["err"], "probe_busy")
 
     def test_authenticated_ping_allows_localhost_origin(self):
         origin = f"http://localhost:{self.server.port}"

@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -7,6 +8,7 @@ from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
 from streamkeep import db
 from streamkeep.headless_service import HeadlessJobService
+from streamkeep.preflight import PreflightError, ProbeBusyError
 from streamkeep.models import QualityInfo, StreamInfo, VODInfo
 
 
@@ -96,6 +98,33 @@ class _FakePickerFetchWorker(QObject):
 
     def requestInterruption(self):
         self._running = False
+
+
+class _StuckProbeWorker(QObject):
+    finished = pyqtSignal(object)
+    vods_found = pyqtSignal(list, str, object)
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
+
+    def __init__(self, _url, **_kwargs):
+        super().__init__()
+        self.interruption_requested = False
+        self._finished = False
+
+    def start(self):
+        return None
+
+    def requestInterruption(self):
+        self.interruption_requested = True
+
+    def wait(self, _timeout):
+        return self._finished
+
+    def isFinished(self):
+        return self._finished
+
+    def isRunning(self):
+        return not self._finished
 
 
 class _FakeDownloadWorker(QObject):
@@ -277,6 +306,40 @@ class HeadlessJobServiceTests(unittest.TestCase):
         self.assertEqual(item["vod_source"], "200")
         self.assertEqual(item["source_id"], "200")
         self.assertEqual(item["title"], "Second VOD")
+
+    def test_timed_out_probe_is_reaped_without_destroying_running_worker(self):
+        workers = []
+
+        def factory(*_args, **_kwargs):
+            worker = _StuckProbeWorker("https://example.com/stuck")
+            workers.append(worker)
+            return worker
+
+        with mock.patch("streamkeep.headless_service.FetchWorker", factory):
+            service = HeadlessJobService(
+                output_dir="",
+                max_concurrent=1,
+                max_probe_concurrent=1,
+            )
+            service._probe_timeout = 0.01
+            with self.assertRaisesRegex(PreflightError, "timed out"):
+                service.probe({"url": "https://example.com/stuck"})
+
+            worker = workers[0]
+            self.assertTrue(worker.interruption_requested)
+            self.assertFalse(worker.isFinished())
+            self.assertIn(worker, service._probe_reapers)
+            with self.assertRaises(ProbeBusyError):
+                service.probe({"url": "https://example.com/second"})
+
+            worker._finished = True
+            for _ in range(20):
+                if worker not in service._probe_reapers:
+                    break
+                time.sleep(0.01)
+            self.assertNotIn(worker, service._probe_reapers)
+            self.assertTrue(service._probe_slots.acquire(blocking=False))
+            service._probe_slots.release()
 
     def test_second_executor_refuses_with_actionable_owner_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:

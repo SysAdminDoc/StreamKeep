@@ -1,11 +1,14 @@
 import unittest
 from types import SimpleNamespace
 
+from PyQt6.QtCore import QObject, pyqtSignal
+
 from streamkeep.models import MediaTrackInfo, QualityInfo, StreamInfo, VODInfo
 from streamkeep.preflight import (
     PreflightError,
     ProbeCache,
     build_picker_response,
+    collect_probe_result,
     normalize_media_selection,
     serialize_stream_picker,
     serialize_vod_picker,
@@ -13,7 +16,48 @@ from streamkeep.preflight import (
 )
 
 
+class _TimeoutProbeWorker(QObject):
+    finished = pyqtSignal(object)
+    vods_found = pyqtSignal(list, str, object)
+    error = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.interruption_requested = False
+        self._finished = False
+
+    def start(self):
+        return None
+
+    def requestInterruption(self):
+        self.interruption_requested = True
+
+    def wait(self, _timeout):
+        return self._finished
+
+    def isFinished(self):
+        return self._finished
+
+    def isRunning(self):
+        return not self._finished
+
+
 class PreflightContractTests(unittest.TestCase):
+    def test_probe_timeout_transfers_running_worker_to_reaper_callback(self):
+        worker = _TimeoutProbeWorker()
+        retained = []
+
+        with self.assertRaisesRegex(PreflightError, "timed out"):
+            collect_probe_result(
+                lambda: worker,
+                timeout_seconds=0.01,
+                on_timeout=retained.append,
+            )
+
+        self.assertTrue(worker.interruption_requested)
+        self.assertEqual(retained, [worker])
+        self.assertFalse(worker.isFinished())
+
     def test_vod_picker_keeps_delivery_sources_private_and_preserves_type(self):
         delivery = "https://cdn.example/video.m3u8?token=secret"
         picker = serialize_vod_picker(

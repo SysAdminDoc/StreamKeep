@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Kept timed-out headless probe workers alive in a service-owned reaper until
+  their `QThread` is finished, bounded concurrent probes, and return a
+  retryable `429` with `Retry-After` when capacity is occupied.
+
 - Added per-user `streamkeep://` registration for Linux XDG/`xdg-mime` and
   macOS LaunchServices, updated the Flatpak desktop entry for URI routing, and
   kept the existing HTTP(S)-only validation shared across every platform.

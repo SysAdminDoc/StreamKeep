@@ -19,6 +19,7 @@ from .models import default_media_tracks
 from .notifications import record_notification
 from .preflight import (
     PreflightError,
+    ProbeBusyError,
     ProbeCache,
     build_picker_response,
     collect_probe_result,
@@ -65,6 +66,7 @@ class HeadlessJobService(QObject):
         max_concurrent: int = 2,
         parallel_connections: int = 4,
         config: dict[str, Any] | None = None,
+        max_probe_concurrent: int | None = None,
         owner_id: str = "",
         parent: QObject | None = None,
     ):
@@ -91,6 +93,23 @@ class HeadlessJobService(QObject):
             )
         except (TypeError, ValueError):
             self._probe_timeout = 45.0
+        configured_probe_limit = (
+            max_probe_concurrent
+            if max_probe_concurrent is not None
+            else self.config.get(
+                "max_probe_concurrent",
+                self.config.get("probe_concurrency", min(self.max_concurrent, 2)),
+            )
+        )
+        try:
+            probe_limit = int(configured_probe_limit)
+        except (TypeError, ValueError, OverflowError):
+            probe_limit = min(self.max_concurrent, 2)
+        self.max_probe_concurrent = max(1, min(8, probe_limit))
+        self._probe_slots = threading.BoundedSemaphore(self.max_probe_concurrent)
+        self._probe_reapers: set[Any] = set()
+        self._probe_reaper_releases: dict[Any, Any] = {}
+        self._probe_reaper_lock = threading.Lock()
         self._download_errors: set[str] = set()
         self._last_progress: dict[str, int] = {}
         self._started = False
@@ -152,12 +171,24 @@ class HeadlessJobService(QObject):
             worker.cancel()
         for worker in list(self._finalizers.values()):
             worker.cancel()
+        for worker in list(self._probe_reapers):
+            try:
+                worker.requestInterruption()
+            except Exception:
+                pass
         for worker in [
             *self._fetchers.values(), *self._downloads.values(),
             *self._finalizers.values(),
         ]:
             if worker.isRunning():
                 worker.wait(max(0, int(wait_ms)))
+        for worker in list(self._probe_reapers):
+            try:
+                if not self._probe_worker_finished(worker):
+                    worker.wait(max(0, int(wait_ms)))
+            except Exception:
+                pass
+        self._reap_probe_workers()
         if self._backup_worker is not None and self._backup_worker.isRunning():
             # A backup is a short, self-contained write; let it finish so the
             # claim is released and no partial archive is left behind.
@@ -179,6 +210,84 @@ class HeadlessJobService(QObject):
             self._request_headers.clear()
         self._download_errors.clear()
         self._last_progress.clear()
+
+    @staticmethod
+    def _probe_worker_finished(worker: Any) -> bool:
+        """Return the terminal state without trusting a completion signal."""
+        try:
+            return bool(worker.isFinished())
+        except Exception:
+            try:
+                return not bool(worker.isRunning())
+            except Exception:
+                return False
+
+    def _reap_probe_workers(self) -> None:
+        """Release timed-out probe workers only after QThread termination."""
+        releases = []
+        with self._probe_reaper_lock:
+            for worker in tuple(self._probe_reapers):
+                if not self._probe_worker_finished(worker):
+                    continue
+                self._probe_reapers.discard(worker)
+                release = self._probe_reaper_releases.pop(worker, None)
+                if release is not None:
+                    releases.append(release)
+        for release in releases:
+            release()
+
+    def _wait_for_probe_worker(self, worker: Any) -> None:
+        """Poll a worker whose custom ``finished`` signal can precede Qt end."""
+        while not self._probe_worker_finished(worker):
+            try:
+                worker.wait(250)
+            except Exception:
+                pass
+            if not self._probe_worker_finished(worker):
+                threading.Event().wait(0.05)
+        self._reap_probe_workers()
+
+    def _retain_probe_worker(self, worker: Any, release_slot) -> bool:
+        """Keep a timed-out worker alive and transfer its slot to the reaper."""
+        if self._probe_worker_finished(worker):
+            release_slot()
+            return False
+        with self._probe_reaper_lock:
+            if self._probe_worker_finished(worker):
+                release_slot()
+                return False
+            self._probe_reapers.add(worker)
+            self._probe_reaper_releases[worker] = release_slot
+        threading.Thread(
+            target=self._wait_for_probe_worker,
+            args=(worker,),
+            name="streamkeep-probe-reaper",
+            daemon=True,
+        ).start()
+        return True
+
+    def _collect_probe_result(self, worker_factory):
+        """Run a probe under bounded admission with timeout ownership transfer."""
+        self._reap_probe_workers()
+        if not self._probe_slots.acquire(blocking=False):
+            raise ProbeBusyError("probe capacity is full; retry shortly")
+        transferred = False
+
+        def on_timeout(worker):
+            nonlocal transferred
+            transferred = self._retain_probe_worker(
+                worker, self._probe_slots.release
+            )
+
+        try:
+            return collect_probe_result(
+                worker_factory,
+                timeout_seconds=self._probe_timeout,
+                on_timeout=on_timeout,
+            )
+        finally:
+            if not transferred:
+                self._probe_slots.release()
 
     def _heartbeat_lease(self) -> None:
         if not self._started or self._stopping or not self._lease_acquired:
@@ -370,10 +479,7 @@ class HeadlessJobService(QObject):
                 request_headers=request_headers,
             )
 
-        kind, value = collect_probe_result(
-            worker_factory,
-            timeout_seconds=self._probe_timeout,
-        )
+        kind, value = self._collect_probe_result(worker_factory)
         picker = (
             serialize_vod_picker(value, url)
             if kind == "vods"
