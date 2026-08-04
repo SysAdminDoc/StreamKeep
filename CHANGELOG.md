@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Moved the Windows reproducible-build and release-gate lane to Python 3.14.6,
+  regenerated the hash-locked build inputs under Python 3.14, and made frozen
+  release entry points reject older interpreters. The Flatpak lock remains
+  aligned with its Python 3.13 KDE BaseApp runtime.
+
 - Scoped CLI completion manifests and failed-job retry metadata to each
   templated job output directory, preventing sibling recordings from being
   rehashed or resumed from the wrong level.

@@ -19,7 +19,8 @@ import release_gate as gate  # noqa: E402
 class StageDriverTests(unittest.TestCase):
     def test_every_stage_is_named_and_ordered_cheapest_first(self):
         names = [name for name, _func in gate.STAGES]
-        self.assertEqual(names[0], "compileall")
+        self.assertEqual(names[0], "release-python")
+        self.assertEqual(names[1], "compileall")
         # The expensive build stages must come after the cheap checks so a
         # trivial failure never costs a full PyInstaller run.
         for build_stage in gate.BUILD_STAGES:
@@ -93,6 +94,25 @@ class StageDriverTests(unittest.TestCase):
     def test_dependency_floor_stage_passes_for_the_checked_in_lock(self):
         ok, detail = gate.stage_dependency_floors()
         self.assertTrue(ok, detail)
+
+    @mock.patch.object(gate, "_run", return_value=(True, ""))
+    def test_test_stage_uses_a_dedicated_basetemp(self, run):
+        self.assertEqual(gate.stage_tests(), (True, ""))
+        command = [str(part) for part in run.call_args.args[0]]
+        self.assertIn("--basetemp", command)
+        base = Path(command[command.index("--basetemp") + 1])
+        self.assertFalse(base.exists())
+
+    @mock.patch.object(gate, "_run", return_value=(False, "No module named pip_audit"))
+    def test_advisory_stage_skips_when_pip_audit_is_missing(self, run):
+        ok, detail = gate.stage_advisories()
+        self.assertTrue(ok)
+        self.assertIn("skipped", detail)
+
+    def test_release_python_policy_accepts_target_and_rejects_older_runtime(self):
+        self.assertEqual(gate.release_python_error((3, 14, 6)), "")
+        error = gate.release_python_error((3, 13, 14))
+        self.assertIn("Python 3.14.6", error)
 
     def test_no_stage_introduces_signing_or_ci(self):
         # The gate is local and unsigned by policy; nothing in it may shell out

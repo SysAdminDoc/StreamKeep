@@ -19,13 +19,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+RELEASE_PYTHON = (3, 14)
+MIN_RELEASE_PYTHON = (3, 14, 6)
 
 # Stages that need a full build environment; --fast skips them so the gate is
 # usable as a pre-commit check without paying for a PyInstaller run.
@@ -91,6 +95,23 @@ def _run(command, *, cwd=ROOT, timeout=1800) -> tuple[bool, str]:
 
 # ── Stages ──────────────────────────────────────────────────────────
 
+def release_python_error(version=None) -> str:
+    """Return a release-runtime error, or an empty string when supported."""
+    current = tuple((version or sys.version_info)[:3])
+    if current[:2] != RELEASE_PYTHON or current < MIN_RELEASE_PYTHON:
+        return (
+            "release artifacts require Python 3.14.6 or newer within the 3.14 "
+            f"line; running Python {'.'.join(str(part) for part in current)}"
+        )
+    return ""
+
+
+def stage_release_python() -> tuple[bool, str]:
+    error = release_python_error()
+    if error:
+        return False, error
+    return True, f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
 def stage_compileall() -> tuple[bool, str]:
     """Every shipped module must at least byte-compile."""
     return _run([
@@ -132,10 +153,14 @@ def stage_dependency_floors() -> tuple[bool, str]:
 
 
 def stage_tests() -> tuple[bool, str]:
-    return _run([
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "--no-cov",
-    ], timeout=3600)
+    basetemp = Path(tempfile.mkdtemp(prefix="streamkeep-release-tests-"))
+    try:
+        return _run([
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            "--no-cov", "--basetemp", basetemp,
+        ], timeout=3600)
+    finally:
+        shutil.rmtree(basetemp, ignore_errors=True)
 
 
 def stage_capability_claims() -> tuple[bool, str]:
@@ -161,7 +186,8 @@ def stage_advisories() -> tuple[bool, str]:
         [sys.executable, str(ROOT / "packaging" / "sbom.py"), "--audit"],
         timeout=900,
     )
-    if not ok and "pip-audit" in detail.lower():
+    lowered = detail.casefold()
+    if not ok and ("pip-audit" in lowered or "pip_audit" in lowered):
         return True, "pip-audit is not installed; advisory scan skipped"
     return ok, detail
 
@@ -212,6 +238,7 @@ def built_artifact() -> Path | None:
 
 
 STAGES = (
+    ("release-python", stage_release_python),
     ("compileall", stage_compileall),
     ("pyflakes", stage_pyflakes),
     ("translations", stage_translations),

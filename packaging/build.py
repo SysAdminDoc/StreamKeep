@@ -24,6 +24,8 @@ from versioning import stamp_versions
 
 
 ROOT = Path(__file__).resolve().parents[1]
+RELEASE_PYTHON = (3, 14)
+MIN_RELEASE_PYTHON = (3, 14, 6)
 
 
 def _wal_reset_is_fixed(version):
@@ -51,6 +53,13 @@ def main(argv=None):
         help="Also build an unsigned Inno Setup installer from the onedir tree",
     )
     args = parser.parse_args(argv)
+
+    current_python = tuple(sys.version_info[:3])
+    if current_python[:2] != RELEASE_PYTHON or current_python < MIN_RELEASE_PYTHON:
+        parser.error(
+            "release artifacts require Python 3.14.6 or newer within the 3.14 line; "
+            f"running Python {'.'.join(str(part) for part in current_python)}"
+        )
 
     stamp_versions(ROOT)
 

@@ -22,6 +22,8 @@ DEFAULT_WORK = ROOT / "work" / "reproducible-build"
 RUNTIME_LOCK = ROOT / "requirements.lock"
 BUILD_LOCK = ROOT / "requirements-build.lock"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+RELEASE_PYTHON = (3, 14)
+MIN_RELEASE_PYTHON = (3, 14, 6)
 
 
 def sha256(path):
@@ -201,8 +203,12 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    if sys.version_info[:2] != (3, 12):
-        parser.error("requirements locks are generated and supported with Python 3.12")
+    current_python = tuple(sys.version_info[:3])
+    if current_python[:2] != RELEASE_PYTHON or current_python < MIN_RELEASE_PYTHON:
+        parser.error(
+            "release artifacts require Python 3.14.6 or newer within the 3.14 line; "
+            f"running Python {'.'.join(str(part) for part in current_python)}"
+        )
     _validate_inputs()
     stamp_versions(ROOT)
 

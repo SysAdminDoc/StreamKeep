@@ -299,3 +299,14 @@ def test_reproducible_builder_gates_double_build_inventory_and_smoke():
         "SOURCE_DATE_EPOCH",
     ):
         assert required in source
+
+
+def test_release_build_inputs_name_the_shipped_python_target():
+    build_source = (ROOT / "packaging" / "build.py").read_text(encoding="utf-8")
+    reproducible_source = (
+        ROOT / "packaging" / "reproducible_build.py"
+    ).read_text(encoding="utf-8")
+    spec_source = (ROOT / "StreamKeep.spec").read_text(encoding="utf-8")
+    for source in (build_source, reproducible_source, spec_source):
+        assert "3, 14, 6" in source
+        assert "3.14.6" in source

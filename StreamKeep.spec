@@ -2,6 +2,7 @@
 import ctypes
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import (
@@ -12,6 +13,14 @@ from PyInstaller.utils.hooks import (
 
 
 ROOT = Path(SPECPATH).resolve()
+MIN_RELEASE_PYTHON = (3, 14, 6)
+
+current_python = tuple(sys.version_info[:3])
+if current_python[:2] != MIN_RELEASE_PYTHON[:2] or current_python < MIN_RELEASE_PYTHON:
+    raise SystemExit(
+        'Frozen releases require Python 3.14.6 or newer within the 3.14 line; '
+        f"running Python {'.'.join(str(part) for part in current_python)}"
+    )
 
 
 def wal_reset_is_fixed(version):

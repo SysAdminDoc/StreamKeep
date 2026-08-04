@@ -264,6 +264,8 @@ it after a successful remux.
 ## Requirements
 
 - Python 3.11 or newer.
+- The shipped Windows release lane and local release gate are built and tested
+  on Python 3.14.6 (3.14.x); source installs retain the Python 3.11+ floor.
 - FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
 - curl 8.21.0 or newer in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` 50.0.0 or newer for authenticated portable-secret backups. Optional SFTP delivery requires Paramiko 5.0.0 or newer and rejects older runtimes through the capability registry.
@@ -299,7 +301,7 @@ Credential values are stored outside `config.json` in the operating-system crede
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- Reproducible PyInstaller **onedir** builds for Windows with `py -3.12 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep/`. Onedir replaced the legacy one-file executable: the single file re-extracted its whole ~500 MB payload to a temp directory on every launch (measured 11.9s cold start versus 0.24s for onedir), maximised the unsigned-binary AV surface, and let simultaneous launches each create their own `_MEIxxxx` extraction (four concurrent launches: four temp directories for onefile, zero for onedir). Build the legacy shape with `packaging/build.py --onefile` if you need it. `streamkeep/__init__.py::VERSION` is the release version source; `packaging/versioning.py` stamps the README, Flatpak metainfo, WinGet manifest, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds.
+- Reproducible PyInstaller **onedir** builds for Windows with `py -3.14 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep/`. Onedir replaced the legacy one-file executable: the single file re-extracted its whole ~500 MB payload to a temp directory on every launch (measured 11.9s cold start versus 0.24s for onedir), maximised the unsigned-binary AV surface, and let simultaneous launches each create their own `_MEIxxxx` extraction (four concurrent launches: four temp directories for onefile, zero for onedir). Build the legacy shape with `packaging/build.py --onefile` if you need it. `streamkeep/__init__.py::VERSION` is the release version source; `packaging/versioning.py` stamps the README, Flatpak metainfo, WinGet manifest, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds and refuses an older release interpreter.
 - An unsigned Inno Setup installer from `packaging/build.py --installer` (`packaging/installer/streamkeep.iss`). It installs the whole onedir tree, supports `/VERYSILENT` for package managers, and leaves the user profile untouched on uninstall so a library, history, or queue is never destroyed.
 - Flatpak packaging under `packaging/flatpak/`, using the KDE/PyQt 6.10 base and a separate hash-checked Linux dependency lock plus generated offline source manifest.
 - Browser companion extension packaging from `browser-extension/`.
@@ -331,9 +333,9 @@ One command runs the whole local release gate. It is unsigned and local by
 design: no signing step, no notarization, and no CI workflow is involved.
 
 ```powershell
-python packaging/release_gate.py           # every stage
-python packaging/release_gate.py --fast    # skip the build/SBOM/artifact stages
-python packaging/release_gate.py --list    # show the stages
+py -3.14 packaging/release_gate.py           # every stage
+py -3.14 packaging/release_gate.py --fast    # skip the build/SBOM/artifact stages
+py -3.14 packaging/release_gate.py --list    # show the stages
 ```
 
 Stages run cheapest-first and stop at the first failure, which the gate names
@@ -353,25 +355,25 @@ python -m compileall StreamKeep.py streamkeep tests
 python -m streamkeep.i18n.extract_translations --check
 python -m streamkeep.i18n.compile_translations
 python packaging/versioning.py
-python -m pytest -q
+py -3.14 -m pytest -q
 python StreamKeep.py --version
 python StreamKeep.py --list-extractors
 python StreamKeep.py download --help
 python StreamKeep.py server --help
 ```
 
-Install test tooling with `python -m pip install -r requirements-dev.txt`. The default pytest run measures `streamkeep/`, prints uncovered lines, and enforces the current 47.5% project floor; raise the floor as the GUI and integration seams gain coverage.
+Install test tooling with `py -3.14 -m pip install -r requirements-dev.txt`. The default pytest run measures `streamkeep/`, prints uncovered lines, and enforces the current 47.5% project floor; raise the floor as the GUI and integration seams gain coverage.
 
 When pyflakes is installed, also run:
 
 ```powershell
-python -m pyflakes StreamKeep.py streamkeep tests
+py -3.14 -m pyflakes StreamKeep.py streamkeep tests
 ```
 
-For a Windows one-file release, build and run the hidden artifact-boundary smoke suite:
+For a Windows release, build and run the hidden artifact-boundary smoke suite:
 
 ```powershell
-py -3.12 packaging/reproducible_build.py --verify-reproducible
+py -3.14 packaging/reproducible_build.py --verify-reproducible
 ```
 
 The artifact suite exercises empty, legacy-migrated, and populated libraries offscreen, writes machine-readable readiness records, checks embedded yt-dlp and thumbnail initialization, rejects process re-entry fanout, and enforces a bounded clean exit. For UI-facing changes, exercise the affected tab only when a non-disruptive test desktop is available.
