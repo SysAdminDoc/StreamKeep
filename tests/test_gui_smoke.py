@@ -169,6 +169,11 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 assert table.focusPolicy() == Qt.FocusPolicy.StrongFocus
                 assert table.accessibleName() == expected_name
                 assert table.property("accessibilityConfigured") is True
+            assert window.storage_scrub_btn.text() == "Run integrity scrub"
+            assert window.storage_integrity_tree.accessibleName() == (
+                "Archive integrity issues"
+            )
+            assert window.integrity_fraction_spin.value() == 10
             interactive_types = (
                 QAbstractButton, QAbstractItemView, QAbstractSpinBox,
                 QComboBox, QLineEdit, QPlainTextEdit, QSlider, QTextEdit,

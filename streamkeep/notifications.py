@@ -270,3 +270,14 @@ class NotificationCenter:
         with self._lock:
             self._buf.clear()
             self._unread = 0
+
+
+def record_notification(text, level="info"):
+    """Persist a notification for headless/background producers.
+
+    Desktop callers should use ``NotificationCenter.push`` so the live bell
+    updates too. The scrub scheduler has no UI object, so it uses this small
+    durable-only bridge.
+    """
+    center = NotificationCenter(capacity=1)
+    return center.push(text, level=level)

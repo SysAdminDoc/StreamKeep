@@ -3,7 +3,7 @@
     <context>
         <name>Accessibility</name>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1671" />
+            <location filename="streamkeep/ui/main_window.py" line="1679" />
             <source>Application state: {state}</source>
             <translation>Estado de la aplicación: {state}</translation>
         </message>
@@ -209,9 +209,9 @@ Archive workstation</source>
             <location filename="streamkeep/ui/tabs/operations.py" line="206" />
             <location filename="streamkeep/ui/tabs/operations.py" line="207" />
             <location filename="streamkeep/ui/tabs/operations.py" line="208" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="244" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="246" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="248" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="245" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="247" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="249" />
             <source>0</source>
             <translation type="unfinished" />
         </message>
@@ -221,7 +221,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="242" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="243" />
             <source>0 B</source>
             <translation type="unfinished" />
         </message>
@@ -231,7 +231,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="471" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="571" />
             <source>0 folder group(s) shown • all sources</source>
             <translation type="unfinished" />
         </message>
@@ -395,7 +395,7 @@ Archive workstation</source>
             <location filename="streamkeep/ui/tabs/download.py" line="833" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1656" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="480" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="345" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="445" />
             <source>Action</source>
             <translation type="unfinished" />
         </message>
@@ -410,7 +410,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1209" />
+            <location filename="streamkeep/ui/main_window.py" line="1210" />
             <source>Active Captures</source>
             <translation type="unfinished" />
         </message>
@@ -513,48 +513,53 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="272" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="273" />
             <source>Adopt external library…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="762" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1051" />
             <source>Adoption cancelled safely.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="761" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1050" />
             <source>Adoption cancelled. No library changes were made.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="790" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1079" />
             <source>Adoption failed before completion. No unreported change ran.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="703" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="992" />
             <source>Adoption preview cancelled.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="701" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="990" />
             <source>Adoption preview cancelled. No changes were made.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="723" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1012" />
             <source>Adoption preview ready for approval.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="765" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1054" />
             <source>Adoption {result.status}: {result.adopted} adopted, {result.skipped} skipped, {result.conflicts} conflict(s). Backup: {result.backup_path or 'not created'}.</source>
             <translation type="unfinished" />
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="381" />
             <source>Advanced</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="368" />
+            <source>Affected file / reason</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -579,10 +584,10 @@ Archive workstation</source>
         </message>
         <message>
             <location filename="streamkeep/ui/notification_log_dialog.py" line="56" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="442" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="451" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="541" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="543" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="542" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="551" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="641" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="643" />
             <source>All</source>
             <translation>Todo</translation>
         </message>
@@ -695,17 +700,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="345" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="445" />
             <source>Apply</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="378" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="478" />
             <source>Apply adoption preview</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="304" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="404" />
             <source>Apply approved</source>
             <translation type="unfinished" />
         </message>
@@ -720,12 +725,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="952" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1241" />
             <source>Applying approved maintenance in the background.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="745" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1034" />
             <source>Applying external library adoption in the background.</source>
             <translation type="unfinished" />
         </message>
@@ -740,32 +745,47 @@ Archive workstation</source>
             <translation>Estado del archivo</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="288" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="373" />
+            <source>Archive integrity issues</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="928" />
+            <source>Archive integrity scrub failed. See the log for details.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="906" />
+            <source>Archive integrity scrub {status}.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="388" />
             <source>Archive maintenance</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1013" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1302" />
             <source>Archive maintenance failed. See the log for details.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="350" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="450" />
             <source>Archive maintenance preview</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="991" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1280" />
             <source>Archive maintenance {result.status}: {result.applied} action(s) applied.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="155" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="156" />
             <source>Archive size trend</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="225" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="226" />
             <source>Archive storage</source>
             <translation>Almacenamiento del archivo</translation>
         </message>
@@ -1127,17 +1147,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="686" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="975" />
             <source>Building a read-only adoption preview…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="838" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1127" />
             <source>Building a read-only archive preview…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="813" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1102" />
             <source>Building a read-only re-template preview…</source>
             <translation type="unfinished" />
         </message>
@@ -1196,8 +1216,9 @@ Archive workstation</source>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="72" />
             <location filename="streamkeep/ui/rename_dialog.py" line="165" />
             <location filename="streamkeep/ui/tabs/settings.py" line="2742" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="308" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="382" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="355" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="408" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="482" />
             <source>Cancel</source>
             <translation>Cancelar</translation>
         </message>
@@ -1238,7 +1259,7 @@ Archive workstation</source>
             <translation>Capturar un origen</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1957" />
+            <location filename="streamkeep/ui/main_window.py" line="1965" />
             <source>Capture and queue streams, VODs, and media for local archiving.</source>
             <translation>Capture y ponga en cola emisiones, VOD y archivos multimedia para archivarlos localmente.</translation>
         </message>
@@ -1277,7 +1298,7 @@ Archive workstation</source>
             <location filename="streamkeep/ui/recover_dialog.py" line="85" />
             <location filename="streamkeep/ui/storage_model.py" line="11" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="224" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="447" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="547" />
             <source>Channel</source>
             <translation>Canal</translation>
         </message>
@@ -1328,7 +1349,7 @@ Archive workstation</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/monitor.py" line="75" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="248" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="249" />
             <source>Channels</source>
             <translation type="unfinished" />
         </message>
@@ -1384,7 +1405,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="351" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="451" />
             <source>Check only maintenance actions that should be applied</source>
             <translation type="unfinished" />
         </message>
@@ -1417,7 +1438,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2010" />
+            <location filename="streamkeep/ui/main_window.py" line="2018" />
             <source>Checking systems</source>
             <translation>Comprobando sistemas</translation>
         </message>
@@ -1427,7 +1448,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1811" />
+            <location filename="streamkeep/ui/main_window.py" line="1819" />
             <source>Checking yt-dlp</source>
             <translation>Comprobando yt-dlp</translation>
         </message>
@@ -1452,7 +1473,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="389" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="489" />
             <source>Choose an external library to preview adoption.</source>
             <translation type="unfinished" />
         </message>
@@ -1509,13 +1530,13 @@ Archive workstation</source>
             <translation>Borrar</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2616" />
+            <location filename="streamkeep/ui/main_window.py" line="2624" />
             <location filename="streamkeep/ui/tabs/settings.py" line="708" />
             <source>Clear all</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="456" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="556" />
             <source>Clear filters</source>
             <translation type="unfinished" />
         </message>
@@ -1821,6 +1842,11 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="321" />
+            <source>Cover in</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <source>Cozy</source>
             <translation>Cómoda</translation>
         </message>
@@ -1902,7 +1928,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="395" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="495" />
             <source>Decision</source>
             <translation type="unfinished" />
         </message>
@@ -2013,7 +2039,7 @@ flac/pcm = lossless</source>
             <translation>Densidad</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2027" />
+            <location filename="streamkeep/ui/main_window.py" line="2035" />
             <source>Desktop build v{VERSION}</source>
             <translation type="unfinished" />
         </message>
@@ -2023,7 +2049,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="345" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="445" />
             <source>Details</source>
             <translation type="unfinished" />
         </message>
@@ -2074,7 +2100,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="228" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="229" />
             <source>Disk usage, maintenance, and safe cleanup.</source>
             <translation>Uso de disco, mantenimiento y limpieza segura.</translation>
         </message>
@@ -2084,7 +2110,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="248" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="249" />
             <source>distinct channels</source>
             <translation type="unfinished" />
         </message>
@@ -2099,7 +2125,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1955" />
+            <location filename="streamkeep/ui/main_window.py" line="1963" />
             <location filename="streamkeep/ui/recover_dialog.py" line="311" />
             <source>Download</source>
             <translation>Descargar</translation>
@@ -2259,12 +2285,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="685" />
+            <location filename="streamkeep/ui/main_window.py" line="686" />
             <source>Dropped content is not a valid URL.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="697" />
+            <location filename="streamkeep/ui/main_window.py" line="698" />
             <source>Dropped file is not a recognized media type ({exts}).</source>
             <translation type="unfinished" />
         </message>
@@ -2437,6 +2463,16 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="1325" />
             <source>Enable LAN through HTTPS reverse proxy</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="306" />
+            <source>Enable rolling archive integrity scrub</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="302" />
+            <source>Enable rolling scrub</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -2665,7 +2701,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/history.py" line="630" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="1025" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1314" />
             <source>Export share bundle (.zip)...</source>
             <translation type="unfinished" />
         </message>
@@ -2685,22 +2721,22 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="365" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="465" />
             <source>External library adoption</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="794" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1083" />
             <source>External library adoption failed. See the log for details.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="400" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="500" />
             <source>External library adoption preview</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="773" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1062" />
             <source>External library adoption {result.status}.</source>
             <translation type="unfinished" />
         </message>
@@ -2811,7 +2847,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation>FFmpeg listo</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1796" />
+            <location filename="streamkeep/ui/main_window.py" line="1804" />
             <source>FFmpeg {version}</source>
             <translation>FFmpeg {version}</translation>
         </message>
@@ -2827,12 +2863,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="330" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="430" />
             <source>Filename template used to rename media and matching sidecars</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="328" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="428" />
             <source>Filename template, e.g. {title}</source>
             <translation type="unfinished" />
         </message>
@@ -2848,7 +2884,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         </message>
         <message>
             <location filename="streamkeep/ui/storage_model.py" line="11" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="244" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="245" />
             <source>Files</source>
             <translation>Archivos</translation>
         </message>
@@ -2909,7 +2945,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="321" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="421" />
             <source>Folder template, e.g. {channel}/{year}</source>
             <translation type="unfinished" />
         </message>
@@ -3021,7 +3057,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2513" />
+            <location filename="streamkeep/ui/main_window.py" line="2521" />
             <source>Free space on {path}</source>
             <translation type="unfinished" />
         </message>
@@ -3373,6 +3409,62 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="872" />
+            <source>Integrity scrub cancelled after {checked} recording(s); {skipped} skipped. No repair or deletion was performed.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="860" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="876" />
+            <source>Integrity scrub cancelled safely.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="857" />
+            <source>Integrity scrub cancelled. No repair or deletion was performed.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="330" />
+            <source>Integrity scrub coverage period</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="924" />
+            <source>Integrity scrub failed before completion. No repair or deletion was performed.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="344" />
+            <source>Integrity scrub fraction</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="318" />
+            <source>Integrity scrub interval</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="880" />
+            <source>Integrity scrub is disabled.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="885" />
+            <source>Integrity scrub is not due yet.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="883" />
+            <source>Integrity scrub is not due yet; the configured cadence is active.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="900" />
+            <source>Integrity scrub {status}: {checked} recording(s) hashed, {mismatches} mismatch(es), {skipped} skipped ({getattr(result, 'offline', 0)} offline). Nothing was repaired or deleted.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <location filename="streamkeep/ui/tabs/download.py" line="245" />
             <source>Interrupted download ready to resume.</source>
             <translation type="unfinished" />
@@ -3602,7 +3694,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1201" />
+            <location filename="streamkeep/ui/main_window.py" line="1202" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="81" />
             <source>Live Now</source>
             <translation type="unfinished" />
@@ -3691,7 +3783,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1888" />
+            <location filename="streamkeep/ui/main_window.py" line="1896" />
             <location filename="streamkeep/ui/tabs/history.py" line="247" />
             <source>LOCAL ARCHIVE</source>
             <translation>ARCHIVO LOCAL</translation>
@@ -3722,13 +3814,13 @@ https://youtu.be/*</source>
             <translation>Herramientas locales</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1932" />
+            <location filename="streamkeep/ui/main_window.py" line="1940" />
             <source>LOCAL-FIRST  •  v{version}</source>
             <translation>LOCAL PRIMERO  •  v{version}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1723" />
-            <location filename="streamkeep/ui/main_window.py" line="2030" />
+            <location filename="streamkeep/ui/main_window.py" line="1731" />
+            <location filename="streamkeep/ui/main_window.py" line="2038" />
             <source>Local-only  •  {active_jobs} active  •  {queued} queued</source>
             <translation>Solo local  •  {active_jobs} activas  •  {queued} en cola</translation>
         </message>
@@ -3743,43 +3835,48 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="980" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1269" />
             <source>Maintenance cancelled safely between actions.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1011" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1300" />
             <source>Maintenance failed before completion. No unreported action ran.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="857" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1146" />
             <source>Maintenance preview cancelled.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="855" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1144" />
             <source>Maintenance preview cancelled. No changes were made.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="889" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1178" />
             <source>Maintenance preview ready for approval.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="977" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1266" />
             <source>Maintenance stopped between actions; completed actions remain audited. Preview again.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="983" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1272" />
             <source>Maintenance {result.status}: {result.applied} applied, {result.failed} failed, {result.skipped} skipped. Backup: {result.backup_path or 'not created'}.</source>
             <translation type="unfinished" />
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="2205" />
             <source>Manage removed media…</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="374" />
+            <source>Manifest files whose cheap or full integrity checks found drift</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -3806,7 +3903,7 @@ rate limit is set.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="244" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="245" />
             <source>media items found</source>
             <translation type="unfinished" />
         </message>
@@ -3917,7 +4014,7 @@ rate limit is set.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1050" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1339" />
             <source>Move {count} folder group(s) totalling {fmt_size(total_size)} to the Recycle Bin.</source>
             <translation type="unfinished" />
         </message>
@@ -3984,12 +4081,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="329" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="429" />
             <source>New archive filename template</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="322" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="422" />
             <source>New archive folder template</source>
             <translation type="unfinished" />
         </message>
@@ -4136,8 +4233,8 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation>Sin entradas</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2303" />
-            <location filename="streamkeep/ui/main_window.py" line="2334" />
+            <location filename="streamkeep/ui/main_window.py" line="2311" />
+            <location filename="streamkeep/ui/main_window.py" line="2342" />
             <location filename="streamkeep/ui/tabs/download.py" line="1227" />
             <source>No events yet</source>
             <translation>Aún no hay eventos</translation>
@@ -4158,7 +4255,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="339" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="362" />
+            <source>No integrity scan yet.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="439" />
             <source>No maintenance preview yet.</source>
             <translation type="unfinished" />
         </message>
@@ -4193,7 +4295,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2603" />
+            <location filename="streamkeep/ui/main_window.py" line="2611" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="95" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="162" />
             <source>No notifications yet</source>
@@ -4235,7 +4337,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="522" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="622" />
             <source>No recordings found in the scan root. Download something, then press Rescan.</source>
             <translation type="unfinished" />
         </message>
@@ -4266,7 +4368,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="242" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="243" />
             <source>No scan yet</source>
             <translation type="unfinished" />
         </message>
@@ -4301,8 +4403,8 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="156" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="167" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="157" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="168" />
             <source>No storage trend data</source>
             <translation type="unfinished" />
         </message>
@@ -4425,7 +4527,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation>Registro de notificaciones</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1994" />
+            <location filename="streamkeep/ui/main_window.py" line="2002" />
             <source>Notifications</source>
             <translation type="unfinished" />
         </message>
@@ -4534,29 +4636,29 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1193" />
+            <location filename="streamkeep/ui/main_window.py" line="1194" />
             <source>Open Alert Log</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1191" />
+            <location filename="streamkeep/ui/main_window.py" line="1192" />
             <source>Open Archive</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1187" />
+            <location filename="streamkeep/ui/main_window.py" line="1188" />
             <source>Open Downloads</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2105" />
+            <location filename="streamkeep/ui/main_window.py" line="2113" />
             <location filename="streamkeep/ui/tabs/history.py" line="626" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="1028" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1317" />
             <source>Open Folder</source>
             <translation>Abrir carpeta</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1189" />
+            <location filename="streamkeep/ui/main_window.py" line="1190" />
             <source>Open Monitor</source>
             <translation type="unfinished" />
         </message>
@@ -4568,8 +4670,8 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2003" />
-            <location filename="streamkeep/ui/main_window.py" line="2004" />
+            <location filename="streamkeep/ui/main_window.py" line="2011" />
+            <location filename="streamkeep/ui/main_window.py" line="2012" />
             <source>Open Settings</source>
             <translation type="unfinished" />
         </message>
@@ -4579,7 +4681,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation>Abra Configuración y revise las herramientas locales</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2015" />
+            <location filename="streamkeep/ui/main_window.py" line="2023" />
             <source>Open Settings to inspect local runtime and storage health</source>
             <translation>Abra Configuración para revisar el entorno local y el estado del almacenamiento</translation>
         </message>
@@ -4589,7 +4691,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1196" />
+            <location filename="streamkeep/ui/main_window.py" line="1197" />
             <source>Open Web Remote</source>
             <translation type="unfinished" />
         </message>
@@ -4783,7 +4885,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2141" />
+            <location filename="streamkeep/ui/main_window.py" line="2149" />
             <source>Paste a URL to begin.</source>
             <translation type="unfinished" />
         </message>
@@ -4812,7 +4914,7 @@ Lines starting with # are comments and will be skipped.</source>
         <message>
             <location filename="streamkeep/ui/history_model.py" line="20" />
             <location filename="streamkeep/ui/storage_model.py" line="11" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="395" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="495" />
             <source>Path</source>
             <translation>Ruta</translation>
         </message>
@@ -4844,6 +4946,11 @@ Lines starting with # are comments and will be skipped.</source>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="1106" />
             <source>per direct MP4 (1 = off, default 4)</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="333" />
+            <source>per run</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -4908,7 +5015,7 @@ Saves your settings first.</source>
             <location filename="streamkeep/ui/tabs/download.py" line="476" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="224" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="480" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="438" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="538" />
             <source>Platform</source>
             <translation>Plataforma</translation>
         </message>
@@ -4918,7 +5025,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="429" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="529" />
             <source>Platform and channel filters.</source>
             <translation type="unfinished" />
         </message>
@@ -4938,7 +5045,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="246" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="247" />
             <source>Platforms</source>
             <translation type="unfinished" />
         </message>
@@ -5098,12 +5205,12 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="368" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="468" />
             <source>Preview folders, yt-dlp archives, and sidecars before adding library rows. Media files are never moved or rewritten.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="290" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="390" />
             <source>Preview imports, missing paths, integrity, backups, and index work before applying.</source>
             <translation type="unfinished" />
         </message>
@@ -5113,7 +5220,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="300" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="400" />
             <source>Preview maintenance</source>
             <translation type="unfinished" />
         </message>
@@ -5123,7 +5230,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="334" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="434" />
             <source>Preview re-template</source>
             <translation type="unfinished" />
         </message>
@@ -5143,17 +5250,17 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="840" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1129" />
             <source>Previewing archive maintenance in the background.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="688" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="977" />
             <source>Previewing external library adoption in the background.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="815" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1104" />
             <source>Previewing the archive re-template in the background.</source>
             <translation type="unfinished" />
         </message>
@@ -5355,7 +5462,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1228" />
+            <location filename="streamkeep/ui/main_window.py" line="1229" />
             <source>Quit</source>
             <translation type="unfinished" />
         </message>
@@ -5416,27 +5523,27 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="317" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="417" />
             <source>Re-template archive</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="919" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1208" />
             <source>Re-template preview ready for approval.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="912" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1201" />
             <source>Re-template preview: {counts['ready']} ready, {counts['unchanged']} unchanged, {counts['conflicts']} conflict(s). Folder: {templates.get('folder', '')}; file: {templates.get('file', '')}. Conflicts, reserved names, and long paths remain unchecked.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="401" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="501" />
             <source>Read-only adoption decisions before adding existing recordings</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2072" />
+            <location filename="streamkeep/ui/main_window.py" line="2080" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="253" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="270" />
             <source>Ready</source>
@@ -5448,7 +5555,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2025" />
+            <location filename="streamkeep/ui/main_window.py" line="2033" />
             <source>Ready to capture</source>
             <translation type="unfinished" />
         </message>
@@ -5464,7 +5571,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="480" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="395" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="495" />
             <source>Reason</source>
             <translation type="unfinished" />
         </message>
@@ -5474,24 +5581,29 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1217" />
+            <location filename="streamkeep/ui/main_window.py" line="1218" />
             <source>Recent Alerts</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1995" />
-            <location filename="streamkeep/ui/main_window.py" line="2594" />
+            <location filename="streamkeep/ui/main_window.py" line="2003" />
+            <location filename="streamkeep/ui/main_window.py" line="2602" />
             <source>Recent notifications</source>
             <translation>Notificaciones recientes</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2590" />
+            <location filename="streamkeep/ui/main_window.py" line="2598" />
             <source>Recent notifications ({unread} unread)</source>
             <translation type="unfinished" />
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="1362" />
             <source>Recommended</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="368" />
+            <source>Recording</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -5516,7 +5628,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="482" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="582" />
             <source>Recordings by folder (newest first)</source>
             <translation type="unfinished" />
         </message>
@@ -5561,12 +5673,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="276" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="277" />
             <source>Recycle selected</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1105" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1394" />
             <source>Recycled {recycled} of {len(targets)} folder(s).</source>
             <translation type="unfinished" />
         </message>
@@ -5581,7 +5693,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="426" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="526" />
             <source>Refine the Archive</source>
             <translation type="unfinished" />
         </message>
@@ -5622,7 +5734,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="323" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="423" />
             <source>Relative folder template used by the archive-wide migration preview</source>
             <translation type="unfinished" />
         </message>
@@ -5738,7 +5850,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="268" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="269" />
             <source>Rescan</source>
             <translation type="unfinished" />
         </message>
@@ -5895,6 +6007,16 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="289" />
+            <source>Rolling archive integrity</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="879" />
+            <source>Rolling integrity scrub is disabled in Storage settings.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="2218" />
             <source>Rotate validated .skbackup archives of your profile on a schedule. Only the app instance that owns queue execution runs the backup.</source>
             <translation type="unfinished" />
@@ -5915,6 +6037,16 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="309" />
+            <source>Run every</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="351" />
+            <source>Run integrity scrub</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="702" />
             <source>Run scene detection (requires scenedetect)</source>
             <translation type="unfinished" />
@@ -5922,6 +6054,11 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
         <message>
             <location filename="streamkeep/ui/tabs/operations.py" line="206" />
             <source>running</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="831" />
+            <source>Running a bounded archive integrity scrub; no repair or deletion is performed…</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -6062,7 +6199,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Buscar contenido multimedia en la página</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="638" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="738" />
             <source>Scanning archive storage in the background.</source>
             <translation type="unfinished" />
         </message>
@@ -6077,12 +6214,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="636" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="736" />
             <source>Scanning: {root}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="262" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="263" />
             <source>Scanning: {str(_default_output_dir())}</source>
             <translation type="unfinished" />
         </message>
@@ -6142,6 +6279,11 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="835" />
+            <source>Scrubbing archive integrity in the background.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <location filename="streamkeep/ui/notification_log_dialog.py" line="60" />
             <source>Search</source>
             <translation>Buscar</translation>
@@ -6156,7 +6298,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Buscar descargas, URL, canales o pódcasts…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1967" />
+            <location filename="streamkeep/ui/main_window.py" line="1975" />
             <source>Search downloads…</source>
             <translation type="unfinished" />
         </message>
@@ -6298,7 +6440,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="933" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1222" />
             <source>Select at least one maintenance action to apply.</source>
             <translation type="unfinished" />
         </message>
@@ -6353,7 +6495,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1054" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1343" />
             <source>Select one or more folder groups to recycle them safely.</source>
             <translation type="unfinished" />
         </message>
@@ -6409,7 +6551,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1080" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1369" />
             <source>send2trash not installed — recycle-bin delete unavailable. No files were changed.</source>
             <translation type="unfinished" />
         </message>
@@ -6485,7 +6627,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1226" />
+            <location filename="streamkeep/ui/main_window.py" line="1227" />
             <source>Show StreamKeep</source>
             <translation type="unfinished" />
         </message>
@@ -6495,7 +6637,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Mostrando todas las descargas</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2333" />
+            <location filename="streamkeep/ui/main_window.py" line="2341" />
             <source>Showing latest {count} event(s)</source>
             <translation>Mostrando los últimos {count} eventos</translation>
         </message>
@@ -6645,7 +6787,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="246" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="247" />
             <source>sources represented</source>
             <translation type="unfinished" />
         </message>
@@ -6777,6 +6919,7 @@ http://fallback:3128||Global fallback</source>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="1316" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="224" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="368" />
             <source>Status</source>
             <translation type="unfinished" />
         </message>
@@ -6786,7 +6929,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2098" />
+            <location filename="streamkeep/ui/main_window.py" line="2106" />
             <source>Stop</source>
             <translation>Detener</translation>
         </message>
@@ -6806,12 +6949,17 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="783" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1072" />
             <source>Stopping adoption before any library changes…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="1002" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="916" />
+            <source>Stopping between recording hashes; no repair or deletion will run…</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="1291" />
             <source>Stopping safely between maintenance actions…</source>
             <translation type="unfinished" />
         </message>
@@ -6821,23 +6969,28 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="222" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="223" />
             <source>Storage</source>
             <translation>Almacenamiento</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2483" />
+            <location filename="streamkeep/ui/main_window.py" line="2491" />
             <source>Storage monitoring off</source>
             <translation>Monitoreo de almacenamiento desactivado</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="650" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="755" />
             <source>Storage scan complete — {scan.total_files} file(s), {fmt_size(scan.total_size)}.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="660" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="765" />
             <source>Storage scan failed. See the log for details.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="292" />
+            <source>Storage scans check manifest presence, size, and timestamps. A bounded background scrub hashes older recordings over the configured coverage period.</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -6871,7 +7024,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1885" />
+            <location filename="streamkeep/ui/main_window.py" line="1893" />
             <location filename="streamkeep/ui/tabs/settings.py" line="2389" />
             <source>StreamKeep</source>
             <translation type="unfinished" />
@@ -6908,8 +7061,8 @@ http://fallback:3128||Global fallback</source>
         </message>
         <message>
             <location filename="streamkeep/ui/main_window.py" line="209" />
-            <location filename="streamkeep/ui/main_window.py" line="1108" />
-            <location filename="streamkeep/ui/main_window.py" line="1179" />
+            <location filename="streamkeep/ui/main_window.py" line="1109" />
+            <location filename="streamkeep/ui/main_window.py" line="1180" />
             <source>StreamKeep v{VERSION}</source>
             <translation type="unfinished" />
         </message>
@@ -7342,7 +7495,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="242" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="243" />
             <source>Total size</source>
             <translation type="unfinished" />
         </message>
@@ -7398,7 +7551,7 @@ Download again?</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/history.py" line="628" />
-            <location filename="streamkeep/ui/tabs/storage.py" line="1026" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1315" />
             <source>Trim / Clip...</source>
             <translation type="unfinished" />
         </message>
@@ -7413,7 +7566,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2111" />
+            <location filename="streamkeep/ui/main_window.py" line="2119" />
             <source>Trim...</source>
             <translation>Recortar...</translation>
         </message>
@@ -7654,7 +7807,7 @@ Download again?</source>
             <translation>Ver diagnósticos</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2619" />
+            <location filename="streamkeep/ui/main_window.py" line="2627" />
             <source>View full log…</source>
             <translation type="unfinished" />
         </message>
@@ -7952,7 +8105,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1815" />
+            <location filename="streamkeep/ui/main_window.py" line="1823" />
             <source>yt-dlp ready</source>
             <translation>yt-dlp listo</translation>
         </message>
@@ -7972,12 +8125,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1813" />
+            <location filename="streamkeep/ui/main_window.py" line="1821" />
             <source>yt-dlp {version} ready</source>
             <translation>yt-dlp {version} listo</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2190" />
+            <location filename="streamkeep/ui/main_window.py" line="2198" />
             <source>{'Current tab' if i == idx else 'Switch to ' + self._tab_names[i]}; keyboard shortcut Ctrl+{i + 1}</source>
             <translation type="unfinished" />
         </message>
@@ -8037,7 +8190,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="717" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1006" />
             <source>{counts['adopt']} adopt, {counts['skip']} skip, {counts['conflict']} conflict; {counts['archive_entries']} archive id(s). Conflicts are review-only and will not be resolved silently.</source>
             <translation type="unfinished" />
         </message>
@@ -8062,7 +8215,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1204" />
+            <location filename="streamkeep/ui/main_window.py" line="1205" />
             <source>{e.channel_id} | {e.platform}</source>
             <translation type="unfinished" />
         </message>
@@ -8077,12 +8230,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2520" />
+            <location filename="streamkeep/ui/main_window.py" line="2528" />
             <source>{free_gb:.0f} GB free</source>
             <translation>{free_gb:.0f} GB libres</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2512" />
+            <location filename="streamkeep/ui/main_window.py" line="2520" />
             <source>{free_gb} GB free</source>
             <translation type="unfinished" />
         </message>
@@ -8159,12 +8312,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1181" />
+            <location filename="streamkeep/ui/main_window.py" line="1182" />
             <source>{len(live_entries)} live | {len(dl_lines)} active | {unread} unread</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="880" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="1169" />
             <source>{len(plan.actions)} proposed action(s): {library['untracked']} orphaned on disk, {library['missing']} missing, {library['moved']} moved. Database: {database.get('quick_check', 'unknown')}; backup: {backup_status}; disk: {disk['status']} ({disk['free_gb']} GiB free; warning at {disk['warning_gb']}, critical at {disk['critical_gb']}).</source>
             <translation type="unfinished" />
         </message>
@@ -8179,7 +8332,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/storage.py" line="162" />
+            <location filename="streamkeep/ui/tabs/storage.py" line="163" />
             <source>{len(self._data)} daily samples; minimum {fmt_size(min(self._data))}; maximum {fmt_size(max(self._data))}; latest {fmt_size(self._data[-1])}</source>
             <translation type="unfinished" />
         </message>
@@ -8224,7 +8377,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2613" />
+            <location filename="streamkeep/ui/main_window.py" line="2621" />
             <source>{n.ts}  {prefix}  {n.text}</source>
             <translation type="unfinished" />
         </message>
@@ -8261,6 +8414,16 @@ Download again?</source>
         <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="1143" />
             <source>{self.crop_slider.value()}%</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="813" />
+            <source>{source}: {checked} manifest file(s) checked; no drift reported.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/storage.py" line="807" />
+            <source>{source}: {checked} manifest file(s) checked; {issue_count} affected file/reason row(s) require review. Nothing was repaired or deleted.</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -8309,7 +8472,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1222" />
+            <location filename="streamkeep/ui/main_window.py" line="1223" />
             <source>{ts} | {text}</source>
             <translation type="unfinished" />
         </message>
@@ -8323,7 +8486,7 @@ Download again?</source>
         </message>
         <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="661" />
-            <location filename="streamkeep/ui/main_window.py" line="2484" />
+            <location filename="streamkeep/ui/main_window.py" line="2492" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1547" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1550" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1601" />

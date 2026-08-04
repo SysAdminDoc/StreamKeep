@@ -31,7 +31,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 TOMBSTONE_REASONS = frozenset({"user", "retention", "lifecycle"})
 TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
@@ -98,6 +98,8 @@ def init_db() -> None:
                 _migrate_tombstones_v17(db)
             if v < 18:
                 _migrate_upgrade_v18(db)
+            if v < 19:
+                _migrate_integrity_v19(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -339,6 +341,7 @@ def _apply_schema(db):
     _apply_upload_schema(db)
     _apply_intelligence_schema(db)
     _apply_tombstone_schema(db)
+    _apply_integrity_scrub_schema(db)
 
 
 def _apply_tombstone_schema(db):
@@ -816,6 +819,38 @@ def _migrate_upgrade_v18(db):
             "upgrade_profile_json TEXT NOT NULL DEFAULT '{}'"
         )
     _apply_upgrade_decision_schema(db)
+
+
+def _migrate_integrity_v19(db):
+    """Install rolling archive-integrity scrub state."""
+    _apply_integrity_scrub_schema(db)
+
+
+def _apply_integrity_scrub_schema(db):
+    """Create per-recording and global rolling-scrub checkpoints."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS integrity_scrub_state (
+            history_id          INTEGER PRIMARY KEY,
+            recording_path      TEXT NOT NULL DEFAULT '',
+            last_cheap_at       TEXT NOT NULL DEFAULT '',
+            last_full_at        TEXT NOT NULL DEFAULT '',
+            status              TEXT NOT NULL DEFAULT '',
+            details             TEXT NOT NULL DEFAULT '',
+            last_full_bytes     INTEGER NOT NULL DEFAULT 0,
+            last_duration_ms    INTEGER NOT NULL DEFAULT 0,
+            run_started_at      TEXT NOT NULL DEFAULT '',
+            run_finished_at     TEXT NOT NULL DEFAULT '',
+            run_status          TEXT NOT NULL DEFAULT '',
+            run_details         TEXT NOT NULL DEFAULT '',
+            run_checked         INTEGER NOT NULL DEFAULT 0,
+            run_mismatches      INTEGER NOT NULL DEFAULT 0,
+            run_skipped         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_integrity_scrub_full
+            ON integrity_scrub_state(last_full_at, history_id);
+        CREATE INDEX IF NOT EXISTS idx_integrity_scrub_status
+            ON integrity_scrub_state(status, history_id);
+    """)
 
 
 def _apply_upgrade_decision_schema(db):
@@ -2119,6 +2154,7 @@ def build_rebuilt_library_database(
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             for table in (
                 "published_recordings", "archive_manifests", "upgrade_decisions",
+                "integrity_scrub_state",
             ):
                 try:
                     db.execute(f"DELETE FROM {table}")
@@ -3732,6 +3768,207 @@ def archive_manifest_count() -> int:
         return db.execute("SELECT COUNT(*) FROM archive_manifests").fetchone()[0]
     finally:
         db.close()
+
+
+def list_archive_manifest_records(*, limit=5000) -> list[dict[str, Any]]:
+    """Return manifest rows joined to their canonical history paths."""
+    limit = max(1, min(100000, int(limit or 5000)))
+    conn = _connect(readonly=True)
+    try:
+        rows = conn.execute(
+            "SELECT a.history_id, a.recording_path, a.manifest_json, "
+            "a.created_at, a.updated_at, a.status, h.path, h.title, "
+            "h.channel, h.platform FROM archive_manifests a "
+            "LEFT JOIN history h ON h.id=a.history_id "
+            "ORDER BY a.history_id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["manifest"] = json.loads(item.get("manifest_json", "{}") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                item["manifest"] = {}
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def get_integrity_scrub_state(history_id: int = 0) -> dict[str, Any]:
+    """Return one rolling-scrub checkpoint, or an empty checkpoint."""
+    try:
+        history_id = int(history_id or 0)
+    except (TypeError, ValueError):
+        history_id = 0
+    conn = _connect(readonly=True)
+    try:
+        row = conn.execute(
+            "SELECT * FROM integrity_scrub_state WHERE history_id=?",
+            (history_id,),
+        ).fetchone()
+        return dict(row) if row else {
+            "history_id": history_id, "recording_path": "",
+            "last_cheap_at": "", "last_full_at": "", "status": "",
+            "details": "", "last_full_bytes": 0, "last_duration_ms": 0,
+            "run_started_at": "", "run_finished_at": "", "run_status": "",
+            "run_details": "", "run_checked": 0, "run_mismatches": 0,
+            "run_skipped": 0,
+        }
+    finally:
+        conn.close()
+
+
+def list_integrity_scrub_states(*, history_ids=None) -> list[dict[str, Any]]:
+    """Return per-recording rolling-scrub checkpoints."""
+    values = []
+    where = "history_id > 0"
+    if history_ids is not None:
+        values = [int(value) for value in history_ids]
+        if not values:
+            return []
+        placeholders = ",".join("?" for _ in values)
+        where += f" AND history_id IN ({placeholders})"
+    conn = _connect(readonly=True)
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM integrity_scrub_state WHERE {where} ORDER BY history_id",
+            values,
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def record_integrity_scrub(
+    history_id: int,
+    *,
+    recording_path="",
+    cheap_at="",
+    full_at="",
+    status="",
+    details="",
+    full_bytes=0,
+    duration_ms=0,
+) -> dict[str, Any]:
+    """Persist one cheap/full per-recording scrub checkpoint."""
+    try:
+        history_id = int(history_id or 0)
+    except (TypeError, ValueError):
+        raise ValueError("history id is invalid") from None
+    if history_id < 0:
+        raise ValueError("history id is invalid")
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO integrity_scrub_state
+                    (history_id, recording_path, last_cheap_at, last_full_at,
+                     status, details, last_full_bytes, last_duration_ms)
+                VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(history_id) DO UPDATE SET
+                    recording_path=CASE WHEN excluded.recording_path <> ''
+                        THEN excluded.recording_path ELSE integrity_scrub_state.recording_path END,
+                    last_cheap_at=CASE WHEN excluded.last_cheap_at <> ''
+                        THEN excluded.last_cheap_at ELSE integrity_scrub_state.last_cheap_at END,
+                    last_full_at=CASE WHEN excluded.last_full_at <> ''
+                        THEN excluded.last_full_at ELSE integrity_scrub_state.last_full_at END,
+                    status=CASE WHEN excluded.status <> ''
+                        THEN excluded.status ELSE integrity_scrub_state.status END,
+                    details=CASE WHEN excluded.details <> ''
+                        THEN excluded.details ELSE integrity_scrub_state.details END,
+                    last_full_bytes=CASE WHEN excluded.last_full_bytes > 0
+                        THEN excluded.last_full_bytes ELSE integrity_scrub_state.last_full_bytes END,
+                    last_duration_ms=CASE WHEN excluded.last_duration_ms > 0
+                        THEN excluded.last_duration_ms ELSE integrity_scrub_state.last_duration_ms END
+                """,
+                (
+                    history_id, str(recording_path or ""), str(cheap_at or ""),
+                    str(full_at or ""), str(status or ""), str(details or "")[:2000],
+                    max(0, int(full_bytes or 0)), max(0, int(duration_ms or 0)),
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return get_integrity_scrub_state(history_id)
+
+
+def record_integrity_scrub_run(
+    *,
+    started_at="",
+    finished_at="",
+    status="",
+    details="",
+    checked=0,
+    mismatches=0,
+    skipped=0,
+) -> dict[str, Any]:
+    """Persist the global rolling-scrub cadence and latest run summary."""
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO integrity_scrub_state
+                    (history_id, run_started_at, run_finished_at, run_status,
+                     run_details, run_checked, run_mismatches, run_skipped)
+                VALUES (0,?,?,?,?,?,?,?)
+                ON CONFLICT(history_id) DO UPDATE SET
+                    run_started_at=CASE WHEN excluded.run_started_at <> ''
+                        THEN excluded.run_started_at ELSE integrity_scrub_state.run_started_at END,
+                    run_finished_at=CASE WHEN excluded.run_finished_at <> ''
+                        THEN excluded.run_finished_at ELSE integrity_scrub_state.run_finished_at END,
+                    run_status=CASE WHEN excluded.run_status <> ''
+                        THEN excluded.run_status ELSE integrity_scrub_state.run_status END,
+                    run_details=CASE WHEN excluded.run_details <> ''
+                        THEN excluded.run_details ELSE integrity_scrub_state.run_details END,
+                    run_checked=CASE WHEN excluded.run_checked >= 0
+                        THEN excluded.run_checked ELSE integrity_scrub_state.run_checked END,
+                    run_mismatches=CASE WHEN excluded.run_mismatches >= 0
+                        THEN excluded.run_mismatches ELSE integrity_scrub_state.run_mismatches END,
+                    run_skipped=CASE WHEN excluded.run_skipped >= 0
+                        THEN excluded.run_skipped ELSE integrity_scrub_state.run_skipped END
+                """,
+                (
+                    str(started_at or ""), str(finished_at or ""),
+                    str(status or ""), str(details or "")[:2000],
+                    max(0, int(checked or 0)), max(0, int(mismatches or 0)),
+                    max(0, int(skipped or 0)),
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return get_integrity_scrub_state(0)
+
+
+def integrity_scrub_is_due(interval_seconds=86400, *, now=None) -> bool:
+    """Return whether the configured rolling scrub interval has elapsed."""
+    state = get_integrity_scrub_state(0)
+    raw = str(state.get("run_finished_at", "") or "")
+    if not raw:
+        return True
+    try:
+        last = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (current - last).total_seconds() >= max(1, int(interval_seconds or 1))
+    except (TypeError, ValueError, OverflowError):
+        return True
 
 
 # ── Upload profiles and durable transfer jobs ───────────────────────
@@ -5598,7 +5835,7 @@ def db_diagnostics() -> dict[str, Any]:
         counts = {}
         for table in ("history", "monitor_channels", "download_queue",
                       "archive_manifests", "failed_jobs", "retry_circuits",
-                      "bandwidth_daily", "channel_polls"):
+                      "integrity_scrub_state", "bandwidth_daily", "channel_polls"):
             try:
                 counts[table] = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             except sqlite3.Error:

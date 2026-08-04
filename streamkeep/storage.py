@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass, field
 
 from .metadata import load_metadata_sidecar
+from .verify import MANIFEST_FILENAME, check_archive_manifest_structure
 
 
 # Metadata sidecars written by streamkeep.metadata.MetadataSaver live next
@@ -48,6 +49,8 @@ class StorageScan:
     by_platform: dict = field(default_factory=dict)   # platform -> total_size
     by_channel: dict = field(default_factory=dict)    # "platform/channel" -> total_size
     groups: list = field(default_factory=list)        # list[StorageGroup]
+    integrity_checked: int = 0
+    integrity_issues: list = field(default_factory=list)
 
 
 def _read_sidecar(dir_path):
@@ -90,6 +93,21 @@ def scan_storage(root, max_depth=3, *, cancel_fn=None):
         if not media_here:
             continue
         meta = _read_sidecar(dirpath)
+        manifest_path = os.path.join(dirpath, MANIFEST_FILENAME)
+        if os.path.isfile(manifest_path):
+            status, _details, report = check_archive_manifest_structure(dirpath)
+            scan.integrity_checked += int(report.get("checked", 0) or 0)
+            if status != "verified":
+                for issue in [
+                    *(report.get("missing", []) or []),
+                    *(report.get("changed", []) or []),
+                ]:
+                    scan.integrity_issues.append({
+                        "recording_path": dirpath,
+                        "path": str(issue.get("path", "") or ""),
+                        "reason": str(issue.get("reason", "missing") or "missing"),
+                        "status": status,
+                    })
         platform = str(meta.get("platform") or _platform_from_path(dirpath, root)) or "Unknown"
         channel = str(meta.get("channel") or os.path.basename(os.path.dirname(dirpath))) or "Unknown"
         title = str(meta.get("title") or os.path.basename(dirpath))

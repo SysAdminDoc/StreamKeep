@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added rolling archive-integrity scrubbing. Storage scans now perform cheap
+  manifest presence/size/mtime checks, while the desktop and headless
+  schedulers hash a configurable fraction of overdue recordings with durable
+  coverage checkpoints, byte/rate bounds, cancellation, offline-volume
+  deferral, and notification-backed mismatch reports; no repair or deletion
+  is automatic.
+
 - Added archive-wide output re-templating with a strict preview/apply plan.
   Existing recording directories move as atomic units with media, notes, and
   sidecars; matching media sidecars can be renamed together, history,

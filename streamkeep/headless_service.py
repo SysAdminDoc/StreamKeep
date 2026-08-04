@@ -14,7 +14,9 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from . import db
 from .config import write_log_line
 from .har import normalize_replay_headers
+from .integrity import IntegrityScrubWorker
 from .models import default_media_tracks
+from .notifications import record_notification
 from .preflight import (
     PreflightError,
     ProbeCache,
@@ -102,6 +104,10 @@ class HeadlessJobService(QObject):
         self._backup_timer = QTimer(self)
         self._backup_timer.setInterval(60_000)
         self._backup_timer.timeout.connect(self._tick_scheduled_backup)
+        self._integrity_worker: IntegrityScrubWorker | None = None
+        self._integrity_timer = QTimer(self)
+        self._integrity_timer.setInterval(60_000)
+        self._integrity_timer.timeout.connect(self._tick_integrity_scrub)
         self._wake_requested.connect(
             self._dispatch, Qt.ConnectionType.QueuedConnection
         )
@@ -126,6 +132,7 @@ class HeadlessJobService(QObject):
         self._dispatch_timer.start()
         self._lease_timer.start()
         self._backup_timer.start()
+        self._integrity_timer.start()
         QTimer.singleShot(0, self._dispatch)
         QTimer.singleShot(0, self._tick_scheduled_backup)
         return recovered
@@ -137,6 +144,7 @@ class HeadlessJobService(QObject):
         self._dispatch_timer.stop()
         self._lease_timer.stop()
         self._backup_timer.stop()
+        self._integrity_timer.stop()
         for worker in list(self._fetchers.values()):
             worker.requestInterruption()
         for worker in list(self._downloads.values()):
@@ -155,6 +163,10 @@ class HeadlessJobService(QObject):
             self._backup_worker.wait(max(0, int(wait_ms)))
             db.release_backup_claim(self.owner_id)
         self._backup_worker = None
+        if self._integrity_worker is not None and self._integrity_worker.isRunning():
+            self._integrity_worker.requestInterruption()
+            self._integrity_worker.wait(max(0, int(wait_ms)))
+        self._integrity_worker = None
         if self._lease_acquired:
             db.release_executor_lease(self.owner_id)
             self._lease_acquired = False
@@ -177,6 +189,9 @@ class HeadlessJobService(QObject):
         self._stopping = True
         self._dispatch_timer.stop()
         self._lease_timer.stop()
+        self._integrity_timer.stop()
+        if self._integrity_worker is not None and self._integrity_worker.isRunning():
+            self._integrity_worker.requestInterruption()
         for worker in list(self._fetchers.values()):
             worker.requestInterruption()
         for worker in list(self._downloads.values()):
@@ -211,6 +226,52 @@ class HeadlessJobService(QObject):
             message or ("[BACKUP] Automatic backup completed"
                         if ok else "[BACKUP] Automatic backup failed")
         )
+
+    def _tick_integrity_scrub(self) -> None:
+        """Run one due scrub while the headless executor owns the lease."""
+        if not self._started or self._stopping or not self._lease_acquired:
+            return
+        if not bool(self.config.get("integrity_scrub_enabled", True)):
+            return
+        worker = self._integrity_worker
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            interval_hours = max(
+                1, min(24 * 30, int(float(
+                    self.config.get("integrity_scrub_interval_hours", 24)
+                )))
+            )
+        except (TypeError, ValueError, OverflowError):
+            interval_hours = 24
+        if not db.integrity_scrub_is_due(interval_hours * 3600):
+            return
+        worker = IntegrityScrubWorker(
+            self.output_dir,
+            self.config,
+            notify_fn=record_notification,
+            parent=self,
+        )
+        worker.completed.connect(self._on_integrity_scrub_finished)
+        worker.failed.connect(self._on_integrity_scrub_failed)
+        worker.finished.connect(self._clear_integrity_worker)
+        worker.finished.connect(worker.deleteLater)
+        self._integrity_worker = worker
+        worker.start()
+
+    def _clear_integrity_worker(self) -> None:
+        self._integrity_worker = None
+
+    def _on_integrity_scrub_finished(self, result) -> None:
+        write_log_line(
+            f"[INTEGRITY] Scrub {result.status}: {result.checked} checked, "
+            f"{result.mismatches} mismatch(es), {result.skipped} skipped."
+        )
+        for error in result.errors:
+            write_log_line(f"[INTEGRITY] {error}")
+
+    def _on_integrity_scrub_failed(self, message: str) -> None:
+        write_log_line(f"[INTEGRITY] Scrub worker failed: {message}")
 
     # These provider methods are intentionally thread-safe for local_server.
 

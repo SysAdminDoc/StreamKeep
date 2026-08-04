@@ -120,6 +120,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "pp_convert_video", "pp_convert_audio", "pp_convert_delete_source",
     "pp_bilingual_subs", "pp_lrc_export",
     "disk_monitor_enabled", "disk_auto_pause",
+    "integrity_scrub_enabled",
     "first_run_complete", "smart_mode",
 })
 _INT_CONFIG_KEYS = frozenset({
@@ -130,6 +131,12 @@ _INT_CONFIG_KEYS = frozenset({
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
     "disk_warning_gb", "disk_critical_gb", "sponsorblock_delay_hours",
+    "integrity_scrub_interval_hours", "integrity_scrub_period_days",
+    "integrity_scrub_max_bytes", "integrity_scrub_max_items",
+    "integrity_scrub_rate_mbps",
+})
+_FLOAT_CONFIG_KEYS = frozenset({
+    "integrity_scrub_fraction",
 })
 _DICT_CONFIG_KEYS = frozenset({
     "bandwidth_rule", "speed_schedule", "quality_defaults", "pp_presets",
@@ -398,6 +405,9 @@ def _validate_config_schema(config):
     for key in _INT_CONFIG_KEYS.intersection(config):
         if isinstance(config[key], bool) or not isinstance(config[key], int):
             raise ConfigImportError(f"config.{key} must be an integer")
+    for key in _FLOAT_CONFIG_KEYS.intersection(config):
+        if isinstance(config[key], bool) or not isinstance(config[key], (int, float)):
+            raise ConfigImportError(f"config.{key} must be a number")
     for key in _DICT_CONFIG_KEYS.intersection(config):
         if not isinstance(config[key], dict):
             raise ConfigImportError(f"config.{key} must be an object")

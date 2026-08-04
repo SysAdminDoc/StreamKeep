@@ -547,6 +547,7 @@ class StreamKeep(
         self._apply_bandwidth_schedule()
         self._promote_due_failed_retries()
         self._tick_scheduled_backup()
+        self._tick_integrity_scrub()
         # Check for ready scheduled items
         worker = getattr(self, "download_worker", None)
         if worker is not None and worker.isRunning():
@@ -1429,6 +1430,13 @@ class StreamKeep(
             try:
                 storage_worker.requestInterruption()
                 storage_worker.wait(1500)
+            except Exception:
+                pass
+        integrity_worker = getattr(self, "_integrity_worker", None)
+        if integrity_worker is not None and integrity_worker.isRunning():
+            try:
+                integrity_worker.requestInterruption()
+                integrity_worker.wait(1500)
             except Exception:
                 pass
         adoption_worker = getattr(self, "_adoption_worker", None)

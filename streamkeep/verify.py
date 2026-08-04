@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -166,11 +167,25 @@ def _iter_manifest_files(recording_dir):
                 yield path
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256_file(path: Path, *, cancel_fn=None, rate_bytes_per_sec=0) -> str:
     h = hashlib.sha256()
+    started = time.monotonic()
+    total = 0
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(HASH_CHUNK_SIZE), b""):
+            if cancel_fn is not None and cancel_fn():
+                raise InterruptedError("archive integrity scrub cancelled")
             h.update(chunk)
+            total += len(chunk)
+            try:
+                rate = float(rate_bytes_per_sec or 0)
+            except (TypeError, ValueError):
+                rate = 0.0
+            if rate > 0:
+                target_elapsed = total / rate
+                delay = target_elapsed - (time.monotonic() - started)
+                if delay > 0:
+                    time.sleep(min(delay, 0.25))
     return h.hexdigest()
 
 
@@ -257,13 +272,89 @@ def _safe_manifest_target(root: Path, rel_path: str):
     return candidate
 
 
-def verify_archive_manifest(recording_dir, manifest=None):
+def check_archive_manifest_structure(recording_dir, manifest=None):
+    """Check an archive manifest without reading file contents.
+
+    This is intentionally cheap enough for every Storage scan. It catches
+    disappeared files and metadata changes while leaving the scheduled scrub
+    responsible for detecting same-size/same-mtime bit flips.
+    """
+    root = Path(recording_dir)
+    if not root.is_dir():
+        report = {"status": STATUS_FAIL, "missing": [], "changed": [], "checked": 0, "expected": 0}
+        return STATUS_FAIL, "Directory not found", report
+    if manifest is None:
+        manifest = load_archive_manifest_sidecar(root)
+    if not isinstance(manifest, dict):
+        report = {"status": STATUS_FAIL, "missing": [], "changed": [], "checked": 0, "expected": 0}
+        return STATUS_FAIL, "No integrity manifest found", report
+    entries = manifest.get("files", [])
+    if not isinstance(entries, list) or not entries:
+        report = {"status": STATUS_WARN, "missing": [], "changed": [], "checked": 0, "expected": 0}
+        return STATUS_WARN, "Integrity manifest contains no files", report
+    missing = []
+    changed = []
+    checked = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            changed.append({"path": "", "reason": "invalid manifest entry"})
+            continue
+        rel = str(entry.get("path", "") or entry.get("relative_path", "") or "")
+        target = _safe_manifest_target(root, rel)
+        if target is None:
+            changed.append({"path": rel, "reason": "unsafe manifest path"})
+            continue
+        if not target.is_file():
+            missing.append({"path": rel, "role": entry.get("role", "")})
+            continue
+        try:
+            st = target.stat()
+            expected_size = int(entry.get("size", -1))
+            expected_mtime = int(entry.get("mtime_ns", -1))
+            if expected_size >= 0 and st.st_size != expected_size:
+                changed.append({
+                    "path": rel,
+                    "reason": f"size {st.st_size} != {expected_size}",
+                })
+                continue
+            if expected_mtime >= 0 and int(getattr(st, "st_mtime_ns", 0)) != expected_mtime:
+                changed.append({"path": rel, "reason": "mtime changed"})
+                continue
+            checked += 1
+        except OSError as exc:
+            changed.append({"path": rel, "reason": str(exc)})
+    status = STATUS_OK if not missing and not changed else STATUS_FAIL
+    report = {
+        "status": status, "missing": missing, "changed": changed,
+        "checked": checked, "expected": len(entries),
+        "created_at": manifest.get("created_at", ""),
+    }
+    if status == STATUS_OK:
+        return status, f"Structure verified: {checked}/{len(entries)} file(s) match", report
+    parts = []
+    if missing:
+        parts.append(f"{len(missing)} missing")
+    if changed:
+        parts.append(f"{len(changed)} changed")
+    return STATUS_FAIL, "Integrity structure drift detected: " + ", ".join(parts), report
+
+
+def verify_archive_manifest(
+    recording_dir,
+    manifest=None,
+    *,
+    hash_files=True,
+    cancel_fn=None,
+    rate_bytes_per_sec=0,
+):
     """Verify a recording directory against a SHA-256 archive manifest.
 
     Returns ``(status, details, report)``. The report contains `missing`,
     `changed`, `checked`, and `expected` entries so callers can present a
     repair/rescan workflow without parsing human-readable text.
     """
+    if not hash_files:
+        return check_archive_manifest_structure(recording_dir, manifest)
     root = Path(recording_dir)
     if not root.is_dir():
         report = {"status": STATUS_FAIL, "missing": [], "changed": [], "checked": 0, "expected": 0}
@@ -305,7 +396,11 @@ def verify_archive_manifest(recording_dir, manifest=None):
                 })
                 continue
             expected_hash = str(entry.get("sha256", "") or "")
-            actual_hash = _sha256_file(target)
+            actual_hash = _sha256_file(
+                target,
+                cancel_fn=cancel_fn,
+                rate_bytes_per_sec=rate_bytes_per_sec,
+            )
             checked += 1
             if expected_hash and actual_hash.lower() != expected_hash.lower():
                 changed.append({"path": rel, "reason": "sha256 mismatch"})

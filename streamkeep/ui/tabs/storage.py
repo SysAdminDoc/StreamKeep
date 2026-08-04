@@ -11,9 +11,9 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, QThread, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMenu, QPushButton, QTableView, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QTableView,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ...maintenance import (
@@ -22,6 +22,7 @@ from ...maintenance import (
     plan_maintenance, save_pending_plan, save_retemplate_plan,
 )
 from ... import db as _db
+from ...integrity import IntegrityScrubWorker
 from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
@@ -279,6 +280,105 @@ def build_storage_tab(win):
     win.storage_delete_btn.clicked.connect(win._on_storage_delete_selected)
     act_lay.addWidget(win.storage_delete_btn)
     lay.addWidget(action_card)
+
+    integrity_card = QFrame()
+    integrity_card.setObjectName("card")
+    integrity_lay = QVBoxLayout(integrity_card)
+    integrity_lay.setContentsMargins(4, 8, 4, 8)
+    integrity_lay.setSpacing(6)
+    integrity_title = QLabel("Rolling archive integrity")
+    integrity_title.setObjectName("sectionTitle")
+    integrity_lay.addWidget(integrity_title)
+    integrity_body = QLabel(
+        "Storage scans check manifest presence, size, and timestamps. A bounded "
+        "background scrub hashes older recordings over the configured coverage period."
+    )
+    integrity_body.setObjectName("sectionBody")
+    integrity_body.setWordWrap(True)
+    integrity_body.setVisible(False)
+    integrity_lay.addWidget(integrity_body)
+    integrity_settings = QHBoxLayout()
+    integrity_settings.setSpacing(8)
+    win.integrity_scrub_enabled_check = QCheckBox("Enable rolling scrub")
+    win.integrity_scrub_enabled_check.setChecked(
+        bool(win._config.get("integrity_scrub_enabled", True))
+    )
+    win.integrity_scrub_enabled_check.setAccessibleName("Enable rolling archive integrity scrub")
+    win.integrity_scrub_enabled_check.toggled.connect(win._on_integrity_settings_changed)
+    integrity_settings.addWidget(win.integrity_scrub_enabled_check)
+    interval_label = QLabel("Run every")
+    interval_label.setObjectName("fieldLabel")
+    integrity_settings.addWidget(interval_label)
+    win.integrity_interval_spin = QSpinBox()
+    win.integrity_interval_spin.setRange(1, 24 * 30)
+    win.integrity_interval_spin.setSuffix(" h")
+    win.integrity_interval_spin.setValue(
+        max(1, min(24 * 30, int(win._config.get("integrity_scrub_interval_hours", 24) or 24)))
+    )
+    win.integrity_interval_spin.setAccessibleName("Integrity scrub interval")
+    win.integrity_interval_spin.valueChanged.connect(win._on_integrity_settings_changed)
+    integrity_settings.addWidget(win.integrity_interval_spin)
+    period_label = QLabel("Cover in")
+    period_label.setObjectName("fieldLabel")
+    integrity_settings.addWidget(period_label)
+    win.integrity_period_spin = QSpinBox()
+    win.integrity_period_spin.setRange(1, 3650)
+    win.integrity_period_spin.setSuffix(" d")
+    win.integrity_period_spin.setValue(
+        max(1, min(3650, int(win._config.get("integrity_scrub_period_days", 30) or 30)))
+    )
+    win.integrity_period_spin.setAccessibleName("Integrity scrub coverage period")
+    win.integrity_period_spin.valueChanged.connect(win._on_integrity_settings_changed)
+    integrity_settings.addWidget(win.integrity_period_spin)
+    fraction_label = QLabel("per run")
+    fraction_label.setObjectName("fieldLabel")
+    integrity_settings.addWidget(fraction_label)
+    win.integrity_fraction_spin = QSpinBox()
+    win.integrity_fraction_spin.setRange(1, 100)
+    win.integrity_fraction_spin.setSuffix(" %")
+    try:
+        fraction_value = int(round(float(win._config.get("integrity_scrub_fraction", 0.10)) * 100))
+    except (TypeError, ValueError):
+        fraction_value = 10
+    win.integrity_fraction_spin.setValue(max(1, min(100, fraction_value)))
+    win.integrity_fraction_spin.setAccessibleName("Integrity scrub fraction")
+    win.integrity_fraction_spin.valueChanged.connect(win._on_integrity_settings_changed)
+    integrity_settings.addWidget(win.integrity_fraction_spin)
+    integrity_settings.addStretch(1)
+    integrity_lay.addLayout(integrity_settings)
+    integrity_actions = QHBoxLayout()
+    integrity_actions.setSpacing(8)
+    win.storage_scrub_btn = QPushButton("Run integrity scrub")
+    win.storage_scrub_btn.setObjectName("secondary")
+    win.storage_scrub_btn.clicked.connect(win._on_integrity_scrub)
+    integrity_actions.addWidget(win.storage_scrub_btn)
+    win.storage_scrub_cancel_btn = QPushButton("Cancel")
+    win.storage_scrub_cancel_btn.setObjectName("ghost")
+    win.storage_scrub_cancel_btn.setEnabled(False)
+    win.storage_scrub_cancel_btn.clicked.connect(win._on_integrity_scrub_cancel)
+    integrity_actions.addWidget(win.storage_scrub_cancel_btn)
+    integrity_actions.addStretch(1)
+    integrity_lay.addLayout(integrity_actions)
+    win.storage_integrity_summary = QLabel("No integrity scan yet.")
+    win.storage_integrity_summary.setObjectName("subtleText")
+    win.storage_integrity_summary.setWordWrap(True)
+    win.storage_integrity_summary.setVisible(False)
+    integrity_lay.addWidget(win.storage_integrity_summary)
+    win.storage_integrity_tree = QTreeWidget()
+    win.storage_integrity_tree.setHeaderLabels(["Status", "Recording", "Affected file / reason"])
+    win.storage_integrity_tree.setRootIsDecorated(False)
+    win.storage_integrity_tree.setAlternatingRowColors(True)
+    win.storage_integrity_tree.setMinimumHeight(112)
+    win.storage_integrity_tree.setVisible(False)
+    win.storage_integrity_tree.setAccessibleName("Archive integrity issues")
+    win.storage_integrity_tree.setAccessibleDescription(
+        "Manifest files whose cheap or full integrity checks found drift"
+    )
+    win.storage_integrity_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    win.storage_integrity_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    win.storage_integrity_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    integrity_lay.addWidget(win.storage_integrity_tree)
+    lay.addWidget(integrity_card)
 
     maintenance_card = QFrame()
     maintenance_card.setObjectName("card")
@@ -647,6 +747,11 @@ class StorageTabMixin:
         self._storage_scan_worker = None
         self.storage_rescan_btn.setEnabled(True)
         populate_storage_table(self, scan)
+        self._render_integrity_issues(
+            scan.integrity_issues,
+            checked=scan.integrity_checked,
+            source="Storage scan",
+        )
         self._set_status(
             f"Storage scan complete — {scan.total_files} file(s), "
             f"{fmt_size(scan.total_size)}.",
@@ -658,6 +763,190 @@ class StorageTabMixin:
         self.storage_rescan_btn.setEnabled(True)
         self._log(f"[STORAGE] Scan failed: {message}")
         self._set_status("Storage scan failed. See the log for details.", "error")
+
+    def _on_integrity_settings_changed(self, *_args):
+        """Persist the small set of scrub controls shown in Storage."""
+        if not hasattr(self, "integrity_scrub_enabled_check"):
+            return
+        self._config["integrity_scrub_enabled"] = bool(
+            self.integrity_scrub_enabled_check.isChecked()
+        )
+        self._config["integrity_scrub_interval_hours"] = int(
+            self.integrity_interval_spin.value()
+        )
+        self._config["integrity_scrub_period_days"] = int(
+            self.integrity_period_spin.value()
+        )
+        self._config["integrity_scrub_fraction"] = (
+            self.integrity_fraction_spin.value() / 100.0
+        )
+        self._persist_config()
+
+    def _render_integrity_issues(self, issues, *, checked=0, source="Integrity scrub"):
+        self.storage_integrity_tree.clear()
+        issue_count = 0
+        for issue in list(issues or ()):
+            status = str(issue.get("status", "failed") or "failed").upper()
+            recording = str(issue.get("recording_path", "") or "")
+            files = list(issue.get("files", ()) or ())
+            if not files:
+                files = [{
+                    "path": issue.get("path", "") or "manifest",
+                    "reason": issue.get("details", "Integrity drift detected"),
+                }]
+            for affected in files:
+                issue_count += 1
+                detail = str(affected.get("path", "") or "manifest")
+                reason = str(affected.get("reason", "") or "Integrity drift detected")
+                self.storage_integrity_tree.addTopLevelItem(
+                    QTreeWidgetItem([status, recording, f"{detail}: {reason}"])
+                )
+        self.storage_integrity_tree.setVisible(bool(issue_count))
+        self.storage_integrity_summary.setVisible(True)
+        if issue_count:
+            self.storage_integrity_summary.setText(
+                f"{source}: {checked} manifest file(s) checked; "
+                f"{issue_count} affected file/reason row(s) require review. "
+                "Nothing was repaired or deleted."
+            )
+        else:
+            self.storage_integrity_summary.setText(
+                f"{source}: {checked} manifest file(s) checked; no drift reported."
+            )
+
+    def _set_integrity_running(self, running):
+        self.storage_scrub_btn.setEnabled(not running)
+        self.storage_scrub_cancel_btn.setEnabled(running)
+        self.integrity_scrub_enabled_check.setEnabled(not running)
+        self.integrity_interval_spin.setEnabled(not running)
+        self.integrity_period_spin.setEnabled(not running)
+        self.integrity_fraction_spin.setEnabled(not running)
+
+    def _start_integrity_scrub(self, *, automatic=False):
+        current = getattr(self, "_integrity_worker", None)
+        if current is not None and current.isRunning():
+            return False
+        self._set_integrity_running(True)
+        self.storage_integrity_summary.setVisible(True)
+        self.storage_integrity_summary.setText(
+            "Running a bounded archive integrity scrub; no repair or deletion is performed…"
+        )
+        if not automatic:
+            self._set_status("Scrubbing archive integrity in the background.", "working")
+        worker = IntegrityScrubWorker(
+            self._storage_scan_root(), self._config, parent=self,
+        )
+        worker.completed.connect(
+            lambda result, automatic=automatic: self._on_integrity_scrub_done(
+                result, automatic=automatic,
+            )
+        )
+        worker.failed.connect(self._on_integrity_scrub_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._integrity_worker = worker
+        worker.start()
+        return True
+
+    def _on_integrity_scrub(self):
+        self._start_integrity_scrub(automatic=False)
+
+    def _on_integrity_scrub_done(self, result, *, automatic=False):
+        self._integrity_worker = None
+        self._set_integrity_running(False)
+        if result is None:
+            self.storage_integrity_summary.setText(
+                "Integrity scrub cancelled. No repair or deletion was performed."
+            )
+            self._set_status("Integrity scrub cancelled safely.", "warning")
+            return
+        checked = int(getattr(result, "checked", 0) or 0)
+        skipped = int(getattr(result, "skipped", 0) or 0)
+        mismatches = int(getattr(result, "mismatches", 0) or 0)
+        status = str(getattr(result, "status", "completed") or "completed")
+        self._render_integrity_issues(
+            getattr(result, "issues", ()),
+            checked=checked,
+            source="Integrity scrub",
+        )
+        if status == "cancelled":
+            self.storage_integrity_summary.setText(
+                f"Integrity scrub cancelled after {checked} recording(s); "
+                f"{skipped} skipped. No repair or deletion was performed."
+            )
+            self._set_status("Integrity scrub cancelled safely.", "warning")
+            return
+        if status == "disabled":
+            self.storage_integrity_summary.setText("Rolling integrity scrub is disabled in Storage settings.")
+            self._set_status("Integrity scrub is disabled.", "idle")
+            return
+        if status == "not_due":
+            self.storage_integrity_summary.setText("Integrity scrub is not due yet; the configured cadence is active.")
+            if not automatic:
+                self._set_status("Integrity scrub is not due yet.", "idle")
+            return
+        if mismatches:
+            for issue in list(getattr(result, "issues", ()) or ()):
+                self._notify_center(
+                    f"Archive integrity drift: {issue.get('recording_path', '')}",
+                    "error",
+                )
+            tone = "error"
+        elif status == "failed":
+            tone = "error"
+        elif skipped:
+            tone = "warning"
+        else:
+            tone = "success"
+        self.storage_integrity_summary.setText(
+            f"Integrity scrub {status}: {checked} recording(s) hashed, "
+            f"{mismatches} mismatch(es), {skipped} skipped "
+            f"({getattr(result, 'offline', 0)} offline). "
+            "Nothing was repaired or deleted."
+        )
+        self._set_status(
+            f"Archive integrity scrub {status}.", tone,
+        )
+
+    def _on_integrity_scrub_cancel(self):
+        worker = getattr(self, "_integrity_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            self.storage_scrub_cancel_btn.setEnabled(False)
+            self.storage_integrity_summary.setVisible(True)
+            self.storage_integrity_summary.setText(
+                "Stopping between recording hashes; no repair or deletion will run…"
+            )
+
+    def _on_integrity_scrub_failed(self, message):
+        self._integrity_worker = None
+        self._set_integrity_running(False)
+        self.storage_integrity_summary.setVisible(True)
+        self.storage_integrity_summary.setText(
+            "Integrity scrub failed before completion. No repair or deletion was performed."
+        )
+        self._log(f"[INTEGRITY] {message}")
+        self._set_status("Archive integrity scrub failed. See the log for details.", "error")
+
+    def _tick_integrity_scrub(self):
+        """Start one due scrub while this desktop owns execution."""
+        if not getattr(self, "_queue_execution_enabled", False):
+            return
+        if not bool(self._config.get("integrity_scrub_enabled", True)):
+            return
+        worker = getattr(self, "_integrity_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        try:
+            interval_hours = max(
+                1, min(24 * 30, int(float(
+                    self._config.get("integrity_scrub_interval_hours", 24)
+                )))
+            )
+        except (TypeError, ValueError, OverflowError):
+            interval_hours = 24
+        if not _db.integrity_scrub_is_due(interval_hours * 3600):
+            return
+        self._start_integrity_scrub(automatic=True)
 
     def _set_adoption_running(self, running):
         self.storage_adopt_btn.setEnabled(not running)
