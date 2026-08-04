@@ -2634,6 +2634,7 @@ _WEB_UI_TEXT = {
     ),
     "pairing_code": _web_text("One-time pairing code"),
     "pair_and_connect": _web_text("Pair and connect"),
+    "remote_navigation": _web_text("Remote navigation"),
     "status": _web_text("Status"),
     "add_url": _web_text("Add URL"),
     "library": _web_text("Library"),

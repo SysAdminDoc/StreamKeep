@@ -28,6 +28,20 @@ def test_server_facade_exposes_route_table_and_external_web_ui():
     assert "{{web_i18n}}" in html
 
 
+def test_web_remote_template_is_mobile_accessible_and_has_error_states():
+    html = static_assets.load_web_ui()
+    assert 'role="tablist"' in html
+    assert 'role="tabpanel"' in html
+    assert 'aria-selected="true"' in html
+    assert 'aria-live="assertive"' in html
+    assert 'aria-busy="true"' in html
+    assert "button:focus-visible" in html
+    assert "@media (max-width:600px)" in html
+    assert 'autocomplete="one-time-code"' in html
+    assert "message.className='status-region error'" in html
+    assert 'type="button"' in html
+
+
 class _PresetCombo:
     def __init__(self, current=""):
         self.items = []

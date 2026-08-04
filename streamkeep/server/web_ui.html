@@ -7,17 +7,25 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  background:#1e1e2e;color:#cdd6f4;min-height:100vh;padding:16px}
+  background:#1e1e2e;color:#cdd6f4;min-height:100vh;padding:clamp(12px,3vw,24px);
+  overflow-x:hidden}
 h1{color:#89b4fa;font-size:1.4em;margin-bottom:12px}
 h2{color:#a6adc8;font-size:1.1em;margin:16px 0 8px}
 .card{background:#313244;border-radius:10px;padding:14px;margin-bottom:12px}
-input,button{font-size:14px;border:none;border-radius:6px;padding:8px 14px;outline:none}
-input{background:#45475a;color:#cdd6f4;width:100%}
+input,button{font-size:14px;border:none;border-radius:6px;padding:10px 14px;outline:none}
+input{background:#45475a;color:#cdd6f4;width:100%;min-width:0}
 input::placeholder{color:#6c7086}
-button{background:#89b4fa;color:#1e1e2e;cursor:pointer;font-weight:600}
+button{background:#89b4fa;color:#1e1e2e;cursor:pointer;font-weight:600;min-height:42px}
 button:hover{background:#74c7ec}
-.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px;min-width:0}
 .row input{flex:1}
+button:focus-visible,input:focus-visible{outline:3px solid #f9e2af;outline-offset:2px}
+button:disabled{cursor:wait;opacity:.65}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.status-region{min-height:1.4em;color:#a6e3a1;margin:4px 0 8px}
+.status-region.error{color:#f38ba8}
+.panel-list[aria-busy="true"]{opacity:.65}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;
   font-weight:600;margin-right:6px}
 .badge-live{background:#a6e3a1;color:#1e1e2e}
@@ -36,51 +44,67 @@ button:hover{background:#74c7ec}
 #auth{max-width:360px;margin:80px auto}
 #auth h1{text-align:center;margin-bottom:20px}
 #app{display:none;max-width:600px;margin:0 auto}
-.tab-bar{display:flex;gap:4px;margin-bottom:12px}
-.tab-bar button{flex:1;background:#313244;color:#a6adc8}
+.tab-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-bottom:12px}
+.tab-bar button{background:#313244;color:#a6adc8;min-width:0;overflow-wrap:anywhere}
 .tab-bar button.active{background:#89b4fa;color:#1e1e2e}
 .tab-content{display:none}
 .tab-content.active{display:block}
+@media (max-width:600px){
+  body{padding:12px}
+  #auth{margin:32px auto}
+  .card{padding:12px}
+  .tab-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .row{align-items:stretch;flex-wrap:wrap}
+  .row input{flex:1 1 100%}
+  .row button{flex:1 1 100%}
+  .item-actions button{flex:1 1 calc(50% - 6px)}
+}
+@media (min-width:601px){
+  #app{max-width:760px}
+}
 </style>
 </head>
 <body>
-<div id="auth">
-<h1>{{t:app_title}}</h1>
+<main id="auth" aria-labelledby="auth-title">
+<h1 id="auth-title">{{t:app_title}}</h1>
 <div class="card">
 <p style="color:#a6adc8;margin-bottom:12px">{{t:auth_instructions}}</p>
-<div class="row"><input id="token-input" type="password" placeholder="{{t:pairing_code}}"></div>
-<button onclick="doAuth()" style="width:100%;margin-top:8px">{{t:pair_and_connect}}</button>
-<p id="auth-err" style="color:#f38ba8;margin-top:8px;display:none"></p>
+<div class="row"><label class="sr-only" for="token-input">{{t:pairing_code}}</label>
+<input id="token-input" type="password" autocomplete="one-time-code" placeholder="{{t:pairing_code}}"></div>
+<button id="pair-button" type="button" onclick="doAuth()" style="width:100%;margin-top:8px">{{t:pair_and_connect}}</button>
+<p id="auth-err" role="alert" aria-live="assertive" style="color:#f38ba8;margin-top:8px;display:none"></p>
 </div>
+</main>
+<main id="app" aria-labelledby="app-title">
+<h1 id="app-title">{{t:app_title}}</h1>
+<div class="status-region" id="app-status" role="status" aria-live="polite"></div>
+<div class="tab-bar" role="tablist" aria-label="{{t:remote_navigation}}">
+<button id="tab-status-button" type="button" role="tab" aria-selected="true" aria-controls="tab-status" tabindex="0" class="active" onclick="switchTab('status',this)">{{t:status}}</button>
+<button id="tab-queue-button" type="button" role="tab" aria-selected="false" aria-controls="tab-queue" tabindex="-1" onclick="switchTab('queue',this)">{{t:add_url}}</button>
+<button id="tab-library-button" type="button" role="tab" aria-selected="false" aria-controls="tab-library" tabindex="-1" onclick="switchTab('library',this)">{{t:library}}</button>
+<button id="tab-monitor-button" type="button" role="tab" aria-selected="false" aria-controls="tab-monitor" tabindex="-1" onclick="switchTab('monitor',this)">{{t:channels}}</button>
 </div>
-<div id="app">
-<h1>{{t:app_title}}</h1>
-<div class="tab-bar">
-<button class="active" onclick="switchTab('status',this)">{{t:status}}</button>
-<button onclick="switchTab('queue',this)">{{t:add_url}}</button>
-<button onclick="switchTab('library',this)">{{t:library}}</button>
-<button onclick="switchTab('monitor',this)">{{t:channels}}</button>
+<div id="tab-status" class="tab-content active" role="tabpanel" aria-labelledby="tab-status-button" tabindex="0">
+<div class="card"><h2>{{t:active_downloads}}</h2><div id="dl-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:active_workers}}</h2><div id="worker-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:queue}}</h2><div id="q-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:resumable}}</h2><div id="resume-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:failures}}</h2><div id="failure-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
 </div>
-<div id="tab-status" class="tab-content active">
-<div class="card"><h2>{{t:active_downloads}}</h2><div id="dl-list"><p class="empty">{{t:loading}}</p></div></div>
-<div class="card"><h2>{{t:active_workers}}</h2><div id="worker-list"><p class="empty">{{t:loading}}</p></div></div>
-<div class="card"><h2>{{t:queue}}</h2><div id="q-list"><p class="empty">{{t:loading}}</p></div></div>
-<div class="card"><h2>{{t:resumable}}</h2><div id="resume-list"><p class="empty">{{t:loading}}</p></div></div>
-<div class="card"><h2>{{t:failures}}</h2><div id="failure-list"><p class="empty">{{t:loading}}</p></div></div>
-</div>
-<div id="tab-queue" class="tab-content">
+<div id="tab-queue" class="tab-content" role="tabpanel" aria-labelledby="tab-queue-button" tabindex="0">
 <div class="card">
 <h2>{{t:add_to_queue}}</h2>
-<div class="row"><input id="url-input" placeholder="{{t:url_placeholder}}">
-<button onclick="addUrl()">{{t:add}}</button></div>
-<p id="q-msg" style="color:#a6e3a1;display:none;margin-top:8px"></p>
+<div class="row"><label class="sr-only" for="url-input">{{t:url_placeholder}}</label>
+<input id="url-input" inputmode="url" autocomplete="url" placeholder="{{t:url_placeholder}}">
+<button id="add-button" type="button" onclick="addUrl()">{{t:add}}</button></div>
+<p id="q-msg" role="status" aria-live="polite" class="status-region" style="display:none"></p>
 </div>
 </div>
-<div id="tab-library" class="tab-content">
-<div class="card"><h2>{{t:library}}</h2><div id="lib-list"><p class="empty">{{t:loading}}</p></div></div>
+<div id="tab-library" class="tab-content" role="tabpanel" aria-labelledby="tab-library-button" tabindex="0">
+<div class="card"><h2>{{t:library}}</h2><div id="lib-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
 </div>
-<div id="tab-monitor" class="tab-content">
-<div class="card"><h2>{{t:monitored_channels}}</h2><div id="mon-list"><p class="empty">{{t:loading}}</p></div></div>
+<div id="tab-monitor" class="tab-content" role="tabpanel" aria-labelledby="tab-monitor-button" tabindex="0">
+<div class="card"><h2>{{t:monitored_channels}}</h2><div id="mon-list" class="panel-list" aria-busy="true"><p class="empty">{{t:loading}}</p></div></div>
 </div>
 </div>
 <script>
@@ -112,6 +136,9 @@ function api(path,opts){
 }
 function doAuth(){
   const code=document.getElementById('token-input').value.trim();
+  const button=document.getElementById('pair-button');
+  const error=document.getElementById('auth-err');
+  button.disabled=true;error.style.display='none';
   fetch(BASE+'/pair',{method:'POST',headers:Object.assign(
     {'Content-Type':'application/json'},freshHeaders()),
     body:JSON.stringify({code,scopes:['status','queue','recovery']})}).then(async r=>{
@@ -122,30 +149,51 @@ function doAuth(){
       _refreshId=setInterval(refresh,5000);}
     else throw new Error(d.message||'');
   }).catch(e=>{
-    document.getElementById('auth-err').style.display='block';
+    error.style.display='block';
     var msg=e&&e.message?e.message:
       T('pairing_hint');
-    document.getElementById('auth-err').textContent=msg;
+    error.textContent=msg;
+    document.getElementById('token-input').focus();
+  }).finally(()=>{
+    button.disabled=false;
   });
 }
 function switchTab(name,btn){
   document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
-  document.querySelectorAll('.tab-bar button').forEach(e=>e.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
-  btn.classList.add('active');
+  document.querySelectorAll('[role="tab"]').forEach(e=>{
+    const selected=e===btn;
+    e.classList.toggle('active',selected);e.setAttribute('aria-selected',String(selected));
+    e.tabIndex=selected?0:-1;
+  });
+  const panel=document.getElementById('tab-'+name);
+  panel.classList.add('active');panel.focus({preventScroll:true});
 }
+document.querySelectorAll('[role="tab"]').forEach((tab,index,tabs)=>tab.addEventListener('keydown',e=>{
+  if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft'&&e.key!=='Home'&&e.key!=='End')return;
+  e.preventDefault();
+  const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:
+    (index+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length;
+  tabs[next].focus();switchTab(tabs[next].id.replace('tab-','').replace('-button',''),tabs[next]);
+}));
 function addUrl(){
   const url=document.getElementById('url-input').value.trim();
   if(!url)return;
+  const button=document.getElementById('add-button');
+  const message=document.getElementById('q-msg');
+  button.disabled=true;message.className='status-region';message.style.display='none';
   api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({url})}).then(d=>{
-    const m=document.getElementById('q-msg');m.style.display='block';
-    m.textContent=d.ok?T('added_to_queue'):T('failed_prefix')+(d.err||T('unknown'));
+    message.style.display='block';
+    message.textContent=d.ok?T('added_to_queue'):T('failed_prefix')+(d.err||T('unknown'));
     document.getElementById('url-input').value='';
-    setTimeout(()=>m.style.display='none',3000);
-  });
+    setTimeout(()=>message.style.display='none',3000);
+  }).catch(e=>{
+    message.className='status-region error';message.style.display='block';
+    message.textContent=e&&e.message?e.message:T('request_failed').replace('{status}','?');
+  }).finally(()=>{button.disabled=false;});
 }
 function renderItems(el,items,empty,renderFn){
+  el.setAttribute('aria-busy','false');
   if(!items||!items.length){el.innerHTML='<p class="empty">'+empty+'</p>';return;}
   el.innerHTML=items.map(renderFn).join('');
 }
@@ -162,6 +210,7 @@ function discardFailure(id){
     body:JSON.stringify({id})}).then(()=>refresh());
 }
 function refresh(){
+  document.getElementById('app-status').textContent=T('loading');
   api('/api/status').then(d=>{
     renderItems(document.getElementById('dl-list'),d.downloads,T('no_active_downloads'),
       i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
@@ -188,10 +237,13 @@ function refresh(){
         (i.next_attempt_at?' &middot; '+esc(T('next_attempt').replace('{value}',i.next_attempt_at)):'')+
         (i.resume_available?' &middot; <span style="color:#a6e3a1">'+esc(T('resume_available'))+'</span>':'')+
         '</div>'+
-        '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">'+T('retry')+'</button>'+
-        (i.auto_retry?'<button onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
-        '<button onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
-  }).catch(()=>{});
+        '<div class="item-actions"><button type="button" onclick="retryFailure('+Number(i.id||0)+')">'+T('retry')+'</button>'+
+        (i.auto_retry?'<button type="button" onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
+        '<button type="button" onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
+  }).catch(e=>{
+    document.getElementById('app-status').className='status-region error';
+    document.getElementById('app-status').textContent=e&&e.message?e.message:T('request_failed').replace('{status}','?');
+  });
   api('/api/library').then(d=>{
     renderItems(document.getElementById('lib-list'),d.history,T('no_recordings'),
       i=>'<div class="item"><div class="title">'+esc(i.title||T('untitled'))+'</div>'+
