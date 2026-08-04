@@ -19,6 +19,7 @@ from xml.sax.saxutils import escape as _xml_escape
 ROOT = Path(__file__).resolve().parents[2]
 I18N_DIR = Path(__file__).parent
 SOURCE_DIRS = (ROOT / "streamkeep" / "ui", ROOT / "streamkeep" / "player")
+SOURCE_FILES = (ROOT / "streamkeep" / "local_server.py",)
 
 FIRST_ARG_CALLS = {
     "QLabel", "QPushButton", "QCheckBox", "QGroupBox", "QRadioButton",
@@ -32,6 +33,7 @@ ALL_ARG_CALLS = {
     "make_field_block", "make_metric_card", "update_status_banner",
 }
 LIST_ARG_CALLS = {"addItems", "setHorizontalHeaderLabels", "setHeaderLabels"}
+WEB_CALLS = {"_web_text"}
 
 
 @dataclass(frozen=True)
@@ -309,6 +311,63 @@ SPANISH_CORE = {
         "{downloads} descargas coincidentes • {hits} coincidencias de transcripción",
 }
 
+WEB_SPANISH = {
+    ("WebRemote", "StreamKeep Remote"): "StreamKeep remoto",
+    ("WebRemote", "Generate a one-time pairing code in StreamKeep Settings, then enter it here."):
+        "Genere un código de emparejamiento de un solo uso en Configuración de StreamKeep y escríbalo aquí.",
+    ("WebRemote", "One-time pairing code"): "Código de emparejamiento de un solo uso",
+    ("WebRemote", "Pair and connect"): "Emparejar y conectar",
+    ("WebRemote", "Status"): "Estado",
+    ("WebRemote", "Add URL"): "Añadir URL",
+    ("WebRemote", "Library"): "Biblioteca",
+    ("WebRemote", "Channels"): "Canales",
+    ("WebRemote", "Active Downloads"): "Descargas activas",
+    ("WebRemote", "Active Workers"): "Trabajadores activos",
+    ("WebRemote", "Queue"): "Cola",
+    ("WebRemote", "Resumable"): "Reanudables",
+    ("WebRemote", "Failures"): "Fallos",
+    ("WebRemote", "Loading..."): "Cargando...",
+    ("WebRemote", "Add to Queue"): "Añadir a la cola",
+    ("WebRemote", "Paste a stream or VOD URL..."):
+        "Pegue una URL de emisión o VOD...",
+    ("WebRemote", "Add"): "Añadir",
+    ("WebRemote", "Monitored Channels"): "Canales supervisados",
+    ("WebRemote", "StreamKeep rejected this session."):
+        "StreamKeep rechazó esta sesión.",
+    ("WebRemote", "Request failed ({status})"): "La solicitud falló ({status})",
+    ("WebRemote", "Pairing failed"): "El emparejamiento falló",
+    ("WebRemote", "Pairing failed. Generate a fresh code in StreamKeep Settings."):
+        "El emparejamiento falló. Genere un código nuevo en Configuración de StreamKeep.",
+    ("WebRemote", "Added to queue!"): "¡Añadido a la cola!",
+    ("WebRemote", "Failed: "): "Falló: ",
+    ("WebRemote", "unknown"): "desconocido",
+    ("WebRemote", "No active downloads."): "No hay descargas activas.",
+    ("WebRemote", "Download"): "Descarga",
+    ("WebRemote", "Queue empty."): "La cola está vacía.",
+    ("WebRemote", "queued"): "en cola",
+    ("WebRemote", "No active workers."): "No hay trabajadores activos.",
+    ("WebRemote", "worker"): "trabajador",
+    ("WebRemote", "Worker"): "Trabajador",
+    ("WebRemote", "(running)"): "(en ejecución)",
+    ("WebRemote", "No resumable downloads."): "No hay descargas reanudables.",
+    ("WebRemote", "{count} segments remaining"): "quedan {count} segmentos",
+    ("WebRemote", "No failures requiring action."):
+        "No hay fallos que requieran acción.",
+    ("WebRemote", "failed"): "fallido",
+    ("WebRemote", "Failed job"): "Tarea fallida",
+    ("WebRemote", "retry {count}"): "reintentos: {count}",
+    ("WebRemote", "next {value}"): "siguiente: {value}",
+    ("WebRemote", "resume available"): "reanudación disponible",
+    ("WebRemote", "Retry"): "Reintentar",
+    ("WebRemote", "Cancel auto retry"): "Cancelar reintento automático",
+    ("WebRemote", "Discard"): "Descartar",
+    ("WebRemote", "No recordings yet."): "Aún no hay grabaciones.",
+    ("WebRemote", "Untitled"): "Sin título",
+    ("WebRemote", "No channels monitored."): "No hay canales supervisados.",
+    ("WebRemote", "offline"): "sin conexión",
+    ("WebRemote", "live"): "en directo",
+}
+
 
 def _call_name(node: ast.Call) -> str:
     func = node.func
@@ -349,76 +408,86 @@ def _add(messages, locations, context, node, source, *, numerus=False, path=None
 def extract_messages() -> tuple[set[Message], dict[Message, set[tuple[str, int]]]]:
     messages: set[Message] = set()
     locations: dict[Message, set[tuple[str, int]]] = defaultdict(set)
-    for directory in SOURCE_DIRS:
-        for path in sorted(directory.rglob("*.py")):
-            relative = path.relative_to(ROOT)
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(relative))
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                    names = {
-                        target.id for target in targets if isinstance(target, ast.Name)
-                    }
-                    value = node.value
-                    if (
-                        any("HEADER" in name for name in names)
-                        and isinstance(value, (ast.List, ast.Tuple))
-                    ):
-                        for element in value.elts:
-                            _add(
-                                messages, locations, "StreamKeep", node,
-                                _template(element), path=relative,
-                            )
-                    continue
-                if not isinstance(node, ast.Call):
-                    continue
-                name = _call_name(node)
-                if name in {"tr", "tr_n", "tr_format"} and node.args:
-                    source = _template(node.args[0])
-                    context = "StreamKeep"
-                    for keyword in node.keywords:
-                        if keyword.arg == "context":
-                            context = _template(keyword.value) or context
-                    _add(
-                        messages, locations, context, node, source,
-                        numerus=name == "tr_n", path=relative,
-                    )
-                    continue
-                if name in FIRST_ARG_CALLS and node.args:
-                    _add(
-                        messages, locations, "StreamKeep", node,
-                        _template(node.args[0]), path=relative,
-                    )
-                elif name in ALL_ARG_CALLS:
-                    for argument in node.args:
-                        _add(
-                            messages, locations, "StreamKeep", node,
-                            _template(argument), path=relative,
-                        )
-                    for keyword in node.keywords:
-                        if keyword.arg in {"title", "body", "eyebrow", "badge_text"}:
-                            _add(
-                                messages, locations, "StreamKeep", node,
-                                _template(keyword.value), path=relative,
-                            )
-                elif name in LIST_ARG_CALLS and node.args and isinstance(
-                    node.args[0], (ast.List, ast.Tuple)
+    source_paths = [
+        path for directory in SOURCE_DIRS for path in directory.rglob("*.py")
+    ] + list(SOURCE_FILES)
+    for path in sorted(set(source_paths)):
+        relative = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(relative))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                names = {
+                    target.id for target in targets if isinstance(target, ast.Name)
+                }
+                value = node.value
+                if (
+                    any("HEADER" in name for name in names)
+                    and isinstance(value, (ast.List, ast.Tuple))
                 ):
-                    for element in node.args[0].elts:
+                    for element in value.elts:
                         _add(
                             messages, locations, "StreamKeep", node,
                             _template(element), path=relative,
                         )
-                elif name in {"information", "warning", "critical", "question"}:
-                    for argument in node.args[1:3]:
+                continue
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            if name in WEB_CALLS and node.args:
+                _add(
+                    messages, locations, "WebRemote", node,
+                    _template(node.args[0]), path=relative,
+                )
+                continue
+            if name in {"tr", "tr_n", "tr_format"} and node.args:
+                source = _template(node.args[0])
+                context = "StreamKeep"
+                for keyword in node.keywords:
+                    if keyword.arg == "context":
+                        context = _template(keyword.value) or context
+                _add(
+                    messages, locations, context, node, source,
+                    numerus=name == "tr_n", path=relative,
+                )
+                continue
+            if name in FIRST_ARG_CALLS and node.args:
+                _add(
+                    messages, locations, "StreamKeep", node,
+                    _template(node.args[0]), path=relative,
+                )
+            elif name in ALL_ARG_CALLS:
+                for argument in node.args:
+                    _add(
+                        messages, locations, "StreamKeep", node,
+                        _template(argument), path=relative,
+                    )
+                for keyword in node.keywords:
+                    if keyword.arg in {"title", "body", "eyebrow", "badge_text"}:
                         _add(
                             messages, locations, "StreamKeep", node,
-                            _template(argument), path=relative,
+                            _template(keyword.value), path=relative,
                         )
+            elif name in LIST_ARG_CALLS and node.args and isinstance(
+                node.args[0], (ast.List, ast.Tuple)
+            ):
+                for element in node.args[0].elts:
+                    _add(
+                        messages, locations, "StreamKeep", node,
+                        _template(element), path=relative,
+                    )
+            elif name in {"information", "warning", "critical", "question"}:
+                for argument in node.args[1:3]:
+                    _add(
+                        messages, locations, "StreamKeep", node,
+                        _template(argument), path=relative,
+                    )
     # Explicit dynamic contexts cannot always be inferred from a variable
     # passed to ``tr``.  The maintained core translations are catalog sources
     # too, so lrelease always receives those status/plural messages.
-    for (context, source), translation in SPANISH_CORE.items():
+    for (context, source), translation in {
+        **SPANISH_CORE, **WEB_SPANISH,
+    }.items():
         messages.add(Message(context, source, isinstance(translation, tuple)))
     return messages, locations
 
@@ -468,7 +537,11 @@ def _catalog_bytes(language: str) -> bytes:
                     )
                 )
             lines.append(_xml_leaf(3, "source", message.source))
-            translation = SPANISH_CORE.get((message.context, message.source))
+            translation = (
+                WEB_SPANISH.get((message.context, message.source))
+                if message.context == "WebRemote"
+                else SPANISH_CORE.get((message.context, message.source))
+            )
             if language == "en":
                 translation = (message.source, message.source) if message.numerus else message.source
             if message.numerus:

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
+from defusedxml import ElementTree as ET
 from PyQt6.QtCore import QCoreApplication, QLocale, QTranslator
 from PyQt6.QtWidgets import QDialog, QWidget
 
@@ -26,6 +28,71 @@ _PSEUDO_MAP = str.maketrans(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "áƀçďëƒğħïĵķľɱñöþɋŕšťüṽŵẋÿžÁƁÇĎËƑĞĦÏĴĶĽṀÑÖÞɊŔŠŤÜṼŴẊŸŽ",
 )
+
+
+@lru_cache(maxsize=8)
+def _load_catalog(language: str) -> dict[tuple[str, str], str | tuple[str, ...]]:
+    path = _I18N_DIR / f"streamkeep_{language}.ts"
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+
+    catalog: dict[tuple[str, str], str | tuple[str, ...]] = {}
+    for context in root.findall("context"):
+        context_name = context.findtext("name") or "StreamKeep"
+        for message in context.findall("message"):
+            source = message.findtext("source") or ""
+            translation = message.find("translation")
+            if not source or translation is None:
+                continue
+            if translation.get("type") == "unfinished":
+                continue
+            forms = tuple(
+                form.text or "" for form in translation.findall("numerusform")
+            )
+            if forms:
+                catalog[(context_name, source)] = forms
+            elif translation.text:
+                catalog[(context_name, source)] = translation.text
+    return catalog
+
+
+def translate_catalog(
+    source: str,
+    language: str,
+    *,
+    context: str = "StreamKeep",
+    n: int = -1,
+) -> str:
+    """Translate a source directly from the checked-in TS catalog.
+
+    The web remote can run without a ``QCoreApplication`` or an installed Qt
+    translator, so it reads the same source catalog used to build the desktop
+    ``.qm`` assets. Missing or unfinished translations intentionally fall back
+    to the English source string.
+    """
+    source = str(source or "")
+    language = str(language or "en").lower()
+    if language == "qps-ploc":
+        result = _pseudo_text(source)
+    elif language == "en":
+        result = source
+    else:
+        value = _load_catalog(language).get((context, source))
+        if isinstance(value, tuple):
+            if n < 0:
+                result = source
+            elif value:
+                index = 0 if n == 1 else min(1, len(value) - 1)
+                result = value[index]
+            else:
+                result = source
+        else:
+            result = value or source
+    if n >= 0:
+        result = result.replace("%n", str(n))
+    return result
 
 
 def available_languages() -> list[str]:
@@ -303,6 +370,7 @@ def install_translator(lang: str, app=None) -> bool:
 
 __all__ = [
     "available_languages", "current_language", "find_clipped_text_widgets",
-    "install_translator", "tr", "tr_format", "tr_n", "TranslatableDialog",
+    "install_translator", "translate_catalog", "tr", "tr_format", "tr_n",
+    "TranslatableDialog",
     "TranslatableWidget", "translate_widget_tree",
 ]

@@ -8699,4 +8699,252 @@ Download again?</translation>
             <translation>✔ Telegram bot detected (chat_id found)</translation>
         </message>
     </context>
+    <context>
+        <name>WebRemote</name>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2688" />
+            <source>(running)</source>
+            <translation>(running)</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2662" />
+            <source>Active Downloads</source>
+            <translation>Active Downloads</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2663" />
+            <source>Active Workers</source>
+            <translation>Active Workers</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2670" />
+            <source>Add</source>
+            <translation>Add</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2668" />
+            <source>Add to Queue</source>
+            <translation>Add to Queue</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2659" />
+            <source>Add URL</source>
+            <translation>Add URL</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2678" />
+            <source>Added to queue!</source>
+            <translation>Added to queue!</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2698" />
+            <source>Cancel auto retry</source>
+            <translation>Cancel auto retry</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2661" />
+            <source>Channels</source>
+            <translation>Channels</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2699" />
+            <source>Discard</source>
+            <translation>Discard</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2682" />
+            <source>Download</source>
+            <translation>Download</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2692" />
+            <source>failed</source>
+            <translation>failed</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2693" />
+            <source>Failed job</source>
+            <translation>Failed job</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2679" />
+            <source>Failed: </source>
+            <translation>Failed: </translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2666" />
+            <source>Failures</source>
+            <translation>Failures</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2653" />
+            <source>Generate a one-time pairing code in StreamKeep Settings, then enter it here.</source>
+            <translation>Generate a one-time pairing code in StreamKeep Settings, then enter it here.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2660" />
+            <source>Library</source>
+            <translation>Library</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2704" />
+            <source>live</source>
+            <translation>live</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2667" />
+            <source>Loading...</source>
+            <translation>Loading...</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2671" />
+            <source>Monitored Channels</source>
+            <translation>Monitored Channels</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2695" />
+            <source>next {value}</source>
+            <translation>next {value}</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2681" />
+            <source>No active downloads.</source>
+            <translation>No active downloads.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2685" />
+            <source>No active workers.</source>
+            <translation>No active workers.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2702" />
+            <source>No channels monitored.</source>
+            <translation>No channels monitored.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2691" />
+            <source>No failures requiring action.</source>
+            <translation>No failures requiring action.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2700" />
+            <source>No recordings yet.</source>
+            <translation>No recordings yet.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2689" />
+            <source>No resumable downloads.</source>
+            <translation>No resumable downloads.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2703" />
+            <source>offline</source>
+            <translation>offline</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2656" />
+            <source>One-time pairing code</source>
+            <translation>One-time pairing code</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2657" />
+            <source>Pair and connect</source>
+            <translation>Pair and connect</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2674" />
+            <source>Pairing failed</source>
+            <translation>Pairing failed</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2675" />
+            <source>Pairing failed. Generate a fresh code in StreamKeep Settings.</source>
+            <translation>Pairing failed. Generate a fresh code in StreamKeep Settings.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2669" />
+            <source>Paste a stream or VOD URL...</source>
+            <translation>Paste a stream or VOD URL...</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2664" />
+            <source>Queue</source>
+            <translation>Queue</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2683" />
+            <source>Queue empty.</source>
+            <translation>Queue empty.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2684" />
+            <source>queued</source>
+            <translation>queued</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2673" />
+            <source>Request failed ({status})</source>
+            <translation>Request failed ({status})</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2665" />
+            <source>Resumable</source>
+            <translation>Resumable</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2696" />
+            <source>resume available</source>
+            <translation>resume available</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2697" />
+            <source>Retry</source>
+            <translation>Retry</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2694" />
+            <source>retry {count}</source>
+            <translation>retry {count}</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2658" />
+            <source>Status</source>
+            <translation>Status</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2672" />
+            <source>StreamKeep rejected this session.</source>
+            <translation>StreamKeep rejected this session.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2652" />
+            <source>StreamKeep Remote</source>
+            <translation>StreamKeep Remote</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2680" />
+            <source>unknown</source>
+            <translation>unknown</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2701" />
+            <source>Untitled</source>
+            <translation>Untitled</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2687" />
+            <source>Worker</source>
+            <translation>Worker</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2686" />
+            <source>worker</source>
+            <translation>worker</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/local_server.py" line="2690" />
+            <source>{count} segments remaining</source>
+            <translation>{count} segments remaining</translation>
+        </message>
+    </context>
 </TS>

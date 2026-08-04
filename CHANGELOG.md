@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Internationalized the embedded web remote through the shared Qt catalog,
+  selecting the page language from `Accept-Language` or `?lang=` and falling
+  back to English for unfinished translations.
+
 - Declared the optional `python-mpv>=1.0.8`, platform-managed
   `libmpv>=0.41.0`, and `boto3>=1.43.0` runtimes outside the reproducible
   locks, recorded them in the SBOM, and added native libmpv version/advisory

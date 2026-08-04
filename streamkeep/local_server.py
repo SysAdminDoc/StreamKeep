@@ -55,6 +55,7 @@ hands received URLs to the main-thread Qt via a pyqtSignal.
 """
 
 import hashlib
+from html import escape as _html_escape
 import ipaddress
 import json
 import re
@@ -70,6 +71,7 @@ from urllib.parse import parse_qs, urlsplit
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from .har import normalize_replay_headers
+from .i18n import available_languages, translate_catalog
 from .notifications import record_security_event as _write_security_event
 
 PRODUCT_REST_PATHS = frozenset({
@@ -1232,10 +1234,12 @@ def _build_handler(
         def do_GET(self):
             if self._reject_bad_host():
                 return
-            path = self.path.split("?")[0]
+            request = urlsplit(self.path)
+            path = request.path
 
             if path == "/":
-                self._serve_web_ui()
+                explicit_language = parse_qs(request.query).get("lang", [""])[0]
+                self._serve_web_ui(explicit_language=explicit_language)
                 return
 
             if path == "/api/spec":
@@ -2617,12 +2621,18 @@ def _build_handler(
                 signals.failed_job_discard_requested.emit(job_id)
             self._json_response(200, {"ok": True, "failure_id": job_id})
 
-        def _serve_web_ui(self):
-            body = _WEB_UI_HTML.encode("utf-8")
+        def _serve_web_ui(self, *, explicit_language=""):
+            language = _select_web_language(
+                explicit_language,
+                self.headers.get("Accept-Language", ""),
+            )
+            body = _render_web_ui(language).encode("utf-8")
             self.send_response(200)
             self._security_headers()
             self._csp_header()
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Language", language)
+            self.send_header("Vary", "Accept-Language")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -2632,12 +2642,135 @@ def _build_handler(
 
 # ── Bundled single-page web remote UI (F37) ─────────────────────────
 
+
+def _web_text(source: str) -> str:
+    """Mark a web-remote source string for the shared translation catalog."""
+    return source
+
+
+_WEB_UI_TEXT = {
+    "app_title": _web_text("StreamKeep Remote"),
+    "auth_instructions": _web_text(
+        "Generate a one-time pairing code in StreamKeep Settings, then enter it here."
+    ),
+    "pairing_code": _web_text("One-time pairing code"),
+    "pair_and_connect": _web_text("Pair and connect"),
+    "status": _web_text("Status"),
+    "add_url": _web_text("Add URL"),
+    "library": _web_text("Library"),
+    "channels": _web_text("Channels"),
+    "active_downloads": _web_text("Active Downloads"),
+    "active_workers": _web_text("Active Workers"),
+    "queue": _web_text("Queue"),
+    "resumable": _web_text("Resumable"),
+    "failures": _web_text("Failures"),
+    "loading": _web_text("Loading..."),
+    "add_to_queue": _web_text("Add to Queue"),
+    "url_placeholder": _web_text("Paste a stream or VOD URL..."),
+    "add": _web_text("Add"),
+    "monitored_channels": _web_text("Monitored Channels"),
+    "session_rejected": _web_text("StreamKeep rejected this session."),
+    "request_failed": _web_text("Request failed ({status})"),
+    "pairing_failed": _web_text("Pairing failed"),
+    "pairing_hint": _web_text(
+        "Pairing failed. Generate a fresh code in StreamKeep Settings."
+    ),
+    "added_to_queue": _web_text("Added to queue!"),
+    "failed_prefix": _web_text("Failed: "),
+    "unknown": _web_text("unknown"),
+    "no_active_downloads": _web_text("No active downloads."),
+    "download": _web_text("Download"),
+    "queue_empty": _web_text("Queue empty."),
+    "queued": _web_text("queued"),
+    "no_active_workers": _web_text("No active workers."),
+    "worker_lower": _web_text("worker"),
+    "worker": _web_text("Worker"),
+    "running": _web_text("(running)"),
+    "no_resumable_downloads": _web_text("No resumable downloads."),
+    "segments_remaining": _web_text("{count} segments remaining"),
+    "no_failures": _web_text("No failures requiring action."),
+    "failed": _web_text("failed"),
+    "failed_job": _web_text("Failed job"),
+    "retry_count": _web_text("retry {count}"),
+    "next_attempt": _web_text("next {value}"),
+    "resume_available": _web_text("resume available"),
+    "retry": _web_text("Retry"),
+    "cancel_auto_retry": _web_text("Cancel auto retry"),
+    "discard": _web_text("Discard"),
+    "no_recordings": _web_text("No recordings yet."),
+    "untitled": _web_text("Untitled"),
+    "no_channels": _web_text("No channels monitored."),
+    "offline": _web_text("offline"),
+    "live": _web_text("live"),
+}
+
+
+def _normalize_web_language(value: str, supported: set[str]) -> str | None:
+    candidate = str(value or "").strip().lower().replace("_", "-")
+    if not candidate or candidate == "*":
+        return None
+    if candidate in supported:
+        return candidate
+    base = candidate.split("-", 1)[0]
+    return base if base in supported else None
+
+
+def _select_web_language(explicit: str = "", accept_language: str = "") -> str:
+    """Choose a catalog language from an explicit query setting or header."""
+    supported = set(available_languages())
+    selected = _normalize_web_language(explicit, supported)
+    if selected:
+        return selected
+
+    choices: list[tuple[float, int, str]] = []
+    for order, item in enumerate(str(accept_language or "").split(",")):
+        parts = [part.strip() for part in item.split(";")]
+        language = _normalize_web_language(parts[0], supported)
+        if not language:
+            continue
+        quality = 1.0
+        for parameter in parts[1:]:
+            name, _, raw_value = parameter.partition("=")
+            if name.strip().lower() != "q":
+                continue
+            try:
+                quality = float(raw_value.strip())
+            except ValueError:
+                quality = 0.0
+        if quality > 0:
+            choices.append((quality, -order, language))
+    if choices:
+        return max(choices)[2]
+    return "en"
+
+
+def _render_web_ui(language: str) -> str:
+    values = {
+        key: translate_catalog(source, language, context="WebRemote")
+        for key, source in _WEB_UI_TEXT.items()
+    }
+    rendered = _WEB_UI_HTML.replace(
+        "{{web_i18n}}",
+        json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026"),
+    )
+    rendered = rendered.replace("{{lang}}", _html_escape(language, quote=True))
+    for key, value in values.items():
+        rendered = rendered.replace(
+            "{{t:" + key + "}}",
+            _html_escape(value, quote=True),
+        )
+    return rendered
+
+
 _WEB_UI_HTML = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{{lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>StreamKeep Remote</title>
+<title>{{t:app_title}}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -2679,46 +2812,48 @@ button:hover{background:#74c7ec}
 </head>
 <body>
 <div id="auth">
-<h1>StreamKeep Remote</h1>
+<h1>{{t:app_title}}</h1>
 <div class="card">
-<p style="color:#a6adc8;margin-bottom:12px">Generate a one-time pairing code in StreamKeep Settings, then enter it here.</p>
-<div class="row"><input id="token-input" type="password" placeholder="One-time pairing code"></div>
-<button onclick="doAuth()" style="width:100%;margin-top:8px">Pair and connect</button>
+<p style="color:#a6adc8;margin-bottom:12px">{{t:auth_instructions}}</p>
+<div class="row"><input id="token-input" type="password" placeholder="{{t:pairing_code}}"></div>
+<button onclick="doAuth()" style="width:100%;margin-top:8px">{{t:pair_and_connect}}</button>
 <p id="auth-err" style="color:#f38ba8;margin-top:8px;display:none"></p>
 </div>
 </div>
 <div id="app">
-<h1>StreamKeep Remote</h1>
+<h1>{{t:app_title}}</h1>
 <div class="tab-bar">
-<button class="active" onclick="switchTab('status',this)">Status</button>
-<button onclick="switchTab('queue',this)">Add URL</button>
-<button onclick="switchTab('library',this)">Library</button>
-<button onclick="switchTab('monitor',this)">Channels</button>
+<button class="active" onclick="switchTab('status',this)">{{t:status}}</button>
+<button onclick="switchTab('queue',this)">{{t:add_url}}</button>
+<button onclick="switchTab('library',this)">{{t:library}}</button>
+<button onclick="switchTab('monitor',this)">{{t:channels}}</button>
 </div>
 <div id="tab-status" class="tab-content active">
-<div class="card"><h2>Active Downloads</h2><div id="dl-list"><p class="empty">Loading...</p></div></div>
-<div class="card"><h2>Active Workers</h2><div id="worker-list"><p class="empty">Loading...</p></div></div>
-<div class="card"><h2>Queue</h2><div id="q-list"><p class="empty">Loading...</p></div></div>
-<div class="card"><h2>Resumable</h2><div id="resume-list"><p class="empty">Loading...</p></div></div>
-<div class="card"><h2>Failures</h2><div id="failure-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>{{t:active_downloads}}</h2><div id="dl-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:active_workers}}</h2><div id="worker-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:queue}}</h2><div id="q-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:resumable}}</h2><div id="resume-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:failures}}</h2><div id="failure-list"><p class="empty">{{t:loading}}</p></div></div>
 </div>
 <div id="tab-queue" class="tab-content">
 <div class="card">
-<h2>Add to Queue</h2>
-<div class="row"><input id="url-input" placeholder="Paste a stream or VOD URL...">
-<button onclick="addUrl()">Add</button></div>
+<h2>{{t:add_to_queue}}</h2>
+<div class="row"><input id="url-input" placeholder="{{t:url_placeholder}}">
+<button onclick="addUrl()">{{t:add}}</button></div>
 <p id="q-msg" style="color:#a6e3a1;display:none;margin-top:8px"></p>
 </div>
 </div>
 <div id="tab-library" class="tab-content">
-<div class="card"><h2>Library</h2><div id="lib-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>{{t:library}}</h2><div id="lib-list"><p class="empty">{{t:loading}}</p></div></div>
 </div>
 <div id="tab-monitor" class="tab-content">
-<div class="card"><h2>Monitored Channels</h2><div id="mon-list"><p class="empty">Loading...</p></div></div>
+<div class="card"><h2>{{t:monitored_channels}}</h2><div id="mon-list"><p class="empty">{{t:loading}}</p></div></div>
 </div>
 </div>
 <script>
 let TOKEN='';
+const I18N={{web_i18n}};
+function T(key){return I18N[key]||key;}
 const BASE=location.origin;
 function freshHeaders(){
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
@@ -2738,8 +2873,8 @@ function api(path,opts){
       document.getElementById('auth').style.display='block';
       document.getElementById('auth-err').style.display='block';
       document.getElementById('auth-err').textContent=
-        d.message||d.err||'StreamKeep rejected this session.';}
-    if(!r.ok)throw new Error(d.message||d.err||('Request failed ('+r.status+')'));
+        d.message||d.err||T('session_rejected');}
+    if(!r.ok)throw new Error(d.message||d.err||T('request_failed').replace('{status}',r.status));
     return d;});
 }
 function doAuth(){
@@ -2747,7 +2882,7 @@ function doAuth(){
   fetch(BASE+'/pair',{method:'POST',headers:Object.assign(
     {'Content-Type':'application/json'},freshHeaders()),
     body:JSON.stringify({code,scopes:['status','queue','recovery']})}).then(async r=>{
-      const d=await r.json();if(!r.ok)throw new Error(d.message||d.err||'Pairing failed');
+      const d=await r.json();if(!r.ok)throw new Error(d.message||d.err||T('pairing_failed'));
       TOKEN=d.token||'';return api('/ping');}).then(d=>{
     if(d.ok){document.getElementById('auth').style.display='none';
       document.getElementById('app').style.display='block';refresh();
@@ -2756,7 +2891,7 @@ function doAuth(){
   }).catch(e=>{
     document.getElementById('auth-err').style.display='block';
     var msg=e&&e.message?e.message:
-      'Pairing failed. Generate a fresh code in StreamKeep Settings.';
+      T('pairing_hint');
     document.getElementById('auth-err').textContent=msg;
   });
 }
@@ -2772,7 +2907,7 @@ function addUrl(){
   api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({url})}).then(d=>{
     const m=document.getElementById('q-msg');m.style.display='block';
-    m.textContent=d.ok?'Added to queue!':'Failed: '+(d.err||'unknown');
+    m.textContent=d.ok?T('added_to_queue'):T('failed_prefix')+(d.err||T('unknown'));
     document.getElementById('url-input').value='';
     setTimeout(()=>m.style.display='none',3000);
   });
@@ -2795,43 +2930,44 @@ function discardFailure(id){
 }
 function refresh(){
   api('/api/status').then(d=>{
-    renderItems(document.getElementById('dl-list'),d.downloads,'No active downloads.',
-      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||'Download')+'</div>'+
+    renderItems(document.getElementById('dl-list'),d.downloads,T('no_active_downloads'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
         '<div class="meta">'+esc(i.status||'')+'</div>'+
         (i.percent!=null?'<div class="progress"><div class="fill" style="width:'+i.percent+'%"></div></div>':'')+
         '</div>');
-    renderItems(document.getElementById('q-list'),d.queue,'Queue empty.',
-      i=>'<div class="item"><span class="badge badge-queue">'+esc((i.status||'queued').toUpperCase())+'</span>'+
+    renderItems(document.getElementById('q-list'),d.queue,T('queue_empty'),
+      i=>'<div class="item"><span class="badge badge-queue">'+esc((i.status||T('queued')).toUpperCase())+'</span>'+
         esc(i.title||i.url||'?')+
         (i.note?'<div class="meta">'+esc(i.note)+'</div>':'')+'</div>');
-    renderItems(document.getElementById('worker-list'),d.active_workers||[],'No active workers.',
-      i=>'<div class="item"><span class="badge badge-live">'+esc((i.type||'worker').toUpperCase())+'</span>'+
-        esc(i.title||i.channel||'Worker')+
-        (i.running?' <span style="color:#a6e3a1">(running)</span>':'')+'</div>');
-    renderItems(document.getElementById('resume-list'),d.resumable||[],'No resumable downloads.',
-      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||'Download')+'</div>'+
-        '<div class="meta">'+esc(String(i.remaining||0))+' segments remaining</div></div>');
-    renderItems(document.getElementById('failure-list'),d.failures,'No failures requiring action.',
-      i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||'failed').toUpperCase())+'</span>'+
-        '<span class="title">'+esc(i.title||'Failed job')+'</span>'+
-        '<div class="meta">'+esc(i.platform||'')+' &middot; retry '+esc(String(i.retry_count||0))+
-        ' &middot; '+esc(i.category||'unknown')+' &middot; '+esc(i.last_reason||'')+
-        (i.next_attempt_at?' &middot; next '+esc(i.next_attempt_at):'')+
-        (i.resume_available?' &middot; <span style="color:#a6e3a1">resume available</span>':'')+
+    renderItems(document.getElementById('worker-list'),d.active_workers||[],T('no_active_workers'),
+      i=>'<div class="item"><span class="badge badge-live">'+esc((i.type||T('worker_lower')).toUpperCase())+'</span>'+
+        esc(i.title||i.channel||T('worker'))+
+        (i.running?' <span style="color:#a6e3a1">'+esc(T('running'))+'</span>':'')+'</div>');
+    renderItems(document.getElementById('resume-list'),d.resumable||[],T('no_resumable_downloads'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
+        '<div class="meta">'+esc(T('segments_remaining').replace('{count}',String(i.remaining||0)))+'</div></div>');
+    renderItems(document.getElementById('failure-list'),d.failures,T('no_failures'),
+      i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||T('failed')).toUpperCase())+'</span>'+
+        '<span class="title">'+esc(i.title||T('failed_job'))+'</span>'+
+        '<div class="meta">'+esc(i.platform||'')+' &middot; '+
+        esc(T('retry_count').replace('{count}',String(i.retry_count||0)))+
+        ' &middot; '+esc(i.category||T('unknown'))+' &middot; '+esc(i.last_reason||'')+
+        (i.next_attempt_at?' &middot; '+esc(T('next_attempt').replace('{value}',i.next_attempt_at)):'')+
+        (i.resume_available?' &middot; <span style="color:#a6e3a1">'+esc(T('resume_available'))+'</span>':'')+
         '</div>'+
-        '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">Retry</button>'+
-        (i.auto_retry?'<button onclick="cancelFailureRetry('+Number(i.id||0)+')">Cancel auto retry</button>':'')+
-        '<button onclick="discardFailure('+Number(i.id||0)+')">Discard</button></div></div>');
+        '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">'+T('retry')+'</button>'+
+        (i.auto_retry?'<button onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
+        '<button onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
   }).catch(()=>{});
   api('/api/library').then(d=>{
-    renderItems(document.getElementById('lib-list'),d.history,'No recordings yet.',
-      i=>'<div class="item"><div class="title">'+esc(i.title||'Untitled')+'</div>'+
+    renderItems(document.getElementById('lib-list'),d.history,T('no_recordings'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||T('untitled'))+'</div>'+
         '<div class="meta">'+esc(i.platform||'')+' &middot; '+esc(i.date||'')+' &middot; '+esc(i.quality||'')+'</div></div>');
   }).catch(()=>{});
   api('/api/monitor').then(d=>{
-    renderItems(document.getElementById('mon-list'),d.channels,'No channels monitored.',
+    renderItems(document.getElementById('mon-list'),d.channels,T('no_channels'),
       i=>'<div class="item"><span class="badge '+(i.status==='live'?'badge-live':'badge-offline')+'">'+
-        esc((i.status||'offline').toUpperCase())+'</span>'+esc(i.channel||i.channel_id||'?')+
+        esc(T(i.status==='live'?'live':'offline').toUpperCase())+'</span>'+esc(i.channel||i.channel_id||'?')+
         ' <span style="color:#6c7086">('+esc(i.platform||'')+')</span></div>');
   }).catch(()=>{});
 }

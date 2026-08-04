@@ -314,6 +314,27 @@ class LocalServerTests(unittest.TestCase):
         err = self._expect_error("/ping", 401)
         self.assertEqual(err.get("err"), "token_invalid")
 
+    def test_web_remote_selects_language_from_header_and_query_setting(self):
+        with self._open(
+            "/",
+            headers={"Accept-Language": "es-ES,es;q=0.9,en;q=0.8"},
+        ) as response:
+            html = response.read().decode("utf-8")
+            self.assertEqual(response.headers["Content-Language"], "es")
+            self.assertIn('<html lang="es">', html)
+            self.assertIn("Estado", html)
+            self.assertIn("Biblioteca", html)
+            self.assertNotIn("{{", html)
+
+        with self._open(
+            "/?lang=en",
+            headers={"Accept-Language": "es"},
+        ) as response:
+            html = response.read().decode("utf-8")
+            self.assertEqual(response.headers["Content-Language"], "en")
+            self.assertIn('<html lang="en">', html)
+            self.assertIn(">Status<", html)
+
     def test_auth_rejections_are_audited_without_token_or_query_and_rate_limited(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             event_log = Path(tmpdir) / "security-events.jsonl"

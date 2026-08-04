@@ -17,10 +17,14 @@ def test_compiled_spanish_translation_is_available(qt_application):
 def test_catalogs_cover_hand_authored_ui_and_match_frozen_assets():
     messages, _locations = extract_messages()
     assert len(messages) >= 1_000
-    assert {"StreamKeep", "Status", "History", "Accessibility"} <= {
+    assert {"StreamKeep", "Status", "History", "Accessibility", "WebRemote"} <= {
         message.context for message in messages
     }
     assert update_catalogs(check=True)
+    assert i18n.translate_catalog("Status", "es", context="WebRemote") == "Estado"
+    assert i18n.translate_catalog(
+        "Not in the catalog", "es", context="WebRemote"
+    ) == "Not in the catalog"
 
     i18n_dir = Path(i18n.__file__).parent
     assert {path.stem for path in i18n_dir.glob("streamkeep_*.ts")} == {
