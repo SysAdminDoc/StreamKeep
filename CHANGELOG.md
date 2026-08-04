@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Closed the WCAG 2.2 accessibility gaps in custom desktop controls. Clip
+  handles, waveform/timeline scrubbers, and schedule blocks now meet the
+  24px target contract and offer keyboard plus single-pointer alternatives;
+  switch/slider role hints include orientation, focus reveal keeps controls
+  reachable in compact layouts, and System theme follows live OS contrast
+  preference changes.
+
 - Updated native HLS handling for RFC 8216bis delta playlists and DATERANGE.
   Retained segments are merged across `EXT-X-SKIP`, SCTE-35 and unknown
   vendor classes survive in `hls.markers.json`, interstitial assets remain

@@ -9,7 +9,10 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import CAT
-from .widgets import make_empty_state, make_status_banner, update_status_banner
+from .widgets import (
+    make_empty_state, make_status_banner, set_accessible,
+    set_accessible_role, update_status_banner,
+)
 
 _BLOCK_COLOR_KEYS = ["blue", "green", "peach", "mauve", "teal", "pink", "yellow", "lavender"]
 _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -86,6 +89,8 @@ class _GridCanvas(QWidget):
         self.setMinimumHeight(400)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleIdentifier("streamkeep-schedule-grid")
+        set_accessible_role(self, "grid")
         self.setAccessibleName("Weekly stream schedule")
         self.setAccessibleDescription(
             "No scheduled streams; use arrow keys to navigate schedule blocks"
@@ -136,8 +141,11 @@ class _GridCanvas(QWidget):
         y_start = max(0.0, y_start)
         x = self._label_w + day_idx * col_w + 4
         y = self._header_h + y_start * row_h + 2
-        width = max(14.0, col_w - 8)
-        height = max(10.0, duration * row_h - 4)
+        # A schedule block remains a 24x24 CSS-pixel target even when a short
+        # event paints to a smaller visual height. Keyboard arrows/Enter and
+        # this single click path invoke the same block selection signal.
+        width = max(24.0, col_w - 8)
+        height = max(24.0, duration * row_h - 4)
         return QRectF(x, y, width, height)
 
     def _segment_index_at(self, pos):
@@ -488,6 +496,34 @@ class ScheduleCalendar(QWidget):
         canvas_lay.setContentsMargins(12, 12, 12, 12)
         canvas_lay.setSpacing(0)
         self._canvas = _GridCanvas()
+        set_accessible(
+            self,
+            "Schedule calendar",
+            "Use Previous week, This week, and Next week to navigate; select a block with click or arrow keys",
+        )
+        for button, name, description in (
+            (
+                self.prev_btn,
+                "Previous week",
+                "Move the schedule calendar back one week",
+            ),
+            (
+                self.this_week_btn,
+                "This week",
+                "Return the schedule calendar to the current week",
+            ),
+            (
+                self.next_btn,
+                "Next week",
+                "Move the schedule calendar forward one week",
+            ),
+            (
+                self.refresh_btn,
+                "Refresh schedules",
+                "Fetch the latest scheduled streams",
+            ),
+        ):
+            set_accessible(button, name, description)
         self._canvas.block_clicked.connect(self.block_clicked.emit)
         canvas_lay.addWidget(self._canvas, 1)
         root.addWidget(canvas_card, 1)

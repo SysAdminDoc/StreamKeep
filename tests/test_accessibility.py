@@ -7,11 +7,16 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QLabel, QTableWidget
+from PyQt6.QtWidgets import (
+    QCheckBox, QLabel, QLineEdit, QSlider, QTableWidget, QVBoxLayout, QWidget,
+)
 
 from streamkeep.ui.calendar_widget import _GridCanvas
 from streamkeep.ui.clip_dialog import ScrubberView, WaveformWidget
-from streamkeep.ui.widgets import style_table, update_accessible_status
+from streamkeep.ui.widgets import (
+    set_accessible_slider, set_accessible_switch, style_table,
+    update_accessible_status, wrap_scroll_page,
+)
 
 
 def test_tables_and_status_expose_keyboard_and_text_state(qt_application):
@@ -79,6 +84,81 @@ def test_clip_visual_controls_have_keyboard_equivalents(qt_application):
     QTest.keyClick(waveform, Qt.Key.Key_Right)
     assert seeks == [0.05]
     assert waveform.accessibleName() == "Audio waveform preview"
+
+
+def test_drag_surfaces_have_24px_targets_and_native_role_hints(qt_application):
+    check = QCheckBox("Normalize")
+    set_accessible_switch(check, "Normalize audio")
+    assert check.property("accessibleRole") == "switch"
+    assert check.property("qtAccessibleRole") == "switch"
+
+    slider = QSlider(Qt.Orientation.Horizontal)
+    set_accessible_slider(slider, "Seek position")
+    assert slider.orientation() == Qt.Orientation.Horizontal
+    assert slider.property("accessibleRole") == "slider"
+    assert slider.property("accessibleOrientation") == "horizontal"
+
+    scrubber = ScrubberView()
+    assert scrubber._start_handle.boundingRect().width() >= 24
+    assert scrubber._end_handle.boundingRect().width() >= 24
+    waveform = WaveformWidget()
+    assert waveform.minimumHeight() >= 24
+
+    canvas = _GridCanvas()
+    segment = {
+        "channel": "alpha",
+        "title": "Short event",
+        "start_iso": "2026-07-13T12:00:00Z",
+        "end_iso": "2026-07-13T12:05:00Z",
+    }
+    canvas.resize(700, 400)
+    canvas.set_segments([(0, 12.0, segment)], date(2026, 7, 13))
+    rect = canvas._segment_rect(0, 12.0, segment)
+    assert rect.width() >= 24
+    assert rect.height() >= 24
+    assert canvas.property("accessibleRole") == "grid"
+    scrubber.close()
+    waveform.close()
+    canvas.close()
+
+
+def test_focus_reveal_keeps_minimum_size_controls_reachable(qt_application):
+    page = QWidget()
+    page.setMinimumSize(500, 900)
+    layout = QVBoxLayout(page)
+    layout.addStretch(1)
+    field = QLineEdit()
+    field.setMinimumWidth(480)
+    layout.addWidget(field)
+    scroll = wrap_scroll_page(page)
+    scroll.resize(320, 220)
+    scroll.show()
+    try:
+        qt_application.processEvents()
+        field.setFocus()
+        qt_application.processEvents()
+        assert field.hasFocus()
+        assert scroll.verticalScrollBar().value() > 0
+    finally:
+        scroll.close()
+
+
+def test_system_contrast_signal_changes_only_system_theme(qt_application, monkeypatch):
+    import streamkeep.theme as theme
+
+    monkeypatch.setattr(theme, "_system_prefers_high_contrast", lambda _app: True)
+    theme.apply_visual_system("system", "cozy", "", qt_application)
+    assert theme.CAT["base"] == theme.CAT_HIGH_CONTRAST["base"]
+
+    theme.apply_visual_system("dark", "cozy", "", qt_application)
+    assert not theme._apply_system_accessibility_theme(qt_application)
+    assert theme.CAT["base"] == theme.STREAMKEEP_DARK["base"]
+    theme.apply_visual_system("system", "cozy", "", qt_application)
+    monkeypatch.setattr(theme, "_system_prefers_high_contrast", lambda _app: False)
+    monkeypatch.setattr(theme, "_detect_system_theme", lambda: "light")
+    assert theme._apply_system_accessibility_theme(qt_application)
+    assert theme.CAT["base"] == theme.STREAMKEEP_LIGHT["base"]
+    theme.apply_visual_system("dark", "cozy", "", qt_application)
 
 
 def test_clip_custom_paints_follow_theme_and_accent(qt_application):

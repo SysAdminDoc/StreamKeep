@@ -8,9 +8,10 @@ without importing the god object.
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QObject, QTimer, Qt
 from PyQt6.QtWidgets import (
-    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QComboBox, QFrame,
+    QAbstractButton, QAbstractItemView, QAbstractSpinBox, QCheckBox,
+    QComboBox, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -85,6 +86,45 @@ def set_accessible(widget, name, description=""):
     return widget
 
 
+def set_accessible_role(widget, role, *, orientation=""):
+    """Attach the Qt 6.11 role/orientation contract to a custom widget.
+
+    PyQt6 does not currently expose ``QAccessible::setFactory`` or the
+    ``QAccessible::Role`` enum. These stable dynamic properties are consumed
+    by the platform accessibility bridge and by the offscreen audit suite;
+    native Qt controls still expose their built-in role as usual.
+    """
+    clean_role = _accessible_text(role).casefold()
+    if clean_role:
+        widget.setProperty("accessibleRole", clean_role)
+        widget.setProperty("qtAccessibleRole", clean_role)
+    clean_orientation = _accessible_text(orientation).casefold()
+    if clean_orientation:
+        widget.setProperty("accessibleOrientation", clean_orientation)
+        widget.setProperty("qtAccessibleOrientation", clean_orientation)
+    return widget
+
+
+def set_accessible_switch(widget, name="", description=""):
+    """Mark a checkable control as a screen-reader switch."""
+    set_accessible(widget, name, description)
+    return set_accessible_role(widget, "switch")
+
+
+def set_accessible_slider(widget, name="", description=""):
+    """Mark a slider and retain its real Qt orientation for AT clients."""
+    set_accessible(widget, name, description)
+    orientation = ""
+    if hasattr(widget, "orientation"):
+        try:
+            orientation = widget.orientation().name
+        except AttributeError:
+            orientation = str(widget.orientation())
+    return set_accessible_role(
+        widget, "slider", orientation=orientation or "horizontal",
+    )
+
+
 def bind_label(label, control, *, name="", description=""):
     """Associate a visible label with its keyboard-focusable control."""
     label.setBuddy(control)
@@ -148,6 +188,10 @@ def configure_accessibility(root, *, owner=None, page_name="", names=None):
         if is_interactive and candidate:
             description = explicit_description or widget.toolTip()
             set_accessible(widget, candidate, description)
+            if isinstance(widget, QCheckBox):
+                set_accessible_role(widget, "switch")
+            elif isinstance(widget, QSlider):
+                set_accessible_slider(widget)
             widget.setProperty("accessibilityConfigured", True)
 
     focusable_types = (
@@ -695,7 +739,33 @@ def wrap_scroll_page(page):
     scroll.viewport().setObjectName("chrome")
     scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     scroll.setWidget(page)
+    reveal_filter = _FocusRevealFilter(scroll)
+    scroll._streamkeep_focus_reveal_filter = reveal_filter
+    for candidate in [page, *page.findChildren(QWidget)]:
+        candidate.installEventFilter(reveal_filter)
     return scroll
+
+
+class _FocusRevealFilter(QObject):
+    """Keep focused controls visible inside a dense scroll page."""
+
+    def __init__(self, scroll):
+        super().__init__(scroll)
+        self.scroll = scroll
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.FocusIn and isinstance(watched, QWidget):
+            QTimer.singleShot(0, lambda: self._reveal(watched))
+        return False
+
+    def _reveal(self, widget):
+        try:
+            if widget is not None and widget.isVisible():
+                self.scroll.ensureWidgetVisible(widget, 24, 24)
+        except RuntimeError:
+            # The page may have been torn down between FocusIn and the queued
+            # geometry pass; that is not an accessibility failure.
+            return
 
 
 def style_table(table, row_height=46, *, accessible_name="", accessible_description=""):

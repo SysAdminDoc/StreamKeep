@@ -9,6 +9,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ..i18n import TranslatableWidget
+from ..ui.widgets import (
+    set_accessible, set_accessible_slider, set_accessible_switch,
+)
 
 def _fmt_time(secs):
     s = max(0, int(secs or 0))
@@ -52,6 +55,9 @@ class PlayerControls(TranslatableWidget):
         self.play_btn.setFixedWidth(36)
         self.play_btn.setObjectName("primary")
         self.play_btn.setToolTip("Play or pause the current recording")
+        set_accessible(
+            self.play_btn, "Play or pause", "Toggle playback with Enter or Space",
+        )
         self.play_btn.clicked.connect(self.toggle_pause.emit)
         lay.addWidget(self.play_btn)
 
@@ -60,6 +66,7 @@ class PlayerControls(TranslatableWidget):
         stop_btn.setFixedWidth(36)
         stop_btn.setObjectName("secondary")
         stop_btn.setToolTip("Stop playback")
+        set_accessible(stop_btn, "Stop playback", "Stop the current recording")
         stop_btn.clicked.connect(self.stop_requested.emit)
         lay.addWidget(stop_btn)
 
@@ -73,6 +80,11 @@ class PlayerControls(TranslatableWidget):
         # Seek slider
         self.seek_slider = QSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 1000)
+        set_accessible_slider(
+            self.seek_slider,
+            "Seek position",
+            "Use Left and Right arrows to seek; Shift moves in smaller steps",
+        )
         self.seek_slider.sliderPressed.connect(self._on_seek_press)
         self.seek_slider.sliderReleased.connect(self._on_seek_release)
         self.seek_slider.sliderMoved.connect(self._on_seek_move)
@@ -93,6 +105,9 @@ class PlayerControls(TranslatableWidget):
         self.vol_slider.setRange(0, 150)
         self.vol_slider.setValue(100)
         self.vol_slider.setFixedWidth(80)
+        set_accessible_slider(
+            self.vol_slider, "Volume", "Adjust playback volume from zero to 150 percent",
+        )
         self.vol_slider.valueChanged.connect(self.volume_changed.emit)
         lay.addWidget(self.vol_slider)
 
@@ -102,6 +117,9 @@ class PlayerControls(TranslatableWidget):
         for s in ("0.25x", "0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x", "3x"):
             self.speed_combo.addItem(s, float(s.rstrip("x")))
         self.speed_combo.setCurrentIndex(3)  # 1x
+        set_accessible(
+            self.speed_combo, "Playback speed", "Choose the playback speed",
+        )
         self.speed_combo.currentIndexChanged.connect(
             lambda i: self.speed_changed.emit(self.speed_combo.itemData(i))
         )
@@ -111,6 +129,9 @@ class PlayerControls(TranslatableWidget):
         self.sub_combo = QComboBox()
         self.sub_combo.setFixedWidth(90)
         self.sub_combo.addItem("Subs Off", False)
+        set_accessible(
+            self.sub_combo, "Subtitle track", "Choose a subtitle track or turn subtitles off",
+        )
         self.sub_combo.currentIndexChanged.connect(
             lambda i: self.subtitle_changed.emit(self.sub_combo.itemData(i))
         )
@@ -121,6 +142,7 @@ class PlayerControls(TranslatableWidget):
         pip_btn.setFixedWidth(36)
         pip_btn.setObjectName("ghost")
         pip_btn.setToolTip("Picture-in-Picture mini player")
+        set_accessible(pip_btn, "Picture in picture", pip_btn.toolTip())
         pip_btn.clicked.connect(self.pip_requested.emit)
         lay.addWidget(pip_btn)
 
@@ -129,6 +151,7 @@ class PlayerControls(TranslatableWidget):
         fs_btn.setFixedWidth(36)
         fs_btn.setObjectName("ghost")
         fs_btn.setToolTip("Toggle fullscreen")
+        set_accessible(fs_btn, "Toggle fullscreen", fs_btn.toolTip())
         fs_btn.clicked.connect(self.fullscreen_requested.emit)
         lay.addWidget(fs_btn)
 
@@ -147,15 +170,22 @@ class PlayerControls(TranslatableWidget):
             sl.setValue(0)
             sl.setFixedWidth(50)
             sl.setToolTip(f"{band_name} (-12 to +12 dB)")
+            set_accessible_slider(sl, band_name, sl.toolTip())
             sl.valueChanged.connect(self._emit_eq)
             eq_row.addWidget(sl)
             self._eq_sliders.append(sl)
         self._normalize_check = QCheckBox("Normalize")
         self._normalize_check.setToolTip("Dynamic audio normalization (mpv dynaudnorm)")
+        set_accessible_switch(
+            self._normalize_check, "Normalize audio", self._normalize_check.toolTip(),
+        )
         self._normalize_check.toggled.connect(self.normalize_changed.emit)
         eq_row.addWidget(self._normalize_check)
         self._mono_check = QCheckBox("Mono")
         self._mono_check.setToolTip("Downmix to mono")
+        set_accessible_switch(
+            self._mono_check, "Mono audio", self._mono_check.toolTip(),
+        )
         self._mono_check.toggled.connect(self.mono_changed.emit)
         eq_row.addWidget(self._mono_check)
         eq_row.addStretch(1)

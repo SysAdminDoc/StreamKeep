@@ -41,6 +41,9 @@ from .widgets import (
     make_dialog_section,
     make_status_banner,
     set_accessible,
+    set_accessible_role,
+    set_accessible_slider,
+    set_accessible_switch,
     update_status_banner,
 )
 
@@ -48,6 +51,7 @@ THUMB_COUNT = 20
 THUMB_W = 120
 THUMB_H = 68     # 16:9-ish placeholder height when thumbs are missing
 STRIP_PAD = 6
+HANDLE_TARGET = 24  # WCAG 2.5.8 minimum pointer target in scene pixels
 
 # Social clip export presets (F31)
 SOCIAL_PRESETS = [
@@ -121,11 +125,13 @@ class ScrubberView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFixedHeight(THUMB_H + 30)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleIdentifier("streamkeep-clip-range-slider")
         set_accessible(
             self,
             "Clip timeline handles",
             "Press Space to choose the start or end handle, then use arrow keys to adjust it",
         )
+        set_accessible_role(self, "slider", orientation="horizontal")
         self.setStyleSheet("background: transparent;")
         self._thumb_items = []
         self._start_ratio = 0.0
@@ -270,8 +276,12 @@ class ScrubberView(QGraphicsView):
             return
         sx = self._start_ratio * self._strip_width
         ex = self._end_ratio * self._strip_width
-        self._start_handle.setRect(sx - 2, -2, 4, THUMB_H + 4)
-        self._end_handle.setRect(ex - 2, -2, 4, THUMB_H + 4)
+        # The painted handles double as their hit targets. A 24px target lets
+        # one pointer click or drag reach either value even at the minimum
+        # density; keyboard arrows/Home/End remain equivalent alternatives.
+        target = float(HANDLE_TARGET)
+        self._start_handle.setRect(sx - target / 2, -10, target, THUMB_H + 20)
+        self._end_handle.setRect(ex - target / 2, -10, target, THUMB_H + 20)
         self._dim_left.setRect(0, 0, max(0, sx), THUMB_H)
         self._dim_right.setRect(ex, 0, max(0, self._strip_width - ex), THUMB_H)
         self.setAccessibleDescription(
@@ -304,6 +314,15 @@ class ScrubberView(QGraphicsView):
                 )
                 ratio = self._end_ratio
             self.preview_requested.emit(ratio)
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Home, Qt.Key.Key_End):
+            value = 0.0 if event.key() == Qt.Key.Key_Home else 1.0
+            if self._keyboard_target == "start":
+                self.set_handles(value, self._end_ratio)
+            else:
+                self.set_handles(self._start_ratio, value)
+            self.preview_requested.emit(value)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -498,12 +517,14 @@ class WaveformWidget(QWidget):
         self.setFixedHeight(WAVE_H)
         self.setMinimumWidth(200)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleIdentifier("streamkeep-waveform-slider")
         self._seek_ratio = 0.0
         set_accessible(
             self,
             "Audio waveform preview",
             "Use Left and Right arrows to move the preview position",
         )
+        set_accessible_role(self, "slider", orientation="horizontal")
 
     def set_peaks(self, peaks):
         self._peaks = peaks
@@ -781,6 +802,11 @@ class ClipDialog(TranslatableDialog):
         mode_row = QHBoxLayout()
         mode_row.setSpacing(10)
         self.reencode_check = QCheckBox("Frame-accurate (re-encode)")
+        set_accessible_switch(
+            self.reencode_check,
+            "Frame-accurate re-encode",
+            "Toggle frame-accurate trimming instead of stream copy",
+        )
         self.reencode_check.setToolTip(
             "Off (default): lossless stream copy — fast, but cut-points "
             "snap to the nearest keyframe.\nOn: frame-exact trim using "
@@ -811,6 +837,11 @@ class ClipDialog(TranslatableDialog):
         self._crop_lbl.setVisible(False)
         social_row.addWidget(self._crop_lbl)
         self.crop_slider = QSlider(Qt.Orientation.Horizontal)
+        set_accessible_slider(
+            self.crop_slider,
+            "Crop offset",
+            "Move the horizontal crop position for the selected social preset",
+        )
         self.crop_slider.setRange(0, 100)
         self.crop_slider.setValue(50)
         self.crop_slider.setFixedWidth(120)

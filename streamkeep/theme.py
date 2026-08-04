@@ -80,6 +80,7 @@ DENSITIES = {"compact": DENSITY_COMPACT, "cozy": DENSITY_COZY, "spacious": DENSI
 _active_density = dict(DENSITY_COZY)
 _active_theme = "dark"
 _active_accent = ""
+_system_accessibility_observers = {}
 
 
 def get_density():
@@ -139,6 +140,63 @@ def _detect_system_theme():
         return "light" if val == 1 else "dark"
     except Exception:
         return "dark"
+
+
+def _system_prefers_high_contrast(app):
+    """Read Qt 6.10+'s OS contrast hint when the runtime exposes it."""
+    try:
+        hints = app.styleHints().accessibility()
+        preference = hints.contrastPreference()
+        return getattr(preference, "name", "") == "HighContrast"
+    except (AttributeError, RuntimeError, TypeError):
+        return False
+
+
+def _resolve_system_theme(app=None):
+    if app is not None and _system_prefers_high_contrast(app):
+        return "high_contrast"
+    return _detect_system_theme()
+
+
+def _apply_system_accessibility_theme(app):
+    """Apply a changed OS contrast preference only in System mode."""
+    global CAT
+    if app is None or _active_theme != "system":
+        return False
+    resolved_theme = _resolve_system_theme(app)
+    next_palette = THEMES.get(resolved_theme, STREAMKEEP_DARK)
+    if CAT == next_palette:
+        return False
+    CAT.clear()
+    CAT.update(next_palette)
+    _rebuild_stylesheet(app)
+    return True
+
+
+def _bind_system_accessibility_observer(app):
+    """Listen for live contrast changes without affecting explicit themes."""
+    if app is None:
+        return
+    key = id(app)
+    if key in _system_accessibility_observers:
+        return
+    try:
+        hints = app.styleHints().accessibility()
+        if hints is None:
+            return
+    except (AttributeError, RuntimeError):
+        return
+
+    def on_contrast_changed(*_args):
+        _apply_system_accessibility_theme(app)
+
+    try:
+        hints.contrastPreferenceChanged.connect(on_contrast_changed)
+    except (AttributeError, RuntimeError):
+        return
+    # Retain the Python callback and QObject for the application's lifetime;
+    # Qt owns the signal source and disconnects it on application teardown.
+    _system_accessibility_observers[key] = (hints, on_contrast_changed)
 
 def build_stylesheet(p=None):
     """Build StreamKeep's restrained, text-led visual system.
@@ -742,7 +800,8 @@ def apply_visual_system(theme="dark", density="cozy", accent="", app=None):
     density = str(density or "cozy")
     _active_density = dict(DENSITIES.get(density, DENSITY_COZY))
     _active_theme = theme
-    resolved_theme = _detect_system_theme() if theme == "system" else theme
+    _bind_system_accessibility_observer(app)
+    resolved_theme = _resolve_system_theme(app) if theme == "system" else theme
     CAT.clear()
     CAT.update(THEMES.get(resolved_theme, STREAMKEEP_DARK))
     _active_accent = _normalize_accent(accent)

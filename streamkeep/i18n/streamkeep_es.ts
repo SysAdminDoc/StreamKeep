@@ -256,8 +256,8 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="67" />
-            <location filename="streamkeep/player/player_controls.py" line="82" />
+            <location filename="streamkeep/player/player_controls.py" line="74" />
+            <location filename="streamkeep/player/player_controls.py" line="94" />
             <location filename="streamkeep/player/sync_viewer.py" line="108" />
             <location filename="streamkeep/player/sync_viewer.py" line="119" />
             <source>0:00</source>
@@ -304,7 +304,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="820" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="851" />
             <source>50%</source>
             <translation type="unfinished" />
         </message>
@@ -324,18 +324,18 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="628" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="649" />
             <source>&lt;b&gt;File&lt;/b&gt;: {os.path.basename(source_path)}&lt;br&gt;&lt;b&gt;Duration&lt;/b&gt;: {fmt_duration(self._duration) if self._duration else 'Unknown'}</source>
             <translation type="unfinished" />
         </message>
         <message>
             <location filename="streamkeep/player/pip_window.py" line="76" />
-            <location filename="streamkeep/player/player_controls.py" line="128" />
+            <location filename="streamkeep/player/player_controls.py" line="150" />
             <source>[ ]</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="59" />
+            <location filename="streamkeep/player/player_controls.py" line="65" />
             <source>[]</source>
             <translation type="unfinished" />
         </message>
@@ -1071,7 +1071,7 @@ Archive workstation</source>
             <translation>Examinar</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="834" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="865" />
             <source>Browse...</source>
             <translation type="unfinished" />
         </message>
@@ -1137,7 +1137,7 @@ Archive workstation</source>
             <translation>Examinar…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="625" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="661" />
             <source>Browsing a different week. Click a block to review timing and open that channel's recording profile.</source>
             <translation type="unfinished" />
         </message>
@@ -1193,7 +1193,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="583" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="619" />
             <source>Calendar view is most useful after a schedule refresh has cached Twitch programming windows.</source>
             <translation type="unfinished" />
         </message>
@@ -1379,7 +1379,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="216" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="222" />
             <source>Chat spike @ {r * 100}%</source>
             <translation type="unfinished" />
         </message>
@@ -1415,7 +1415,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/widgets.py" line="633" />
+            <location filename="streamkeep/ui/widgets.py" line="677" />
             <source>Check the value and try again</source>
             <translation type="unfinished" />
         </message>
@@ -1468,7 +1468,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="775" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="796" />
             <source>Choose accuracy, framing, and destination before saving the final clip.</source>
             <translation type="unfinished" />
         </message>
@@ -1478,7 +1478,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1196" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1227" />
             <source>Choose an output path</source>
             <translation type="unfinished" />
         </message>
@@ -1570,12 +1570,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="737" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="758" />
             <source>Clip length</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="634" />
             <source>CLIP STUDIO</source>
             <translation type="unfinished" />
         </message>
@@ -1595,7 +1595,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="856" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="887" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="111" />
             <location filename="streamkeep/ui/recover_dialog.py" line="165" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="500" />
@@ -1866,7 +1866,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="810" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="836" />
             <source>Crop offset:</source>
             <translation type="unfinished" />
         </message>
@@ -1881,7 +1881,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="621" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="657" />
             <source>Current week in your local timezone. Use the calendar to spot upcoming schedule windows quickly.</source>
             <translation type="unfinished" />
         </message>
@@ -2054,7 +2054,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="700" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="721" />
             <source>Detect scenes</source>
             <translation type="unfinished" />
         </message>
@@ -2065,7 +2065,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1299" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1330" />
             <source>Detecting scenes</source>
             <translation type="unfinished" />
         </message>
@@ -2264,7 +2264,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="158" />
+            <location filename="streamkeep/player/player_controls.py" line="185" />
             <source>Downmix to mono</source>
             <translation type="unfinished" />
         </message>
@@ -2275,12 +2275,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="659" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="680" />
             <source>Drag the handles</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="637" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="658" />
             <source>Drag the handles or click the waveform to refine your clip visually before export.</source>
             <translation type="unfinished" />
         </message>
@@ -2315,12 +2315,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="880" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="911" />
             <source>Duration could not be read</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="154" />
+            <location filename="streamkeep/player/player_controls.py" line="178" />
             <source>Dynamic audio normalization (mpv dynaudnorm)</source>
             <translation type="unfinished" />
         </message>
@@ -2507,12 +2507,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="728" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="749" />
             <source>End (HH:MM:SS)</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1240" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1271" />
             <source>End time needs to be later than start time</source>
             <translation type="unfinished" />
         </message>
@@ -2541,7 +2541,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="139" />
+            <location filename="streamkeep/player/player_controls.py" line="162" />
             <source>EQ</source>
             <translation type="unfinished" />
         </message>
@@ -2647,17 +2647,17 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1464" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1495" />
             <source>Export canceled</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="860" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="891" />
             <source>Export Clip</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1271" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1302" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="234" />
             <source>Export complete</source>
             <translation type="unfinished" />
@@ -2668,7 +2668,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1278" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1309" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="224" />
             <source>Export failed</source>
             <translation type="unfinished" />
@@ -2685,7 +2685,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="849" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="880" />
             <source>Export progress and ffmpeg messages appear here.</source>
             <translation type="unfinished" />
         </message>
@@ -2695,7 +2695,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="775" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="796" />
             <source>Export settings</source>
             <translation type="unfinished" />
         </message>
@@ -2716,7 +2716,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1187" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1218" />
             <source>Exporting {mode}</source>
             <translation type="unfinished" />
         </message>
@@ -3047,7 +3047,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="783" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="804" />
             <source>Frame-accurate (re-encode)</source>
             <translation type="unfinished" />
         </message>
@@ -3505,7 +3505,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1331" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1362" />
             <source>Jump to {format_hhmmss(t)[:8]}</source>
             <translation type="unfinished" />
         </message>
@@ -3999,7 +3999,7 @@ rate limit is set.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="157" />
+            <location filename="streamkeep/player/player_controls.py" line="184" />
             <source>Mono</source>
             <translation type="unfinished" />
         </message>
@@ -4146,7 +4146,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="451" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="459" />
             <source>Next week</source>
             <translation type="unfinished" />
         </message>
@@ -4378,27 +4378,27 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="574" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="610" />
             <source>No schedule cache yet</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="582" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="618" />
             <source>No schedule data yet</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="479" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="487" />
             <source>No schedule in view</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="595" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="631" />
             <source>No scheduled streams in view</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="90" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="95" />
             <source>No scheduled streams; use arrow keys to navigate schedule blocks</source>
             <translation type="unfinished" />
         </message>
@@ -4409,7 +4409,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="691" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="712" />
             <source>No storyboard yet. Detect scenes to create quick jump points.</source>
             <translation type="unfinished" />
         </message>
@@ -4429,7 +4429,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1218" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1249" />
             <source>No valid ranges to export</source>
             <translation type="unfinished" />
         </message>
@@ -4476,7 +4476,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="153" />
+            <location filename="streamkeep/player/player_controls.py" line="177" />
             <source>Normalize</source>
             <translation type="unfinished" />
         </message>
@@ -4497,7 +4497,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="587" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="623" />
             <source>Nothing scheduled for this week</source>
             <translation type="unfinished" />
         </message>
@@ -4538,7 +4538,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="784" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="810" />
             <source>Off (default): lossless stream copy — fast, but cut-points snap to the nearest keyframe.
 On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
@@ -4797,12 +4797,12 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1204" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1235" />
             <source>Output path conflicts with the source</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="830" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="861" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1594" />
             <source>Output:</source>
             <translation>Salida:</translation>
@@ -4990,7 +4990,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="123" />
+            <location filename="streamkeep/player/player_controls.py" line="144" />
             <source>Picture-in-Picture mini player</source>
             <translation type="unfinished" />
         </message>
@@ -5000,7 +5000,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="120" />
+            <location filename="streamkeep/player/player_controls.py" line="141" />
             <source>PiP</source>
             <translation type="unfinished" />
         </message>
@@ -5040,7 +5040,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="804" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="830" />
             <source>Platform:</source>
             <translation type="unfinished" />
         </message>
@@ -5050,7 +5050,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="54" />
+            <location filename="streamkeep/player/player_controls.py" line="57" />
             <source>Play or pause the current recording</source>
             <translation type="unfinished" />
         </message>
@@ -5225,7 +5225,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="580" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="601" />
             <source>Preview position {self._seek_ratio * 100} percent</source>
             <translation type="unfinished" />
         </message>
@@ -5270,7 +5270,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="428" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="436" />
             <source>Previous week</source>
             <translation type="unfinished" />
         </message>
@@ -5477,12 +5477,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="238" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="244" />
             <source>Range {i + 1}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="709" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="730" />
             <source>Ranges</source>
             <translation type="unfinished" />
         </message>
@@ -5560,7 +5560,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1057" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1088" />
             <source>Ready to export a {export_mode}</source>
             <translation type="unfinished" />
         </message>
@@ -5703,13 +5703,13 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="457" />
-            <location filename="streamkeep/ui/calendar_widget.py" line="517" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="465" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="553" />
             <source>Refresh schedules</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="574" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="610" />
             <source>Refresh schedules after adding Twitch channels to fill this calendar with upcoming stream windows.</source>
             <translation type="unfinished" />
         </message>
@@ -5719,17 +5719,17 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="479" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="487" />
             <source>Refresh Twitch schedules or move to another week to look ahead.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="561" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="597" />
             <source>Refreshing schedule cache</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="569" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="605" />
             <source>Refreshing schedule data</source>
             <translation type="unfinished" />
         </message>
@@ -6047,7 +6047,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="702" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="723" />
             <source>Run scene detection (requires scenedetect)</source>
             <translation type="unfinished" />
         </message>
@@ -6229,7 +6229,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="570" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="606" />
             <source>Schedule blocks will appear here as soon as the refresh completes.</source>
             <translation type="unfinished" />
         </message>
@@ -6239,12 +6239,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="556" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="592" />
             <source>Schedule data could not be refreshed</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="602" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="638" />
             <source>Schedule overview</source>
             <translation type="unfinished" />
         </message>
@@ -6254,7 +6254,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="548" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="584" />
             <source>Schedule refresh ran into a problem</source>
             <translation type="unfinished" />
         </message>
@@ -6536,12 +6536,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="382" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="390" />
             <source>Selected {self._tooltip_for_segment(segment)}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="355" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="363" />
             <source>Selected {self._tooltip_for_segment(self._segments[idx][2])}</source>
             <translation type="unfinished" />
         </message>
@@ -6571,7 +6571,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="634" />
             <source>Set in and out points visually, build highlight reels from multiple ranges, and export in the format that best fits the destination.</source>
             <translation type="unfinished" />
         </message>
@@ -6662,7 +6662,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="634" />
             <source>Single clip</source>
             <translation type="unfinished" />
         </message>
@@ -6768,7 +6768,7 @@ http://fallback:3128||Global fallback</source>
             <translation>Origen detectado</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="624" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="645" />
             <source>Source media</source>
             <translation type="unfinished" />
         </message>
@@ -6867,7 +6867,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="719" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="740" />
             <source>Start (HH:MM:SS)</source>
             <translation type="unfinished" />
         </message>
@@ -6887,7 +6887,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="277" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="287" />
             <source>Start {self._start_ratio * 100} percent; end {self._end_ratio * 100} percent; keyboard controls {self._keyboard_target} handle</source>
             <translation type="unfinished" />
         </message>
@@ -6939,7 +6939,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="62" />
+            <location filename="streamkeep/player/player_controls.py" line="68" />
             <source>Stop playback</source>
             <translation type="unfinished" />
         </message>
@@ -6999,7 +6999,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1341" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1372" />
             <source>Storyboard ready</source>
             <translation type="unfinished" />
         </message>
@@ -7040,7 +7040,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="561" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="597" />
             <source>StreamKeep is checking the latest Twitch schedule windows for channels in your watch list.</source>
             <translation type="unfinished" />
         </message>
@@ -7100,8 +7100,8 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation>Quite el audio de la salida y conserve la pista de vídeo</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="113" />
-            <location filename="streamkeep/player/player_controls.py" line="188" />
+            <location filename="streamkeep/player/player_controls.py" line="131" />
+            <location filename="streamkeep/player/player_controls.py" line="218" />
             <source>Subs Off</source>
             <translation type="unfinished" />
         </message>
@@ -7345,12 +7345,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="445" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="453" />
             <source>This week</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="596" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="632" />
             <source>This week is quiet for the currently cached channels, so there is nothing to plot on the calendar.</source>
             <translation type="unfinished" />
         </message>
@@ -7400,7 +7400,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="637" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="658" />
             <source>Timeline and preview</source>
             <translation type="unfinished" />
         </message>
@@ -7443,7 +7443,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="131" />
+            <location filename="streamkeep/player/player_controls.py" line="153" />
             <source>Toggle fullscreen</source>
             <translation type="unfinished" />
         </message>
@@ -7545,7 +7545,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="594" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="615" />
             <source>Trim / Clip</source>
             <translation type="unfinished" />
         </message>
@@ -7561,7 +7561,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="613" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="634" />
             <source>Trim, package, and export moments cleanly</source>
             <translation type="unfinished" />
         </message>
@@ -7576,7 +7576,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="557" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="593" />
             <source>Try again in a moment. Cached results will appear here when available.</source>
             <translation type="unfinished" />
         </message>
@@ -7586,7 +7586,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="587" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="623" />
             <source>Try the next or previous week, or refresh schedules if you expect upcoming streams to appear.</source>
             <translation type="unfinished" />
         </message>
@@ -7722,7 +7722,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="709" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="730" />
             <source>Use one range for a clean trim, or stack multiple ranges to export a highlight reel.</source>
             <translation type="unfinished" />
         </message>
@@ -7817,7 +7817,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="88" />
+            <location filename="streamkeep/player/player_controls.py" line="100" />
             <source>Vol</source>
             <translation type="unfinished" />
         </message>
@@ -7934,7 +7934,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="89" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="94" />
             <source>Weekly stream schedule</source>
             <translation type="unfinished" />
         </message>
@@ -7999,7 +7999,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="624" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="645" />
             <source>Work from the current recording without touching the original file.</source>
             <translation type="unfinished" />
         </message>
@@ -8145,7 +8145,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/player_controls.py" line="149" />
+            <location filename="streamkeep/player/player_controls.py" line="172" />
             <source>{band_name} (-12 to +12 dB)</source>
             <translation type="unfinished" />
         </message>
@@ -8302,7 +8302,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="538" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="574" />
             <source>{len(channels)} channel(s) in view</source>
             <translation type="unfinished" />
         </message>
@@ -8357,12 +8357,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="535" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="571" />
             <source>{len(self._segments)} scheduled item(s)</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="602" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="638" />
             <source>{len(self._segments)} scheduled stream(s) across {len(channels)} channel(s), spread over {day_count} day(s). Click any block to inspect it or jump into that channel's profile.</source>
             <translation type="unfinished" />
         </message>
@@ -8407,12 +8407,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="617" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="653" />
             <source>{self._week_start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="1143" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="1174" />
             <source>{self.crop_slider.value()}%</source>
             <translation type="unfinished" />
         </message>
@@ -8437,7 +8437,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/calendar_widget.py" line="541" />
+            <location filename="streamkeep/ui/calendar_widget.py" line="577" />
             <source>{timezone_name} shown</source>
             <translation type="unfinished" />
         </message>
@@ -8478,14 +8478,14 @@ Download again?</source>
         </message>
         <message>
             <location filename="streamkeep/player/pip_window.py" line="69" />
-            <location filename="streamkeep/player/player_controls.py" line="51" />
+            <location filename="streamkeep/player/player_controls.py" line="54" />
             <location filename="streamkeep/player/sync_viewer.py" line="102" />
             <location filename="streamkeep/player/sync_viewer.py" line="171" />
             <source>||</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/clip_dialog.py" line="661" />
+            <location filename="streamkeep/ui/clip_dialog.py" line="682" />
             <location filename="streamkeep/ui/main_window.py" line="2492" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1547" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1550" />
