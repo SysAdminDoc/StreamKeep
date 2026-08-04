@@ -1,0 +1,12 @@
+#EXTM3U
+#EXT-X-VERSION:9
+#EXT-X-TARGETDURATION:6
+#EXT-X-MEDIA-SEQUENCE:500
+#EXT-X-DATERANGE:ID="splice-500",CLASS="com.example.scte35",START-DATE="2026-08-01T12:00:00Z",DURATION=12.0,SCTE35-OUT="/DAhAAAAAAAAAP/wFAUAAABf",SCTE35-IN="/DAhAAAAAAAAAP/wFAUAAAAA",X-PUBLISHER-NOTE="preserve-me"
+#EXT-X-DATERANGE:ID="interstitial-1",CLASS="com.apple.hls.interstitial",START-DATE="2026-08-01T12:00:12Z",DURATION=6.0,X-ASSET-URI="interstitial/asset.m3u8?token=secret",X-ASSET-LIST="{\"URI\":\"https://ads.example.com/asset.m3u8?sig=secret\"}"
+#EXT-X-DATERANGE:ID="schedule-1",CLASS="com.apple.hls.daterange-schedule",START-DATE="2026-08-01T12:00:18Z",X-URI="schedules/dateranges.json"
+#EXTINF:6.0,
+seg500.ts
+#EXTINF:6.0,
+seg501.ts
+#EXT-X-ENDLIST

@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Updated native HLS handling for RFC 8216bis delta playlists and DATERANGE.
+  Retained segments are merged across `EXT-X-SKIP`, SCTE-35 and unknown
+  vendor classes survive in `hls.markers.json`, interstitial assets remain
+  marker-only, and guarded `daterange-schedule` resources are archived beside
+  the capture without persisting signed query material.
+
 - Added rolling archive-integrity scrubbing. Storage scans now perform cheap
   manifest presence/size/mtime checks, while the desktop and headless
   schedulers hash a configurable fraction of overdue recordings with durable

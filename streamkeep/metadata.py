@@ -840,6 +840,61 @@ class MetadataSaver:
         return True
 
     @staticmethod
+    def write_hls_markers(
+        output_dir, markers, schedules=(), file_base="",
+    ):
+        """Write public-safe HLS DATERANGE and schedule metadata.
+
+        Interstitial assets are represented as marker rows only. Their URIs
+        are never promoted to media inputs, and query material is scrubbed in
+        the sidecar just like the rest of the public metadata surface.
+        """
+        if not output_dir or not os.path.isdir(output_dir):
+            return False
+        marker_rows = list(markers or [])[:10_000]
+        schedule_rows = []
+        for item in list(schedules or [])[:256]:
+            if isinstance(item, dict):
+                uri = item.get("uri", "")
+                body = item.get("body", "")
+            elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                uri, body = item[0], item[1]
+            else:
+                continue
+            row = {"uri": scrub_public_text(uri)}
+            text_body = str(body or "")
+            try:
+                decoded = json.loads(text_body)
+            except (TypeError, ValueError):
+                row["body"] = scrub_public_text(text_body[:MAX_IMPORT_SIDECAR_BYTES])
+            else:
+                row["payload"] = scrub_public_data(decoded)
+            schedule_rows.append(row)
+        if not marker_rows and not schedule_rows:
+            return False
+        payload = {
+            "schema": "streamkeep.hls-markers",
+            "schema_version": 1,
+            "markers": scrub_public_data(marker_rows),
+            "schedules": schedule_rows,
+        }
+        base = os.path.basename(file_base) if file_base else "hls"
+        if not base or base in {".", ".."}:
+            base = "hls"
+        _atomic_write_text(
+            os.path.join(output_dir, f"{base}.markers.json"),
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        )
+        return True
+
+    @staticmethod
+    def write_markers(output_dir, markers, schedules=(), file_base=""):
+        """Compatibility alias for generic marker-sidecar callers."""
+        return MetadataSaver.write_hls_markers(
+            output_dir, markers, schedules=schedules, file_base=file_base,
+        )
+
+    @staticmethod
     def _xml_escape(value):
         if not value:
             return ""

@@ -6,6 +6,7 @@ pattern that the parsers must handle correctly.
 """
 
 import ipaddress
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,7 @@ from streamkeep.hls import (
     resume_identity_matches,
     validate_hls_manifest,
 )
+from streamkeep.metadata import MetadataSaver
 from streamkeep.models import ResumeState, default_media_tracks
 from streamkeep.net_guard import RemoteURLPolicyError
 
@@ -410,6 +412,54 @@ https://video.example.com/720p.m3u8
                 sentinel.read_text(encoding="utf-8"), "do-not-read"
             )
 
+    def test_daterange_asset_and_schedule_uris_are_resources_not_playlists(self):
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            references = validate_hls_manifest(
+                _read("daterange_interstitial.m3u8"),
+                "https://origin.example.com/live/media.m3u8",
+            )
+        self.assertIn(
+            "https://origin.example.com/live/interstitial/asset.m3u8?token=secret",
+            references.resources,
+        )
+        self.assertIn(
+            "https://origin.example.com/live/schedules/dateranges.json",
+            references.resources,
+        )
+        self.assertEqual(references.playlists, ())
+        self.assertEqual(
+            references.schedule_uris,
+            ("https://origin.example.com/live/schedules/dateranges.json",),
+        )
+
+    def test_daterange_schedule_is_fetched_by_the_guarded_preflight(self):
+        root = "https://origin.example.com/live/media.m3u8"
+        schedule = "https://origin.example.com/live/schedules/dateranges.json"
+        documents = {
+            root: _read("daterange_interstitial.m3u8"),
+            schedule: json.dumps({"events": [{"id": "e1", "token": "secret"}]}),
+        }
+        fetched = []
+        schedules = []
+
+        def fetch(url):
+            fetched.append(url)
+            return documents.get(url)
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            preflight_hls_manifest_tree(
+                root, fetch, on_schedule=lambda url, body: schedules.append((url, body))
+            )
+        self.assertEqual(fetched, [root, schedule])
+        self.assertEqual(schedules[0][0], schedule)
+        self.assertIn('"events"', schedules[0][1])
+
 
 class HLSMediaPlaylistTests(unittest.TestCase):
     def test_media_playlist_duration_and_segments(self):
@@ -470,6 +520,81 @@ class HLSMediaPlaylistTests(unittest.TestCase):
             [s.media_sequence for s in playlist.segments], [5, 7]
         )
         self.assertAlmostEqual(playlist.total_duration, 19.0, places=1)
+
+    def test_delta_playlist_merges_the_retained_window(self):
+        previous = parse_hls_media_playlist(
+            _read("media_delta_base.m3u8"), "https://cdn.example.com/live/"
+        )
+        current = parse_hls_media_playlist(
+            _read("media_delta.m3u8"),
+            "https://cdn.example.com/live/",
+            previous_playlist=previous,
+        )
+        self.assertEqual(current.skipped_segments, 2)
+        self.assertEqual(
+            [segment.media_sequence for segment in current.segments],
+            [100, 101, 102, 103],
+        )
+        self.assertEqual(
+            [segment.uri for segment in current.segments],
+            [
+                "https://cdn.example.com/live/seg100.ts",
+                "https://cdn.example.com/live/seg101.ts",
+                "https://cdn.example.com/live/seg102.ts",
+                "https://cdn.example.com/live/seg103.ts",
+            ],
+        )
+
+    def test_dateranges_preserve_scte_interstitial_and_unknown_attributes(self):
+        playlist = parse_hls_media_playlist(
+            _read("daterange_interstitial.m3u8"),
+            "https://cdn.example.com/live/media.m3u8",
+        )
+        self.assertEqual([s.media_sequence for s in playlist.segments], [500, 501])
+        self.assertNotIn(
+            "https://ads.example.com/asset.m3u8?sig=secret",
+            [segment.uri for segment in playlist.segments],
+        )
+        splice = playlist.dateranges[0]
+        self.assertEqual(splice["class"], "com.example.scte35")
+        self.assertEqual(splice["scte35_out"], "/DAhAAAAAAAAAP/wFAUAAABf")
+        self.assertEqual(splice["scte35_in"], "/DAhAAAAAAAAAP/wFAUAAAAA")
+        self.assertEqual(splice["attributes"]["X-PUBLISHER-NOTE"], "preserve-me")
+        interstitial = playlist.dateranges[1]
+        self.assertEqual(interstitial["type"], "interstitial")
+        self.assertEqual(
+            interstitial["asset_uri"],
+            "https://cdn.example.com/live/interstitial/asset.m3u8?token=secret",
+        )
+        self.assertIn("URI", interstitial["asset_list"])
+        self.assertTrue(playlist.dateranges[2]["is_schedule"])
+
+    def test_marker_sidecar_is_written_and_redacts_signed_asset_queries(self):
+        playlist = parse_hls_media_playlist(
+            _read("daterange_interstitial.m3u8"),
+            "https://cdn.example.com/live/media.m3u8",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(
+                MetadataSaver.write_hls_markers(
+                    tmpdir,
+                    playlist.dateranges,
+                    schedules=[
+                        (
+                            "https://cdn.example.com/schedule.json?sig=secret",
+                            '{"events":[{"token":"secret"}]}',
+                        )
+                    ],
+                    file_base="capture",
+                )
+            )
+            sidecar = Path(tmpdir) / "capture.markers.json"
+            sidecar_text = sidecar.read_text(encoding="utf-8")
+            payload = json.loads(sidecar_text)
+        self.assertEqual(payload["schema"], "streamkeep.hls-markers")
+        self.assertEqual(len(payload["markers"]), 3)
+        self.assertNotIn("token=secret", sidecar_text)
+        self.assertNotIn("token", payload["schedules"][0]["payload"]["events"][0])
 
 
 class HLSResumeIdentityTests(unittest.TestCase):

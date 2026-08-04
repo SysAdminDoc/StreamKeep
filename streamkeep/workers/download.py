@@ -147,6 +147,9 @@ class DownloadWorker(QThread):
         self.hls_media_sequence = 0
         self.hls_discontinuity_sequence = 0
         self.hls_playlist_segment_count = 0
+        self.hls_markers = []
+        self.hls_marker_schedules = []
+        self._hls_playlist = None
         self.download_sections = ""  # yt-dlp --download-sections value (F21)
         self.max_retries = 2
         self.parallel_connections = 4
@@ -327,6 +330,99 @@ class DownloadWorker(QThread):
         self.hls_playlist_segment_count = len(
             getattr(playlist, "segments", []) or []
         )
+        self._hls_playlist = playlist
+        dateranges = list(getattr(playlist, "dateranges", []) or [])
+        if dateranges:
+            self._merge_hls_markers(dateranges)
+
+    def _merge_hls_markers(self, markers):
+        """Append DATERANGE rows without losing vendor-specific attributes."""
+        seen = {
+            (
+                str(item.get("id", "")),
+                str(item.get("class", "")),
+                str(item.get("start_date", "")),
+            )
+            for item in self.hls_markers
+            if isinstance(item, dict)
+        }
+        for marker in list(markers or []):
+            if not isinstance(marker, dict):
+                continue
+            key = (
+                str(marker.get("id", "")),
+                str(marker.get("class", "")),
+                str(marker.get("start_date", "")),
+            )
+            if key in seen:
+                # A repeated ID is a later update; replace the older row so
+                # SCTE35-IN and END-DATE updates are not lost.
+                marker_id = str(marker.get("id", ""))
+                for index, existing in enumerate(self.hls_markers):
+                    if (
+                        isinstance(existing, dict)
+                        and str(existing.get("id", "")) == marker_id
+                    ):
+                        self.hls_markers[index] = marker
+                        break
+                continue
+            seen.add(key)
+            self.hls_markers.append(marker)
+
+    def _record_hls_manifest(self, url, body, root_url):
+        """Observe guarded HLS bodies for identity and marker metadata."""
+        text = str(body or "")
+        if not text.lstrip().startswith("#EXTM3U"):
+            return
+        is_media = any(
+            tag in text
+            for tag in (
+                "#EXTINF:", "#EXT-X-MEDIA-SEQUENCE:",
+                "#EXT-X-TARGETDURATION:",
+            )
+        )
+        if not is_media:
+            return
+        from ..hls import parse_hls_media_playlist
+
+        previous = self._hls_playlist if str(url) == str(root_url) else None
+        playlist = parse_hls_media_playlist(
+            text, str(url), previous_playlist=previous,
+        )
+        if str(url) == str(root_url) or self._hls_playlist is None:
+            self.set_hls_playlist_identity(playlist)
+        self._merge_hls_markers(getattr(playlist, "dateranges", []) or [])
+
+    def _record_hls_schedule(self, url, body):
+        target = str(url or "")
+        if not target or any(
+            str(item.get("uri", "")) == target
+            for item in self.hls_marker_schedules
+            if isinstance(item, dict)
+        ):
+            return
+        self.hls_marker_schedules.append({
+            "uri": target,
+            "body": str(body or ""),
+        })
+
+    def _write_hls_marker_sidecar(self):
+        if not self.hls_markers and not self.hls_marker_schedules:
+            return
+        try:
+            from ..metadata import MetadataSaver
+            if MetadataSaver.write_hls_markers(
+                self.output_dir,
+                self.hls_markers,
+                schedules=self.hls_marker_schedules,
+                file_base="hls",
+            ):
+                self.log.emit(
+                    f"[HLS] Archived {len(self.hls_markers)} marker(s)"
+                    f" and {len(self.hls_marker_schedules)} schedule(s)"
+                )
+        except Exception as error:  # noqa: BLE001 - sidecar is best effort
+            self.log.emit(f"[HLS] Marker sidecar unavailable: {error}")
 
     def set_manifest_refresh_resolver(self, resolver):
         """Inject a delivery resolver for headless integrations and tests.
@@ -558,7 +654,16 @@ class DownloadWorker(QThread):
 
             body = guarded_curl(url, self._guarded_proxy.url, timeout=20)
             if body and body.lstrip().startswith("#EXTM3U"):
-                return parse_hls_media_playlist(body, url)
+                playlist = parse_hls_media_playlist(
+                    body,
+                    url,
+                    previous_playlist=getattr(self, "_hls_playlist", None),
+                )
+                self.set_hls_playlist_identity(playlist)
+                self._merge_hls_markers(
+                    getattr(playlist, "dateranges", []) or []
+                )
+                return playlist
         except Exception as error:  # noqa: BLE001 - diagnostics must not abort refresh
             self.log.emit(f"[REFRESH] Could not inspect fresh HLS identity: {error}")
         return None
@@ -1236,7 +1341,19 @@ class DownloadWorker(QThread):
             for url, kind in manifest_inputs:
                 safe_url = normalized[url]
                 if kind == "hls":
-                    preflight_hls_manifest_tree(safe_url, fetch_text)
+                    # DATERANGE schedules and marker rows are observed only
+                    # after each body has passed the same URL policy used by
+                    # the download graph.
+                    self.hls_markers = []
+                    self.hls_marker_schedules = []
+                    preflight_hls_manifest_tree(
+                        safe_url,
+                        fetch_text,
+                        on_manifest=lambda current, body, root=safe_url:
+                        self._record_hls_manifest(current, body, root),
+                        on_schedule=self._record_hls_schedule,
+                    )
+                    self._write_hls_marker_sidecar()
                 elif kind == "dash":
                     preflight_dash_manifest(safe_url, fetch_text)
         except Exception:

@@ -90,6 +90,8 @@ class FinalizeWorker(QThread):
             steps.append(("Writing NFO", "nfo"))
         if getattr(info, "chapters", None):
             steps.append(("Exporting chapters", "chapters"))
+        if getattr(info, "markers", None) or getattr(info, "marker_schedules", None):
+            steps.append(("Exporting HLS markers", "markers"))
         if task.get("download_chat") and self._chat_vod_id(info):
             steps.append(("Downloading chat", "chat"))
         if self._podcast_feed_url(task, info):
@@ -268,6 +270,22 @@ class FinalizeWorker(QThread):
                     if MetadataSaver.write_chapters(out_dir, info, file_base=file_base):
                         count = len(getattr(info, "chapters", None) or [])
                         self.log.emit(f"[CHAPTERS] Exported {count} chapter(s) to {file_base}.chapters.txt/.json")
+                if (
+                    getattr(info, "markers", None)
+                    or getattr(info, "marker_schedules", None)
+                ) and not self._interrupted():
+                    step_no += 1
+                    self._emit_progress("Exporting HLS markers", step_no, total_steps)
+                    if MetadataSaver.write_hls_markers(
+                        out_dir,
+                        getattr(info, "markers", None),
+                        schedules=getattr(info, "marker_schedules", None),
+                        file_base=file_base,
+                    ):
+                        self.log.emit(
+                            f"[HLS] Exported marker sidecar for "
+                            f"{file_base or 'recording'}"
+                        )
                 if task.get("download_chat") and chat_vod_id and not self._interrupted():
                     step_no += 1
                     self._emit_progress("Downloading chat", step_no, total_steps)

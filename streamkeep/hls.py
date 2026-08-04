@@ -46,6 +46,10 @@ class HLSManifestReferences:
 
     resources: tuple
     playlists: tuple
+    # Apple’s out-of-band daterange schedule is a fetched resource, not a
+    # child media playlist. Keeping it separate lets callers archive it while
+    # ensuring an interstitial asset can never become a primary input.
+    schedule_uris: tuple = ()
 
 
 _HLS_PLAYLIST_URI_TAGS = frozenset({
@@ -93,11 +97,13 @@ def validate_hls_manifest(
     playlists = []
     resource_seen = set()
     playlist_seen = set()
+    schedule_seen = set()
+    schedule_uris = []
     pending_playlist = False
 
     def add(raw_value, *, playlist=False):
         if not str(raw_value or "").strip():
-            return
+            return ""
         target = validate_remote_url(
             raw_value,
             base_url=base,
@@ -113,6 +119,7 @@ def validate_hls_manifest(
             raise RemoteURLPolicyError(
                 "HLS manifest exceeds the URI reference limit"
             )
+        return target
 
     for raw_line in str(body or "").splitlines():
         line = raw_line.strip()
@@ -124,6 +131,24 @@ def validate_hls_manifest(
                 pending_playlist = True
             if separator and tag in _HLS_URI_VALUE_TAGS:
                 add(value)
+                continue
+            if separator and tag == "#EXT-X-DATERANGE":
+                attrs = _parse_attributes(value)
+                # X-ASSET-URI is intentionally a resource only. It is a
+                # client-side interstitial asset and must not be added to the
+                # playlist graph consumed as primary media.
+                if attrs.get("X-ASSET-URI"):
+                    add(attrs["X-ASSET-URI"])
+                schedule_uri = attrs.get("X-URI", "")
+                if (
+                    schedule_uri
+                    and attrs.get("CLASS", "").casefold()
+                    == "com.apple.hls.daterange-schedule"
+                ):
+                    target = add(schedule_uri)
+                    if target and target not in schedule_seen:
+                        schedule_seen.add(target)
+                        schedule_uris.append(target)
                 continue
             if not separator or tag not in _HLS_URI_ATTRIBUTE_TAGS:
                 continue
@@ -144,7 +169,9 @@ def validate_hls_manifest(
         add(line, playlist=pending_playlist)
         pending_playlist = False
 
-    return HLSManifestReferences(tuple(resources), tuple(playlists))
+    return HLSManifestReferences(
+        tuple(resources), tuple(playlists), tuple(schedule_uris),
+    )
 
 
 def preflight_hls_manifest_tree(
@@ -154,8 +181,17 @@ def preflight_hls_manifest_tree(
     allow_private_network=False,
     max_depth=8,
     max_manifests=128,
+    on_manifest=None,
+    on_schedule=None,
 ):
-    """Fetch and validate a bounded recursive HLS playlist graph."""
+    """Fetch and validate a bounded recursive HLS playlist graph.
+
+    ``on_manifest`` receives ``(url, body)`` after the body has passed the
+    URI policy.  Daterange schedules are fetched through the same guarded
+    ``fetch_text`` callback and delivered to ``on_schedule`` as
+    ``(url, body)``. Both callbacks are observation hooks; they cannot widen
+    the set of URLs that the graph walker will fetch.
+    """
     root = validate_remote_url(
         url, allow_private_network=allow_private_network,
     ).url
@@ -182,6 +218,12 @@ def preflight_hls_manifest_tree(
             current,
             allow_private_network=allow_private_network,
         )
+        if on_manifest is not None:
+            on_manifest(current, body)
+        for schedule_url in references.schedule_uris:
+            schedule_body = fetch_text(schedule_url)
+            if schedule_body is not None and on_schedule is not None:
+                on_schedule(schedule_url, schedule_body)
         if references.playlists and depth >= max_depth:
             raise RemoteURLPolicyError(
                 "HLS playlist graph exceeds the recursion limit"
@@ -340,7 +382,124 @@ def parse_hls_duration(body):
     return total_secs, start_time, seg_count
 
 
-def parse_hls_media_playlist(body, base_url=""):
+def _parse_daterange(value, base_url=""):
+    """Return a lossless, sidecar-ready representation of DATERANGE."""
+    attrs = _parse_attributes(value)
+    if not attrs:
+        return None
+    class_name = attrs.get("CLASS", "")
+    asset_uri_raw = attrs.get("X-ASSET-URI", "")
+    asset_list = attrs.get("X-ASSET-LIST", "")
+    is_interstitial = bool(asset_uri_raw or asset_list) or (
+        class_name.casefold() == "com.apple.hls.interstitial"
+    )
+    duration = _to_float(attrs.get("DURATION"), default=None)
+    planned_duration = _to_float(
+        attrs.get("PLANNED-DURATION"), default=None,
+    )
+    return {
+        "type": "interstitial" if is_interstitial else "daterange",
+        "id": attrs.get("ID", ""),
+        # Keep CLASS verbatim; unknown vendor classes are part of the public
+        # marker contract and must not be normalized away.
+        "class": class_name,
+        "start_date": attrs.get("START-DATE", ""),
+        "end_date": attrs.get("END-DATE", ""),
+        "duration": duration,
+        "planned_duration": planned_duration,
+        "scte35_out": attrs.get("SCTE35-OUT", ""),
+        "scte35_in": attrs.get("SCTE35-IN", ""),
+        "asset_uri": _resolve(base_url, asset_uri_raw),
+        "asset_uri_raw": asset_uri_raw,
+        "asset_list": asset_list,
+        "x_uri": _resolve(base_url, attrs.get("X-URI", "")),
+        "x_uri_raw": attrs.get("X-URI", ""),
+        "is_schedule": class_name.casefold()
+        == "com.apple.hls.daterange-schedule",
+        # This is deliberately retained in addition to the typed convenience
+        # fields above so new RFC/vendor attributes survive unchanged.
+        "attributes": dict(attrs),
+    }
+
+
+def merge_hls_delta_playlist(previous_playlist, current_playlist):
+    """Merge retained segments from a prior playlist into an EXT-X-SKIP response.
+
+    A delta response advertises the sequence immediately after the skipped
+    window. The caller supplies the still-retained prior playlist; only the
+    exact skipped sequence interval is copied, then current entries win on
+    overlap. The response's advertised ``media_sequence`` remains intact for
+    resume identity, while the effective segment list contains the full
+    retained window.
+    """
+    if current_playlist is None or not getattr(current_playlist, "skipped_segments", 0):
+        return current_playlist
+    if previous_playlist is None:
+        return current_playlist
+    skip_count = max(0, _to_int(current_playlist.skipped_segments))
+    if skip_count <= 0:
+        return current_playlist
+    current_segments = list(getattr(current_playlist, "segments", []) or [])
+    current_start = _to_int(getattr(current_playlist, "media_sequence", 0))
+    retained_start = current_start - skip_count
+    retained = [
+        segment for segment in (getattr(previous_playlist, "segments", []) or [])
+        if retained_start <= _to_int(getattr(segment, "media_sequence", 0))
+        < current_start
+    ]
+    current_keys = {
+        (
+            _to_int(getattr(segment, "media_sequence", 0)),
+            _to_int(getattr(segment, "discontinuity_sequence", 0)),
+        )
+        for segment in current_segments
+    }
+    merged = [
+        segment for segment in retained
+        if (
+            _to_int(getattr(segment, "media_sequence", 0)),
+            _to_int(getattr(segment, "discontinuity_sequence", 0)),
+        ) not in current_keys
+    ]
+    merged.extend(current_segments)
+    merged.sort(key=lambda segment: (
+        _to_int(getattr(segment, "media_sequence", 0)),
+        _to_int(getattr(segment, "discontinuity_sequence", 0)),
+    ))
+
+    dateranges = []
+    seen_ids = set()
+    for marker in [
+        *(getattr(previous_playlist, "dateranges", []) or []),
+        *(getattr(current_playlist, "dateranges", []) or []),
+    ]:
+        marker_id = str(marker.get("id", "") if isinstance(marker, dict) else "")
+        key = marker_id or repr(marker)
+        if key in seen_ids:
+            # The newest response is authoritative for a repeated ID.
+            for index, old in enumerate(dateranges):
+                old_key = str(old.get("id", "") if isinstance(old, dict) else "")
+                if old_key == marker_id:
+                    dateranges[index] = marker
+                    break
+            continue
+        seen_ids.add(key)
+        dateranges.append(marker)
+
+    return replace(
+        current_playlist,
+        segments=merged,
+        total_duration=sum(
+            _to_float(getattr(segment, "duration", 0.0))
+            for segment in merged
+        ),
+        dateranges=dateranges,
+    )
+
+
+def parse_hls_media_playlist(
+    body, base_url="", *, previous_playlist=None,
+):
     """Parse an HLS media (segment) playlist into a typed model.
 
     Tracks EXT-X-MEDIA-SEQUENCE / EXT-X-DISCONTINUITY-SEQUENCE so each segment
@@ -349,6 +508,10 @@ def parse_hls_media_playlist(body, base_url=""):
     per-segment EXT-X-DISCONTINUITY, EXT-X-GAP, EXT-X-BYTERANGE, and
     EXT-X-PROGRAM-DATE-TIME, and distinguishes VOD (EXT-X-ENDLIST) from live.
     Malformed EXTINF values isolate to a skipped segment rather than aborting.
+    When ``previous_playlist`` is supplied, EXT-X-SKIP retained entries are
+    merged into the returned effective segment list. EXT-X-DATERANGE rows are
+    preserved with their full attribute map, including interstitial and
+    vendor-specific fields.
     """
     playlist = HLSMediaPlaylist()
     media_sequence = 0
@@ -363,6 +526,17 @@ def parse_hls_media_playlist(body, base_url=""):
             playlist.discontinuity_sequence = discontinuity_sequence
         elif line.startswith("#EXT-X-TARGETDURATION:"):
             playlist.target_duration = _to_float(line.split(":", 1)[1])
+        elif line.startswith("#EXT-X-SKIP:"):
+            attrs = _parse_attributes(line.split(":", 1)[1])
+            playlist.skipped_segments = max(
+                0, _to_int(attrs.get("SKIPPED-SEGMENTS", 0))
+            )
+        elif line.startswith("#EXT-X-DATERANGE:"):
+            marker = _parse_daterange(
+                line.split(":", 1)[1], base_url,
+            )
+            if marker is not None:
+                playlist.dateranges.append(marker)
         elif line == "#EXT-X-ENDLIST":
             playlist.is_endlist = True
 
@@ -414,7 +588,7 @@ def parse_hls_media_playlist(body, base_url=""):
             pending_pdt = pending_byterange = ""
             pending_gap = False
             pending_duration = None
-    return playlist
+    return merge_hls_delta_playlist(previous_playlist, playlist)
 
 
 def resume_identity_matches(state, playlist):

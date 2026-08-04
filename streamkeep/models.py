@@ -67,6 +67,14 @@ class HLSMediaPlaylist:
     start_time: str = ""
     validator: str = ""             # strong HTTP validator (ETag/Last-Modified)
     segments: list[HLSSegment] = field(default_factory=list)
+    # RFC 8216bis delta-playlist metadata.  ``segments`` can be expanded with
+    # retained entries by ``merge_hls_delta_playlist`` while this remains the
+    # sequence advertised by the response itself.
+    skipped_segments: int = 0
+    # Parsed EXT-X-DATERANGE rows.  Attribute names and values are retained in
+    # each row so new/unknown vendor classes survive a round trip to a marker
+    # sidecar instead of being silently discarded.
+    dateranges: list[dict] = field(default_factory=list)
 
     @property
     def is_live(self) -> bool:
@@ -125,6 +133,8 @@ class StreamInfo:
     segment_count: int = 0
     thumbnail_url: str = ""
     chapters: list[dict[str, str | float]] = field(default_factory=list)  # list of {title, start, end}
+    markers: list[dict] = field(default_factory=list)
+    marker_schedules: list[dict] = field(default_factory=list)
     subtitles: list[SubtitleInfo] = field(default_factory=list)
     # Originating podcast RSS feed, when this download came from a browsed
     # feed. Lets finalize auto-fetch transcript/chapter sidecars for the
