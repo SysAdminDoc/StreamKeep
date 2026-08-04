@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Hardened ordered rules: site criteria now honor host boundaries, malformed
+  duration bounds fail closed, legacy `filename_template` actions migrate to
+  `arg_template`, and rules can override folder and filename templates.
+
 - Made copied download commands safe to paste into Windows `cmd.exe`,
   escaping metacharacters while preserving exact argv round-trips on Windows
   and POSIX shells.

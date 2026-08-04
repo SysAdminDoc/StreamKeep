@@ -9,7 +9,9 @@ action key, and a rule with ``stop: true`` halts evaluation once it matches.
 Actions steer how the job is handled:
 
     output_dir          — destination folder override
-    filename_template   — yt-dlp / structured argv template name
+    arg_template        — named yt-dlp / structured argv template
+    folder_template     — output folder template override
+    file_template       — output filename template override
     pp_preset           — named post-processing preset
     quality             — quality preference ("best"/"1080p"/"audio"/...)
     proxy               — per-job proxy URL
@@ -32,7 +34,9 @@ CONFIG_KEY = "rules"
 # Recognised action keys and the type each is coerced to when applied.
 ACTION_KEYS = (
     "output_dir",
-    "filename_template",
+    "arg_template",
+    "folder_template",
+    "file_template",
     "pp_preset",
     "quality",
     "proxy",
@@ -42,9 +46,11 @@ ACTION_KEYS = (
 )
 
 _STRING_ACTIONS = frozenset({
-    "output_dir", "filename_template", "pp_preset", "quality", "proxy",
-    "auth_profile",
+    "output_dir", "arg_template", "folder_template", "file_template",
+    "pp_preset", "quality", "proxy", "auth_profile",
 })
+
+_LEGACY_ACTION_ALIASES = {"filename_template": "arg_template"}
 
 _MATCH_MODES = ("all", "any")
 _KNOWN_TYPES = frozenset({"video", "audio", "live", "playlist", "image", ""})
@@ -94,14 +100,25 @@ def _safe_search(pattern, value):
         return False
 
 
+def _normalize_site(value):
+    """Normalize a host-shaped site value for boundary-safe comparison."""
+    site = str(value or "").strip().lower().rstrip(".")
+    if site.startswith("www."):
+        site = site[4:]
+    return site
+
+
 def _criterion_results(match, context):
     """Yield (satisfied, present) for each declared match criterion."""
     if not isinstance(match, dict):
         return
 
-    site = str(match.get("site", "") or "")
+    site = _normalize_site(match.get("site", ""))
+    context_site = _normalize_site(context.get("site", ""))
     if site:
-        yield site.lower() in context["site"].lower(), True
+        yield bool(context_site) and (
+            context_site == site or context_site.endswith("." + site)
+        ), True
 
     url_regex = str(match.get("url_regex", "") or "")
     if url_regex:
@@ -124,14 +141,14 @@ def _criterion_results(match, context):
         try:
             yield context["duration"] >= float(dmin), True
         except (TypeError, ValueError):
-            pass
+            yield False, True
 
     dmax = match.get("duration_max")
     if dmax not in (None, ""):
         try:
             yield context["duration"] <= float(dmax), True
         except (TypeError, ValueError):
-            pass
+            yield False, True
 
 
 def rule_matches(rule, context):
@@ -157,10 +174,17 @@ def _coerce_actions(actions):
     out = {}
     if not isinstance(actions, dict):
         return out
+    source = dict(actions)
+    # V15 called the named yt-dlp argument template ``filename_template``.
+    # Keep old configs working while exposing the truthful action name; a
+    # canonical key wins when a config contains both spellings.
+    for legacy_key, canonical_key in _LEGACY_ACTION_ALIASES.items():
+        if canonical_key not in source and legacy_key in source:
+            source[canonical_key] = source[legacy_key]
     for key in ACTION_KEYS:
-        if key not in actions:
+        if key not in source:
             continue
-        val = actions[key]
+        val = source[key]
         if key in _STRING_ACTIONS:
             text = str(val or "").strip()
             if text:
@@ -217,7 +241,9 @@ def normalize_rule(rule):
         try:
             norm_match[key] = float(raw)
         except (TypeError, ValueError):
-            continue
+            # Retain malformed criteria so matching fails closed instead of
+            # silently dropping the condition from an ``all`` rule.
+            norm_match[key] = str(raw)
     mode = str(rule.get("match_mode", "all") or "all").lower()
     if mode not in _MATCH_MODES:
         mode = "all"
@@ -266,7 +292,9 @@ def apply_rules_to_job(job, config):
 
     _fill("output_dir", "output_dir")
     _fill("quality", "quality")
-    _fill("arg_template", "filename_template")
+    _fill("arg_template", "arg_template")
+    _fill("folder_template", "folder_template")
+    _fill("file_template", "file_template")
     _fill("override_pp_preset", "pp_preset")
     _fill("proxy", "proxy")
     _fill("auth_profile_id", "auth_profile")

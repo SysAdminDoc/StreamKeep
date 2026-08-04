@@ -49,9 +49,27 @@ class RuleMatchTests(unittest.TestCase):
     def test_empty_rule_never_matches(self):
         self.assertFalse(rules.rule_matches(_rule(), self.ctx))
 
-    def test_site_substring_match(self):
-        self.assertTrue(rules.rule_matches(_rule(match={"site": "youtube"}), self.ctx))
-        self.assertFalse(rules.rule_matches(_rule(match={"site": "twitch"}), self.ctx))
+    def test_site_matches_exact_host_or_subdomain_boundary(self):
+        self.assertTrue(rules.rule_matches(
+            _rule(match={"site": "youtube.com"}), self.ctx
+        ))
+        subdomain_ctx = rules.context_from_job({
+            "url": "https://live.youtube.com/watch?v=1",
+        })
+        self.assertTrue(rules.rule_matches(
+            _rule(match={"site": "youtube.com"}), subdomain_ctx
+        ))
+        self.assertFalse(rules.rule_matches(
+            _rule(match={"site": "twitch.tv"}), rules.context_from_job({
+                "url": "https://twitch.tv.attacker.example/watch",
+            })
+        ))
+        self.assertFalse(rules.rule_matches(
+            _rule(match={"site": "twitch.tv"}), rules.context_from_job({
+                "url": "https://nottwitch.tv/watch",
+            })
+        ))
+        self.assertFalse(rules.rule_matches(_rule(match={"site": "twitch.tv"}), self.ctx))
 
     def test_title_regex_match_is_case_insensitive(self):
         self.assertTrue(rules.rule_matches(
@@ -67,16 +85,22 @@ class RuleMatchTests(unittest.TestCase):
         self.assertFalse(rules.rule_matches(
             _rule(match={"duration_max": 60}), self.ctx))
 
+    def test_invalid_duration_criterion_fails_closed(self):
+        self.assertFalse(rules.rule_matches(
+            _rule(match={"site": "youtube.com", "duration_min": "later"}),
+            self.ctx,
+        ))
+
     def test_type_exact(self):
         self.assertTrue(rules.rule_matches(_rule(match={"type": "video"}), self.ctx))
         self.assertFalse(rules.rule_matches(_rule(match={"type": "audio"}), self.ctx))
 
     def test_all_mode_requires_every_criterion(self):
-        rule = _rule(match={"site": "youtube", "type": "audio"})
+        rule = _rule(match={"site": "youtube.com", "type": "audio"})
         self.assertFalse(rules.rule_matches(rule, self.ctx))
 
     def test_any_mode_requires_one_criterion(self):
-        rule = _rule(match={"site": "youtube", "type": "audio"}, match_mode="any")
+        rule = _rule(match={"site": "youtube.com", "type": "audio"}, match_mode="any")
         self.assertTrue(rules.rule_matches(rule, self.ctx))
 
 
@@ -91,8 +115,8 @@ class EvaluateTests(unittest.TestCase):
 
     def test_later_rule_overrides_earlier(self):
         ruleset = [
-            _rule("a", match={"site": "twitch"}, actions={"output_dir": "/a"}),
-            _rule("b", match={"site": "twitch"}, actions={"output_dir": "/b"}),
+            _rule("a", match={"site": "twitch.tv"}, actions={"output_dir": "/a"}),
+            _rule("b", match={"site": "twitch.tv"}, actions={"output_dir": "/b"}),
         ]
         out = rules.evaluate(self.ctx, ruleset)
         self.assertEqual(out["actions"]["output_dir"], "/b")
@@ -100,20 +124,20 @@ class EvaluateTests(unittest.TestCase):
 
     def test_stop_halts_further_rules(self):
         ruleset = [
-            _rule("a", match={"site": "twitch"}, actions={"output_dir": "/a"}, stop=True),
-            _rule("b", match={"site": "twitch"}, actions={"output_dir": "/b"}),
+            _rule("a", match={"site": "twitch.tv"}, actions={"output_dir": "/a"}, stop=True),
+            _rule("b", match={"site": "twitch.tv"}, actions={"output_dir": "/b"}),
         ]
         out = rules.evaluate(self.ctx, ruleset)
         self.assertEqual(out["actions"]["output_dir"], "/a")
         self.assertEqual(out["matched"], ["a"])
 
     def test_disabled_rules_are_skipped(self):
-        ruleset = [_rule("a", match={"site": "twitch"},
+        ruleset = [_rule("a", match={"site": "twitch.tv"},
                          actions={"output_dir": "/a"}, enabled=False)]
         self.assertEqual(rules.evaluate(self.ctx, ruleset)["actions"], {})
 
     def test_actions_are_coerced(self):
-        ruleset = [_rule("a", match={"site": "twitch"}, actions={
+        ruleset = [_rule("a", match={"site": "twitch.tv"}, actions={
             "priority": "7", "auto_start": 1, "proxy": "  http://p  ",
             "bogus": "ignored",
         })]
@@ -136,6 +160,16 @@ class NormalizeRuleTests(unittest.TestCase):
         norm = rules.normalize_rule({"match_mode": "sometimes"})
         self.assertEqual(norm["match_mode"], "all")
 
+    def test_invalid_duration_is_retained_as_a_failing_criterion(self):
+        norm = rules.normalize_rule({"match": {"duration_min": "later"}})
+        self.assertEqual(norm["match"]["duration_min"], "later")
+
+    def test_legacy_filename_action_migrates_to_argument_template(self):
+        norm = rules.normalize_rule({
+            "actions": {"filename_template": "Archive headers"},
+        })
+        self.assertEqual(norm["actions"], {"arg_template": "Archive headers"})
+
 
 class ApplyRulesToJobTests(unittest.TestCase):
     def test_no_rules_returns_copy_unchanged(self):
@@ -144,22 +178,36 @@ class ApplyRulesToJobTests(unittest.TestCase):
         self.assertEqual(out, job)
         self.assertIsNot(out, job)
 
-    def test_rule_fills_output_dir_and_template(self):
-        config = {"rules": [_rule("a", match={"site": "twitch"}, actions={
-            "output_dir": "/streams/twitch", "filename_template": "tmpl1",
+    def test_rule_fills_output_dir_and_templates(self):
+        config = {"rules": [_rule("a", match={"site": "twitch.tv"}, actions={
+            "output_dir": "/streams/twitch", "arg_template": "tmpl1",
+            "folder_template": "{channel}", "file_template": "{title}",
             "proxy": "http://p", "priority": 5, "auto_start": True,
         })]}
         job = {"url": "https://twitch.tv/foo", "title": "x"}
         out = rules.apply_rules_to_job(job, config)
         self.assertEqual(out["output_dir"], "/streams/twitch")
         self.assertEqual(out["arg_template"], "tmpl1")
+        self.assertEqual(out["folder_template"], "{channel}")
+        self.assertEqual(out["file_template"], "{title}")
         self.assertEqual(out["proxy"], "http://p")
         self.assertEqual(out["priority"], 5)
         self.assertIs(out["auto_start"], True)
         self.assertEqual(out["_rule_matched"], ["a"])
 
+    def test_legacy_filename_action_fills_arg_template(self):
+        config = {"rules": [_rule(
+            match={"site": "twitch.tv"},
+            actions={"filename_template": "legacy"},
+        )]}
+        out = rules.apply_rules_to_job(
+            {"url": "https://www.twitch.tv/foo"}, config
+        )
+        self.assertEqual(out["arg_template"], "legacy")
+        self.assertNotIn("filename_template", out["_rule_actions"])
+
     def test_explicit_job_value_is_not_clobbered(self):
-        config = {"rules": [_rule("a", match={"site": "twitch"},
+        config = {"rules": [_rule("a", match={"site": "twitch.tv"},
                                   actions={"output_dir": "/from-rule"})]}
         job = {"url": "https://twitch.tv/foo", "output_dir": "/user-set"}
         out = rules.apply_rules_to_job(job, config)
