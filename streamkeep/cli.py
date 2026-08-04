@@ -536,13 +536,15 @@ def _run_download(args):
         def on_download_error(_si, msg):
             _print_line(f"Error: {msg}")
             state["exit_code"] = 1
-            _record_cli_failure(args.url, "download", msg, output_dir, state.get("info"))
+            _record_cli_failure(
+                args.url, "download", msg, job_output_dir, state.get("info")
+            )
 
         dw.error.connect(on_download_error)
         dw.segment_done.connect(lambda si, path: _print_line(
             f"  segment {si} done"
         ))
-        dw.all_done.connect(lambda: _on_download_done(state, app, output_dir))
+        dw.all_done.connect(lambda: _on_download_done(state, app, job_output_dir))
         # Always quit when the worker thread ends. `all_done` (success) and
         # `error` are delivered before `finished`, so their slots run first;
         # this is a backstop so the process can never hang if a worker path
@@ -598,14 +600,14 @@ def _run_download(args):
     sys.exit(ret)
 
 
-def _on_download_done(state, app, output_dir):
+def _on_download_done(state, app, job_output_dir):
     _print_progress("")
-    _print_line(f"\nDownload complete -> {output_dir}")
+    _print_line(f"\nDownload complete -> {job_output_dir}")
     from . import db
     db.mark_failed_jobs_resolved_for_url(state.get("source_url", ""))
     try:
         from .verify import create_archive_manifest
-        manifest = create_archive_manifest(output_dir, write_sidecar=True)
+        manifest = create_archive_manifest(job_output_dir, write_sidecar=True)
         _print_line(
             "Integrity manifest -> "
             f"{len(manifest.get('files', []) or [])} file(s)"

@@ -6,7 +6,10 @@ import sys
 from io import StringIO
 from unittest import mock
 
+import pytest
+
 from streamkeep import cli
+from streamkeep.models import QualityInfo, StreamInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +28,200 @@ def _run_launcher(*args, appdata):
         timeout=30,
         check=False,
     )
+
+
+def _run_fake_cli_download(monkeypatch, args, info, *, mode):
+    class Signal:
+        def __init__(self):
+            self._callback = None
+
+        def connect(self, callback):
+            self._callback = callback
+
+        def emit(self, *values):
+            if self._callback is not None:
+                self._callback(*values)
+
+    class FakeApp:
+        def __init__(self, _argv):
+            self.quit_count = 0
+
+        def exec(self):
+            return 0
+
+        def quit(self):
+            self.quit_count += 1
+
+    class FakeFetchWorker:
+        def __init__(self, *_args, **_kwargs):
+            self.finished = Signal()
+            self.error = Signal()
+            self.vods_found = Signal()
+            self.log = Signal()
+
+        def start(self):
+            self.finished.emit(info)
+
+        def isRunning(self):
+            return False
+
+        def wait(self, _timeout):
+            return True
+
+    class FakeDownloadWorker:
+        specs = []
+
+        def __init__(self, spec):
+            self.spec = spec
+            self.progress = Signal()
+            self.log = Signal()
+            self.error = Signal()
+            self.segment_done = Signal()
+            self.all_done = Signal()
+            self.finished = Signal()
+
+        @classmethod
+        def from_spec(cls, spec):
+            cls.specs.append(spec)
+            return cls(spec)
+
+        def start(self):
+            output_dir = Path(self.spec.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            label = str(self.spec.segments[0][1])
+            if mode == "success":
+                (output_dir / f"{label}.mp4").write_bytes(b"target recording")
+                self.all_done.emit()
+            else:
+                (output_dir / ".streamkeep_resume.json").write_text(
+                    "{}", encoding="utf-8"
+                )
+                self.error.emit(0, "network timeout")
+            self.finished.emit()
+
+        def isRunning(self):
+            return False
+
+        def wait(self, _timeout):
+            return True
+
+    monkeypatch.setattr(cli, "QCoreApplication", FakeApp)
+    monkeypatch.setattr(cli, "_check_ffmpeg", lambda: True)
+    monkeypatch.setattr(cli, "_init_db_or_exit", lambda _db: None)
+    monkeypatch.setattr(cli, "_print_line", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "_print_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("streamkeep.auth_profiles.ensure_migrated", lambda: None)
+    monkeypatch.setattr("streamkeep.config.install_file_logging", lambda: None)
+    monkeypatch.setattr("streamkeep.config.load_config", lambda: {})
+    monkeypatch.setattr("streamkeep.config.write_log_line", lambda *_args: None)
+    monkeypatch.setattr(
+        "streamkeep.extractors.ytdlp.apply_resolve_timeout_config",
+        lambda _config: None,
+    )
+    monkeypatch.setattr("streamkeep.workers.FetchWorker", FakeFetchWorker)
+    monkeypatch.setattr("streamkeep.workers.DownloadWorker", FakeDownloadWorker)
+
+    with pytest.raises(SystemExit) as raised:
+        cli._run_download(args)
+    return FakeDownloadWorker.specs[-1], raised.value.code
+
+
+def _fake_stream_info():
+    return StreamInfo(
+        platform="Test",
+        channel="Channel",
+        title="Target",
+        url="https://example.com/watch",
+        qualities=[QualityInfo(
+            name="Best",
+            url="https://cdn.example.com/target.m3u8",
+            resolution="720p",
+            format_type="hls",
+        )],
+        total_secs=60,
+        duration_str="1:00",
+        webpage_url="https://example.com/watch",
+        source_id="test:target",
+    )
+
+
+def _fake_download_args(output_root):
+    return cli.build_parser().parse_args([
+        "download", "https://example.com/watch",
+        "--output", str(output_root),
+        "--folder-template", "{channel}",
+        "--filename-template", "{title}",
+    ])
+
+
+def test_cli_completion_scopes_manifest_to_one_templated_recording(
+    tmp_path, monkeypatch,
+):
+    library = tmp_path / "library"
+    sibling = library / "Other"
+    sibling.mkdir(parents=True)
+    (sibling / "other.mp4").write_bytes(b"must not be hashed")
+    monkeypatch.setattr(
+        "streamkeep.db.mark_failed_jobs_resolved_for_url", lambda _url: None
+    )
+
+    spec, exit_code = _run_fake_cli_download(
+        monkeypatch,
+        _fake_download_args(library),
+        _fake_stream_info(),
+        mode="success",
+    )
+
+    assert exit_code == 0
+    target = library / "Channel"
+    assert Path(spec.output_dir) == target
+    manifest = json.loads(
+        (target / ".streamkeep_manifest.json").read_text(encoding="utf-8")
+    )
+    assert [item["path"] for item in manifest["files"]] == ["Target.mp4"]
+    assert (sibling / "other.mp4").read_bytes() == b"must not be hashed"
+
+
+def test_cli_failure_and_retry_keep_the_templated_output_directory(
+    tmp_path, monkeypatch,
+):
+    from streamkeep import db
+
+    config_dir = tmp_path / "config"
+    monkeypatch.setattr(db, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(db, "DB_PATH", config_dir / "library.db")
+    db.init_db()
+
+    spec, exit_code = _run_fake_cli_download(
+        monkeypatch,
+        _fake_download_args(tmp_path / "library"),
+        _fake_stream_info(),
+        mode="failure",
+    )
+
+    assert exit_code == 1
+    target = Path(spec.output_dir)
+    failures = db.load_failed_jobs()
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure["output_dir"] == str(target)
+    assert failure["resume_sidecar"] == str(target / ".streamkeep_resume.json")
+
+    output = StringIO()
+    monkeypatch.setattr(cli, "_print_line", lambda text: output.write(text + "\n"))
+    retry_args = cli.build_parser().parse_args([
+        "operations", "--retry", str(failure["id"]), "--json",
+    ])
+    cli._run_operations(retry_args)
+
+    payload = json.loads(output.getvalue())
+    assert len(payload["actions"]) == 1
+    action = payload["actions"][0]
+    assert action["action"] == "retry"
+    assert action["failure_id"] == failure["id"]
+    assert action["ok"] is True
+    queued = db.load_queue_job(action["job_id"])
+    assert queued["output_dir"] == str(target)
 
 
 def test_print_helpers_tolerate_windowed_build_without_stdout():

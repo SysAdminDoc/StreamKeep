@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Scoped CLI completion manifests and failed-job retry metadata to each
+  templated job output directory, preventing sibling recordings from being
+  rehashed or resumed from the wrong level.
+
 - Preserved Smart Mode regular-expression bodies while normalizing their
   prefixes, and matched regex patterns against the same URL candidates as
   glob patterns.
