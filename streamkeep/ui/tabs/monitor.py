@@ -31,6 +31,11 @@ from ...monitor import entry_in_schedule_window
 from ...models import HistoryEntry, default_media_tracks
 from ...utils import default_output_dir as _default_output_dir
 from ...resume import clear_resume_state
+from ...upgrade import (
+    UpgradeDecision,
+    default_upgrade_profile,
+    evaluate_upgrade,
+)
 
 
 def build_monitor_tab(win):
@@ -612,6 +617,8 @@ class MonitorTabMixin:
                         except (TypeError, ValueError):
                             e.retention_keep_last = 0
                         e.filter_keywords = str(ch.get("filter_keywords", "") or "")
+                        profile = ch.get("upgrade_profile", {})
+                        e.upgrade_profile = dict(profile) if isinstance(profile, dict) else {}
                         layout = str(ch.get("media_server_layout", "") or "").lower()
                         e.media_server_layout = layout if layout in ("seasoned", "flat") else ""
                         break
@@ -1477,14 +1484,36 @@ class MonitorTabMixin:
 
     # ── VOD subscription + quality upgrade ──────────────────────────
 
+    def _record_upgrade_decision(
+        self, decision, *, history_id=0, job_id="", title="", channel="", profile=None,
+    ):
+        """Persist an audit row without making monitor polling fragile."""
+        try:
+            return _db.record_upgrade_decision(
+                decision,
+                history_id=history_id,
+                job_id=job_id,
+                title=title,
+                channel=channel,
+                profile=profile,
+            )
+        except Exception as error:
+            self._log(f"[UPGRADE] Could not record decision: {error}")
+            return None
+
     def _check_quality_upgrade(self, channel_id, vod, candidate_quality=""):
-        """Return the exact existing recording eligible for an upgrade."""
+        """Return the exact existing recording eligible for an upgrade.
+
+        Every same-identity evaluation is recorded, including disabled and
+        rejected candidates. Unknown listing quality is deliberately deferred
+        until the resolver has selected the actual media representation.
+        """
         entry = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 entry = e
                 break
-        if not entry or not entry.auto_upgrade:
+        if not entry:
             return None
         platform = str(getattr(vod, "platform", "") or "")
         source_id = str(getattr(vod, "source_id", "") or "")
@@ -1492,31 +1521,73 @@ class MonitorTabMixin:
             return None
         row = _db.find_history_by_identity(platform, source_id)
         existing = HistoryEntry.from_dict(row) if row else None
+        profile = dict(entry.upgrade_profile or {})
+        if not profile:
+            profile = default_upgrade_profile(entry.min_upgrade_quality)
+        recorder = getattr(self, "_record_upgrade_decision", None)
+
+        def record(decision, **kwargs):
+            if callable(recorder):
+                return recorder(decision, **kwargs)
+            try:
+                return _db.record_upgrade_decision(decision, **kwargs)
+            except Exception:
+                return None
+
+        candidate = {
+            "platform": platform,
+            "source_id": source_id,
+            "quality": str(candidate_quality or getattr(vod, "quality", "") or ""),
+            "title": str(getattr(vod, "title", "") or ""),
+            "channel": str(getattr(vod, "channel", "") or channel_id or ""),
+            "format": str(getattr(vod, "format", "") or ""),
+        }
+        if not entry.auto_upgrade:
+            decision = evaluate_upgrade(
+                existing or {}, candidate, profile, enabled=False,
+            )
+            record(
+                decision,
+                history_id=existing.db_id if existing else 0,
+                title=candidate["title"], channel=candidate["channel"],
+                profile=profile,
+            )
+            return None
         if (
             not existing
             or not existing.quality
             or not existing.path
             or not os.path.isdir(existing.path)
         ):
+            decision = UpgradeDecision(
+                "rejected",
+                "known_good_missing",
+                "The same-identity known-good recording is missing",
+                candidate_quality=candidate["quality"],
+                platform=platform,
+                source_id=source_id,
+            )
+            record(
+                decision,
+                history_id=existing.db_id if existing else 0,
+                title=candidate["title"], channel=candidate["channel"],
+                profile=profile,
+            )
             return None
-        # Listing endpoints often omit resolution. In that case this is an
-        # upgrade candidate; the resolved quality is checked before any bytes
-        # are downloaded.
-        vod_quality = str(
-            candidate_quality or getattr(vod, "quality", "") or ""
+        decision = evaluate_upgrade(
+            existing,
+            candidate,
+            profile,
+            enabled=True,
+            defer_unknown_quality=True,
         )
-        if vod_quality:
-            existing_rank = self._quality_rank(existing.quality)
-            new_rank = self._quality_rank(vod_quality)
-            if new_rank <= existing_rank:
-                return None
-        # Check minimum upgrade threshold
-        min_q = entry.min_upgrade_quality or ""
-        if min_q and vod_quality:
-            min_rank = self._quality_rank(min_q)
-            if new_rank < min_rank:
-                return None
-        return existing
+        record(
+            decision,
+            history_id=existing.db_id,
+            title=candidate["title"], channel=candidate["channel"],
+            profile=profile,
+        )
+        return existing if decision.accepted or decision.deferred else None
 
     def _apply_sponsorblock_delay(self, item, vod):
         """Defer an auto-discovered YouTube VOD so SponsorBlock segments can
@@ -1622,6 +1693,19 @@ class MonitorTabMixin:
                         "",
                     )
                     if is_upgrade else ""
+                ),
+                upgrade_profile=(
+                    dict(
+                        next(
+                            (
+                                entry.upgrade_profile
+                                for entry in self.monitor.entries
+                                if entry.channel_id == channel_id
+                            ),
+                            {},
+                        ) or {}
+                    )
+                    if is_upgrade else {}
                 ),
             ):
                 if self._download_queue:

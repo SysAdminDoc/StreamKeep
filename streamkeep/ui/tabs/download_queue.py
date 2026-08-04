@@ -34,6 +34,8 @@ from ...utils import (
 from ...workers import DownloadWorker, FetchWorker
 from ...upgrade import (
     UpgradeSafetyError,
+    default_upgrade_profile,
+    evaluate_upgrade,
     identity_matches,
     plan_upgrade_paths,
     prepare_upgrade_staging,
@@ -41,6 +43,13 @@ from ...upgrade import (
 )
 from ...i18n import TranslatableDialog
 from ..widgets import ask_premium_confirmation, ask_premium_text_input
+
+
+def _as_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class DownloadQueueMixin:
@@ -395,12 +404,18 @@ class DownloadQueueMixin:
             "upgrade_min_quality": str(
                 item.get("upgrade_min_quality", "") or ""
             ),
+            "upgrade_profile": (
+                dict(item.get("upgrade_profile", {}))
+                if isinstance(item.get("upgrade_profile", {}), dict) else {}
+            ),
             "upgrade_stage_dir": str(
                 item.get("upgrade_stage_dir", "") or ""
             ),
             "upgrade_final_dir": str(
                 item.get("upgrade_final_dir", "") or ""
             ),
+            "upgrade_decision_id": _as_int(item.get("upgrade_decision_id", 0) or 0),
+            "upgrade_version_keep": _as_int(item.get("upgrade_version_keep", 3) or 3, 3),
         }
         try:
             normalized["upgrade_history_id"] = int(
@@ -455,6 +470,7 @@ class DownloadQueueMixin:
         upgrade_existing_path="",
         upgrade_existing_quality="",
         upgrade_min_quality="",
+        upgrade_profile=None,
         request_headers=None,
     ):
         """Append a URL to the persistent download queue.
@@ -582,6 +598,10 @@ class DownloadQueueMixin:
             "upgrade_existing_path": upgrade_existing_path,
             "upgrade_existing_quality": upgrade_existing_quality,
             "upgrade_min_quality": upgrade_min_quality,
+            "upgrade_profile": (
+                dict(upgrade_profile) if isinstance(upgrade_profile, dict)
+                else {}
+            ),
         }))
         if request_headers:
             from ...har import normalize_replay_headers
@@ -860,6 +880,24 @@ class DownloadQueueMixin:
                     "Resolved media identity does not match the queued "
                     "upgrade candidate"
                 )
+                try:
+                    _db.record_upgrade_decision(
+                        {
+                            "decision": "rejected",
+                            "reason_code": "identity_mismatch",
+                            "reason": error,
+                            "platform": resolved_platform,
+                            "source_id": resolved_source_id,
+                            "candidate_quality": chosen_quality,
+                        },
+                        history_id=int(item.get("upgrade_history_id", 0) or 0),
+                        job_id=str(item.get("job_id", "") or ""),
+                        title=str(getattr(info, "title", "") or item.get("title", "")),
+                        channel=str(getattr(info, "channel", "") or item.get("vod_channel", "")),
+                        profile=item.get("upgrade_profile", {}),
+                    )
+                except Exception:
+                    pass
                 failure_id = self._record_failed_job(
                     stage="fetch", error=error, item=item, info=info,
                 )
@@ -879,6 +917,24 @@ class DownloadQueueMixin:
                 or not os.path.isdir(current.path)
             ):
                 error = "Known-good recording for this upgrade is missing"
+                try:
+                    _db.record_upgrade_decision(
+                        {
+                            "decision": "rejected",
+                            "reason_code": "known_good_missing",
+                            "reason": error,
+                            "platform": resolved_platform,
+                            "source_id": resolved_source_id,
+                            "candidate_quality": chosen_quality,
+                        },
+                        history_id=int(item.get("upgrade_history_id", 0) or 0),
+                        job_id=str(item.get("job_id", "") or ""),
+                        title=str(getattr(info, "title", "") or item.get("title", "")),
+                        channel=str(getattr(info, "channel", "") or item.get("vod_channel", "")),
+                        profile=item.get("upgrade_profile", {}),
+                    )
+                except Exception:
+                    pass
                 failure_id = self._record_failed_job(
                     stage="fetch", error=error, item=item, info=info,
                 )
@@ -888,27 +944,41 @@ class DownloadQueueMixin:
                 self._log(f"[UPGRADE] Refused: {error}")
                 self._advance_queue()
                 return
-            if self._quality_rank(chosen_quality) <= self._quality_rank(
-                current.quality
-            ):
-                note = (
-                    f"No upgrade: resolved {chosen_quality or 'unknown'} "
-                    f"is not higher than {current.quality or 'unknown'}"
+            profile = item.get("upgrade_profile", {})
+            if not isinstance(profile, dict) or not profile:
+                profile = default_upgrade_profile(
+                    str(item.get("upgrade_min_quality", "") or "")
                 )
-                self._set_queue_item_status(item, "done", note)
-                self._log(f"[UPGRADE] {note}")
-                self._advance_queue()
-                return
-            minimum = str(item.get("upgrade_min_quality", "") or "")
-            if (
-                minimum
-                and self._quality_rank(chosen_quality)
-                < self._quality_rank(minimum)
-            ):
-                note = (
-                    f"No upgrade: resolved {chosen_quality} is below "
-                    f"the {minimum} threshold"
+            candidate = {
+                "platform": resolved_platform,
+                "source_id": resolved_source_id,
+                "quality": chosen_quality,
+                "title": str(getattr(info, "title", "") or item.get("title", "")),
+                "channel": str(getattr(info, "channel", "") or item.get("vod_channel", "")),
+                "format": str(getattr(q_data, "format_type", "") or ""),
+                "container": str(getattr(q_data, "container", "") or ""),
+            }
+            decision = evaluate_upgrade(
+                current,
+                candidate,
+                profile,
+                enabled=True,
+                expected_platform=expected_platform,
+                expected_source_id=expected_source_id,
+            )
+            try:
+                decision_id = _db.record_upgrade_decision(
+                    decision,
+                    history_id=current.db_id,
+                    job_id=str(item.get("job_id", "") or ""),
+                    title=candidate["title"],
+                    channel=candidate["channel"],
+                    profile=profile,
                 )
+            except Exception:
+                decision_id = None
+            if not decision.accepted:
+                note = f"No upgrade: {decision.reason_code} — {decision.reason}"
                 self._set_queue_item_status(item, "done", note)
                 self._log(f"[UPGRADE] {note}")
                 self._advance_queue()
@@ -921,6 +991,12 @@ class DownloadQueueMixin:
                 )
                 prepare_upgrade_staging(upgrade_paths)
             except (OSError, UpgradeSafetyError) as error:
+                if decision_id:
+                    _db.update_upgrade_decision(
+                        decision_id,
+                        execution_status="failed",
+                        execution_error=str(error),
+                    )
                 failure_id = self._record_failed_job(
                     stage="download", error=str(error), item=item, info=info,
                 )
@@ -936,6 +1012,8 @@ class DownloadQueueMixin:
                 "upgrade_existing_quality": current.quality,
                 "upgrade_stage_dir": str(upgrade_paths.staging),
                 "upgrade_final_dir": str(upgrade_paths.final),
+                "upgrade_decision_id": _as_int(decision_id or 0),
+                "upgrade_version_keep": _as_int(profile.get("version_keep", 3) or 3, 3),
             })
         # Build segments and output path
         playlist_url = q_data.url if q_data else info.url
@@ -999,6 +1077,8 @@ class DownloadQueueMixin:
             ),
             upgrade_stage_dir=str(item.get("upgrade_stage_dir", "") or ""),
             upgrade_final_dir=str(item.get("upgrade_final_dir", "") or ""),
+            upgrade_decision_id=_as_int(item.get("upgrade_decision_id", 0) or 0),
+            upgrade_version_keep=_as_int(item.get("upgrade_version_keep", 3) or 3, 3),
         ):
             self._log(
                 f"[QUEUE] Ownership changed before download start: "

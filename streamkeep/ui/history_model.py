@@ -106,12 +106,21 @@ class HistoryTableModel(QAbstractTableModel):
                 return QColor(CAT["overlay0"])
         if role == Qt.ItemDataRole.ToolTipRole and column == 3:
             hits = self._transcript_hits.get(entry.path, [])[:3]
+            lines = []
+            if entry.upgrade_decision:
+                decision = entry.upgrade_decision.title()
+                reason = entry.upgrade_reason or entry.upgrade_reason_code
+                execution = entry.upgrade_execution_status
+                suffix = f" — {reason}" if reason else ""
+                if execution and execution not in {"not_started", ""}:
+                    suffix += f" ({execution})"
+                lines.append(f"Upgrade decision: {decision}{suffix}")
             if hits:
-                lines = []
                 for hit in hits:
                     mins = int(hit["start_sec"]) // 60
                     secs = int(hit["start_sec"]) % 60
                     lines.append(f"[{mins}:{secs:02d}] {hit['text']}")
+            if lines:
                 return "\n".join(lines)
         if role == Qt.ItemDataRole.AccessibleTextRole:
             value = self.data(index, Qt.ItemDataRole.DisplayRole)

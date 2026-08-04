@@ -22,6 +22,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,7 +31,7 @@ from .sqlite_runtime import connect as sqlite_connect
 from .sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 TOMBSTONE_REASONS = frozenset({"user", "retention", "lifecycle"})
 TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
@@ -95,6 +96,8 @@ def init_db() -> None:
                 _migrate_identity_v16(db)
             if v < 17:
                 _migrate_tombstones_v17(db)
+            if v < 18:
+                _migrate_upgrade_v18(db)
             _apply_schema(db)
             if v == 0:
                 _migrate_execution_v8(db)
@@ -178,9 +181,38 @@ def _apply_schema(db):
             ytdlp_template_name         TEXT    NOT NULL DEFAULT '',
             auto_upgrade                INTEGER NOT NULL DEFAULT 0,
             min_upgrade_quality         TEXT    NOT NULL DEFAULT '',
+            upgrade_profile_json        TEXT    NOT NULL DEFAULT '{}',
             auth_profile_id             TEXT    NOT NULL DEFAULT '',
             media_server_layout         TEXT    NOT NULL DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS upgrade_decisions (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at          TEXT    NOT NULL DEFAULT '',
+            job_id              TEXT    NOT NULL DEFAULT '',
+            history_id          INTEGER NOT NULL DEFAULT 0,
+            platform            TEXT    NOT NULL DEFAULT '',
+            source_id           TEXT    NOT NULL DEFAULT '',
+            title               TEXT    NOT NULL DEFAULT '',
+            channel             TEXT    NOT NULL DEFAULT '',
+            current_quality     TEXT    NOT NULL DEFAULT '',
+            candidate_quality   TEXT    NOT NULL DEFAULT '',
+            decision            TEXT    NOT NULL DEFAULT 'rejected',
+            reason_code         TEXT    NOT NULL DEFAULT '',
+            reason              TEXT    NOT NULL DEFAULT '',
+            score               REAL    NOT NULL DEFAULT 0.0,
+            profile_json        TEXT    NOT NULL DEFAULT '{}',
+            execution_status    TEXT    NOT NULL DEFAULT 'not_started',
+            activation_path     TEXT    NOT NULL DEFAULT '',
+            previous_path       TEXT    NOT NULL DEFAULT '',
+            execution_error     TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_history
+            ON upgrade_decisions(history_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_identity
+            ON upgrade_decisions(platform COLLATE NOCASE, source_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_created
+            ON upgrade_decisions(created_at DESC, id DESC);
 
         CREATE TABLE IF NOT EXISTS download_queue (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -771,6 +803,54 @@ def _migrate_tombstones_v17(db):
     _apply_tombstone_schema(db)
 
 
+def _migrate_upgrade_v18(db):
+    """Add explicit monitor upgrade profiles and durable decisions."""
+    existing_cols = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(monitor_channels)"
+        ).fetchall()
+    }
+    if existing_cols and "upgrade_profile_json" not in existing_cols:
+        db.execute(
+            "ALTER TABLE monitor_channels ADD COLUMN "
+            "upgrade_profile_json TEXT NOT NULL DEFAULT '{}'"
+        )
+    _apply_upgrade_decision_schema(db)
+
+
+def _apply_upgrade_decision_schema(db):
+    """Create the upgrade audit table for new and rebuilt databases."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS upgrade_decisions (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at          TEXT    NOT NULL DEFAULT '',
+            job_id              TEXT    NOT NULL DEFAULT '',
+            history_id          INTEGER NOT NULL DEFAULT 0,
+            platform            TEXT    NOT NULL DEFAULT '',
+            source_id           TEXT    NOT NULL DEFAULT '',
+            title               TEXT    NOT NULL DEFAULT '',
+            channel             TEXT    NOT NULL DEFAULT '',
+            current_quality     TEXT    NOT NULL DEFAULT '',
+            candidate_quality   TEXT    NOT NULL DEFAULT '',
+            decision            TEXT    NOT NULL DEFAULT 'rejected',
+            reason_code         TEXT    NOT NULL DEFAULT '',
+            reason              TEXT    NOT NULL DEFAULT '',
+            score               REAL    NOT NULL DEFAULT 0.0,
+            profile_json        TEXT    NOT NULL DEFAULT '{}',
+            execution_status    TEXT    NOT NULL DEFAULT 'not_started',
+            activation_path     TEXT    NOT NULL DEFAULT '',
+            previous_path       TEXT    NOT NULL DEFAULT '',
+            execution_error     TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_history
+            ON upgrade_decisions(history_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_identity
+            ON upgrade_decisions(platform COLLATE NOCASE, source_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_upgrade_decisions_created
+            ON upgrade_decisions(created_at DESC, id DESC);
+    """)
+
+
 def _migrate_media_layout_v12(db):
     """Add the per-monitor media-server layout override."""
     existing_cols = {
@@ -926,6 +1006,25 @@ def _history_like_filter(query: str, alias="h"):
     return " AND ".join(clauses), params
 
 
+def _history_select_with_upgrade(alias: str = "h") -> str:
+    """Select history plus the latest per-item upgrade audit summary."""
+    return (
+        f"SELECT {alias}.*, "
+        f"COALESCE((SELECT d.decision FROM upgrade_decisions d "
+        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
+        "AS upgrade_decision, "
+        f"COALESCE((SELECT d.reason_code FROM upgrade_decisions d "
+        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
+        "AS upgrade_reason_code, "
+        f"COALESCE((SELECT d.reason FROM upgrade_decisions d "
+        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
+        "AS upgrade_reason, "
+        f"COALESCE((SELECT d.execution_status FROM upgrade_decisions d "
+        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
+        "AS upgrade_execution_status"
+    )
+
+
 def query_history_page(
     *,
     query: str = "",
@@ -963,7 +1062,7 @@ def query_history_page(
     db = _connect(readonly=True)
     try:
         rows = db.execute(
-            f"SELECT h.* FROM history h {join} "
+            f"{_history_select_with_upgrade('h')} FROM history h {join} "
             f"WHERE {' AND '.join(where)} ORDER BY h.id DESC LIMIT ?",
             params,
         ).fetchall()
@@ -1503,6 +1602,293 @@ def save_completed_recording(
             db.close()
 
 
+def update_completed_recording(
+    history_id: int,
+    entry_dict: dict[str, Any],
+    manifest: dict[str, Any] | None = None,
+) -> int | None:
+    """Update one canonical history row after a verified upgrade.
+
+    The history id is intentionally stable: a quality upgrade changes the
+    representation of one media item, not the identity of the media item.
+    History and its manifest are committed together, so a metadata/database
+    failure cannot make a newly downloaded version look active.
+    """
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        return None
+    if history_id <= 0:
+        return None
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            old = conn.execute(
+                "SELECT * "
+                "FROM history WHERE id=?",
+                (history_id,),
+            ).fetchone()
+            if old is None:
+                conn.rollback()
+                return None
+            old_dict = dict(old)
+            try:
+                old_bookmarks = json.loads(old_dict.get("bookmarks", "[]") or "[]")
+            except (TypeError, json.JSONDecodeError):
+                old_bookmarks = []
+            fields = (
+                "date", "platform", "source_id", "webpage_url", "title",
+                "channel", "quality", "size", "path", "url", "favorite",
+                "watched", "watch_position_secs", "bookmarks",
+            )
+            merged = {
+                field: old_dict.get(field, "")
+                for field in fields
+            }
+            merged["bookmarks"] = old_bookmarks
+            merged.update({
+                field: value
+                for field, value in dict(entry_dict or {}).items()
+                if (
+                    field in fields
+                    and value is not None
+                    and (value != "" or not old_dict.get(field, ""))
+                )
+            })
+            normalized = _canonical_history_entry(merged)
+            conn.execute(
+                """
+                UPDATE history SET date=?, platform=?, source_id=?, webpage_url=?,
+                    title=?, channel=?, quality=?, size=?, path=?, url=?,
+                    favorite=?, watched=?, watch_position_secs=?, bookmarks=?
+                WHERE id=?
+                """,
+                (
+                    str(normalized.get("date", "")),
+                    str(normalized.get("platform", "")),
+                    str(normalized.get("source_id", "")),
+                    str(normalized.get("webpage_url", "")),
+                    str(normalized.get("title", "")),
+                    str(normalized.get("channel", "")),
+                    str(normalized.get("quality", "")),
+                    str(normalized.get("size", "")),
+                    str(normalized.get("path", "")),
+                    str(normalized.get("url", "")),
+                    int(bool(normalized.get("favorite", old_dict.get("favorite", 0)))),
+                    int(bool(normalized.get("watched", old_dict.get("watched", 0)))),
+                    float(normalized.get("watch_position_secs", old_dict.get("watch_position_secs", 0)) or 0),
+                    json.dumps(
+                        normalized.get("bookmarks", old_bookmarks)
+                        or []
+                    ),
+                    history_id,
+                ),
+            )
+            if manifest is not None:
+                if not isinstance(manifest, dict):
+                    raise TypeError("archive manifest must be a dictionary")
+                now = _utc_now_iso()
+                conn.execute(
+                    """
+                    INSERT INTO archive_manifests
+                        (history_id, recording_path, manifest_json, created_at,
+                         updated_at, status, last_check_at, last_check_details)
+                    VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(history_id) DO UPDATE SET
+                        recording_path=excluded.recording_path,
+                        manifest_json=excluded.manifest_json,
+                        updated_at=excluded.updated_at,
+                        status=excluded.status,
+                        last_check_at=excluded.last_check_at,
+                        last_check_details=excluded.last_check_details
+                    """,
+                    (
+                        history_id,
+                        str(normalized.get("path", "")),
+                        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+                        str(manifest.get("created_at", now) or now),
+                        now,
+                        "created",
+                        now,
+                        f"Captured {len(manifest.get('files', []) or [])} file(s)",
+                    ),
+                )
+            conn.commit()
+            return history_id
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def record_upgrade_decision(
+    decision: Mapping[str, Any] | Any,
+    *,
+    history_id: int = 0,
+    job_id: str = "",
+    title: str = "",
+    channel: str = "",
+    profile: Mapping[str, Any] | None = None,
+    execution_status: str = "not_started",
+) -> int | None:
+    """Persist one credential-free accepted/rejected/deferred evaluation."""
+    if isinstance(decision, Mapping):
+        get = decision.get
+    else:
+        get = lambda key, default="": getattr(decision, key, default)
+    outcome = str(get("decision", "rejected") or "rejected").strip().lower()
+    if outcome not in {"accepted", "rejected", "deferred"}:
+        outcome = "rejected"
+    try:
+        history_id = max(0, int(history_id or 0))
+    except (TypeError, ValueError):
+        history_id = 0
+    try:
+        score = float(get("score", 0) or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    safe_profile = {}
+    if isinstance(profile, Mapping) and profile:
+        try:
+            from .upgrade import normalize_upgrade_profile
+            safe_profile = normalize_upgrade_profile(
+                profile, allow_legacy_default=False,
+            )
+        except (TypeError, ValueError):
+            # Rejected or legacy evaluations may not have a valid profile;
+            # keep the audit row credential-free without persisting arbitrary
+            # unvalidated input.
+            safe_profile = {}
+    payload = json.dumps(safe_profile, ensure_ascii=False, sort_keys=True)
+    created_at = _utc_now_iso()
+    with _write_lock:
+        conn = _connect()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO upgrade_decisions
+                    (created_at, job_id, history_id, platform, source_id, title,
+                     channel, current_quality, candidate_quality, decision,
+                     reason_code, reason, score, profile_json, execution_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    created_at,
+                    str(job_id or "")[:128],
+                    history_id,
+                    str(get("platform", "") or "")[:64],
+                    str(get("source_id", "") or "")[:160],
+                    str(title or "")[:240],
+                    str(channel or "")[:160],
+                    str(get("current_quality", "") or "")[:64],
+                    str(get("candidate_quality", "") or "")[:64],
+                    outcome,
+                    str(get("reason_code", "") or "")[:96],
+                    str(get("reason", "") or "")[:500],
+                    score,
+                    payload,
+                    str(execution_status or "not_started")[:32],
+                ),
+            )
+            conn.commit()
+            return int(cursor.lastrowid)
+        finally:
+            conn.close()
+
+
+def update_upgrade_decision(
+    decision_id: int,
+    *,
+    execution_status: str = "",
+    activation_path: str = "",
+    previous_path: str = "",
+    execution_error: str = "",
+) -> bool:
+    """Attach activation/failure state to a previously recorded decision."""
+    try:
+        decision_id = int(decision_id)
+    except (TypeError, ValueError):
+        return False
+    if decision_id <= 0:
+        return False
+    fields = {}
+    if execution_status:
+        fields["execution_status"] = str(execution_status)[:32]
+    if activation_path:
+        fields["activation_path"] = str(activation_path)[:1024]
+    if previous_path:
+        fields["previous_path"] = str(previous_path)[:1024]
+    if execution_error:
+        fields["execution_error"] = str(execution_error)[:500]
+    if not fields:
+        return False
+    with _write_lock:
+        conn = _connect()
+        try:
+            assignments = ", ".join(f"{key}=?" for key in fields)
+            cursor = conn.execute(
+                f"UPDATE upgrade_decisions SET {assignments} WHERE id=?",
+                [*fields.values(), decision_id],
+            )
+            conn.commit()
+            return bool(cursor.rowcount)
+        finally:
+            conn.close()
+
+
+def list_upgrade_decisions(
+    *,
+    history_id: int = 0,
+    platform: str = "",
+    source_id: str = "",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return newest upgrade evaluations for audit and per-item UI."""
+    try:
+        limit = max(1, min(5000, int(limit or 100)))
+    except (TypeError, ValueError):
+        limit = 100
+    where = []
+    params: list[Any] = []
+    if history_id:
+        where.append("history_id=?")
+        params.append(int(history_id))
+    if platform:
+        where.append("platform=? COLLATE NOCASE")
+        params.append(str(platform))
+    if source_id:
+        where.append("source_id=?")
+        params.append(str(source_id))
+    params.append(limit)
+    conn = _connect(readonly=True)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM upgrade_decisions "
+            + (f"WHERE {' AND '.join(where)} " if where else "")
+            + "ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["profile"] = json.loads(item.pop("profile_json", "{}") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                item["profile"] = {}
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def latest_upgrade_decision(history_id: int) -> dict[str, Any] | None:
+    """Return the latest durable decision for one history item."""
+    rows = list_upgrade_decisions(history_id=history_id, limit=1)
+    return rows[0] if rows else None
+
+
 def adopt_history_records(
     entries: list[dict[str, Any]],
     *,
@@ -1659,7 +2045,9 @@ def build_rebuilt_library_database(
             db.execute("BEGIN IMMEDIATE")
             _apply_schema(db)
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            for table in ("published_recordings", "archive_manifests"):
+            for table in (
+                "published_recordings", "archive_manifests", "upgrade_decisions",
+            ):
                 try:
                     db.execute(f"DELETE FROM {table}")
                 except sqlite3.OperationalError:
@@ -2136,7 +2524,7 @@ def find_history_by_url(url: str) -> dict[str, Any] | None:
     db = _connect(readonly=True)
     try:
         row = db.execute(
-            "SELECT * FROM history "
+            _history_select_with_upgrade("history") + " FROM history "
             f"WHERE {' OR '.join(clauses)} "
             "ORDER BY id DESC LIMIT 1",
             params,
@@ -2155,7 +2543,7 @@ def find_history_by_identity(platform: str, source_id: str) -> dict[str, Any] | 
     db = _connect(readonly=True)
     try:
         row = db.execute(
-            "SELECT * FROM history "
+            _history_select_with_upgrade("history") + " FROM history "
             "WHERE platform=? COLLATE NOCASE AND source_id=? "
             "ORDER BY id DESC LIMIT 1",
             (platform, source_id),
@@ -2183,7 +2571,8 @@ def find_latest_history(*, channel="", title="", platform="") -> dict[str, Any] 
     db = _connect(readonly=True)
     try:
         row = db.execute(
-            f"SELECT * FROM history WHERE {' AND '.join(where)} "
+            f"{_history_select_with_upgrade('history')} FROM history "
+            f"WHERE {' AND '.join(where)} "
             "ORDER BY id DESC LIMIT 1",
             params,
         ).fetchone()
@@ -2220,8 +2609,9 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                      schedule_start_hhmm, schedule_end_hhmm, schedule_days_mask,
                      retention_keep_last, filter_keywords, override_pp_preset,
                      ytdlp_template_name, auto_upgrade, min_upgrade_quality,
+                     upgrade_profile_json,
                      auth_profile_id, media_server_layout)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("url", "")),
                 str(entry_dict.get("platform", "")),
@@ -2242,6 +2632,12 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                 str(entry_dict.get("ytdlp_template_name", "") or ""),
                 int(bool(entry_dict.get("auto_upgrade", False))),
                 str(entry_dict.get("min_upgrade_quality", "") or ""),
+                json.dumps(
+                    entry_dict.get("upgrade_profile", {})
+                    if isinstance(entry_dict.get("upgrade_profile", {}), dict)
+                    else {},
+                    ensure_ascii=False, sort_keys=True,
+                ),
                 str(entry_dict.get("auth_profile_id", "") or ""),
                 str(entry_dict.get("media_server_layout", "") or ""),
             ))
@@ -2268,8 +2664,9 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                          schedule_days_mask, retention_keep_last,
                          filter_keywords, override_pp_preset,
                          ytdlp_template_name, auto_upgrade, min_upgrade_quality,
+                         upgrade_profile_json,
                          auth_profile_id, media_server_layout)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     str(d.get("url", "")),
                     str(d.get("platform", "")),
@@ -2290,6 +2687,12 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                     str(d.get("ytdlp_template_name", "") or ""),
                     int(bool(d.get("auto_upgrade", False))),
                     str(d.get("min_upgrade_quality", "") or ""),
+                    json.dumps(
+                        d.get("upgrade_profile", {})
+                        if isinstance(d.get("upgrade_profile", {}), dict)
+                        else {},
+                        ensure_ascii=False, sort_keys=True,
+                    ),
                     str(d.get("auth_profile_id", "") or ""),
                     str(d.get("media_server_layout", "") or ""),
                 ))
@@ -4976,6 +5379,11 @@ def _row_to_monitor_dict(row):
         d["archive_ids"] = json.loads(d.get("archive_ids", "[]") or "[]")
     except (json.JSONDecodeError, TypeError):
         d["archive_ids"] = []
+    try:
+        profile = json.loads(d.get("upgrade_profile_json", "{}") or "{}")
+        d["upgrade_profile"] = profile if isinstance(profile, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        d["upgrade_profile"] = {}
     return d
 
 

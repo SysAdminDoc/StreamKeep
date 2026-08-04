@@ -205,6 +205,8 @@ class FinalizeWorker(QThread):
             ),
             "queue_job_id": task.get("queue_job_id", ""),
             "is_upgrade": bool(task.get("is_upgrade", False)),
+            "upgrade_history_id": int(task.get("upgrade_history_id", 0) or 0),
+            "upgrade_decision_id": int(task.get("upgrade_decision_id", 0) or 0),
             "upgrade_activated": False,
             "info": info,
             "cancelled": False,
@@ -375,10 +377,27 @@ class FinalizeWorker(QThread):
                         step_no,
                         total_steps,
                     )
-                    final_dir = activate_upgrade_version(paths)
+                    final_dir = activate_upgrade_version(
+                        paths,
+                        version_keep=int(task.get("upgrade_version_keep", 3) or 3),
+                    )
                     out_dir = str(final_dir)
                     result["out_dir"] = out_dir
+                    result["upgrade_previous_path"] = str(paths.existing)
                     result["upgrade_activated"] = True
+                    if result["upgrade_decision_id"]:
+                        try:
+                            from .. import db as _db
+                            _db.update_upgrade_decision(
+                                result["upgrade_decision_id"],
+                                execution_status="activated",
+                                activation_path=out_dir,
+                                previous_path=str(paths.existing),
+                            )
+                        except Exception as error:
+                            self.log.emit(
+                                f"[UPGRADE] Decision status could not be updated: {error}"
+                            )
                     self.log.emit(
                         f"[UPGRADE] Activated verified version: {out_dir}"
                     )
@@ -389,6 +408,16 @@ class FinalizeWorker(QThread):
                 )
             except Exception as e:
                 result["archive_manifest_error"] = str(e)
+                if result.get("upgrade_decision_id"):
+                    try:
+                        from .. import db as _db
+                        _db.update_upgrade_decision(
+                            result["upgrade_decision_id"],
+                            execution_status="failed",
+                            execution_error=str(e),
+                        )
+                    except Exception:
+                        pass
                 self.log.emit(f"[VERIFY] Could not capture integrity manifest: {e}")
 
         result["cancelled"] = self._interrupted()

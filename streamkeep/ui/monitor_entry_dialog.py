@@ -1,5 +1,7 @@
 """Monitor-entry profile editor — polished per-channel override editor."""
 
+import json
+
 from PyQt6.QtCore import Qt, QTime
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
@@ -322,6 +324,27 @@ class MonitorEntryDialog(TranslatableDialog):
         upgrade_row.addStretch(1)
         content.addLayout(upgrade_row)
 
+        content.addWidget(self._field_label("Upgrade policy (JSON)"))
+        profile_hint = QLabel(
+            "Optional explicit policy with an ordered ladder, cutoff, scored matchers, "
+            "and version_keep. Example: {\"ladder\":[\"720p\",\"1080p\",\"source\"],"
+            "\"cutoff\":\"1080p\",\"matchers\":[],\"version_keep\":3}"
+        )
+        profile_hint.setObjectName("fieldHint")
+        profile_hint.setWordWrap(True)
+        content.addWidget(profile_hint)
+        profile = getattr(self.entry, "upgrade_profile", {})
+        self.upgrade_profile_input = QLineEdit(
+            json.dumps(profile, ensure_ascii=False, sort_keys=True)
+            if isinstance(profile, dict) and profile else ""
+        )
+        self.upgrade_profile_input.setPlaceholderText(
+            "Leave blank for the ordered default ladder and source cutoff"
+        )
+        self.upgrade_profile_input.setClearButtonEnabled(True)
+        self.upgrade_profile_input.textChanged.connect(self._update_summary)
+        content.addWidget(self.upgrade_profile_input)
+
         root.addWidget(section)
 
     def _build_retention_section(self, root):
@@ -387,6 +410,8 @@ class MonitorEntryDialog(TranslatableDialog):
             )
         if self.auto_upgrade_check.isChecked():
             parts.append("auto-upgrade")
+            if self.upgrade_profile_input.text().strip():
+                parts.append("explicit upgrade policy")
         if int(self.retention_spin.value() or 0) > 0:
             parts.append(f"keep last {self.retention_spin.value()}")
         if self.media_server_layout_combo.currentData() or "":
@@ -438,6 +463,33 @@ class MonitorEntryDialog(TranslatableDialog):
         entry.ytdlp_template_name = self.ytdlp_template_combo.currentData() or ""
         entry.auto_upgrade = self.auto_upgrade_check.isChecked()
         entry.min_upgrade_quality = self.min_upgrade_combo.currentData() or ""
+        profile_text = self.upgrade_profile_input.text().strip()
+        if profile_text:
+            try:
+                raw_profile = json.loads(profile_text)
+                if not isinstance(raw_profile, dict):
+                    raise ValueError("policy must be a JSON object")
+                from ..upgrade import normalize_upgrade_profile
+                entry.upgrade_profile = normalize_upgrade_profile(
+                    raw_profile,
+                    minimum_quality=entry.min_upgrade_quality,
+                    allow_legacy_default=False,
+                )
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                update_status_banner(
+                    self.summary_banner,
+                    self.summary_title,
+                    self.summary_body,
+                    title="Upgrade policy was not saved",
+                    body=str(error),
+                    tone="warning",
+                )
+                return
+        elif entry.auto_upgrade:
+            from ..upgrade import default_upgrade_profile
+            entry.upgrade_profile = default_upgrade_profile(entry.min_upgrade_quality)
+        else:
+            entry.upgrade_profile = {}
         entry.retention_keep_last = int(self.retention_spin.value())
         entry.media_server_layout = self.media_server_layout_combo.currentData() or ""
         self.accept()

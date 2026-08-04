@@ -29,10 +29,11 @@ from .preflight import (
 from .retry import sanitize_failure_reason
 from .upgrade import (
     UpgradeSafetyError,
+    default_upgrade_profile,
+    evaluate_upgrade,
     identity_matches,
     plan_upgrade_paths,
     prepare_upgrade_staging,
-    quality_rank,
 )
 from .utils import default_output_dir, fmt_size, safe_filename
 from .workers import (
@@ -513,6 +514,8 @@ class HeadlessJobService(QObject):
         )
         upgrade_paths = None
         existing_history = None
+        upgrade_decision_id = 0
+        upgrade_version_keep = 3
         if bool(job.get("is_upgrade", False)):
             if not identity_matches(
                 str(job.get("vod_platform") or job.get("platform") or ""),
@@ -520,6 +523,23 @@ class HeadlessJobService(QObject):
                 resolved_platform,
                 resolved_source_id,
             ):
+                try:
+                    db.record_upgrade_decision(
+                        {
+                            "decision": "rejected",
+                            "reason_code": "identity_mismatch",
+                            "reason": "Resolved media identity does not match the queued upgrade candidate",
+                            "platform": resolved_platform,
+                            "source_id": resolved_source_id,
+                            "candidate_quality": chosen_quality,
+                        },
+                        job_id=job_id,
+                        title=title,
+                        channel=str(getattr(info, "channel", "") or ""),
+                        profile=job.get("upgrade_profile", {}),
+                    )
+                except Exception:
+                    pass
                 self._fail_job(
                     job_id,
                     "fetch",
@@ -536,6 +556,24 @@ class HeadlessJobService(QObject):
                 or not existing_history.get("path")
                 or not os.path.isdir(str(existing_history.get("path")))
             ):
+                try:
+                    db.record_upgrade_decision(
+                        {
+                            "decision": "rejected",
+                            "reason_code": "known_good_missing",
+                            "reason": "The same-identity known-good recording is missing",
+                            "platform": resolved_platform,
+                            "source_id": resolved_source_id,
+                            "candidate_quality": chosen_quality,
+                        },
+                        history_id=int(existing_history.get("id", 0) or 0),
+                        job_id=job_id,
+                        title=title,
+                        channel=str(getattr(info, "channel", "") or ""),
+                        profile=job.get("upgrade_profile", {}),
+                    )
+                except Exception:
+                    pass
                 self._fail_job(
                     job_id,
                     "fetch",
@@ -543,36 +581,49 @@ class HeadlessJobService(QObject):
                     info=info,
                 )
                 return
-            if quality_rank(chosen_quality) <= quality_rank(
-                str(existing_history.get("quality", ""))
-            ):
+            profile = job.get("upgrade_profile", {})
+            if not isinstance(profile, dict) or not profile:
+                profile = default_upgrade_profile(
+                    str(job.get("upgrade_min_quality", "") or "")
+                )
+            decision = evaluate_upgrade(
+                existing_history,
+                {
+                    "platform": resolved_platform,
+                    "source_id": resolved_source_id,
+                    "quality": chosen_quality,
+                    "title": title,
+                    "channel": str(getattr(info, "channel", "") or ""),
+                    "format": format_type,
+                },
+                profile,
+                enabled=True,
+                expected_platform=str(job.get("vod_platform") or job.get("platform") or ""),
+                expected_source_id=str(job.get("source_id", "") or ""),
+            )
+            try:
+                upgrade_decision_id = db.record_upgrade_decision(
+                    decision,
+                    history_id=int(existing_history.get("id", 0) or 0),
+                    job_id=job_id,
+                    title=title,
+                    channel=str(getattr(info, "channel", "") or ""),
+                    profile=profile,
+                ) or 0
+            except Exception:
+                upgrade_decision_id = 0
+            if not decision.accepted:
                 db.transition_owned_queue_job(
                     job_id,
                     self.owner_id,
                     expected_statuses="fetching",
                     status="done",
                     progress=100,
-                    progress_text=(
-                        f"No upgrade: {chosen_quality} is not higher than "
-                        f"{existing_history.get('quality', '')}"
-                    ),
+                    progress_text=f"No upgrade: {decision.reason_code} — {decision.reason}",
                 )
                 self._dispatch()
                 return
-            minimum = str(job.get("upgrade_min_quality", "") or "")
-            if minimum and quality_rank(chosen_quality) < quality_rank(minimum):
-                db.transition_owned_queue_job(
-                    job_id,
-                    self.owner_id,
-                    expected_statuses="fetching",
-                    status="done",
-                    progress=100,
-                    progress_text=(
-                        f"No upgrade: {chosen_quality} is below {minimum}"
-                    ),
-                )
-                self._dispatch()
-                return
+            upgrade_version_keep = int(profile.get("version_keep", 3) or 3)
             try:
                 upgrade_paths = plan_upgrade_paths(
                     str(existing_history.get("path")),
@@ -581,6 +632,12 @@ class HeadlessJobService(QObject):
                 )
                 prepare_upgrade_staging(upgrade_paths)
             except (OSError, UpgradeSafetyError) as error:
+                if upgrade_decision_id:
+                    db.update_upgrade_decision(
+                        upgrade_decision_id,
+                        execution_status="failed",
+                        execution_error=str(error),
+                    )
                 self._fail_job(
                     job_id, "download", str(error), info=info,
                 )
@@ -751,6 +808,12 @@ class HeadlessJobService(QObject):
             "upgrade_final_dir": (
                 str(upgrade_paths.final) if upgrade_paths else ""
             ),
+            "upgrade_history_id": (
+                int(existing_history.get("id", 0) or 0)
+                if existing_history else 0
+            ),
+            "upgrade_decision_id": int(upgrade_decision_id or 0),
+            "upgrade_version_keep": int(upgrade_version_keep or 3),
         }
         self._downloads[job_id] = worker
         current = db.transition_owned_queue_job(
@@ -777,6 +840,8 @@ class HeadlessJobService(QObject):
             upgrade_final_dir=(
                 str(upgrade_paths.final) if upgrade_paths else ""
             ),
+            upgrade_decision_id=int(upgrade_decision_id or 0),
+            upgrade_version_keep=int(upgrade_version_keep or 3),
         )
         if not current:
             self._contexts.pop(job_id, None)
@@ -870,6 +935,21 @@ class HeadlessJobService(QObject):
             "upgrade_final_dir": str(
                 ctx.get("upgrade_final_dir", "") or ""
             ),
+            "upgrade_history_id": int(
+                ctx.get("upgrade_history_id", 0)
+                or job.get("upgrade_history_id", 0)
+                or 0
+            ),
+            "upgrade_decision_id": int(
+                ctx.get("upgrade_decision_id", 0)
+                or job.get("upgrade_decision_id", 0)
+                or 0
+            ),
+            "upgrade_version_keep": int(
+                ctx.get("upgrade_version_keep", 3)
+                or job.get("upgrade_version_keep", 3)
+                or 3
+            ),
             "expected_duration": float(
                 getattr(info, "total_secs", 0) or 0
             ),
@@ -932,6 +1012,12 @@ class HeadlessJobService(QObject):
         if result.get("is_upgrade") and not result.get("upgrade_activated"):
             failure = failure or "Upgrade activation did not complete"
         if failure:
+            if result.get("upgrade_decision_id"):
+                db.update_upgrade_decision(
+                    int(result.get("upgrade_decision_id", 0) or 0),
+                    execution_status="failed",
+                    execution_error=failure,
+                )
             safe_failure = sanitize_failure_reason(failure)
             failure_id = db.save_failed_job(
                 url=str(job.get("url", "")),
@@ -963,7 +1049,7 @@ class HeadlessJobService(QObject):
             size_label = fmt_size(self._folder_size(output_dir))
         try:
             manifest = result.get("archive_manifest")
-            history_id = db.save_completed_recording({
+            entry_payload = {
                 "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "platform": str(
                     result.get("platform", "") or job.get("platform", "")
@@ -985,8 +1071,33 @@ class HeadlessJobService(QObject):
                 "url": str(
                     result.get("history_url", "") or job.get("url", "")
                 ),
-            }, manifest if isinstance(manifest, dict) else None)
+            }
+            if result.get("is_upgrade"):
+                history_id = db.update_completed_recording(
+                    int(
+                        result.get("upgrade_history_id", 0)
+                        or job.get("upgrade_history_id", 0)
+                        or 0
+                    ),
+                    entry_payload,
+                    manifest if isinstance(manifest, dict) else None,
+                )
+            else:
+                history_id = db.save_completed_recording(
+                    entry_payload,
+                    manifest if isinstance(manifest, dict) else None,
+                )
+            if result.get("is_upgrade") and not history_id:
+                raise RuntimeError(
+                    "The canonical history row for this upgrade no longer exists"
+                )
         except Exception as error:
+            if result.get("upgrade_decision_id"):
+                db.update_upgrade_decision(
+                    int(result.get("upgrade_decision_id", 0) or 0),
+                    execution_status="failed",
+                    execution_error=str(error),
+                )
             self._fail_job(
                 job_id,
                 "finalize",

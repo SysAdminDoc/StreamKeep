@@ -3,6 +3,7 @@
 import copy
 import os
 import urllib.parse
+from datetime import datetime
 
 from ... import db as _db
 from ...extractors import Extractor, TwitchExtractor
@@ -90,30 +91,6 @@ class DownloadFinalizeMixin:
             and not finalize_error
             and (not is_upgrade or result.get("upgrade_activated"))
         )
-        history_entry = None
-        if succeeded:
-            try:
-                history_entry = self._add_history(
-                    result.get("platform", "?"),
-                    result.get("title", "?"),
-                    result.get("quality_name", ""),
-                    result.get(
-                        "size_label",
-                        self._output_size_label(result.get("out_dir", "")),
-                    ),
-                    result.get("out_dir", ""),
-                    channel=result.get("channel", ""),
-                    url=result.get("history_url", ""),
-                    source_id=result.get("source_id", ""),
-                    webpage_url=result.get("webpage_url", ""),
-                    archive_manifest=result.get("archive_manifest"),
-                )
-            except Exception as error:
-                succeeded = False
-                finalize_error = (
-                    f"Could not persist completed recording: {error}"
-                )
-                self._log(f"[FINALIZE] {finalize_error}")
         queue_job_id = str(result.get("queue_job_id", "") or "")
         queue_item = next(
             (
@@ -122,6 +99,87 @@ class DownloadFinalizeMixin:
             ),
             None,
         )
+        history_entry = None
+        if succeeded:
+            try:
+                size_label = result.get(
+                    "size_label",
+                    self._output_size_label(result.get("out_dir", "")),
+                )
+                if is_upgrade:
+                    history_id = int(
+                        result.get("upgrade_history_id", 0)
+                        or (queue_item or {}).get("upgrade_history_id", 0)
+                        or 0
+                    )
+                    history_id = _db.update_completed_recording(
+                        history_id,
+                        {
+                            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "platform": result.get("platform", "?"),
+                            "title": result.get("title", "?"),
+                            "quality": result.get("quality_name", ""),
+                            "size": size_label,
+                            "path": result.get("out_dir", ""),
+                            "channel": result.get("channel", ""),
+                            "url": result.get("history_url", ""),
+                            "source_id": result.get("source_id", ""),
+                            "webpage_url": (
+                                result.get("webpage_url", "")
+                                or result.get("history_url", "")
+                            ),
+                        },
+                        result.get("archive_manifest"),
+                    )
+                    if not history_id:
+                        raise RuntimeError(
+                            "The canonical history row for this upgrade no longer exists"
+                        )
+                    updated = _db.find_history_by_identity(
+                        result.get("platform", ""), result.get("source_id", ""),
+                    )
+                    history_entry = HistoryEntry.from_dict(updated) if updated else HistoryEntry(
+                        db_id=history_id,
+                        platform=result.get("platform", "?"),
+                        title=result.get("title", "?"),
+                        quality=result.get("quality_name", ""),
+                        size=size_label,
+                        path=result.get("out_dir", ""),
+                        source_id=result.get("source_id", ""),
+                        webpage_url=result.get("webpage_url", ""),
+                    )
+                    history_entry.db_id = history_id
+                    refresh_history = getattr(self, "_refresh_history_table", None)
+                    if callable(refresh_history):
+                        refresh_history()
+                else:
+                    history_entry = self._add_history(
+                        result.get("platform", "?"),
+                        result.get("title", "?"),
+                        result.get("quality_name", ""),
+                        size_label,
+                        result.get("out_dir", ""),
+                        channel=result.get("channel", ""),
+                        url=result.get("history_url", ""),
+                        source_id=result.get("source_id", ""),
+                        webpage_url=result.get("webpage_url", ""),
+                        archive_manifest=result.get("archive_manifest"),
+                    )
+            except Exception as error:
+                succeeded = False
+                finalize_error = (
+                    f"Could not persist completed recording: {error}"
+                )
+                self._log(f"[FINALIZE] {finalize_error}")
+                if result.get("upgrade_decision_id"):
+                    try:
+                        _db.update_upgrade_decision(
+                            result["upgrade_decision_id"],
+                            execution_status="failed",
+                            execution_error=finalize_error,
+                        )
+                    except Exception:
+                        pass
         if succeeded and is_upgrade:
             self._index_finalized_recording(
                 result.get("out_dir", ""), result.get("info"),
@@ -334,6 +392,18 @@ class DownloadFinalizeMixin:
             "upgrade_final_dir": (
                 str(queue_item.get("upgrade_final_dir", "") or "")
                 if queue_item else ""
+            ),
+            "upgrade_history_id": (
+                int(queue_item.get("upgrade_history_id", 0) or 0)
+                if queue_item else 0
+            ),
+            "upgrade_decision_id": (
+                int(queue_item.get("upgrade_decision_id", 0) or 0)
+                if queue_item else 0
+            ),
+            "upgrade_version_keep": (
+                int(queue_item.get("upgrade_version_keep", 3) or 3)
+                if queue_item else 3
             ),
             "expected_duration": float(
                 getattr(info_copy, "total_secs", 0) or 0

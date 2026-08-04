@@ -6,7 +6,9 @@ from unittest import mock
 from streamkeep.upgrade import (
     UpgradeSafetyError,
     activate_upgrade_version,
+    evaluate_upgrade,
     identity_matches,
+    list_upgrade_versions,
     plan_upgrade_paths,
     prepare_upgrade_staging,
     quality_rank,
@@ -60,6 +62,167 @@ def test_quality_rank_compares_height_in_resolution_labels():
     assert quality_rank("1080p60") == 1080
     assert quality_rank("1280x720") == 720
     assert quality_rank("source") > quality_rank("2160p")
+
+
+def test_upgrade_profile_has_ordered_cutoff_and_hard_veto_matchers():
+    profile = {
+        "ladder": ["720p", "1080p", "2160p"],
+        "cutoff": "1080p",
+        "minimum_score": 5,
+        "matchers": [
+            {"name": "official", "field": "title", "pattern": "official", "score": 5},
+            {"name": "ad", "field": "title", "pattern": "ad", "score": -100},
+        ],
+    }
+    base = {"platform": "Twitch", "source_id": "vod:1", "quality": "720p"}
+    accepted = evaluate_upgrade(
+        base,
+        {
+            **base,
+            "quality": "1080p",
+            "title": "Official recording",
+        },
+        profile,
+    )
+    assert accepted.accepted
+    assert accepted.reason_code == "quality_upgrade_eligible"
+
+    vetoed = evaluate_upgrade(
+        base,
+        {
+            **base,
+            "quality": "1080p",
+            "title": "Official ad break",
+        },
+        profile,
+    )
+    assert vetoed.decision == "rejected"
+    assert vetoed.reason_code == "matcher_veto"
+
+    above_cutoff = evaluate_upgrade(
+        base,
+        {**base, "quality": "2160p", "title": "Official recording"},
+        profile,
+    )
+    assert above_cutoff.reason_code == "above_upgrade_cutoff"
+
+
+def test_upgrade_decisions_are_durable_and_projected_on_history(tmp_path):
+    recording = tmp_path / "recording"
+    recording.mkdir()
+    with mock.patch.object(db, "DB_PATH", tmp_path / "library.db"):
+        db.init_db()
+        history_id = db.save_history_entry({
+            "platform": "Twitch",
+            "source_id": "vod:1",
+            "title": "Episode",
+            "quality": "720p",
+            "path": str(recording),
+        })
+        decision_id = db.record_upgrade_decision(
+            {
+                "decision": "rejected",
+                "reason_code": "matcher_veto",
+                "reason": "Candidate rejected by hard-veto matcher 'ad'",
+                "platform": "Twitch",
+                "source_id": "vod:1",
+                "current_quality": "720p",
+                "candidate_quality": "1080p",
+            },
+            history_id=history_id,
+            title="Episode",
+            profile={"ladder": ["720p", "1080p"], "cutoff": "1080p"},
+        )
+        assert decision_id
+        rows = db.list_upgrade_decisions(history_id=history_id)
+        assert rows[0]["reason_code"] == "matcher_veto"
+        projected = db.query_history_page(limit=1)[0]
+
+    assert projected["upgrade_decision"] == "rejected"
+    assert projected["upgrade_reason_code"] == "matcher_veto"
+
+
+def test_upgrade_update_keeps_stable_history_state_and_manifest(tmp_path):
+    recording = tmp_path / "recording"
+    replacement = tmp_path / "recording-upgraded"
+    recording.mkdir()
+    replacement.mkdir()
+    db_path = tmp_path / "library.db"
+    with mock.patch.object(db, "DB_PATH", db_path):
+        db.init_db()
+        history_id = db.save_completed_recording({
+            "date": "2026-08-03 12:00",
+            "platform": "Twitch",
+            "source_id": "vod:stable",
+            "webpage_url": "https://www.twitch.tv/videos/123",
+            "title": "Episode",
+            "channel": "creator",
+            "quality": "720p",
+            "size": "1 MB",
+            "path": str(recording),
+            "url": "https://www.twitch.tv/videos/123",
+            "favorite": True,
+            "watched": True,
+            "watch_position_secs": 42,
+            "bookmarks": [{"name": "intro", "secs": 4}],
+        })
+        db.update_history_entry(history_id, {
+            "favorite": True,
+            "watched": True,
+            "watch_position_secs": 42,
+            "bookmarks": [{"name": "intro", "secs": 4}],
+        })
+        manifest = {"files": [{"path": "episode.mp4", "size": 12}]}
+        assert db.update_completed_recording(
+            history_id,
+            {"quality": "1080p", "path": str(replacement)},
+            manifest,
+        ) == history_id
+        updated = db.find_history_by_identity("twitch", "vod:stable")
+        archive_manifest = db.load_archive_manifest(history_id)
+
+    assert updated["id"] == history_id
+    assert updated["quality"] == "1080p"
+    assert updated["path"] == str(replacement)
+    assert updated["title"] == "Episode"
+    assert updated["webpage_url"] == "https://www.twitch.tv/videos/123"
+    assert updated["favorite"]
+    assert updated["watched"]
+    assert updated["watch_position_secs"] == 42
+    assert updated["bookmarks"] == [{"name": "intro", "secs": 4}]
+    assert archive_manifest["recording_path"] == str(replacement)
+    assert archive_manifest["manifest"] == manifest
+
+
+def test_upgrade_deferred_and_malformed_profiles_have_named_outcomes():
+    base = {"platform": "Twitch", "source_id": "vod:1", "quality": "720p"}
+    profile = {"ladder": ["720p", "1080p"], "cutoff": "1080p"}
+    deferred = evaluate_upgrade(
+        base,
+        {**base, "quality": ""},
+        profile,
+        defer_unknown_quality=True,
+    )
+    assert deferred.decision == "deferred"
+    assert deferred.platform == "Twitch"
+    assert deferred.source_id == "vod:1"
+    invalid = evaluate_upgrade(base, {**base, "quality": "1080p"}, [])
+    assert invalid.reason_code == "invalid_profile"
+
+
+def test_version_retention_keeps_known_good_and_bounded_siblings(tmp_path):
+    existing = tmp_path / "recording"
+    existing.mkdir()
+    original = existing / "known-good.txt"
+    original.write_text("known good", encoding="utf-8")
+    for index in range(4):
+        paths = plan_upgrade_paths(existing, f"job-{index:012d}", f"{720 + index * 120}p")
+        prepare_upgrade_staging(paths)
+        (paths.staging / "new.txt").write_text(str(index), encoding="utf-8")
+        activate_upgrade_version(paths, version_keep=2)
+
+    assert original.read_text(encoding="utf-8") == "known good"
+    assert len(list_upgrade_versions(existing)) <= 2
 
 
 def test_source_identity_survives_immutable_job_round_trip():

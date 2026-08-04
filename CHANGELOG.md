@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added same-identity quality-upgrade decisions with explicit ordered ladders,
+  cutoffs, scored matchers, named audit reasons, and per-item history tooltips.
+  Verified replacements publish atomically beside the known-good recording and
+  retain a bounded set of prior versions; automatic upgrades remain opt-in.
+
 - Added preview-first external-library adoption for arbitrary media trees,
   yt-dlp download archives, and `.info.json`/NFO sidecars. Conflicts remain
   explicit, apply creates a backup and atomically adds history plus monitor

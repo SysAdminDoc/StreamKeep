@@ -188,6 +188,13 @@ class HistoryEntry:
     watch_position_secs: float = 0.0       # resume position (F38)
     bookmarks: list[dict[str, str | float]] = field(default_factory=list)  # [{name, secs}] (F38)
     db_id: int = 0                         # SQLite row id (F41, 0=not persisted)
+    # Latest durable quality-upgrade evaluation, populated by paged history
+    # queries for a per-item audit tooltip. These are read-only projections,
+    # not columns written back with the history row.
+    upgrade_decision: str = ""
+    upgrade_reason_code: str = ""
+    upgrade_reason: str = ""
+    upgrade_execution_status: str = ""
 
     def to_dict(self) -> dict[str, str | bool | float | list[dict[str, str | float]]]:
         """Serialize to a dict suitable for ``db.save_history_entry()``."""
@@ -222,6 +229,12 @@ class HistoryEntry:
             watch_position_secs=float(d.get("watch_position_secs", 0) or 0),
             bookmarks=list(d.get("bookmarks", []) or []),
             db_id=int(d.get("id", 0) or 0),
+            upgrade_decision=str(d.get("upgrade_decision", "") or ""),
+            upgrade_reason_code=str(d.get("upgrade_reason_code", "") or ""),
+            upgrade_reason=str(d.get("upgrade_reason", "") or ""),
+            upgrade_execution_status=str(
+                d.get("upgrade_execution_status", "") or ""
+            ),
         )
 
 
@@ -251,6 +264,7 @@ class MonitorEntry:
     auth_profile_id: str = ""             # site-bound auth profile (V50); "" = resolve by URL
     auto_upgrade: bool = False            # re-download when higher quality VOD appears (F25)
     min_upgrade_quality: str = ""         # minimum quality to trigger upgrade (e.g. "1080p")
+    upgrade_profile: dict = field(default_factory=dict)  # explicit ladder/cutoff/matchers
     media_server_layout: str = ""         # "seasoned"/"flat"; empty = global media-server layout
     _cancel_requested: bool = field(default=False, repr=False, compare=False)
 

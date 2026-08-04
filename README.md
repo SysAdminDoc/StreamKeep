@@ -50,6 +50,8 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 
 - Monitor Kick and Twitch channels with per-channel intervals and auto-record rules.
 - Override output directory, quality, filename template, schedule window, active days, and retention count per channel.
+- Opt into same-identity quality upgrades with an ordered ladder, explicit cutoff,
+  optional scored matchers, named decision reasons, and bounded retained versions.
 - Route completed monitor captures into Season `SYYYYE##` or flat per-channel
   Plex/Jellyfin/Emby/Kodi layouts, with privacy-safe NFO sidecars. Optional
   portable M3U and native server playlists are maintained from the same import.
