@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added labeled scoped API-token inventory and management. The master-only
+  endpoint, CLI, and Browser Companion Settings panel expose redacted metadata,
+  while one-token revocation takes effect immediately without displaying bearer
+  values.
+
 - Added opt-in BagIt 0.97 fixity export from the authoritative archive
   manifest, including SHA-256 payload/tag manifests, bag metadata, and a
   per-file SHA-384 SRI manifest that verifies through podcast integrity.

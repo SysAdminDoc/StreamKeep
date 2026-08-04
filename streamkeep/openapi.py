@@ -27,6 +27,9 @@ DOCUMENTED_OPERATIONS = frozenset({
     "GET /",
     "GET /ping",
     "GET /api/spec",
+    "GET /api/tokens",
+    "POST /api/tokens",
+    "DELETE /api/tokens/{id}",
     "GET /api/status",
     "GET /api/operations",
     "POST /api/operations/action",
@@ -245,8 +248,52 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                     "properties": {
                         "code": {"type": "string", "description": "One-use pairing code."},
                         "scopes": {"type": "array", "items": {"type": "string"}},
+                        "label": {"type": "string", "maxLength": 128},
                     },
                     "required": ["code"],
+                },
+                "TokenMetadata": {
+                    "type": "object",
+                    "description": (
+                        "Redacted metadata for one active scoped token. The bearer "
+                        "value is intentionally never present in this schema."
+                    ),
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "scopes": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["status", "queue", "recovery"]},
+                        },
+                        "origin": {"type": "string"},
+                        "created_at": {"type": ["integer", "null"], "format": "int64"},
+                        "last_used": {"type": ["integer", "null"], "format": "int64"},
+                        "expires_at": {"type": ["integer", "null"], "format": "int64"},
+                    },
+                    "required": [
+                        "id", "label", "scopes", "origin", "created_at",
+                        "last_used", "expires_at",
+                    ],
+                    "additionalProperties": False,
+                },
+                "TokenCreateRequest": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "scopes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "enum": ["status", "queue", "recovery"]},
+                        },
+                        "origin": {"type": "string"},
+                        "expires_in": {
+                            "type": "integer", "minimum": 60,
+                            "description": "Optional lifetime in seconds; omit for no expiry.",
+                        },
+                    },
+                    "required": ["label", "scopes"],
                 },
                 "ShareRecordingRequest": {
                     "type": "object",
@@ -365,6 +412,87 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "200": json_ok("OpenAPI document.", {"type": "object"}),
                     },
                 }
+            },
+            "/api/tokens": {
+                "get": {
+                    "summary": "List active scoped API-token metadata.",
+                    "description": (
+                        "Master-token only. Responses contain labels, scopes, origin, "
+                        "timestamps, and opaque ids; bearer values are never returned."
+                    ),
+                    "tags": ["auth"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Active token metadata.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "tokens": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/TokenMetadata"},
+                                },
+                            },
+                            "required": ["ok", "tokens"],
+                        }),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+                "post": {
+                    "summary": "Mint one labeled scoped API token.",
+                    "description": (
+                        "Master-token only. The bearer value is returned once in this "
+                        "creation response and is omitted from later list and revoke calls."
+                    ),
+                    "tags": ["auth"],
+                    "security": bearer,
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {
+                            "schema": {"$ref": "#/components/schemas/TokenCreateRequest"},
+                        }},
+                    },
+                    "responses": {
+                        "201": json_ok("Scoped token issued once.", {
+                            "allOf": [
+                                {"$ref": "#/components/schemas/TokenMetadata"},
+                                {"type": "object", "properties": {
+                                    "ok": {"type": "boolean"},
+                                    "token": {"type": "string"},
+                                }, "required": ["ok", "token"]},
+                            ],
+                        }),
+                        "400": {"description": "Invalid label, scope, origin, or expiry.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
+            },
+            "/api/tokens/{id}": {
+                "delete": {
+                    "summary": "Revoke one scoped API token by opaque id.",
+                    "tags": ["auth"],
+                    "security": bearer,
+                    "parameters": [
+                        {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}},
+                        {"$ref": "#/components/parameters/MutationTimestamp"},
+                        {"$ref": "#/components/parameters/MutationNonce"},
+                    ],
+                    "responses": {
+                        "200": json_ok("Token revoked.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "id": {"type": "string"},
+                                "revoked": {"type": "boolean"},
+                            },
+                            "required": ["ok", "id", "revoked"],
+                        }),
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Token id not found.", "content": error_content},
+                    },
+                },
             },
             "/api/status": {
                 "get": {

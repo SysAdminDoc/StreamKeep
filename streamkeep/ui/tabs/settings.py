@@ -9,7 +9,7 @@ converter buttons, import/export/save row.
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHeaderView, QHBoxLayout, QLabel,
+    QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QHeaderView, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -1503,8 +1503,32 @@ def build_settings_tab(win):
     comp_token_row.addWidget(win.companion_revoke_tokens_btn)
     companion_panel_lay.addLayout(comp_token_row)
 
+    token_inventory_label = QLabel("Active scoped tokens")
+    token_inventory_label.setObjectName("subtleText")
+    companion_panel_lay.addWidget(token_inventory_label)
+    win.companion_tokens_table = QTableWidget(0, 6)
+    win.companion_tokens_table.setHorizontalHeaderLabels(
+        ["Label", "Scopes", "Origin", "Created", "Last used", "Action"]
+    )
+    win.companion_tokens_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    win.companion_tokens_table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    win.companion_tokens_table.verticalHeader().setVisible(False)
+    win.companion_tokens_table.setFixedHeight(170)
+    token_header = win.companion_tokens_table.horizontalHeader()
+    token_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    token_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    token_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    token_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+    token_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+    token_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+    companion_panel_lay.addWidget(win.companion_tokens_table)
+
     companion_hint = QLabel(
-        "The master token is generated with 256 bits and kept in the operating-system secure store. Clients receive scoped, origin-bound tokens only after explicit one-time pairing. Mutating calls are nonce-protected."
+        "The master token is generated with 256 bits and kept in the operating-system secure store. This inventory shows only scoped-token metadata; bearer values are never displayed. Mutating calls are nonce-protected."
     )
     companion_hint.setObjectName("subtleText")
     companion_hint.setWordWrap(True)

@@ -291,6 +291,52 @@ class SettingsCompanionMixin:
             self.companion_token_display.setText(pairing_code)
         if hasattr(self, "companion_copy_token_btn"):
             self.companion_copy_token_btn.setEnabled(bool(pairing_code))
+        self._refresh_companion_tokens()
+
+    def _refresh_companion_tokens(self):
+        """Refresh the redacted scoped-token inventory in Settings."""
+        table = getattr(self, "companion_tokens_table", None)
+        if table is None:
+            return
+        from PyQt6.QtWidgets import QTableWidgetItem, QPushButton
+
+        table.setRowCount(0)
+        srv = getattr(self, "_companion_server", None)
+        if srv is None or int(getattr(srv, "port", 0) or 0) <= 0:
+            return
+        for metadata in srv.list_scoped_tokens():
+            row = table.rowCount()
+            table.insertRow(row)
+            values = (
+                metadata.get("label", ""),
+                ", ".join(metadata.get("scopes", [])),
+                metadata.get("origin", "") or "Any origin",
+                metadata.get("created_at", "") or "",
+                metadata.get("last_used") or "Never",
+            )
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(str(value)))
+            revoke = QPushButton("Revoke")
+            revoke.setObjectName("secondary")
+            revoke.clicked.connect(
+                lambda _checked=False, token_id=metadata.get("id", ""):
+                self._on_revoke_companion_token(token_id)
+            )
+            table.setCellWidget(row, 5, revoke)
+
+    def _on_revoke_companion_token(self, token_id):
+        """Revoke one scoped token selected from the metadata inventory."""
+        srv = getattr(self, "_companion_server", None)
+        if srv is None or not str(token_id or "").strip():
+            self._set_status("That scoped token is no longer active.", "warning")
+            return
+        if not srv.revoke_token_by_id(token_id):
+            self._set_status("That scoped token is no longer active.", "warning")
+            self._refresh_companion_tokens()
+            return
+        self._log(f"[COMPANION] Revoked scoped token {token_id}.")
+        self._set_status("Scoped token revoked immediately.", "success")
+        self._refresh_companion_tokens()
 
     def _on_copy_companion_url(self):
         self._copy_text_to_clipboard(self._companion_local_url(), "Browser companion URL")

@@ -612,3 +612,25 @@ def test_bagit_export_is_an_explicit_cli_command(tmp_path, monkeypatch):
     summary = json.loads(output[0])
     assert summary["bagit_version"] == "0.97"
     assert (recording / "manifest-sha256.txt").is_file()
+
+
+def test_tokens_cli_parser_supports_list_create_and_revoke():
+    parser = cli.build_parser()
+
+    listed = parser.parse_args(["tokens", "list", "--server-url", "http://127.0.0.1:9"])
+    assert listed.command == "tokens"
+    assert listed.tokens_command == "list"
+    assert listed.server_url == "http://127.0.0.1:9"
+
+    created = parser.parse_args([
+        "tokens", "create", "--label", "CI", "--scope", "status",
+        "--scope", "queue", "--expires-in", "3600",
+    ])
+    assert created.tokens_command == "create"
+    assert created.label == "CI"
+    assert created.scope == ["status", "queue"]
+    assert created.expires_in == 3600
+
+    revoked = parser.parse_args(["tokens", "revoke", "opaque-id"])
+    assert revoked.tokens_command == "revoke"
+    assert revoked.token_id == "opaque-id"

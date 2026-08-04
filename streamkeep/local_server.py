@@ -45,6 +45,9 @@ REST API endpoints (F37):
   POST /api/operations/action — retry or discard selected failures [recovery]
   POST /api/operations/export — return a redacted operations report [status]
   GET  /api/spec       — OpenAPI 3.1 specification (unauthenticated)
+  GET  /api/tokens     — list active scoped token metadata [master]
+  POST /api/tokens     — mint one labeled scoped token [master]
+  DELETE /api/tokens/{id} — revoke one scoped token [master]
   GET  /               — serves the single-page web remote UI
 
 The server runs on its own thread (stdlib http.server is threaded), and
@@ -59,7 +62,7 @@ import secrets
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from urllib.parse import parse_qs, urlsplit
@@ -101,6 +104,9 @@ PRODUCT_REST_PATHS = frozenset({
     "GET /api/operations",
     "POST /api/operations/action",
     "POST /api/operations/export",
+    "GET /api/tokens",
+    "POST /api/tokens",
+    "DELETE /api/tokens/{id}",
 })
 
 SCOPE_STATUS = "status"
@@ -110,6 +116,8 @@ ALL_SCOPES = frozenset({SCOPE_STATUS, SCOPE_QUEUE, SCOPE_RECOVERY})
 PAIRED_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+TOKEN_LABEL_MAX_LENGTH = 128
+TOKEN_TTL_MAX_SECONDS = PAIRED_TOKEN_TTL_SECONDS
 SECURITY_EVENT_WINDOW_SECONDS = 60.0
 SECURITY_EVENT_PER_CLIENT_LIMIT = 12
 SECURITY_EVENT_TOTAL_LIMIT = 100
@@ -173,22 +181,41 @@ class TokenGrant:
     scopes: frozenset
     origin: str = ""
     expires_at: float = 0.0
+    token_id: str = ""
+    label: str = ""
+    created_at: float = 0.0
+    last_used: float = 0.0
+    is_master: bool = False
 
 
 class TokenStore:
-    """Thread-safe token → scopes mapping."""
+    """Thread-safe bearer-token registry with redacted metadata views."""
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._tokens = {}  # token_str -> frozenset of scopes
+        self._tokens = {}  # token_str -> TokenGrant
 
-    def add(self, token, scopes, *, origin="", expires_at=0.0):
+    def add(
+        self, token, scopes, *, origin="", expires_at=0.0, label="",
+        token_id="", created_at=None, is_master=False,
+    ):
         if not valid_bearer_token(token):
             raise ValueError("Bearer tokens must contain at least 128 bits.")
+        now = time.time()
+        created = float(now if created_at is None else created_at or now)
+        normalized_label = str(label or "").strip()[:TOKEN_LABEL_MAX_LENGTH]
         with self._lock:
+            candidate_id = str(token_id or "").strip()
+            existing_ids = {
+                grant.token_id for grant in self._tokens.values() if grant.token_id
+            }
+            while not candidate_id or candidate_id in existing_ids:
+                candidate_id = secrets.token_urlsafe(12)
             self._tokens[token] = TokenGrant(
-                frozenset(scopes), str(origin or ""), float(expires_at or 0.0)
+                frozenset(scopes), str(origin or ""), float(expires_at or 0.0),
+                candidate_id, normalized_label, created, 0.0, bool(is_master),
             )
+            return candidate_id
 
     def remove(self, token):
         with self._lock:
@@ -212,7 +239,61 @@ class TokenStore:
         if matched and matched.expires_at and matched.expires_at <= time.time():
             self.remove(candidate)
             return None
+        if matched:
+            with self._lock:
+                current = self._tokens.get(candidate)
+                if current is not None:
+                    matched = replace(current, last_used=time.time())
+                    self._tokens[candidate] = matched
         return matched
+
+    @staticmethod
+    def _metadata(grant):
+        return {
+            "id": grant.token_id,
+            "label": grant.label,
+            "scopes": sorted(grant.scopes),
+            "origin": grant.origin,
+            "created_at": int(grant.created_at) if grant.created_at else 0,
+            "last_used": int(grant.last_used) if grant.last_used else None,
+            "expires_at": int(grant.expires_at) if grant.expires_at else None,
+        }
+
+    def metadata_for_token(self, token):
+        """Return metadata for an internal token lookup, never the secret."""
+        with self._lock:
+            grant = self._tokens.get(str(token or ""))
+        return self._metadata(grant) if grant else None
+
+    def list_metadata(self):
+        """Return active scoped-token metadata without bearer material."""
+        now = time.time()
+        with self._lock:
+            expired = [
+                token for token, grant in self._tokens.items()
+                if grant.expires_at and grant.expires_at <= now
+            ]
+            for token in expired:
+                self._tokens.pop(token, None)
+            grants = tuple(
+                grant for grant in self._tokens.values() if not grant.is_master
+            )
+        return [
+            self._metadata(grant)
+            for grant in sorted(grants, key=lambda item: (item.created_at, item.token_id))
+        ]
+
+    def remove_by_id(self, token_id):
+        """Revoke one scoped token by opaque record id; never the master."""
+        wanted = str(token_id or "").strip()
+        if not wanted:
+            return False
+        with self._lock:
+            for token, grant in tuple(self._tokens.items()):
+                if grant.token_id == wanted and not grant.is_master:
+                    self._tokens.pop(token, None)
+                    return True
+        return False
 
     def __len__(self):
         with self._lock:
@@ -511,7 +592,9 @@ class LocalCompanionServer:
         self.token = str(master_token or generate_bearer_token())
         if not valid_bearer_token(self.token):
             raise ValueError("Stored companion token is invalid or too short.")
-        self._token_store.add(self.token, ALL_SCOPES)
+        self._token_store.add(
+            self.token, ALL_SCOPES, label="master", is_master=True,
+        )
         self.port = int(port or 0)
         self._httpd = None
         self._thread = None
@@ -556,7 +639,9 @@ class LocalCompanionServer:
         """Replace master access and revoke every paired client immediately."""
         self._token_store.revoke_all()
         self.token = generate_bearer_token()
-        self._token_store.add(self.token, ALL_SCOPES)
+        self._token_store.add(
+            self.token, ALL_SCOPES, label="master", is_master=True,
+        )
         self._clear_extension_origin()
         return self.token
 
@@ -587,14 +672,15 @@ class LocalCompanionServer:
             self._extension_origin = ""
         self.extension_origin_pinned.emit("")
 
-    def create_scoped_token(self, scopes, *, origin="", expires_at=0.0):
+    def create_scoped_token(self, scopes, *, label="", origin="", expires_at=0.0):
         """Mint a token restricted to the given scopes."""
         valid = frozenset(scopes) & ALL_SCOPES
         if not valid:
             raise ValueError(f"No valid scopes in {scopes!r}")
         tok = generate_bearer_token()
         self._token_store.add(
-            tok, valid, origin=str(origin or ""), expires_at=expires_at
+            tok, valid, label=label or "unnamed token",
+            origin=str(origin or ""), expires_at=expires_at,
         )
         return tok
 
@@ -605,6 +691,14 @@ class LocalCompanionServer:
     def revoke_token(self, token):
         """Revoke a specific token (scoped or master)."""
         self._token_store.remove(token)
+
+    def list_scoped_tokens(self):
+        """Return active scoped-token metadata without bearer values."""
+        return self._token_store.list_metadata()
+
+    def revoke_token_by_id(self, token_id):
+        """Revoke one scoped token by its metadata id."""
+        return self._token_store.remove_by_id(token_id)
 
     def start(self):
         if self._httpd is not None:
@@ -626,6 +720,7 @@ class LocalCompanionServer:
             allow_private_network=self.allow_private_network,
             extension_origin_getter=self._get_extension_origin,
             extension_origin_pinner=self._pin_extension_origin,
+            master_token=self.token,
         )
         self._httpd = _CompanionHTTPServer((self._bind_addr, self.port), handler_cls)
         self.port = self._httpd.server_address[1]
@@ -703,6 +798,7 @@ def _build_handler(
     allow_private_network=False,
     extension_origin_getter=None,
     extension_origin_pinner=None,
+    master_token="",
 ):
     allow_private_network = bool(allow_private_network)
     allowed_hosts = frozenset(allowed_hosts or _build_allowed_hosts())
@@ -711,6 +807,7 @@ def _build_handler(
     external_origin = str(external_origin or "")
     extension_origin_getter = extension_origin_getter or (lambda: "")
     extension_origin_pinner = extension_origin_pinner or (lambda _origin: True)
+    master_token = str(master_token or "")
     external_host = (
         _canonical_host(urlsplit(external_origin).hostname)
         if external_origin else ""
@@ -904,7 +1001,7 @@ def _build_handler(
                     return value.strip()
             return ""
 
-        def _require_auth(self, scope=None, *, mutating=False):
+        def _require_auth(self, scope=None, *, mutating=False, master_only=False):
             """Check auth + optional scope. Returns True if authorized."""
             auth, error = self._token_grant()
             if auth is None:
@@ -936,6 +1033,17 @@ def _build_handler(
                 )
                 return False
             grant, token = auth
+            if master_only and not (
+                grant.is_master
+                or (master_token and secrets.compare_digest(token, master_token))
+            ):
+                self._record_security_event("master_token_required")
+                self._json_response(403, {
+                    "ok": False,
+                    "err": "master_token_required",
+                    "message": "Only the secure master token can manage API tokens.",
+                })
+                return False
             if scope and scope not in grant.scopes:
                 self._record_security_event("scope_denied")
                 self._json_response(403, {
@@ -997,7 +1105,9 @@ def _build_handler(
             if origin and self._origin_ok(origin):
                 self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin, X-Forwarded-Proto, X-Forwarded-Host")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+            self.send_header(
+                "Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"
+            )
             self.send_header(
                 "Access-Control-Allow-Headers",
                 "Content-Type, Authorization, X-StreamKeep-Timestamp, X-StreamKeep-Nonce",
@@ -1130,6 +1240,9 @@ def _build_handler(
 
             if path == "/api/spec":
                 self._handle_api_spec()
+            elif path == "/api/tokens":
+                if self._require_auth(master_only=True):
+                    self._handle_api_tokens()
             elif path == "/ping":
                 if self._require_auth():
                     self._json_response(200, {"ok": True, "app": "StreamKeep"})
@@ -1187,6 +1300,9 @@ def _build_handler(
 
             if path == "/pair":
                 self._handle_pair()
+            elif path == "/api/tokens":
+                if self._require_auth(mutating=True, master_only=True):
+                    self._handle_api_token_create()
             elif path == "/send_url":
                 if self._require_auth(SCOPE_QUEUE, mutating=True):
                     self._handle_send_url()
@@ -1268,6 +1384,17 @@ def _build_handler(
             else:
                 self._json_response(404, {"ok": False, "err": "not_found"})
 
+        def do_DELETE(self):
+            if self._reject_bad_host():
+                return
+            path = self.path.split("?", 1)[0]
+            if path.startswith("/api/tokens/") and path.count("/") == 3:
+                token_id = path.removeprefix("/api/tokens/")
+                if self._require_auth(mutating=True, master_only=True):
+                    self._handle_api_token_revoke(token_id)
+                return
+            self._json_response(404, {"ok": False, "err": "not_found"})
+
         def _handle_pair(self):
             origin_header = self.headers.get("Origin", "")
             if origin_header and not self._origin_ok(origin_header):
@@ -1339,6 +1466,17 @@ def _build_handler(
                         ),
                     })
                     return
+            label = str(data.get("label") or "paired client").strip()
+            if not label or len(label) > TOKEN_LABEL_MAX_LENGTH or any(
+                character in label for character in "\r\n"
+            ):
+                self._record_security_event("pairing_label_invalid")
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "pairing_label_invalid",
+                    "message": "Token label must be 1-128 characters.",
+                })
+                return
             if origin.startswith(("chrome-extension://", "moz-extension://")):
                 if not extension_origin_pinner(origin):
                     self._record_security_event("origin_denied")
@@ -1350,10 +1488,14 @@ def _build_handler(
                     return
             token = generate_bearer_token()
             expires_at = time.time() + PAIRED_TOKEN_TTL_SECONDS
-            token_store.add(token, scopes, origin=origin, expires_at=expires_at)
+            token_id = token_store.add(
+                token, scopes, label=label, origin=origin, expires_at=expires_at,
+            )
             self._json_response(201, {
                 "ok": True,
                 "token": token,
+                "id": token_id,
+                "label": label,
                 "scopes": sorted(scopes),
                 "origin": origin,
                 "expires_at": int(expires_at),
@@ -1459,6 +1601,95 @@ def _build_handler(
         def _handle_api_spec(self):
             from . import openapi
             self._json_response(200, openapi.build_openapi_spec())
+
+        def _handle_api_tokens(self):
+            self._json_response(200, {
+                "ok": True,
+                "tokens": token_store.list_metadata(),
+            })
+
+        def _handle_api_token_create(self):
+            data = self._read_body(max_bytes=16_384)
+            label = str(data.get("label") or "").strip()
+            if not label or len(label) > TOKEN_LABEL_MAX_LENGTH or any(
+                character in label for character in "\r\n"
+            ):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "label_required",
+                    "message": "A token label between 1 and 128 characters is required.",
+                })
+                return
+            requested_scopes = data.get("scopes")
+            if not isinstance(requested_scopes, list):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "scopes_required",
+                    "message": "Scopes must be a non-empty list.",
+                })
+                return
+            scopes = frozenset(str(scope).strip() for scope in requested_scopes)
+            if not scopes or not scopes.issubset(ALL_SCOPES):
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "invalid_scopes",
+                    "message": f"Scopes must be drawn from: {', '.join(sorted(ALL_SCOPES))}.",
+                })
+                return
+            raw_origin = str(data.get("origin") or "").strip()
+            origin = _normalize_origin(raw_origin) if raw_origin else ""
+            if raw_origin and not origin:
+                self._json_response(400, {
+                    "ok": False,
+                    "err": "invalid_origin",
+                    "message": "Origin must be a valid browser origin.",
+                })
+                return
+            raw_ttl = data.get("expires_in")
+            expires_at = 0.0
+            if raw_ttl not in (None, ""):
+                try:
+                    ttl = int(raw_ttl)
+                except (TypeError, ValueError):
+                    ttl = -1
+                if ttl < 60 or ttl > TOKEN_TTL_MAX_SECONDS:
+                    self._json_response(400, {
+                        "ok": False,
+                        "err": "invalid_expiry",
+                        "message": (
+                            "expires_in must be between 60 seconds and "
+                            f"{TOKEN_TTL_MAX_SECONDS} seconds."
+                        ),
+                    })
+                    return
+                expires_at = time.time() + ttl
+            token = generate_bearer_token()
+            token_store.add(
+                token, scopes, label=label, origin=origin, expires_at=expires_at,
+            )
+            metadata = token_store.metadata_for_token(token)
+            self._json_response(201, {
+                "ok": True,
+                "token": token,
+                **(metadata or {}),
+            })
+
+        def _handle_api_token_revoke(self, token_id):
+            if not token_id or "/" in token_id:
+                self._json_response(404, {"ok": False, "err": "token_not_found"})
+                return
+            if not token_store.remove_by_id(token_id):
+                self._json_response(404, {
+                    "ok": False,
+                    "err": "token_not_found",
+                    "message": "No active scoped token has that id.",
+                })
+                return
+            self._json_response(200, {
+                "ok": True,
+                "id": token_id,
+                "revoked": True,
+            })
 
         def _handle_api_status(self):
             state = self._get_state()

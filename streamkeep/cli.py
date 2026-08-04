@@ -637,6 +637,114 @@ def _run_bagit(args):
         _print_line(f"  {entry['path']}: {entry['sha384_sri']}")
 
 
+def _run_tokens(args):
+    """Manage scoped companion tokens through a running local server."""
+    import secrets
+    import time
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    from .config import load_config
+
+    base_url = str(getattr(args, "server_url", "") or "").rstrip("/")
+    if not base_url:
+        _print_line("Error: --server-url is required")
+        sys.exit(2)
+    token = str(getattr(args, "token", "") or "")
+    if not token:
+        token = str(load_config().get("companion_token", "") or "")
+    if not token:
+        _print_line("Error: pass --token or configure the companion master token")
+        sys.exit(2)
+
+    command = str(getattr(args, "tokens_command", "") or "")
+    path = "/api/tokens"
+    payload = None
+    method = "GET"
+    if command == "create":
+        scopes = list(getattr(args, "scope", []) or [])
+        raw_scopes = str(getattr(args, "scopes", "") or "")
+        scopes.extend(item.strip() for item in raw_scopes.split(",") if item.strip())
+        scopes = list(dict.fromkeys(scopes))
+        if not scopes:
+            _print_line("Error: pass at least one --scope or --scopes value")
+            sys.exit(2)
+        payload = {
+            "label": str(args.label or "").strip(),
+            "scopes": scopes,
+        }
+        if getattr(args, "origin", ""):
+            payload["origin"] = str(args.origin).strip()
+        if getattr(args, "expires_in", None) is not None:
+            payload["expires_in"] = int(args.expires_in)
+        method = "POST"
+    elif command == "revoke":
+        path = "/api/tokens/" + str(args.token_id)
+        method = "DELETE"
+        payload = {}
+    elif command != "list":
+        _print_line(f"Error: unsupported token command {command!r}")
+        sys.exit(2)
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    if payload is not None:
+        headers.update({
+            "Content-Type": "application/json",
+            "X-StreamKeep-Timestamp": str(int(time.time())),
+            "X-StreamKeep-Nonce": secrets.token_urlsafe(18),
+        })
+    request = Request(
+        base_url + path,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        try:
+            result = json.loads(error.read().decode("utf-8"))
+        except (OSError, ValueError):
+            result = {"ok": False, "err": str(error.reason or error)}
+        _print_line(json.dumps(result, indent=2) if getattr(args, "json", False)
+                    else f"Error: {result.get('message') or result.get('err') or error}")
+        sys.exit(2)
+    except (OSError, URLError) as error:
+        _print_line(f"Error: token server request failed: {error}")
+        sys.exit(2)
+
+    if getattr(args, "json", False):
+        _print_line(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    if command == "list":
+        rows = result.get("tokens", [])
+        if not rows:
+            _print_line("No active scoped tokens.")
+            return
+        for row in rows:
+            origin = row.get("origin") or "Any origin"
+            last_used = row.get("last_used") or "Never"
+            expiry = row.get("expires_at") or "Never"
+            _print_line(
+                f"  {row.get('label', ''):<24s} {row.get('id', '')} "
+                f"[{', '.join(row.get('scopes', []))}] "
+                f"origin={origin} created={row.get('created_at', '')} "
+                f"last_used={last_used} expires={expiry}"
+            )
+    elif command == "create":
+        _print_line(
+            f"Created scoped token {result.get('label', args.label)} "
+            f"({result.get('id', '')}); store this value securely:"
+        )
+        _print_line(str(result.get("token", "")))
+    else:
+        _print_line(f"Revoked scoped token {result.get('id', args.token_id)}.")
+
+
 def _pick_quality(qualities, pref):
     """Pick a quality entry matching *pref*."""
     if not qualities:
@@ -2296,6 +2404,47 @@ def build_parser():
     bagit_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                          help="Override the config/database directory")
 
+    # -- scoped companion API tokens --
+    tokens_p = sub.add_parser(
+        "tokens", help="List, create, or revoke scoped companion API tokens",
+    )
+    tokens_sub = tokens_p.add_subparsers(dest="tokens_command")
+    tokens_sub.required = True
+
+    def add_token_connection_args(parser):
+        parser.add_argument(
+            "--server-url", "--url", dest="server_url",
+            default="http://127.0.0.1:8787",
+            help="Running StreamKeep companion URL (default: http://127.0.0.1:8787)",
+        )
+        parser.add_argument(
+            "--token", default="",
+            help="Master bearer token (defaults to the configured companion token)",
+        )
+        parser.add_argument("--json", action="store_true", help="Emit JSON")
+
+    tokens_list = tokens_sub.add_parser("list", help="List redacted active token metadata")
+    add_token_connection_args(tokens_list)
+    tokens_create = tokens_sub.add_parser("create", help="Mint one scoped token")
+    tokens_create.add_argument("--label", required=True, help="Operator label for the token")
+    tokens_create.add_argument(
+        "--scope", action="append", default=[], choices=["status", "queue", "recovery"],
+        help="Granted scope; repeat for multiple scopes",
+    )
+    tokens_create.add_argument(
+        "--scopes", default="",
+        help="Comma-separated granted scopes (alternative to repeated --scope)",
+    )
+    tokens_create.add_argument("--origin", default="", help="Optional exact browser origin binding")
+    tokens_create.add_argument(
+        "--expires-in", type=int, default=None,
+        help="Optional lifetime in seconds (60 to 2592000)",
+    )
+    add_token_connection_args(tokens_create)
+    tokens_revoke = tokens_sub.add_parser("revoke", help="Revoke one scoped token by id")
+    tokens_revoke.add_argument("token_id", help="Opaque token id from tokens list")
+    add_token_connection_args(tokens_revoke)
+
     # -- HAR import: extract media/manifest links from a browser capture --
     har_p = sub.add_parser(
         "import-har",
@@ -2755,6 +2904,8 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "bagit":
         _run_bagit(args)
+    elif args.command == "tokens":
+        _run_tokens(args)
     elif args.command == "import-har":
         _run_har_import(args)
     elif args.command in ("import-library", "adopt"):
@@ -2792,7 +2943,7 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
-        "snapshot", "backup", "bagit", "startup-check", "import-har", "import-library",
+        "snapshot", "backup", "bagit", "tokens", "startup-check", "import-har", "import-library",
         "retemplate",
         "adopt", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",

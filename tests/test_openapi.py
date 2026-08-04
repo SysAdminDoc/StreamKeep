@@ -71,9 +71,12 @@ class OpenApiRouteConsistencyTests(unittest.TestCase):
         from streamkeep import local_server
         src = inspect.getsource(local_server)
         get_block = src.split("def do_GET", 1)[1].split("def do_POST", 1)[0]
-        post_block = src.split("def do_POST", 1)[1].split("def _handle_pair", 1)[0]
+        post_block = src.split("def do_POST", 1)[1].split("def do_DELETE", 1)[0]
+        delete_block = src.split("def do_DELETE", 1)[1].split("def _handle_pair", 1)[0]
         ops = set()
-        for method, block in (("GET", get_block), ("POST", post_block)):
+        for method, block in (
+            ("GET", get_block), ("POST", post_block), ("DELETE", delete_block),
+        ):
             for line in block.splitlines():
                 line = line.strip()
                 if 'path == "/' in line:
@@ -87,6 +90,8 @@ class OpenApiRouteConsistencyTests(unittest.TestCase):
                     ops.add(f"{method} /media/{{id}}")
                 elif 'path.startswith("/feed/")' in line:
                     ops.add(f"{method} /feed/{{id}}.xml")
+                elif 'path.startswith("/api/tokens/")' in line:
+                    ops.add(f"{method} /api/tokens/{{id}}")
         # "/" is served in do_GET via _serve_web_ui without an explicit ``==``.
         ops.add("GET /")
         return ops

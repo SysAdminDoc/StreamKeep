@@ -1064,6 +1064,77 @@ class LocalServerTests(unittest.TestCase):
         )
         self.assertTrue(payload["ok"])
 
+    def test_scoped_token_inventory_is_redacted_and_tracks_last_use(self):
+        first = self.server.create_scoped_token(
+            {SCOPE_STATUS}, label="Phone monitor"
+        )
+        second = self.server.create_scoped_token(
+            {SCOPE_QUEUE}, label="CI queue"
+        )
+
+        payload, status = self._open_json(
+            "/api/tokens", token=self.server.token
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {item["label"] for item in payload["tokens"]},
+            {"Phone monitor", "CI queue"},
+        )
+        text = json.dumps(payload)
+        self.assertNotIn(first, text)
+        self.assertNotIn(second, text)
+        self.assertNotIn(self.server.token, text)
+        for item in payload["tokens"]:
+            self.assertTrue(item["id"])
+            self.assertIn("created_at", item)
+            self.assertIsNone(item["last_used"])
+
+        self._open_json("/api/status", token=first)
+        payload, _ = self._open_json("/api/tokens", token=self.server.token)
+        used = next(item for item in payload["tokens"] if item["label"] == "Phone monitor")
+        self.assertIsNotNone(used["last_used"])
+
+    def test_master_can_create_and_revoke_one_scoped_token_without_affecting_others(self):
+        survivor = self.server.create_scoped_token(
+            {SCOPE_STATUS}, label="Keep me"
+        )
+        created, status = self._open_json(
+            "/api/tokens",
+            token=self.server.token,
+            method="POST",
+            data={"label": "Build agent", "scopes": [SCOPE_STATUS]},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(created["label"], "Build agent")
+        self.assertTrue(created["token"])
+        self.assertTrue(created["id"])
+
+        listed, _ = self._open_json("/api/tokens", token=self.server.token)
+        listed_text = json.dumps(listed)
+        self.assertNotIn(created["token"], listed_text)
+        self.assertNotIn(self.server.token, listed_text)
+
+        survivor_payload, _ = self._open_json("/api/status", token=survivor)
+        self.assertTrue(survivor_payload["ok"])
+        revoked, revoke_status = self._open_json(
+            f"/api/tokens/{created['id']}",
+            token=self.server.token,
+            method="DELETE",
+            data={},
+        )
+        self.assertEqual(revoke_status, 200)
+        self.assertEqual(revoked, {
+            "ok": True, "id": created["id"], "revoked": True,
+        })
+        self._expect_error("/api/status", 401, token=created["token"])
+        survivor_payload, _ = self._open_json("/api/status", token=survivor)
+        self.assertTrue(survivor_payload["ok"])
+
+    def test_scoped_token_cannot_manage_token_inventory(self):
+        scoped = self.server.create_scoped_token({SCOPE_STATUS}, label="Reader")
+        error = self._expect_error("/api/tokens", 403, token=scoped)
+        self.assertEqual(error["err"], "master_token_required")
+
     def test_revoked_scoped_token_rejected(self):
         tok = self.server.create_scoped_token({SCOPE_STATUS})
         payload, _ = self._open_json("/api/status", token=tok)
