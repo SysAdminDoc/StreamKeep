@@ -16,7 +16,7 @@ import os
 
 
 def detect_spikes(jsonl_path, *, bucket_secs=10, min_std_dev=2.0,
-                  rolling_window=30, start_ts=None):
+                  rolling_window=30, start_ts=None, event_weights=None):
     """Scan *jsonl_path* and return spike timestamps.
 
     Parameters
@@ -33,6 +33,10 @@ def detect_spikes(jsonl_path, *, bucket_secs=10, min_std_dev=2.0,
     start_ts : float or None
         If set, message timestamps are made relative by subtracting this
         value.  If *None*, the first message's ``ts`` is used.
+    event_weights : dict or None
+        Optional weights for typed ``event_kind`` rows. ``"*"`` supplies the
+        fallback for event kinds not named explicitly. Ordinary messages keep
+        weight one.
 
     Returns
     -------
@@ -45,6 +49,7 @@ def detect_spikes(jsonl_path, *, bucket_secs=10, min_std_dev=2.0,
 
     # Pass 1: collect timestamps
     timestamps = []
+    weighted = event_weights is not None
     try:
         with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -55,7 +60,16 @@ def detect_spikes(jsonl_path, *, bucket_secs=10, min_std_dev=2.0,
                     obj = json.loads(line)
                     ts = obj.get("ts")
                     if ts is not None:
-                        timestamps.append(float(ts))
+                        weight = 1.0
+                        if weighted and obj.get("event_kind"):
+                            try:
+                                weight = float(event_weights.get(
+                                    str(obj["event_kind"]),
+                                    event_weights.get("*", 1.0),
+                                ))
+                            except (AttributeError, TypeError, ValueError):
+                                weight = 1.0
+                        timestamps.append((float(ts), weight))
                 except (json.JSONDecodeError, TypeError, ValueError):
                     continue
     except OSError:
@@ -64,19 +78,19 @@ def detect_spikes(jsonl_path, *, bucket_secs=10, min_std_dev=2.0,
     if len(timestamps) < 2:
         return []
 
-    timestamps.sort()
+    timestamps.sort(key=lambda item: item[0])
     if start_ts is None:
-        start_ts = timestamps[0]
+        start_ts = timestamps[0][0]
 
     # Pass 2: bucket into fixed-width windows
-    max_rel = timestamps[-1] - start_ts
+    max_rel = timestamps[-1][0] - start_ts
     n_buckets = max(1, int(math.ceil(max_rel / bucket_secs)) + 1)
     buckets = [0] * n_buckets
-    for ts in timestamps:
+    for ts, weight in timestamps:
         rel = ts - start_ts
         idx = int(rel / bucket_secs)
         if 0 <= idx < n_buckets:
-            buckets[idx] += 1
+            buckets[idx] += weight if weighted else 1
 
     # Pass 3: rolling stats → spike detection
     spikes = []

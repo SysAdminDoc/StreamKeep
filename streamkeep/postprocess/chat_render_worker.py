@@ -64,6 +64,15 @@ def _nick_color(nick, color_tag=""):
     return _hex_to_rgb(_NICK_PALETTE[idx])
 
 
+def _event_color(event_kind):
+    """Use a warm, deterministic color so event rows read as callouts."""
+    return _hex_to_rgb("#FFB86C" if event_kind else "#CDD6F4")
+
+
+def _event_label(event_kind):
+    return str(event_kind or "event").replace("_", " ").upper()
+
+
 def _load_chat_jsonl(path, start_ts=None):
     """Load chat.jsonl and normalize timestamps relative to the first message."""
     messages = []
@@ -81,12 +90,14 @@ def _load_chat_jsonl(path, start_ts=None):
                 nick = obj.get("nick", "") or "?"
                 text = obj.get("message", "") or ""
                 color = obj.get("color", "") or ""
-                if text:
+                event_kind = str(obj.get("event_kind", "") or "")
+                if text or event_kind:
                     messages.append({
                         "ts": ts,
                         "nick": nick,
-                        "text": text,
+                        "text": text or _event_label(event_kind),
                         "color": color,
+                        "event_kind": event_kind,
                     })
     except OSError:
         return []
@@ -257,7 +268,7 @@ class ChatRenderWorker(QThread):
 
         try:
             msg_idx = 0
-            active_msgs = []  # list of (expire_time, nick, text, color_rgb)
+            active_msgs = []  # (expire_time, nick, text, color_rgb, event_kind)
 
             for frame_num in range(total_frames):
                 if self._cancel:
@@ -273,7 +284,9 @@ class ChatRenderWorker(QThread):
                     m = messages[msg_idx]
                     rgb = _nick_color(m["nick"], m["color"])
                     expire = m["rel"] + self.msg_duration
-                    active_msgs.append((expire, m["nick"], m["text"], rgb))
+                    active_msgs.append((
+                        expire, m["nick"], m["text"], rgb, m.get("event_kind", ""),
+                    ))
                     msg_idx += 1
 
                 # Remove expired messages
@@ -288,8 +301,18 @@ class ChatRenderWorker(QThread):
                 y = self.height - len(visible) * line_height - 4
                 text_color = (205, 214, 244)
                 emote_h = self.font_size + 2
-                for _expire, nick, text, nick_rgb in visible:
-                    nick_display = f"{nick}: "
+                for _expire, nick, text, nick_rgb, event_kind in visible:
+                    if event_kind:
+                        nick_rgb = _event_color(event_kind)
+                        nick_display = f"[{_event_label(event_kind)}] {nick}: "
+                        draw.rectangle(
+                            (2, y - 2, self.width - 2, y + line_height - 2),
+                            fill=(70, 48, 30, min(self.bg_opacity, 220)),
+                            outline=nick_rgb,
+                            width=1,
+                        )
+                    else:
+                        nick_display = f"{nick}: "
                     draw.text((6, y), nick_display, fill=nick_rgb, font=font)
                     try:
                         nick_w = draw.textlength(nick_display, font=font)

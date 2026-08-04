@@ -37,6 +37,7 @@ WrapStyle: 0
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Chat,Consolas,22,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,1,0,7,20,20,20,1
+Style: ChatEvent,Consolas,22,&H0000A5FF,&H000000FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,1,0,7,20,20,20,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -116,12 +117,22 @@ class ChatWorker(QThread):
                     jsonl_f.write(json.dumps(msg, ensure_ascii=False) + "\n")
                     jsonl_f.flush()
                     self._count += 1
-                    self.message.emit(msg["nick"], msg["message"])
+                    nick = str(msg.get("nick", "system") or "system")
+                    message = str(msg.get("message", "") or "")
+                    event_kind = str(msg.get("event_kind", "") or "")
+                    self.message.emit(nick, message)
                     if self.render_ass:
                         rel = max(0.0, msg["ts"] - self.start_ts)
                         # Each chat line stays on screen for 8 seconds.
-                        text = self._ass_escape(f"{msg['nick']}: {msg['message']}")
-                        ass_events.append((rel, rel + 8.0, text))
+                        if event_kind:
+                            label = event_kind.replace("_", " ").upper()
+                            display = f"[{label}] {nick}: {message}"
+                            style = "ChatEvent"
+                        else:
+                            display = f"{nick}: {message}"
+                            style = "Chat"
+                        text = self._ass_escape(display)
+                        ass_events.append((rel, rel + 8.0, style, text))
         except Exception as e:
             self.log.emit(f"[CHAT] Reader error: {e}")
         finally:
@@ -132,10 +143,10 @@ class ChatWorker(QThread):
             try:
                 with open(ass_path, "w", encoding="utf-8") as f:
                     f.write(_ASS_HEADER)
-                    for start, end, text in ass_events:
+                    for start, end, style, text in ass_events:
                         f.write(
                             f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},"
-                            f"Chat,,0,0,0,,{text}\n"
+                            f"{style},,0,0,0,,{text}\n"
                         )
                 self.log.emit(f"[CHAT] Wrote {self._count} line(s) + .ass sidecar")
             except OSError as e:

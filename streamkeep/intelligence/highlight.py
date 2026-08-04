@@ -15,6 +15,21 @@ import os
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
+_CHAT_EVENT_WEIGHTS = {
+    "*": 2.0,
+    "subscription": 2.0,
+    "resubscription": 2.0,
+    "gift_subscription": 2.5,
+    "gift_subscription_upgrade": 2.0,
+    "raid": 3.0,
+    "raid_cancelled": 2.0,
+    "announcement": 2.0,
+    "timeout": 2.5,
+    "message_delete": 2.0,
+    "chat_clear": 1.5,
+}
+
+
 # ── Signal analysis helpers ─────────────────────────────────────────
 
 def _load_chat_spikes(recording_dir, bucket_secs=30):
@@ -23,7 +38,12 @@ def _load_chat_spikes(recording_dir, bucket_secs=30):
     if not os.path.isfile(jsonl):
         return {}
     from ..chat.spike_detect import detect_spikes
-    spikes = detect_spikes(jsonl, bucket_secs=bucket_secs, min_std_dev=1.0)
+    spikes = detect_spikes(
+        jsonl,
+        bucket_secs=bucket_secs,
+        min_std_dev=1.0,
+        event_weights=_CHAT_EVENT_WEIGHTS,
+    )
     return {int(s["time"] // bucket_secs): s["score"] for s in spikes}
 
 

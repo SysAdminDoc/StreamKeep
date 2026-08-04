@@ -7,11 +7,17 @@ connection.
 
 import json
 import socket
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from streamkeep.chat import kick_ws
+from streamkeep.chat.chat_worker import ChatWorker
 from streamkeep.chat.kick_ws import KickChatReader
 from streamkeep.chat.twitch_irc import TwitchIRCReader, _parse_tags
+from streamkeep.chat.spike_detect import detect_spikes
+from streamkeep.postprocess.chat_render_worker import _load_chat_jsonl
 
 
 class _FakeSocket:
@@ -89,6 +95,71 @@ class TwitchIRCReaderTests(unittest.TestCase):
         messages = list(reader.iter_messages())
         self.assertEqual(messages[0]["message"], "split message")
 
+    def test_event_commands_round_trip_as_typed_rows(self):
+        lines = [
+            (
+                "@display-name=Alice;msg-id=sub;subscriber=1 "
+                ":tmi.twitch.tv USERNOTICE #chan :Alice subscribed\r\n"
+            ),
+            (
+                "@display-name=Alice;msg-id=resub;subscriber=1 "
+                ":tmi.twitch.tv USERNOTICE #chan :Alice resubscribed\r\n"
+            ),
+            (
+                "@display-name=Alice;msg-id=subgift;target-user-name=Bob "
+                ":tmi.twitch.tv USERNOTICE #chan :gifted\r\n"
+            ),
+            (
+                "@msg-id=raid;msg-param-viewerCount=42 "
+                ":tmi.twitch.tv USERNOTICE #chan :raid incoming\r\n"
+            ),
+            (
+                "@msg-id=announcement;system-msg=Stream\\supdate "
+                ":tmi.twitch.tv USERNOTICE #chan :announcement\r\n"
+            ),
+            (
+                "@ban-duration=600;target-user-id=42;target-user-name=Bob "
+                ":tmi.twitch.tv CLEARCHAT #chan :Bob\r\n"
+            ),
+            (
+                "@login=Bob;target-msg-id=deleted "
+                ":tmi.twitch.tv CLEARMSG #chan :removed text\r\n"
+            ),
+            (
+                "@msg-id=vendor-future;foo=bar "
+                ":tmi.twitch.tv USERNOTICE #chan :future\r\n"
+            ),
+        ]
+        reader = TwitchIRCReader("chan")
+        reader._sock = _FakeSocket(["".join(lines).encode()])
+        rows = list(reader.iter_messages())
+        self.assertEqual(
+            [row["event_kind"] for row in rows],
+            [
+                "subscription", "resubscription", "gift_subscription", "raid",
+                "announcement", "timeout", "message_delete",
+                "usernotice:vendor-future",
+            ],
+        )
+        self.assertEqual(rows[5]["duration"], 600)
+        self.assertEqual(rows[5]["target"], "Bob")
+        self.assertEqual(rows[-1]["event_data"]["foo"], "bar")
+        self.assertIn("USERNOTICE", rows[-1]["raw_event"])
+
+    def test_privmsg_shape_remains_unchanged_alongside_events(self):
+        line = (
+            "@display-name=Bob :bob!bob@host PRIVMSG #chan :hello\r\n"
+            ":tmi.twitch.tv USERNOTICE #chan :notice\r\n"
+        )
+        reader = TwitchIRCReader("chan")
+        reader._sock = _FakeSocket([line.encode()])
+        rows = list(reader.iter_messages())
+        self.assertEqual(
+            set(rows[0]),
+            {"ts", "nick", "message", "color", "badges", "mod", "sub"},
+        )
+        self.assertEqual(rows[1]["event_kind"], "usernotice")
+
 
 class _FakeWS:
     def __init__(self, frames):
@@ -119,6 +190,13 @@ def _chat_frame(username, content):
             "sender": {"username": username, "identity": {"color": "#123456"}},
             "content": content,
         }),
+    })
+
+
+def _kick_event_frame(event, payload):
+    return json.dumps({
+        "event": f"App\\Events\\{event}",
+        "data": json.dumps(payload),
     })
 
 
@@ -166,9 +244,98 @@ class KickChatReaderTests(unittest.TestCase):
     def test_slug_is_stripped(self):
         self.assertEqual(KickChatReader("/some-slug/").channel_slug, "some-slug")
 
+    def test_event_envelopes_and_unknown_payloads_are_archived(self):
+        frames = [
+            _kick_event_frame("SubscriptionEvent", {"username": "Alice"}),
+            _kick_event_frame("GiftedSubscriptionsEvent", {"username": "Alice"}),
+            _kick_event_frame("RaidEvent", {"sender": {"username": "Alice"}}),
+            _kick_event_frame("AnnouncementEvent", {"content": "Heads up"}),
+            _kick_event_frame("MessageDeletedEvent", {"username": "Bob"}),
+            _kick_event_frame("UserBannedEvent", {"username": "Bob", "duration": 30}),
+            _kick_event_frame("FutureEnvelopeEvent", {"opaque": {"value": 7}}),
+        ]
+        reader = KickChatReader("someslug")
+        reader._ws = _FakeWS(frames)
+        rows = list(reader.iter_messages())
+        self.assertEqual(
+            [row["event_kind"] for row in rows],
+            [
+                "subscription", "gift_subscription", "raid", "announcement",
+                "message_delete", "timeout", "kick:futureenvelope",
+            ],
+        )
+        self.assertEqual(rows[5]["duration"], 30)
+        self.assertEqual(rows[-1]["event_data"]["opaque"]["value"], 7)
+        self.assertIn("FutureEnvelopeEvent", rows[-1]["raw_event"])
+
     def test_is_available_reflects_optional_dep(self):
         # Just assert the probe returns a bool and does not raise.
         self.assertIsInstance(kick_ws.is_available(), bool)
+
+
+class ChatEventArchiveTests(unittest.TestCase):
+    def test_chat_worker_writes_events_and_distinct_ass_rows(self):
+        rows = [
+            {
+                "ts": 1.0, "nick": "Alice", "message": "hello",
+                "color": "", "badges": "", "mod": False, "sub": False,
+            },
+            {
+                "ts": 2.0, "nick": "system", "message": "Alice raided",
+                "color": "", "badges": "", "mod": False, "sub": False,
+                "event_kind": "raid", "event_type": "raid",
+                "raw_event": "fixture-raid",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "streamkeep.chat.chat_worker.TwitchIRCReader"
+        ) as reader_cls:
+            reader = reader_cls.return_value
+            reader.iter_messages.return_value = rows
+            worker = ChatWorker(
+                "chan", tmpdir, render_ass=True, start_ts=0,
+            )
+            worker.run()
+            saved = [json.loads(line) for line in
+                     (Path(tmpdir) / "chat.jsonl").read_text(encoding="utf-8").splitlines()]
+            ass = (Path(tmpdir) / "chat.ass").read_text(encoding="utf-8")
+        self.assertEqual(saved, rows)
+        self.assertIn("ChatEvent", ass)
+        self.assertIn("[RAID] system: Alice raided", ass)
+
+    def test_render_loader_keeps_unknown_event_without_message(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chat.jsonl"
+            path.write_text(
+                json.dumps({
+                    "ts": 10, "nick": "system", "event_kind": "kick:future",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            rows = _load_chat_jsonl(str(path))
+        self.assertEqual(rows[0]["event_kind"], "kick:future")
+        self.assertEqual(rows[0]["text"], "KICK:FUTURE")
+
+    def test_event_rows_receive_extra_highlight_weight(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "chat.jsonl"
+            path.write_text(
+                "\n".join([
+                    json.dumps({"ts": 0, "message": "one"}),
+                    json.dumps({"ts": 10, "message": "two"}),
+                    json.dumps({"ts": 20, "message": "raid", "event_kind": "raid"}),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            plain = detect_spikes(
+                str(path), bucket_secs=10, min_std_dev=1.0, start_ts=0,
+            )
+            weighted = detect_spikes(
+                str(path), bucket_secs=10, min_std_dev=1.0, start_ts=0,
+                event_weights={"*": 3.0},
+            )
+        self.assertEqual(plain, [])
+        self.assertEqual(weighted[0]["time"], 20)
 
 
 if __name__ == "__main__":

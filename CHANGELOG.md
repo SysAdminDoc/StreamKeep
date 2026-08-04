@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Archived typed Twitch and Kick chat events in `chat.jsonl`, retaining raw
+  unknown envelopes, rendering event rows distinctly in ASS and chat-video
+  overlays, and giving raids, subscriptions, moderation and announcements
+  extra highlight weight while leaving ordinary message rows unchanged.
+
 - Parsed guarded HLS DATERANGES schedule documents into marker sidecars,
   resolving nested X-SCHEDULE-OFFSET rows with bounded cycle-safe traversal,
   preserving JSON scalar types and verbatim schedule bodies, and classifying
