@@ -7,7 +7,10 @@ from unittest import mock
 from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
 from streamkeep import db
-from streamkeep.headless_service import HeadlessJobService
+from streamkeep.headless_service import (
+    REQUEST_HEADERS_MAX_ENTRIES,
+    HeadlessJobService,
+)
 from streamkeep.preflight import PreflightError, ProbeBusyError
 from streamkeep.models import QualityInfo, StreamInfo, VODInfo
 
@@ -311,12 +314,37 @@ class HeadlessJobServiceTests(unittest.TestCase):
             with mock.patch.object(db, "DB_PATH", root / "library.db"):
                 service = HeadlessJobService(output_dir=str(root / "output"))
                 db.init_db()
-                job = service.enqueue("https://example.com/waiting")
+                job = service.enqueue({
+                    "url": "https://example.com/waiting",
+                    "request_headers": {
+                        "Cookie": "session=secret",
+                        "Authorization": "Bearer secret",
+                    },
+                })
+                self.assertEqual(
+                    service._request_headers_for(job["job_id"]),
+                    {"Cookie": "session=secret", "Authorization": "Bearer secret"},
+                )
                 cancelled = service.cancel(job["job_id"])
                 state = service.state_snapshot()
 
             self.assertEqual(cancelled["status"], "cancelled")
             self.assertEqual(state["queue"][0]["status"], "cancelled")
+            self.assertEqual(service._request_headers, {})
+
+    def test_request_header_cache_evicts_oldest_entries_at_bound(self):
+        service = HeadlessJobService()
+        for index in range(REQUEST_HEADERS_MAX_ENTRIES + 2):
+            service._remember_request_headers(
+                f"job-{index}", {"Cookie": f"session-{index}"}
+            )
+
+        self.assertEqual(len(service._request_headers), REQUEST_HEADERS_MAX_ENTRIES)
+        self.assertNotIn("job-0", service._request_headers)
+        self.assertNotIn("job-1", service._request_headers)
+        self.assertEqual(
+            service._request_headers_for("job-2"), {"Cookie": "session-2"}
+        )
 
     def test_enqueue_logs_when_user_tombstone_blocks_job(self):
         with tempfile.TemporaryDirectory() as tmpdir:

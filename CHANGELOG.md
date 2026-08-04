@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Cleared browser replay headers as queued service jobs become terminal,
+  including pre-dispatch cancellation, tombstone skips, retry cancellation, and
+  finalizer exits, and bounded the in-memory header cache with oldest-first
+  eviction.
+
 - Added labeled scoped API-token inventory and management. The master-only
   endpoint, CLI, and Browser Companion Settings panel expose redacted metadata,
   while one-token revocation takes effect immediately without displaying bearer

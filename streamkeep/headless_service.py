@@ -54,6 +54,11 @@ from .workers import (
     ScheduledBackupWorker,
 )
 
+REQUEST_HEADERS_MAX_ENTRIES = 256
+_TERMINAL_QUEUE_STATUSES = frozenset({
+    "done", "failed", "cancelled", "discarded", "expired",
+})
+
 
 class HeadlessJobService(QObject):
     """Run persisted queue jobs through StreamKeep's fetch/download workers.
@@ -534,8 +539,7 @@ class HeadlessJobService(QObject):
                 f"{job.get('source_id', '') or job.get('webpage_url', '') or job.get('url', '')}"
             )
         if request_headers:
-            with self._request_headers_lock:
-                self._request_headers[str(job.get("job_id", ""))] = request_headers
+            self._remember_request_headers(job.get("job_id", ""), request_headers)
         self._wake_requested.emit()
         return job
 
@@ -574,14 +578,41 @@ class HeadlessJobService(QObject):
         with self._request_headers_lock:
             return dict(self._request_headers.get(str(job_id), {}))
 
+    def _remember_request_headers(
+        self, job_id: str, request_headers: dict[str, str]
+    ) -> None:
+        """Keep a bounded insertion-ordered cache of replay headers."""
+        key = str(job_id or "")
+        if not key or not request_headers:
+            return
+        with self._request_headers_lock:
+            # Re-enqueueing an id should make its latest credentials newest.
+            self._request_headers.pop(key, None)
+            while len(self._request_headers) >= REQUEST_HEADERS_MAX_ENTRIES:
+                oldest = next(iter(self._request_headers), None)
+                if oldest is None:
+                    break
+                self._request_headers.pop(oldest, None)
+            self._request_headers[key] = dict(request_headers)
+
     def _forget_request_headers(self, job_id: str) -> None:
         with self._request_headers_lock:
             self._request_headers.pop(str(job_id), None)
+
+    def _forget_terminal_request_headers(self) -> None:
+        """Drop headers whose durable queue row is already terminal."""
+        with self._request_headers_lock:
+            job_ids = tuple(self._request_headers)
+        for job_id in job_ids:
+            job = db.load_queue_job(job_id)
+            if not job or str(job.get("status", "")) in _TERMINAL_QUEUE_STATUSES:
+                self._forget_request_headers(job_id)
 
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         """Persist cancellation and asynchronously stop an active worker."""
         job = db.cancel_queue_job(job_id)
         if job and job.get("status") == "cancelled":
+            self._forget_request_headers(job_id)
             self._cancel_requested.emit(str(job_id))
         return job
 
@@ -594,13 +625,17 @@ class HeadlessJobService(QObject):
 
     def cancel_failure_retry(self, failure_id: int) -> bool:
         """Disable a scheduled retry without discarding its failure record."""
-        return db.cancel_failed_job_retry(int(failure_id))
+        cancelled = db.cancel_failed_job_retry(int(failure_id))
+        if cancelled:
+            self._forget_terminal_request_headers()
+        return cancelled
 
     def discard_failure(self, failure_id: int) -> bool:
         failure = db.load_failed_job(int(failure_id))
         if not failure:
             return False
         db.mark_failed_job_discarded(int(failure_id))
+        self._forget_terminal_request_headers()
         return True
 
     def state_snapshot(self) -> dict[str, Any]:
@@ -640,6 +675,7 @@ class HeadlessJobService(QObject):
             )
         skipped = db.skip_tombstoned_queue_jobs()
         for job in skipped:
+            self._forget_request_headers(job.get("job_id", ""))
             write_log_line(
                 "[QUEUE] Skipped tombstoned media "
                 f"{job.get('platform', '') or 'source'} / "
@@ -684,6 +720,11 @@ class HeadlessJobService(QObject):
         )
         if not current:
             latest = db.load_queue_job(job_id)
+            if (
+                not latest
+                or str(latest.get("status", "")) in _TERMINAL_QUEUE_STATUSES
+            ):
+                self._forget_request_headers(job_id)
             if latest and latest.get("tombstone_skipped"):
                 write_log_line(
                     "[QUEUE] Skipped tombstoned media "
@@ -733,6 +774,7 @@ class HeadlessJobService(QObject):
             or job.get("status") != "fetching"
             or job.get("execution_owner") != self.owner_id
         ):
+            self._forget_request_headers(job_id)
             self._dispatch()
             return
         worker = FetchWorker(
@@ -759,6 +801,7 @@ class HeadlessJobService(QObject):
             or job.get("execution_owner") != self.owner_id
             or self._stopping
         ):
+            self._forget_request_headers(job_id)
             self._dispatch()
             return
         quality = self._pick_quality(getattr(info, "qualities", []), job.get("quality", "best"))
@@ -887,6 +930,7 @@ class HeadlessJobService(QObject):
                     progress=100,
                     progress_text=f"No upgrade: {decision.reason_code} — {decision.reason}",
                 )
+                self._forget_request_headers(job_id)
                 self._dispatch()
                 return
             upgrade_version_keep = int(profile.get("version_keep", 3) or 3)
@@ -1163,6 +1207,7 @@ class HeadlessJobService(QObject):
         self._download_errors.add(job_id)
         job = db.load_queue_job(job_id)
         if self._stopping or not job or job.get("status") == "cancelled":
+            self._forget_request_headers(job_id)
             return
         ctx = self._contexts.get(job_id, {})
         self._fail_job(
@@ -1178,6 +1223,7 @@ class HeadlessJobService(QObject):
             or job.get("status") != "downloading"
             or job.get("execution_owner") != self.owner_id
         ):
+            self._forget_request_headers(job_id)
             return
         ctx = self._contexts.get(job_id, {})
         info = ctx.get("info")
@@ -1277,8 +1323,10 @@ class HeadlessJobService(QObject):
             or job.get("status") != "finalizing"
             or job.get("execution_owner") != self.owner_id
         ):
+            self._forget_request_headers(job_id)
             return
         if result.get("cancelled"):
+            self._forget_request_headers(job_id)
             return
         output_dir = str(result.get("out_dir", "") or self.output_dir)
         failure = str(
@@ -1418,6 +1466,7 @@ class HeadlessJobService(QObject):
     def _on_finalize_finished(self, job_id: str) -> None:
         self._finalizers.pop(job_id, None)
         self._contexts.pop(job_id, None)
+        self._forget_request_headers(job_id)
         self._dispatch()
 
     def _fail_job(
