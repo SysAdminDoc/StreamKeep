@@ -119,14 +119,21 @@ class SceneWorker(QThread):
                 "-q:v", "4", "-y", thumb_path,
             ]
             try:
-                subprocess.run(
+                result = subprocess.run(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     creationflags=_CREATE_NO_WINDOW, timeout=15,
                 )
             except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
                 continue
-            if os.path.isfile(thumb_path):
+            if (result.returncode == 0 and os.path.isfile(thumb_path)
+                    and os.path.getsize(thumb_path) > 0):
                 results.append({"time": ts, "thumb": thumb_path})
+            else:
+                try:
+                    if os.path.exists(thumb_path):
+                        os.remove(thumb_path)
+                except OSError:
+                    pass
             pct = int((i + 1) / len(timestamps) * 100)
             self.progress.emit(pct, f"Thumbnails {i + 1}/{len(timestamps)}")
 

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added subprocess/file-worker coverage for safe argv construction, player and
+  companion-settings paths, and partial-output cleanup; transcript and summary
+  sidecars now use atomic writes, and the measured coverage gate is 64.0%.
+
 - Reused configured profile SQLite connections per thread, applying the
   runtime and journal policy once per physical handle while keeping temporary
   migration databases one-shot. GUI and headless shutdown now close cached

@@ -30,6 +30,15 @@ from ..capabilities import resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
+def _remove_partial_output(path):
+    """Remove a mux output left behind by a failed FFmpeg invocation."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def is_available():
     """Return True if auto-editor is installed and callable."""
     try:
@@ -205,11 +214,13 @@ def remove_silence(src, dst, method="audio", threshold="4%", margin="0.2s",
             if log_fn:
                 log_fn(f"[AUTO-EDITOR] Silence removed: {os.path.basename(dst)}")
             return True
+        _remove_partial_output(dst)
         if log_fn:
             log_fn(f"[AUTO-EDITOR] Concat failed: {(r.stderr or b'').decode('utf-8', errors='replace')[:200]}")
         return False
 
     except Exception as e:
+        _remove_partial_output(dst)
         if log_fn:
             log_fn(f"[AUTO-EDITOR] Error during re-mux: {e}")
         return False

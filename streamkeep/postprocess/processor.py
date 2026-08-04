@@ -191,6 +191,15 @@ class PostProcessor:
 
     @staticmethod
     def _ffmpeg_run(cmd, log_fn, label):
+        output_path = str(cmd[-1]) if cmd else ""
+
+        def remove_partial_output():
+            try:
+                if output_path and output_path != "-" and os.path.exists(output_path):
+                    os.remove(output_path)
+            except OSError:
+                pass
+
         try:
             cmd = list(cmd)
             cmd[0] = resolve_tool_command("ffmpeg")
@@ -208,8 +217,10 @@ class PostProcessor:
                     if r.stderr else f"exit {r.returncode}"
                 )
                 log_fn(f"[POST] {label} failed: {err[:120]}")
+            remove_partial_output()
             return False
         except Exception as e:
+            remove_partial_output()
             if log_fn:
                 log_fn(f"[POST] {label} error: {e}")
             return False

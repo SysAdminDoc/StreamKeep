@@ -105,10 +105,24 @@ def _run_ffmpeg_thumb(src, at_secs, dst, width=240):
             timeout=20,
         )
     except (CapabilityUnavailableError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+        except OSError:
+            pass
         return False
-    return (proc.returncode == 0
-            and os.path.exists(dst)
-            and os.path.getsize(dst) > 0)
+    ok = (
+        proc.returncode == 0
+        and os.path.exists(dst)
+        and os.path.getsize(dst) > 0
+    )
+    if not ok:
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+        except OSError:
+            pass
+    return ok
 
 
 class ThumbWorker(QThread):

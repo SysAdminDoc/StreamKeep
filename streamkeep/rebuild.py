@@ -1090,6 +1090,12 @@ def apply_library_rebuild(
         if cancel_fn and cancel_fn():
             result.status = "cancelled"
             return result
+        # The configured profile connection is intentionally cached for hot
+        # paths, but the live database must be released before the atomic
+        # swap below can rename it on Windows.
+        close_connections = getattr(db_module, "close_connections", None)
+        if callable(close_connections):
+            close_connections()
         _swap_databases(
             [
                 (Path(db_module.DB_PATH), stage_library),

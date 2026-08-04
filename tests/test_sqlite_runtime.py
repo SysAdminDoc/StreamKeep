@@ -118,6 +118,7 @@ class SQLiteRuntimePolicyTests(unittest.TestCase):
             finally:
                 connection.close()
             results = db.search_history("needle")
+            db.close_connections()
 
         self.assertIsNone(fts_table)
         self.assertEqual([row["title"] for row in results], ["Fallback needle result"])
@@ -145,6 +146,7 @@ class SQLiteRuntimePolicyTests(unittest.TestCase):
             finally:
                 connection.close()
             results = db.search_history("needle")
+            db.close_connections()
 
         self.assertIsNotNone(fts_table)
         self.assertEqual([row["title"] for row in results], ["Indexed needle result"])

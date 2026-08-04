@@ -20,6 +20,15 @@ from ..capabilities import CapabilityUnavailableError, resolve_tool_command
 from ..paths import _CREATE_NO_WINDOW, FFMPEG_SAFETY
 
 
+def _remove_partial_output(path):
+    """Remove an output left behind by a failed encoder invocation."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 class ClipWorker(QThread):
     """Trim a file to an in/out range and write to a new output path."""
 
@@ -166,20 +175,18 @@ class ClipWorker(QThread):
                 self.log.emit(f"[CLIP] Wrote {self.output_path}")
                 self.done.emit(True, self.output_path)
                 return
-            # Failure — remove zero-byte stub, surface the tail of stderr.
-            if (os.path.exists(self.output_path)
-                    and os.path.getsize(self.output_path) == 0):
-                try:
-                    os.remove(self.output_path)
-                except OSError:
-                    pass
+            # Failure — remove any stub or partial output, then surface the
+            # tail of stderr.
+            _remove_partial_output(self.output_path)
             tail = "\n".join(output_lines[-5:]) or f"ffmpeg exit {self._proc.returncode}"
             self.log.emit(f"[CLIP] Failed:\n{tail}")
             self.done.emit(False, "")
         except FileNotFoundError:
+            _remove_partial_output(self.output_path)
             self.log.emit("[CLIP] ffmpeg not found in PATH.")
             self.done.emit(False, "")
         except Exception as e:
+            _remove_partial_output(self.output_path)
             self.log.emit(f"[CLIP] Error: {e}")
             self.done.emit(False, "")
 
@@ -232,6 +239,7 @@ class HighlightWorker(QThread):
 
         tmp_dir = tempfile.mkdtemp(prefix="streamkeep_hl_")
         parts = []
+        succeeded = False
         n = len(self.ranges)
         mode = "re-encode" if self.reencode else "stream-copy"
         self.log.emit(f"[HIGHLIGHT] {n} range(s), {mode}")
@@ -319,13 +327,20 @@ class HighlightWorker(QThread):
             if (self._proc.returncode == 0
                     and os.path.exists(self.output_path)
                     and os.path.getsize(self.output_path) > 0):
+                succeeded = True
                 self.progress.emit(100, "Complete")
                 self.log.emit(f"[HIGHLIGHT] Wrote {self.output_path}")
                 self.done.emit(True, self.output_path)
             else:
                 self.log.emit("[HIGHLIGHT] Concat failed.")
                 self.done.emit(False, "")
+        except Exception as error:
+            _remove_partial_output(self.output_path)
+            self.log.emit(f"[HIGHLIGHT] Error: {error}")
+            self.done.emit(False, "")
         finally:
+            if not succeeded:
+                _remove_partial_output(self.output_path)
             for p in parts:
                 try:
                     os.remove(p)

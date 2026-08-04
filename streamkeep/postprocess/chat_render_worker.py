@@ -37,6 +37,15 @@ DEFAULT_BG_OPACITY = 180       # 0-255
 DEFAULT_FPS = 30
 
 
+def _remove_partial_output(path):
+    """Remove a chat video left behind by a failed pipe or encoder."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def _hex_to_rgb(color_hex):
     """Convert '#RRGGBB' or 'RRGGBB' to (R, G, B) tuple."""
     color_hex = (color_hex or "").lstrip("#").strip()
@@ -261,6 +270,7 @@ class ChatRenderWorker(QThread):
                 creationflags=_CREATE_NO_WINDOW,
             )
         except FileNotFoundError:
+            _remove_partial_output(self.output_path)
             self.done.emit(False, "ffmpeg not found in PATH.")
             return
 
@@ -274,6 +284,7 @@ class ChatRenderWorker(QThread):
                 if self._cancel:
                     proc.stdin.close()
                     proc.wait()
+                    _remove_partial_output(self.output_path)
                     self.done.emit(False, "Cancelled.")
                     return
 
@@ -374,7 +385,12 @@ class ChatRenderWorker(QThread):
                     self.progress.emit(pct, f"Frame {frame_num}/{total_frames}")
 
         except (BrokenPipeError, OSError) as e:
+            _remove_partial_output(self.output_path)
             self.done.emit(False, f"ffmpeg pipe error: {e}")
+            return
+        except Exception as e:
+            _remove_partial_output(self.output_path)
+            self.done.emit(False, f"Chat render failed: {e}")
             return
         finally:
             try:
@@ -382,7 +398,10 @@ class ChatRenderWorker(QThread):
             except OSError:
                 pass
             proc.wait()
-        if proc.returncode != 0:
+        if (proc.returncode != 0
+                or not os.path.isfile(self.output_path)
+                or os.path.getsize(self.output_path) <= 0):
+            _remove_partial_output(self.output_path)
             stderr = ""
             try:
                 stderr = proc.stderr.read().decode("utf-8", errors="replace")[:300]

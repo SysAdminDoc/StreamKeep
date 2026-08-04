@@ -16,6 +16,7 @@ import json
 import hashlib
 import os
 import re
+import tempfile
 import threading
 import urllib.request
 
@@ -138,6 +139,28 @@ def _chunk_text(text, max_chars=MAX_CHUNK_CHARS):
     if current:
         chunks.append("\n".join(current))
     return chunks
+
+
+def _write_summary_atomically(path, text):
+    """Write a summary beside the recording without exposing a partial file."""
+    directory = os.path.dirname(path) or "."
+    fd, temporary = tempfile.mkstemp(
+        prefix=".streamkeep_summary_", suffix=".tmp", dir=directory,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
 
 
 # ── LLM backends ────────────────────────────────────────────────────
@@ -327,8 +350,7 @@ def summarize_recording(recording_dir, *, provider="ollama", model="",
         # Save alongside recording
         out_path = os.path.join(recording_dir, ".summary.md")
         try:
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(summary)
+            _write_summary_atomically(out_path, summary)
         except OSError:
             pass
 

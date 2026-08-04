@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -69,6 +70,28 @@ def _format_vtt_time(secs):
 def _first_words(text, n=6):
     words = (text or "").strip().split()
     return " ".join(words[:n]).strip()
+
+
+def _write_text_atomically(path, text):
+    """Write one transcript sidecar without exposing a partial file."""
+    directory = os.path.dirname(path) or "."
+    fd, temporary = tempfile.mkstemp(
+        prefix=".streamkeep_transcript_", suffix=".tmp", dir=directory,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
 
 
 class TranscribeWorker(QThread):
@@ -126,7 +149,24 @@ class TranscribeWorker(QThread):
             self.done.emit(False, "No speech detected.")
             return
         base, _ = os.path.splitext(self.media_path)
-        self._write_outputs(base, segments)
+        output_paths = [
+            base + ".srt",
+            base + ".vtt",
+            base + ".transcript.json",
+            base + ".chapters.auto.txt",
+        ]
+        existing_outputs = {path for path in output_paths if os.path.exists(path)}
+        try:
+            self._write_outputs(base, segments)
+        except OSError as error:
+            for path in output_paths:
+                if path not in existing_outputs:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            self.done.emit(False, f"Could not write transcript outputs: {error}")
+            return
         self.progress.emit(100, "Complete")
         self.done.emit(True, base)
 
@@ -253,20 +293,21 @@ class TranscribeWorker(QThread):
             )
             if proc.returncode != 0:
                 raise RuntimeError(proc.stderr.strip()[:200] or "non-zero exit")
-        except FileNotFoundError:
-            raise RuntimeError(f"{binary} not found in PATH")
-        # Parse the .srt.
-        out = []
-        try:
+            # Parse the .srt while it is still available, then always remove
+            # the backend's intermediate file below.
             with open(srt_out, "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError as e:
-            raise RuntimeError(f"Could not read {srt_out}: {e}")
+            if isinstance(e, FileNotFoundError):
+                raise RuntimeError(f"{binary} not found in PATH") from e
+            raise RuntimeError(f"Could not read {srt_out}: {e}") from e
         finally:
             try:
                 os.remove(srt_out)
             except OSError:
                 pass
+        # Parse the .srt.
+        out = []
         for chunk in text.strip().split("\n\n"):
             lines = chunk.strip().splitlines()
             if len(lines) < 3:
@@ -285,24 +326,28 @@ class TranscribeWorker(QThread):
     def _write_outputs(self, base, segments):
         """Write .srt, .vtt, .json, and chapters.auto.txt."""
         # .srt — use word-level timestamps for tighter cues when available
-        with open(base + ".srt", "w", encoding="utf-8") as f:
-            for i, seg in enumerate(segments, start=1):
-                speaker = seg.get("speaker", "")
-                prefix = f"[{speaker}] " if speaker else ""
-                f.write(f"{i}\n")
-                f.write(f"{_format_srt_time(seg['start'])} --> {_format_srt_time(seg['end'])}\n")
-                f.write(f"{prefix}{seg['text']}\n\n")
+        srt = []
+        for i, seg in enumerate(segments, start=1):
+            speaker = seg.get("speaker", "")
+            prefix = f"[{speaker}] " if speaker else ""
+            srt.append(f"{i}\n")
+            srt.append(
+                f"{_format_srt_time(seg['start'])} --> "
+                f"{_format_srt_time(seg['end'])}\n"
+            )
+            srt.append(f"{prefix}{seg['text']}\n\n")
         # .vtt — include speaker labels
-        with open(base + ".vtt", "w", encoding="utf-8") as f:
-            f.write("WEBVTT\n\n")
-            for seg in segments:
-                speaker = seg.get("speaker", "")
-                prefix = f"<v {speaker}>" if speaker else ""
-                f.write(f"{_format_vtt_time(seg['start'])} --> {_format_vtt_time(seg['end'])}\n")
-                f.write(f"{prefix}{seg['text']}\n\n")
+        vtt = ["WEBVTT\n\n"]
+        for seg in segments:
+            speaker = seg.get("speaker", "")
+            prefix = f"<v {speaker}>" if speaker else ""
+            vtt.append(
+                f"{_format_vtt_time(seg['start'])} --> "
+                f"{_format_vtt_time(seg['end'])}\n"
+            )
+            vtt.append(f"{prefix}{seg['text']}\n\n")
         # .json — full structure including words + speakers
-        with open(base + ".transcript.json", "w", encoding="utf-8") as f:
-            json.dump(segments, f, ensure_ascii=False, indent=2)
+        transcript_json = json.dumps(segments, ensure_ascii=False, indent=2)
         # chapters.auto.txt — emit one chapter at every silence gap > threshold.
         chapters = [(0.0, _first_words(segments[0]["text"]) or "Start")]
         for prev, nxt in zip(segments, segments[1:]):
@@ -310,12 +355,19 @@ class TranscribeWorker(QThread):
             if gap >= self.silence_gap_secs:
                 heading = _first_words(nxt["text"]) or f"Chapter at {int(nxt['start'])}s"
                 chapters.append((nxt["start"], heading))
-        with open(base + ".chapters.auto.txt", "w", encoding="utf-8") as f:
-            for secs, title in chapters:
-                h = int(secs // 3600)
-                m = int((secs % 3600) // 60)
-                s = int(secs % 60)
-                f.write(f"{h:02d}:{m:02d}:{s:02d}  {title}\n")
+        chapter_lines = []
+        for secs, title in chapters:
+            h = int(secs // 3600)
+            m = int((secs % 3600) // 60)
+            s = int(secs % 60)
+            chapter_lines.append(f"{h:02d}:{m:02d}:{s:02d}  {title}\n")
+
+        _write_text_atomically(base + ".srt", "".join(srt))
+        _write_text_atomically(base + ".vtt", "".join(vtt))
+        _write_text_atomically(base + ".transcript.json", transcript_json)
+        _write_text_atomically(
+            base + ".chapters.auto.txt", "".join(chapter_lines),
+        )
 
 
 def _srt_to_secs(stamp):

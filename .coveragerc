@@ -2,7 +2,7 @@
 source = streamkeep
 
 [report]
-fail_under = 47.5
+fail_under = 64.0
 precision = 1
 show_missing = True
 skip_covered = True

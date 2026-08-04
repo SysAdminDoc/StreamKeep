@@ -28,6 +28,15 @@ BUILTIN_PROFILES = {
 }
 
 
+def _remove_partial_output(path):
+    """Remove a normalization output left by a failed FFmpeg pass."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
                        target_lra=11, log_fn=None):
     """Two-pass EBU R128 loudness normalization.
@@ -97,6 +106,7 @@ def normalize_two_pass(src, dst, *, target_i=-16, target_tp=-1.5,
     except (subprocess.TimeoutExpired, OSError) as e:
         if log_fn:
             log_fn(f"[NORM] Pass 2 error: {e}")
+    _remove_partial_output(dst)
     return False
 
 
@@ -141,8 +151,11 @@ def _single_pass(src, dst, target_i, target_tp, target_lra, log_fn, ffmpeg_path)
         ok = r.returncode == 0 and os.path.exists(dst) and os.path.getsize(dst) > 0
         if ok and log_fn:
             log_fn(f"[NORM] Single-pass done: {os.path.basename(dst)}")
+        if not ok:
+            _remove_partial_output(dst)
         return ok
     except (subprocess.TimeoutExpired, OSError):
+        _remove_partial_output(dst)
         return False
 
 
