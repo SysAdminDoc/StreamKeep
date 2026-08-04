@@ -37,6 +37,8 @@ from .verify import MANIFEST_FILENAME, MANIFEST_VERSION
 
 REBUILD_PLAN_SCHEMA = 1
 MAX_PLAN_BYTES = 64 * 1024 * 1024
+REBUILD_SWAP_MARKER = ".streamkeep-rebuild-swap.json"
+_REBUILD_STAGE_PREFIX = ".streamkeep-rebuild-"
 _MEDIA_EXTS = set(MEDIA_EXTS) | {".m4v"}
 _SIDECAR_SUFFIXES = (".info.json", ".nfo")
 
@@ -771,15 +773,156 @@ def _check_plan_items(plan):
     return errors
 
 
+def _swap_marker_path(pairs):
+    if not pairs:
+        raise ValueError("at least one database pair is required")
+    return Path(pairs[0][0]).parent / REBUILD_SWAP_MARKER
+
+
+def _swap_record(target, staged, plan_id):
+    target = Path(target)
+    staged = Path(staged)
+    return {
+        "target": str(target),
+        "staged": str(staged),
+        "previous": str(
+            target.with_name(target.name + f".pre-rebuild-{plan_id}")
+        ),
+        "existed": target.is_file(),
+    }
+
+
+def _write_swap_marker(marker, plan_id, records):
+    marker = Path(marker)
+    if marker.exists():
+        raise RuntimeError(
+            f"interrupted rebuild swap marker already exists: {marker}"
+        )
+    temporary = marker.with_name(marker.name + ".tmp")
+    payload = {
+        "schema": 1,
+        "plan_id": str(plan_id),
+        "pairs": records,
+    }
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _clear_swap_marker(marker):
+    marker = Path(marker)
+    marker.unlink(missing_ok=True)
+    marker.with_name(marker.name + ".tmp").unlink(missing_ok=True)
+
+
+def _unlink_sqlite_file(path):
+    path = Path(path)
+    path.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm"):
+        Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+
+def _validate_swap_marker(marker, payload):
+    if not isinstance(payload, dict) or payload.get("schema") != 1:
+        raise ValueError("unsupported rebuild swap marker")
+    plan_id = _text(payload.get("plan_id"))
+    records = payload.get("pairs")
+    if not plan_id or not isinstance(records, list) or not records:
+        raise ValueError("invalid rebuild swap marker")
+    marker_parent = Path(marker).parent.resolve(strict=False)
+    expected_stage = marker_parent / f"{_REBUILD_STAGE_PREFIX}{plan_id}"
+    validated = []
+    for raw in records:
+        if not isinstance(raw, dict):
+            raise ValueError("invalid rebuild swap pair")
+        target = Path(raw.get("target", ""))
+        staged = Path(raw.get("staged", ""))
+        previous = Path(raw.get("previous", ""))
+        if target.parent.resolve(strict=False) != marker_parent:
+            raise ValueError("rebuild target is outside the config directory")
+        if staged.parent.resolve(strict=False) != expected_stage:
+            raise ValueError("rebuild stage is outside the generated stage")
+        expected_previous = target.with_name(
+            target.name + f".pre-rebuild-{plan_id}"
+        )
+        if previous != expected_previous:
+            raise ValueError("invalid rebuild previous path")
+        if not isinstance(raw.get("existed"), bool):
+            raise ValueError("invalid rebuild existence flag")
+        validated.append({
+            "target": target,
+            "staged": staged,
+            "previous": previous,
+            "existed": raw["existed"],
+        })
+    if expected_stage not in {record["staged"].parent for record in validated}:
+        raise ValueError("missing rebuild stage")
+    return validated, expected_stage
+
+
+def finalize_interrupted_rebuild(*, config_dir=None, db_module=_db):
+    """Roll back a rebuild whose marker survived an interrupted swap.
+
+    The marker is deliberately resolved before the database is opened.  All
+    paths are validated against the generated config/stage layout so a
+    malformed marker cannot turn startup recovery into an arbitrary delete.
+    """
+    marker_parent = Path(
+        config_dir or Path(db_module.DB_PATH).parent
+    ).expanduser().resolve(strict=False)
+    marker = marker_parent / REBUILD_SWAP_MARKER
+    if not marker.is_file():
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        records, stage_dir = _validate_swap_marker(marker, payload)
+        for record in records:
+            target = record["target"]
+            previous = record["previous"]
+            if previous.exists():
+                _unlink_sqlite_file(target)
+                if record["existed"]:
+                    os.replace(previous, target)
+                for suffix in ("-wal", "-shm"):
+                    previous_sidecar = Path(f"{previous}{suffix}")
+                    target_sidecar = Path(f"{target}{suffix}")
+                    if previous_sidecar.exists():
+                        os.replace(previous_sidecar, target_sidecar)
+            elif not record["existed"] and target.exists():
+                _unlink_sqlite_file(target)
+            elif record["existed"] and not target.exists():
+                raise OSError(
+                    f"rebuild target disappeared without a backup: {target}"
+                )
+            _unlink_sqlite_file(record["staged"])
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        if stage_dir.exists():
+            raise OSError(f"could not remove rebuild stage: {stage_dir}")
+        _clear_swap_marker(marker)
+        return True
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def _swap_databases(pairs, plan_id):
+    marker = _swap_marker_path(pairs)
+    records = [_swap_record(target, staged, plan_id) for target, staged in pairs]
+    _write_swap_marker(marker, plan_id, records)
     moved = []
     try:
-        for target, staged in pairs:
+        for record in records:
+            target = record["target"]
+            staged = record["staged"]
+            previous = record["previous"]
             target = Path(target)
             staged = Path(staged)
-            previous = target.with_name(
-                target.name + f".pre-rebuild-{plan_id}"
-            )
+            previous = Path(previous)
             previous.unlink(missing_ok=True)
             sidecars = []
             if target.is_file():
@@ -800,20 +943,30 @@ def _swap_databases(pairs, plan_id):
                 if staged_sidecar.exists():
                     os.replace(staged_sidecar, target_sidecar)
     except Exception:
+        rollback_ok = True
         for target, previous, existed, sidecars in reversed(moved):
             try:
-                Path(target).unlink(missing_ok=True)
+                _unlink_sqlite_file(target)
             except OSError:
-                pass
+                rollback_ok = False
             for live_sidecar, previous_sidecar in reversed(sidecars):
                 try:
                     if previous_sidecar.exists():
                         os.replace(previous_sidecar, live_sidecar)
                 except OSError:
-                    pass
+                    rollback_ok = False
             if existed and previous.exists():
-                os.replace(previous, target)
+                try:
+                    os.replace(previous, target)
+                except OSError:
+                    rollback_ok = False
+        if rollback_ok:
+            try:
+                _clear_swap_marker(marker)
+            except OSError:
+                pass
         raise
+    _clear_swap_marker(marker)
     for _target, previous, _existed, sidecars in moved:
         previous.unlink(missing_ok=True)
         for _live_sidecar, previous_sidecar in sidecars:
@@ -876,11 +1029,11 @@ def apply_library_rebuild(
         {"path": item.get("path", ""), "tags": item.get("tags", [])}
         for item in valid_items
     ]
-    stage_dir = config_dir / f".streamkeep-rebuild-{plan.plan_id}"
-    stage_dir.mkdir(parents=True, exist_ok=False)
+    stage_dir = config_dir / f"{_REBUILD_STAGE_PREFIX}{plan.plan_id}"
     stage_library = stage_dir / "library.db"
     stage_tags = stage_dir / "tags.db"
     try:
+        stage_dir.mkdir(parents=True, exist_ok=False)
         db_module.build_rebuilt_library_database(
             stage_library, entries, manifests
         )

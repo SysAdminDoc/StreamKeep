@@ -92,12 +92,17 @@ def _connect(readonly=False):
 
 def init_db() -> None:
     """Create tables if they don't exist.  Idempotent."""
-    _check_schema_version()
     # Repair a config directory left mixed by a restore that died mid-swap
-    # before opening the database. Lazy import avoids a backup<->db cycle.
+    # before opening the database. Lazy imports avoid backup<->db and
+    # rebuild<->db cycles.
     try:
         from .backup import finalize_interrupted_restore
         finalize_interrupted_restore()
+    except Exception:
+        pass
+    try:
+        from .rebuild import finalize_interrupted_rebuild
+        finalize_interrupted_rebuild()
     except Exception:
         pass
     _check_schema_version()

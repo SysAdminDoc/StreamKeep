@@ -2,10 +2,14 @@ import json
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from streamkeep import db, tags
+from streamkeep import rebuild
 from streamkeep.metadata import MetadataSaver
 from streamkeep.models import QualityInfo, StreamInfo
 from streamkeep.rebuild import (
+    REBUILD_SWAP_MARKER,
     apply_library_rebuild,
     plan_library_rebuild,
 )
@@ -27,6 +31,68 @@ def _info():
 def _remove_sqlite_files(path):
     for suffix in ("", "-wal", "-shm"):
         Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+
+def test_init_db_recovers_interrupted_rebuild_swap(tmp_path):
+    config_dir = tmp_path / "config"
+    library_db = config_dir / "library.db"
+    tags_db = config_dir / "tags.db"
+    plan_id = "recover-swap"
+    with mock.patch.object(db, "DB_PATH", library_db), mock.patch.object(
+        tags, "DB_PATH", tags_db,
+    ):
+        db.init_db()
+        tag_db = tags._connect()
+        tag_db.close()
+        db.save_completed_recording({
+            "date": "2026-08-03T00:00:00Z",
+            "platform": "Twitch",
+            "source_id": "vod:recovery",
+            "title": "Recovery recording",
+            "channel": "RecoveryChannel",
+            "path": str(tmp_path / "recording"),
+        })
+        original_library = library_db.read_bytes()
+        stage_dir = config_dir / f".streamkeep-rebuild-{plan_id}"
+        stage_dir.mkdir(parents=True)
+        staged_library = stage_dir / "library.db"
+        staged_tags = stage_dir / "tags.db"
+        staged_library.write_bytes(b"replacement library")
+        staged_tags.write_bytes(b"replacement tags")
+
+        real_replace = rebuild.os.replace
+
+        def interrupt_before_live_library(source, destination):
+            if Path(destination) == library_db:
+                raise KeyboardInterrupt("simulated power loss")
+            return real_replace(source, destination)
+
+        with mock.patch.object(
+            rebuild.os, "replace", side_effect=interrupt_before_live_library,
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                rebuild._swap_databases(
+                    [(library_db, staged_library), (tags_db, staged_tags)],
+                    plan_id,
+                )
+
+        marker = config_dir / REBUILD_SWAP_MARKER
+        marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+        assert {
+            pair["target"] for pair in marker_payload["pairs"]
+        } == {str(library_db), str(tags_db)}
+        assert not library_db.exists()
+        assert library_db.with_name(
+            f"library.db.pre-rebuild-{plan_id}"
+        ).is_file()
+
+        db.init_db()
+
+        assert library_db.read_bytes() == original_library
+        assert len(db.load_history()) == 1
+        assert tags_db.is_file()
+        assert not marker.exists()
+        assert not stage_dir.exists()
 
 
 def test_preview_then_apply_rebuilds_history_tags_and_manifest(tmp_path):

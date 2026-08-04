@@ -4,6 +4,9 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made rebuild database swaps crash-recoverable with an fsynced marker,
+  startup rollback, and orphaned staging cleanup before the database opens.
+
 - Added an append-only re-template swap journal and startup finalizer. An
   interrupted directory move is now reversed or retained from the durable
   history decision, with empty staging parents cleaned and storage visibility
