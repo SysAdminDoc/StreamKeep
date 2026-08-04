@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from streamkeep import db, tags
 from streamkeep.maintenance import (
-    apply_maintenance, apply_retemplate, load_pending_plan, plan_maintenance,
-    plan_retemplate, save_pending_plan,
+    _order_file_renames, apply_maintenance, apply_retemplate, load_pending_plan,
+    plan_maintenance, plan_retemplate, save_pending_plan,
 )
+from streamkeep.utils import TemplateRenderError
 
 
 def _recording(root, name, *, platform="Twitch", channel="alpha", title="Show"):
@@ -231,6 +234,61 @@ def test_retemplate_preview_and_apply_moves_the_complete_recording_unit(
     events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
     assert events[-2]["event"] == "action_applied"
     assert events[-2]["kind"] == "retemplate"
+
+
+def test_retemplate_overlapping_renames_preserve_both_source_files(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "library.db"
+    tag_database = tmp_path / "tags.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    monkeypatch.setattr(tags, "DB_PATH", tag_database)
+    db.init_db()
+    root = tmp_path / "archive"
+    old = root / "legacy"
+    old.mkdir(parents=True)
+    (old / "clip.mp4").write_bytes(b"clip bytes")
+    (old / "Title.mp4").write_bytes(b"title bytes")
+    (old / "metadata.json").write_text(json.dumps({
+        "platform": "Twitch", "channel": "alpha", "title": "Show",
+    }), encoding="utf-8")
+    _history(old, title="Show")
+
+    plan = plan_retemplate(root, "{title}", "Title")
+    action = next(item for item in plan.actions if item.kind == "retemplate")
+    # Simulate a persisted preview whose order follows casefold sorting. The
+    # apply path must still protect the source at the destination.
+    action.payload["file_renames"] = [
+        {"old": "clip.mp4", "new": "Title.mp4"},
+        {"old": "Title.mp4", "new": "Title_002.mp4"},
+    ]
+
+    result = apply_retemplate(
+        plan, [action.action_id], backup_fn=_backup,
+        ledger_path=tmp_path / "audit.jsonl", config_dir=tmp_path / "state",
+    )
+    new = root / "Show"
+    assert result.status == "completed"
+    assert (new / "Title.mp4").read_bytes() == b"clip bytes"
+    assert (new / "Title_002.mp4").read_bytes() == b"title bytes"
+
+
+def test_retemplate_preview_rejects_case_only_destination_collision():
+    with pytest.raises(TemplateRenderError) as error:
+        _order_file_renames([
+            {"old": "clip.txt", "new": "Title.mp4"},
+            {"old": "Title.txt", "new": "title.MP4"},
+        ])
+    assert error.value.code == "filename_collision"
+
+
+def test_retemplate_preview_names_unorderable_filename_cycles():
+    with pytest.raises(TemplateRenderError) as error:
+        _order_file_renames([
+            {"old": "clip.mp4", "new": "Title.mp4"},
+            {"old": "Title.mp4", "new": "clip.mp4"},
+        ])
+    assert error.value.code == "filename_cycle"
 
 
 def test_retemplate_refuses_reserved_names_and_duplicate_destinations(tmp_path, monkeypatch):

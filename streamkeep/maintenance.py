@@ -196,9 +196,12 @@ def _file_rename_preview(recording_path, new_base):
     """Return safe direct-file renames for one recording directory."""
     root = Path(recording_path)
     media = sorted(
-        entry for entry in root.iterdir()
-        if entry.is_file() and not entry.name.startswith(".")
-        and entry.suffix.lower() in MEDIA_EXTS
+        (
+            entry for entry in root.iterdir()
+            if entry.is_file() and not entry.name.startswith(".")
+            and entry.suffix.lower() in MEDIA_EXTS
+        ),
+        key=lambda entry: os.path.normcase(entry.name),
     )
     if not media:
         raise TemplateRenderError(
@@ -220,7 +223,10 @@ def _file_rename_preview(recording_path, new_base):
     # Keep yt-dlp/NFO/chapter/subtitle/chat siblings attached to the media
     # basename. Generic sidecars (metadata, notes, thumbnail, manifest) stay
     # named as-is and still move with the directory.
-    all_names = [entry.name for entry in root.iterdir() if entry.is_file()]
+    all_names = sorted(
+        (entry.name for entry in root.iterdir() if entry.is_file()),
+        key=os.path.normcase,
+    )
     for name in all_names:
         if name in renames or name.startswith("."):
             continue
@@ -230,21 +236,70 @@ def _file_rename_preview(recording_path, new_base):
                 if name != candidate:
                     renames[name] = candidate
                 break
-    old_names = set(all_names)
+    old_names = {os.path.normcase(name) for name in all_names}
+    rename_sources = {os.path.normcase(name) for name in renames}
     destinations = list(renames.values())
-    if len(set(destinations)) != len(destinations):
+    if len({os.path.normcase(name) for name in destinations}) != len(destinations):
         raise TemplateRenderError(
             "filename_collision", "Rendered media sidecars would collide"
         )
     for destination in destinations:
-        if destination in old_names and destination not in renames:
+        destination_key = os.path.normcase(destination)
+        if destination_key in old_names and destination_key not in rename_sources:
             raise TemplateRenderError(
                 "filename_collision", f"Rendered filename already exists: {destination}"
             )
-    return [
+    return _order_file_renames([
         {"old": old_name, "new": new_name}
-        for old_name, new_name in sorted(renames.items(), key=lambda item: item[0].casefold())
-    ]
+        for old_name, new_name in renames.items()
+    ])
+
+
+def _order_file_renames(file_renames):
+    """Order overlapping renames without writing over an unmoved source."""
+    source_by_key = {}
+    destination_by_key = {}
+    for pair in file_renames:
+        old_name = str(pair["old"])
+        new_name = str(pair["new"])
+        old_key = os.path.normcase(old_name)
+        new_key = os.path.normcase(new_name)
+        if old_key in source_by_key:
+            raise TemplateRenderError(
+                "filename_collision", f"Duplicate source filename: {old_name}"
+            )
+        if new_key in destination_by_key:
+            raise TemplateRenderError(
+                "filename_collision", f"Rendered filename already exists: {new_name}"
+            )
+        source_by_key[old_key] = {"old": old_name, "new": new_name}
+        destination_by_key[new_key] = old_name
+
+    dependencies = {old_key: set() for old_key in source_by_key}
+    for old_key, pair in source_by_key.items():
+        destination_key = os.path.normcase(pair["new"])
+        if destination_key in source_by_key and destination_key != old_key:
+            # The file currently at the destination must move first.
+            dependencies[old_key].add(destination_key)
+
+    remaining = set(source_by_key)
+    ordered = []
+    while remaining:
+        ready = sorted(
+            (key for key in remaining if not dependencies[key] & remaining),
+            key=os.path.normcase,
+        )
+        if not ready:
+            cycle = ", ".join(
+                source_by_key[key]["old"] for key in sorted(remaining, key=os.path.normcase)
+            )
+            raise TemplateRenderError(
+                "filename_cycle", f"File rename cycle cannot be ordered: {cycle}"
+            )
+        for key in ready:
+            ordered.append(source_by_key[key])
+            remaining.remove(key)
+    return ordered
 
 
 def _template_path_context(row, root, folder_template, file_template):
@@ -464,8 +519,14 @@ def _apply_retemplate_action(action, *, db_module, tags_module):
             raise RuntimeError("invalid file rename in preview")
         if not (old_path / pair["old"]).is_file():
             raise RuntimeError(f"sidecar changed after preview: {pair['old']}")
+    try:
+        file_renames = _order_file_renames(file_renames)
+    except TemplateRenderError as exc:
+        raise RuntimeError(str(exc)) from exc
+    rename_sources = {os.path.normcase(pair["old"]) for pair in file_renames}
+    for pair in file_renames:
         target = old_path / pair["new"]
-        if target.exists() and target.name not in {item.get("old") for item in file_renames}:
+        if target.exists() and os.path.normcase(target.name) not in rename_sources:
             raise RuntimeError(f"file destination exists: {target.name}")
 
     old_manifest_row = None

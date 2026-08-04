@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made re-template file renames dependency-aware and case-insensitive, with
+  named cycle conflicts and byte-preserving overlap coverage so a destination
+  can never overwrite a source still awaiting its move.
+
 - Constrained headless queue requests to a frozen safe field set, confined
   client-selected output directories to the configured root, and kept upgrade
   and archive controls under trusted server/config ownership. Rejected fields
