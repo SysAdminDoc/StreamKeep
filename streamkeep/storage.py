@@ -19,6 +19,7 @@ METADATA_SIDECAR = "metadata.json"
 MEDIA_EXTS = {
     ".mp4", ".mkv", ".webm", ".mov", ".ts", ".avi", ".flv",
     ".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif",
 }
 
 

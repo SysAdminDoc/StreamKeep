@@ -39,7 +39,11 @@ BAGIT_FILENAMES = frozenset({
 MEDIA_EXTS = {
     ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
     ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif",
 }
+IMAGE_EXTS = frozenset({
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif",
+})
 MANIFEST_SKIP_NAMES = {
     MANIFEST_FILENAME,
     *BAGIT_FILENAMES,
@@ -75,6 +79,10 @@ def verify_media(media_path, expected_duration=0):
     file_size = os.path.getsize(media_path)
     if file_size == 0:
         return STATUS_FAIL, "File is empty (0 bytes)"
+    if Path(media_path).suffix.lower() in IMAGE_EXTS:
+        return STATUS_OK, (
+            f"Valid image ({file_size / 1024 / 1024:.1f} MB)"
+        )
 
     try:
         cmd = [

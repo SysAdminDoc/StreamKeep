@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added opt-in gallery-dl image-set ingest. `--ingest` registers new image
+  sets with public metadata and idempotent History rows, while `--package cbz`
+  and `--package zip` preserve gallery-dl `info.json` sidecars and materialize
+  a bounded cover for package-only sets so the authenticated gallery can
+  render image media.
+
 - Added opt-in local semantic moment search. A bounded, cancellable,
   dependency-free index combines timestamped transcript, scene, OCR, audio,
   and comment sidecars with confidence and provenance; exact FTS remains

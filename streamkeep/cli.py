@@ -779,6 +779,8 @@ def _run_gallery(args):
         build_gallery_dl_command,
         gallery_dl_available,
         gallery_dl_install_hint,
+        ingest_gallery_output,
+        snapshot_gallery_output,
     )
 
     if not gallery_dl_available():
@@ -790,6 +792,13 @@ def _run_gallery(args):
     if not output_dir:
         from .utils import default_output_dir
         output_dir = default_output_dir()
+    package_format = str(getattr(args, "package", "none") or "none")
+    ingest_requested = bool(
+        getattr(args, "ingest", False) or package_format.casefold() not in {"", "none"}
+    )
+    before_paths = snapshot_gallery_output(
+        output_dir, package_format=package_format,
+    ) if ingest_requested else {}
 
     archive_path = ""
     if not getattr(args, "no_archive", False):
@@ -813,6 +822,8 @@ def _run_gallery(args):
             proxy=proxy,
             simulate=getattr(args, "simulate", False),
             rate_limit=getattr(args, "rate_limit", "") or "",
+            package_format=package_format,
+            write_info_json=ingest_requested,
         )
     except (ValueError, GalleryDlUnavailable) as error:
         _print_line(f"Error: {error}")
@@ -826,9 +837,26 @@ def _run_gallery(args):
     except OSError as error:
         _print_line(f"Error: could not start gallery-dl: {error}")
         sys.exit(1)
+    exit_code = result.returncode
     if result.returncode == 0 and not getattr(args, "simulate", False):
         _print_line(f"\nGallery download complete -> {output_dir}")
-    sys.exit(result.returncode)
+        if ingest_requested:
+            ingest_result = ingest_gallery_output(
+                output_dir,
+                args.url,
+                before_paths=before_paths,
+                package_format=package_format,
+            )
+            _print_line(
+                "Library ingest: "
+                f"{ingest_result['ingested']} new set(s), "
+                f"{ingest_result['skipped']} already registered"
+            )
+            for error in ingest_result.get("errors", []):
+                _print_line(f"  Ingest warning: {error}")
+            if ingest_result.get("errors"):
+                exit_code = 1
+    sys.exit(exit_code)
 
 
 # ── raw-protocol capture jobs (V9) ─────────────────────────────────
@@ -2471,6 +2499,14 @@ def build_parser():
                        help="List what would be downloaded without downloading")
     gal_p.add_argument("--no-archive", action="store_true",
                        help="Do not use the per-source download-archive (re-fetch all)")
+    gal_p.add_argument(
+        "--package", choices=("none", "cbz", "zip"), default="none",
+        help="Package each image set as CBZ/ZIP and ingest it into the library",
+    )
+    gal_p.add_argument(
+        "--ingest", action="store_true",
+        help="Write gallery-dl info.json sidecars and register downloaded sets",
+    )
     gal_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")
 

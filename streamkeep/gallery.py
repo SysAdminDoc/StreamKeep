@@ -2,8 +2,8 @@
 
 Extends the local web server with:
   GET /gallery       — browsable grid of shared recordings
-  GET /share/{id}    — HTML page with embedded video player
-  GET /media/{id}    — video file streaming with HTTP Range support
+  GET /share/{id}    — HTML page with an audio, image, or video player
+  GET /media/{id}    — media delivery with HTTP Range support
 
 Only recordings explicitly present in the durable publishing registry are
 accessible. Share IDs are random 128-bit values and media paths are resolved
@@ -32,6 +32,7 @@ _MIME_OVERRIDES = {
     ".png": "image/png",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".avif": "image/avif",
 }
 
 
@@ -60,9 +61,17 @@ def render_gallery_html(base_url="", entries=None):
         for sid, info in snapshot.items():
             title = info.get("title", "Untitled")[:50]
             channel = info.get("channel", "")
+            media = info.get("media", "")
+            thumbnail = ""
+            if _media_type(media).startswith("image/"):
+                thumbnail = (
+                    f'<img class="thumb" src="{safe_base_url}/media/'
+                    f'{_esc(sid)}" alt="{_esc(title)}" loading="lazy">'
+                )
             items_html += (
                 f'<div class="card">'
                 f'<a href="{safe_base_url}/share/{_esc(sid)}">'
+                f'{thumbnail}'
                 f'<div class="title">{_esc(title)}</div>'
                 f'<div class="channel">{_esc(channel)}</div>'
                 f'</a></div>\n'
@@ -78,6 +87,7 @@ h1 {{ color: {CAT['blue']}; }}
 .card {{ background: {CAT['surface0']}; border-radius: 8px; padding: 16px; }}
 .card a {{ color: {CAT['text']}; text-decoration: none; }}
 .card:hover {{ background: {CAT['surface1']}; }}
+.thumb {{ width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 6px; margin-bottom: 10px; background: #000; }}
 .title {{ font-weight: bold; margin-bottom: 4px; }}
 .channel {{ color: {CAT['subtext0']}; font-size: 0.9em; }}
 </style></head><body>

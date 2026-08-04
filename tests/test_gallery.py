@@ -39,6 +39,20 @@ class GalleryTests(unittest.TestCase):
         self.assertIn(f'href="{escaped_base}/gallery"', share_html)
         self.assertIn(f'src="{escaped_base}/media/{escaped_id}"', share_html)
 
+    def test_gallery_cards_render_image_set_thumbnails(self):
+        html = gallery.render_gallery_html(
+            "http://127.0.0.1:8787",
+            [{
+                "share_id": "image-set",
+                "title": "Image set",
+                "media": "cover.jpg",
+            }],
+        )
+
+        self.assertIn('class="thumb"', html)
+        self.assertIn("loading=\"lazy\"", html)
+        self.assertIn("image/jpeg", gallery._media_type("cover.jpg"))
+
     def test_serve_media_range_returns_partial_content(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             media = Path(tmpdir) / "clip.webm"
