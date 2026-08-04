@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Kept sync-viewer cards owned by their stream slots and reused them across
+  grid relayouts, preventing live mpv widgets from being destroyed during
+  third-stream or audio-slot changes.
+
 - Routed upgrade-version pruning through the recycle bin, refusing to delete
   when `send2trash` is unavailable and removing pruned history rows through
   the existing retention tombstone transaction.

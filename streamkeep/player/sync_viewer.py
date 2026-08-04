@@ -39,6 +39,8 @@ class _StreamSlot:
     """Internal state for one player slot."""
     def __init__(self):
         self.widget = None       # MpvWidget
+        self.card = None         # QFrame retained across grid relayouts
+        self.audio_badge = None  # QLabel inside card
         self.label = ""
         self.offset_secs = 0.0   # +-30s offset for sync
         self.file_path = ""
@@ -178,14 +180,14 @@ class SyncViewer(TranslatableDialog):
 
     def _relayout_grid(self):
         """Arrange player widgets in a grid based on count."""
-        # Remove items from the grid without destroying them — the MpvWidget
-        # instances inside the cards are still alive in self._slots and must
-        # not be deleted.
+        # Remove cards from the grid without destroying them. Each slot owns
+        # its card so removing it from the layout cannot destroy the card's
+        # live MpvWidget child.
         while self._grid.count():
             item = self._grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
+            card = item.widget()
+            if card is not None:
+                card.setParent(None)
 
         n = len(self._slots)
         if n <= 1:
@@ -196,47 +198,52 @@ class SyncViewer(TranslatableDialog):
             cols = 2
 
         for i, slot in enumerate(self._slots):
-            card = QFrame()
-            card.setObjectName("playerSlotCard")
-            container = QVBoxLayout(card)
-            container.setContentsMargins(10, 10, 10, 10)
-            container.setSpacing(8)
-            head_row = QHBoxLayout()
-            head_row.setContentsMargins(0, 0, 0, 0)
-            head_row.setSpacing(8)
-            title_col = QVBoxLayout()
-            title_col.setSpacing(2)
-            label = QLabel(slot.label)
-            label.setObjectName("playerMiniTitle")
-            label.setWordWrap(True)
-            title_col.addWidget(label)
-            meta = QLabel(os.path.basename(slot.file_path))
-            meta.setObjectName("playerMiniMeta")
-            meta.setWordWrap(True)
-            title_col.addWidget(meta)
-            head_row.addLayout(title_col, 1)
-            badge = QLabel("Audio" if i == self._audio_slot else "Silent")
-            badge.setObjectName("playerBadgeMuted")
-            head_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-            container.addLayout(head_row)
-            container.addWidget(slot.widget, 1)
+            card = slot.card
+            if card is None:
+                card = QFrame()
+                card.setObjectName("playerSlotCard")
+                slot.card = card
+                container = QVBoxLayout(card)
+                container.setContentsMargins(10, 10, 10, 10)
+                container.setSpacing(8)
+                head_row = QHBoxLayout()
+                head_row.setContentsMargins(0, 0, 0, 0)
+                head_row.setSpacing(8)
+                title_col = QVBoxLayout()
+                title_col.setSpacing(2)
+                label = QLabel(slot.label)
+                label.setObjectName("playerMiniTitle")
+                label.setWordWrap(True)
+                title_col.addWidget(label)
+                meta = QLabel(os.path.basename(slot.file_path))
+                meta.setObjectName("playerMiniMeta")
+                meta.setWordWrap(True)
+                title_col.addWidget(meta)
+                head_row.addLayout(title_col, 1)
+                slot.audio_badge = QLabel()
+                slot.audio_badge.setObjectName("playerBadgeMuted")
+                head_row.addWidget(slot.audio_badge, 0, Qt.AlignmentFlag.AlignTop)
+                container.addLayout(head_row)
+                container.addWidget(slot.widget, 1)
 
-            # Offset control
-            offset_row = QHBoxLayout()
-            offset_row.setSpacing(4)
-            offset_label = QLabel("Offset:")
-            offset_label.setObjectName("playerTinyLabel")
-            offset_row.addWidget(offset_label)
-            spin = QSpinBox()
-            spin.setRange(-30, 30)
-            spin.setSuffix("s")
-            spin.setValue(int(slot.offset_secs))
-            spin.setFixedWidth(70)
-            idx = i  # capture
-            spin.valueChanged.connect(lambda v, si=idx: self._set_offset(si, v))
-            offset_row.addWidget(spin)
-            offset_row.addStretch(1)
-            container.addLayout(offset_row)
+                # Offset control
+                offset_row = QHBoxLayout()
+                offset_row.setSpacing(4)
+                offset_label = QLabel("Offset:")
+                offset_label.setObjectName("playerTinyLabel")
+                offset_row.addWidget(offset_label)
+                spin = QSpinBox()
+                spin.setRange(-30, 30)
+                spin.setSuffix("s")
+                spin.setValue(int(slot.offset_secs))
+                spin.setFixedWidth(70)
+                idx = i  # capture
+                spin.valueChanged.connect(lambda v, si=idx: self._set_offset(si, v))
+                offset_row.addWidget(spin)
+                offset_row.addStretch(1)
+                container.addLayout(offset_row)
+
+            slot.audio_badge.setText("Audio" if i == self._audio_slot else "Silent")
 
             row, col = divmod(i, cols)
             self._grid.addWidget(card, row, col)

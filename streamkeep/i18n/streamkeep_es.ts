@@ -258,8 +258,8 @@ Archive workstation</source>
         <message>
             <location filename="streamkeep/player/player_controls.py" line="74" />
             <location filename="streamkeep/player/player_controls.py" line="94" />
-            <location filename="streamkeep/player/sync_viewer.py" line="108" />
-            <location filename="streamkeep/player/sync_viewer.py" line="119" />
+            <location filename="streamkeep/player/sync_viewer.py" line="110" />
+            <location filename="streamkeep/player/sync_viewer.py" line="121" />
             <source>0:00</source>
             <translation type="unfinished" />
         </message>
@@ -461,7 +461,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="264" />
+            <location filename="streamkeep/player/sync_viewer.py" line="271" />
             <source>Add at least one more recording to make sync comparison useful.</source>
             <translation type="unfinished" />
         </message>
@@ -487,7 +487,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="87" />
+            <location filename="streamkeep/player/sync_viewer.py" line="89" />
             <source>Add recordings to compare</source>
             <translation type="unfinished" />
         </message>
@@ -497,7 +497,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="255" />
+            <location filename="streamkeep/player/sync_viewer.py" line="262" />
             <source>Add two or more recordings to compare reactions, timing, or multiple points of view on the same moment.</source>
             <translation type="unfinished" />
         </message>
@@ -835,7 +835,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="124" />
+            <location filename="streamkeep/player/sync_viewer.py" line="126" />
             <source>Audio</source>
             <translation type="unfinished" />
         </message>
@@ -1639,7 +1639,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>Compare 2-4 recordings side by side, keep one stream on audio, and nudge offsets until moments line up cleanly.</source>
             <translation type="unfinished" />
         </message>
@@ -4071,7 +4071,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>Multi-stream sync viewer</source>
             <translation type="unfinished" />
         </message>
@@ -4589,7 +4589,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="227" />
+            <location filename="streamkeep/player/sync_viewer.py" line="232" />
             <source>Offset:</source>
             <translation type="unfinished" />
         </message>
@@ -4636,7 +4636,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="264" />
+            <location filename="streamkeep/player/sync_viewer.py" line="271" />
             <source>One stream loaded</source>
             <translation type="unfinished" />
         </message>
@@ -5103,7 +5103,7 @@ Saves your settings first.</source>
             <location filename="streamkeep/player/chapter_panel.py" line="56" />
             <location filename="streamkeep/player/pip_window.py" line="58" />
             <location filename="streamkeep/player/player_panel.py" line="57" />
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>PLAYER</source>
             <translation type="unfinished" />
         </message>
@@ -5605,7 +5605,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="255" />
+            <location filename="streamkeep/player/sync_viewer.py" line="262" />
             <source>Ready for a side-by-side session</source>
             <translation type="unfinished" />
         </message>
@@ -7144,7 +7144,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="53" />
+            <location filename="streamkeep/player/sync_viewer.py" line="55" />
             <source>StreamKeep — Multi-Stream Sync Viewer</source>
             <translation type="unfinished" />
         </message>
@@ -7226,7 +7226,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="273" />
+            <location filename="streamkeep/player/sync_viewer.py" line="280" />
             <source>Sync viewer ready</source>
             <translation type="unfinished" />
         </message>
@@ -7352,7 +7352,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="87" />
+            <location filename="streamkeep/player/sync_viewer.py" line="89" />
             <source>The sync viewer shines with multiple POVs. Once streams are added, playback stays locked to one shared transport bar.</source>
             <translation type="unfinished" />
         </message>
@@ -7812,7 +7812,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="273" />
+            <location filename="streamkeep/player/sync_viewer.py" line="280" />
             <source>Use the shared transport below, pick one audio stream, and adjust offsets until the moments line up.</source>
             <translation type="unfinished" />
         </message>
@@ -7903,7 +7903,7 @@ Download again?</source>
         </message>
         <message>
             <location filename="streamkeep/player/chapter_panel.py" line="186" />
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1438" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="276" />
             <source>Waiting</source>
@@ -8549,8 +8549,8 @@ Download again?</source>
         <message>
             <location filename="streamkeep/player/pip_window.py" line="69" />
             <location filename="streamkeep/player/player_controls.py" line="54" />
-            <location filename="streamkeep/player/sync_viewer.py" line="102" />
-            <location filename="streamkeep/player/sync_viewer.py" line="171" />
+            <location filename="streamkeep/player/sync_viewer.py" line="104" />
+            <location filename="streamkeep/player/sync_viewer.py" line="173" />
             <source>||</source>
             <translation type="unfinished" />
         </message>

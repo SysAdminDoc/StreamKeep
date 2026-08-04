@@ -261,8 +261,8 @@ Archive workstation</translation>
         <message>
             <location filename="streamkeep/player/player_controls.py" line="74" />
             <location filename="streamkeep/player/player_controls.py" line="94" />
-            <location filename="streamkeep/player/sync_viewer.py" line="108" />
-            <location filename="streamkeep/player/sync_viewer.py" line="119" />
+            <location filename="streamkeep/player/sync_viewer.py" line="110" />
+            <location filename="streamkeep/player/sync_viewer.py" line="121" />
             <source>0:00</source>
             <translation>0:00</translation>
         </message>
@@ -464,7 +464,7 @@ Archive workstation</translation>
             <translation>Add a channel to start monitoring.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="264" />
+            <location filename="streamkeep/player/sync_viewer.py" line="271" />
             <source>Add at least one more recording to make sync comparison useful.</source>
             <translation>Add at least one more recording to make sync comparison useful.</translation>
         </message>
@@ -490,7 +490,7 @@ Archive workstation</translation>
             <translation>Add checked VODs to the download queue for concurrent downloading</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="87" />
+            <location filename="streamkeep/player/sync_viewer.py" line="89" />
             <source>Add recordings to compare</source>
             <translation>Add recordings to compare</translation>
         </message>
@@ -500,7 +500,7 @@ Archive workstation</translation>
             <translation>Add the current URL to the download queue</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="255" />
+            <location filename="streamkeep/player/sync_viewer.py" line="262" />
             <source>Add two or more recordings to compare reactions, timing, or multiple points of view on the same moment.</source>
             <translation>Add two or more recordings to compare reactions, timing, or multiple points of view on the same moment.</translation>
         </message>
@@ -838,7 +838,7 @@ Archive workstation</translation>
             <translation>Audible beep on notification events</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="124" />
+            <location filename="streamkeep/player/sync_viewer.py" line="126" />
             <source>Audio</source>
             <translation>Audio</translation>
         </message>
@@ -1642,7 +1642,7 @@ Archive workstation</translation>
             <translation>Companion server is not running.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>Compare 2-4 recordings side by side, keep one stream on audio, and nudge offsets until moments line up cleanly.</source>
             <translation>Compare 2-4 recordings side by side, keep one stream on audio, and nudge offsets until moments line up cleanly.</translation>
         </message>
@@ -4092,7 +4092,7 @@ Higher values can be 3-5x faster on CDN-hosted content.
 Set to 1 to disable and always use ffmpeg.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>Multi-stream sync viewer</source>
             <translation>Multi-stream sync viewer</translation>
         </message>
@@ -4611,7 +4611,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Off (local only)</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="227" />
+            <location filename="streamkeep/player/sync_viewer.py" line="232" />
             <source>Offset:</source>
             <translation>Offset:</translation>
         </message>
@@ -4660,7 +4660,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>One scan only: allow RFC1918/ULA page targets. Loopback, link-local, cloud metadata, and other special addresses remain blocked.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="264" />
+            <location filename="streamkeep/player/sync_viewer.py" line="271" />
             <source>One stream loaded</source>
             <translation>One stream loaded</translation>
         </message>
@@ -5130,7 +5130,7 @@ Saves your settings first.</translation>
             <location filename="streamkeep/player/chapter_panel.py" line="56" />
             <location filename="streamkeep/player/pip_window.py" line="58" />
             <location filename="streamkeep/player/player_panel.py" line="57" />
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <source>PLAYER</source>
             <translation>PLAYER</translation>
         </message>
@@ -5635,7 +5635,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="255" />
+            <location filename="streamkeep/player/sync_viewer.py" line="262" />
             <source>Ready for a side-by-side session</source>
             <translation>Ready for a side-by-side session</translation>
         </message>
@@ -7178,7 +7178,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>StreamKeep works best with ffmpeg available in PATH. If it is missing, the app can still open but downloads will not start yet.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="53" />
+            <location filename="streamkeep/player/sync_viewer.py" line="55" />
             <source>StreamKeep — Multi-Stream Sync Viewer</source>
             <translation>StreamKeep — Multi-Stream Sync Viewer</translation>
         </message>
@@ -7260,7 +7260,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Supported examples: kick.com/user or twitch.tv/user</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="273" />
+            <location filename="streamkeep/player/sync_viewer.py" line="280" />
             <source>Sync viewer ready</source>
             <translation>Sync viewer ready</translation>
         </message>
@@ -7386,7 +7386,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>The Smart Mode authentication profile is unknown or not allowed for this site.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="87" />
+            <location filename="streamkeep/player/sync_viewer.py" line="89" />
             <source>The sync viewer shines with multiple POVs. Once streams are added, playback stays locked to one shared transport bar.</source>
             <translation>The sync viewer shines with multiple POVs. Once streams are added, playback stays locked to one shared transport bar.</translation>
         </message>
@@ -7849,7 +7849,7 @@ Download again?</translation>
             <translation>Use the first matching URL profile without opening another dialog.</translation>
         </message>
         <message>
-            <location filename="streamkeep/player/sync_viewer.py" line="273" />
+            <location filename="streamkeep/player/sync_viewer.py" line="280" />
             <source>Use the shared transport below, pick one audio stream, and adjust offsets until the moments line up.</source>
             <translation>Use the shared transport below, pick one audio stream, and adjust offsets until the moments line up.</translation>
         </message>
@@ -7940,7 +7940,7 @@ Download again?</translation>
         </message>
         <message>
             <location filename="streamkeep/player/chapter_panel.py" line="186" />
-            <location filename="streamkeep/player/sync_viewer.py" line="66" />
+            <location filename="streamkeep/player/sync_viewer.py" line="68" />
             <location filename="streamkeep/ui/tabs/settings.py" line="1438" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="276" />
             <source>Waiting</source>
@@ -8586,8 +8586,8 @@ Download again?</translation>
         <message>
             <location filename="streamkeep/player/pip_window.py" line="69" />
             <location filename="streamkeep/player/player_controls.py" line="54" />
-            <location filename="streamkeep/player/sync_viewer.py" line="102" />
-            <location filename="streamkeep/player/sync_viewer.py" line="171" />
+            <location filename="streamkeep/player/sync_viewer.py" line="104" />
+            <location filename="streamkeep/player/sync_viewer.py" line="173" />
             <source>||</source>
             <translation>||</translation>
         </message>
