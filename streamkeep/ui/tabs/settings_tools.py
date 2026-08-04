@@ -84,6 +84,14 @@ class SettingsToolsMixin:
             reports.append(report)
         return reports
 
+    def _source_adapter_reports(self):
+        """Return hot-reloaded YAML adapter diagnostics for Settings tooling."""
+        from ... import plugins
+
+        return plugins.declarative_adapter_diagnostics(
+            config=getattr(self, "_config", None),
+        )
+
     @staticmethod
     def _plugin_state_label(report):
         if report.get("error") or not report.get("compatible"):
@@ -97,6 +105,7 @@ class SettingsToolsMixin:
         return "Review required"
 
     def _refresh_plugin_trust_ui(self):
+        self._source_adapter_snapshot = self._source_adapter_reports()
         if not hasattr(self, "plugin_trust_table"):
             return
         reports = self._plugin_reports()
@@ -164,7 +173,17 @@ class SettingsToolsMixin:
 
     def _on_plugin_refresh_clicked(self):
         self._refresh_plugin_trust_ui()
-        self._set_status("Plugin contract diagnostics refreshed.", "info")
+        adapter_report = self._source_adapter_snapshot
+        adapter_count = len(adapter_report.get("adapters", []))
+        error_count = len(adapter_report.get("errors", []))
+        suffix = (
+            f" Declarative source adapters: {adapter_count} loaded, "
+            f"{error_count} error(s)."
+        )
+        self._set_status(
+            "Plugin and source-adapter diagnostics refreshed." + suffix,
+            "warning" if error_count else "info",
+        )
 
     def _on_plugin_enable_clicked(self):
         from ... import plugins

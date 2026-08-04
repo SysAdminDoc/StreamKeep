@@ -914,6 +914,19 @@ def registered_adapters(*, plugin_id: str = ""):
     return handles
 
 
+def declarative_adapter_diagnostics(directory=None, config=None):
+    """Expose the no-code source-adapter surface beside plugin diagnostics.
+
+    Declarative definitions intentionally do not become trusted Python
+    plugins. This small facade lets CLI and Settings diagnostics report both
+    adapter families through one integration boundary without importing or
+    executing definition content.
+    """
+    from .declarative import declarative_adapter_diagnostics as _diagnostics
+
+    return _diagnostics(directory=directory, config=config)
+
+
 def _call_adapter_target(
     handle: PluginAdapterHandle,
     operation: str | None,

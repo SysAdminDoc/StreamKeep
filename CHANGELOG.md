@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added versioned, data-only YAML source adapters with guarded JSON/HTML field
+  mapping, VOD pagination, live checks, hot reload, diagnostics, and config
+  import quarantine. Adapter requests and returned media URLs use the existing
+  SSRF policy; definitions cannot execute code or access local capabilities.
+
 - Added a schema-v20 append-only history action log for favorites, watched
   state, playback positions, bookmarks, and deletions. Materialized history
   state can be replayed after backup restore or library rebuild, and redundant

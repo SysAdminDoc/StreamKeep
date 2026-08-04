@@ -99,6 +99,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Generate contact sheets, chapters, subtitle files, transcripts, highlights, and silence-removed cuts. **Smart thumbnails** are resource-bounded and preserve source artwork. **LLM summaries** are local-first through History, CLI, and the authenticated local API; cloud requests require an exact transcript preview and one-use consent, with optional redaction.
 - Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
 - **Plugin adapters** cover versioned extractor, post-process, upload, and optional `youtube_backend` contracts through `plugins --json`; the Settings → Plugin trust panel and `plugins --load-trusted` print each manifest's permissions, dependencies, compatibility range, and entry points before enabling it. Trust is tied to a contract fingerprint, so a changed manifest — including a new permission — requires explicit review again. Manifest permissions, dependencies, compatibility, timeouts, and typed outcomes are enforced by the adapter broker. Backend results are restricted to validated YouTube extractor-argument pairs and never receive cookies or request headers from the host.
+- **Declarative source adapters** extend extraction without shipping Python: place a versioned, data-only YAML definition in `%APPDATA%\StreamKeep\source_adapters\` (or inspect a directory with `source-adapters --json`). Definitions support guarded JSON/HTML requests, field mapping, quality lists, VOD pagination, and live checks; they hot-reload on the next detection, reject code/filesystem/process capabilities, enforce the normal SSRF policy for every URL, and remain quarantined when imported through a backup.
 - **Operations view** unifies durable queue, monitor, and failure state across the desktop, CLI, and authenticated local API. Filter by state/source/stage, inspect totals and retry health, retry or discard selected failures, and export a redacted report without URLs or paths.
 
 ### Backup and Recovery
@@ -122,6 +123,7 @@ python StreamKeep.py --help
 python StreamKeep.py --version
 python StreamKeep.py extractors
 python StreamKeep.py plugins --json
+python StreamKeep.py source-adapters --json
 python StreamKeep.py plugins --load-trusted
 python StreamKeep.py operations --json
 python StreamKeep.py operations --state failed --output C:\Support\operations.json

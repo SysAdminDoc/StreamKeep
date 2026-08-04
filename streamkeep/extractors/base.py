@@ -31,7 +31,30 @@ class Extractor:
         url = url.strip()
         if not url:
             return None
+        fallback_classes = []
         for ext_cls in cls._registry:
+            # Declarative definitions are intended to cover new sites while
+            # keeping native extractors authoritative. The yt-dlp catch-all
+            # therefore runs only after the data-only registry has had a turn.
+            if getattr(ext_cls, "NAME", "") == "yt-dlp":
+                fallback_classes.append(ext_cls)
+                continue
+            for pattern in ext_cls.URL_PATTERNS:
+                try:
+                    if pattern.match(url):
+                        return ext_cls()
+                except Exception:
+                    continue
+        try:
+            from ..declarative import detect_declarative_extractor
+            declarative = detect_declarative_extractor(url)
+            if declarative is not None:
+                return declarative
+        except Exception:
+            # A malformed optional YAML definition must not disable the
+            # built-in extractor registry or turn URL detection into a crash.
+            pass
+        for ext_cls in fallback_classes:
             for pattern in ext_cls.URL_PATTERNS:
                 try:
                     if pattern.match(url):
@@ -42,7 +65,15 @@ class Extractor:
 
     @classmethod
     def all_names(cls) -> list[str]:
-        return [e.NAME for e in cls._registry]
+        names = [e.NAME for e in cls._registry]
+        try:
+            from ..declarative import declarative_adapter_names
+            names.extend(declarative_adapter_names())
+        except Exception:
+            # Adapter diagnostics are optional; preserve the native names if
+            # a malformed or unavailable YAML registry cannot be inspected.
+            pass
+        return names
 
     def resolve(self, url: str, log_fn: Callable[[str], Any] | None = None) -> Any:
         """Resolve a URL to a StreamInfo with qualities.

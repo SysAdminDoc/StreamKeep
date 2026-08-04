@@ -447,13 +447,13 @@ Archive workstation</translation>
             <translation>A contract change, including a new permission, requires a fresh review. Plugins are never enabled from this panel without your explicit approval.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="720" />
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="736" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="739" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="755" />
             <source>A conversion is already running.</source>
             <translation>A conversion is already running.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="316" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="335" />
             <source>A Deno installation is already running.</source>
             <translation>A Deno installation is already running.</translation>
         </message>
@@ -1038,7 +1038,7 @@ Archive workstation</translation>
             <translation>Automatic Backups</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="841" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="860" />
             <source>Automatic backups are off.</source>
             <translation>Automatic backups are off.</translation>
         </message>
@@ -1103,7 +1103,7 @@ Archive workstation</translation>
             <translation>Backup folder</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="876" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="895" />
             <source>Backup requested; it runs on the next tick.</source>
             <translation>Backup requested; it runs on the next tick.</translation>
         </message>
@@ -1336,12 +1336,12 @@ Archive workstation</translation>
             <translation>Cancel automatic retry</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="814" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="833" />
             <source>Cancelling conversion...</source>
             <translation>Cancelling conversion...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="189" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="208" />
             <source>Cannot enable plugin: {detail}</source>
             <translation>Cannot enable plugin: {detail}</translation>
         </message>
@@ -1678,7 +1678,7 @@ Archive workstation</translation>
             <translation>Clear-key recovery supports the default tracks from one HLS media playlist; load that playlist directly for custom tracks.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="697" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="716" />
             <source>Cleared the {event} hook.</source>
             <translation>Cleared the {event} hook.</translation>
         </message>
@@ -1794,17 +1794,17 @@ Archive workstation</translation>
             <translation>Config</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="895" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="914" />
             <source>Config exported to {path}</source>
             <translation>Config exported to {path}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="950" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="969" />
             <source>Config import cancelled; no changes were applied.</source>
             <translation>Config import cancelled; no changes were applied.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="1006" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="1025" />
             <source>Config imported from {path}.{suffix} Some changes may require a restart.</source>
             <translation>Config imported from {path}.{suffix} Some changes may require a restart.</translation>
         </message>
@@ -1830,12 +1830,12 @@ Archive workstation</translation>
             <translation>Continue</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="801" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="820" />
             <source>Conversion complete: {successes}/{total} succeeded.</source>
             <translation>Conversion complete: {successes}/{total} succeeded.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="803" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="822" />
             <source>Conversion finished: {successes} ok, {failures} failed. See log.</source>
             <translation>Conversion finished: {successes} ok, {failures} failed. See log.</translation>
         </message>
@@ -1875,7 +1875,7 @@ Archive workstation</translation>
             <translation>Convert {sub_format.upper()}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="783" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="802" />
             <source>Converting 0/{len(files)}...</source>
             <translation>Converting 0/{len(files)}...</translation>
         </message>
@@ -2147,7 +2147,7 @@ flac/pcm = lossless</translation>
             <translation>Deleted profile {profile.name}.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="589" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="608" />
             <source>Deleted Smart Mode profile "{selected}".</source>
             <translation>Deleted Smart Mode profile "{selected}".</translation>
         </message>
@@ -2157,7 +2157,7 @@ flac/pcm = lossless</translation>
             <translation>Deleted VOD Recovery</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="439" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="458" />
             <source>Deleted yt-dlp argument template "{name}".</source>
             <translation>Deleted yt-dlp argument template "{name}".</translation>
         </message>
@@ -2167,12 +2167,12 @@ flac/pcm = lossless</translation>
             <translation>Deliberately removed media stays out of monitor, playlist, and queue dispatch until its tombstone is cleared. Retention and lifecycle markers are listed for audit but do not block re-fetching.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="341" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="360" />
             <source>Deno installation failed: {message}</source>
             <translation>Deno installation failed: {message}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="363" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="382" />
             <source>Deno removal failed: {error}</source>
             <translation>Deno removal failed: {error}</translation>
         </message>
@@ -2577,7 +2577,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>en</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="769" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="788" />
             <source>Enable 'Convert video' or 'Convert audio' in Post-Processing first.</source>
             <translation>Enable 'Convert video' or 'Convert audio' in Post-Processing first.</translation>
         </message>
@@ -2602,7 +2602,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Enable auto-record (live)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="870" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="889" />
             <source>Enable automatic backups and save settings first.</source>
             <translation>Enable automatic backups and save settings first.</translation>
         </message>
@@ -2687,7 +2687,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Enter a channel name first</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="539" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="558" />
             <source>Enter a name and at least one valid URL pattern.</source>
             <translation>Enter a name and at least one valid URL pattern.</translation>
         </message>
@@ -2836,7 +2836,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/monitor.py" line="562" />
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="898" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="917" />
             <source>Export failed: {e}</source>
             <translation>Export failed: {e}</translation>
         </message>
@@ -3101,7 +3101,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Flat channel folder (Channel)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="756" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="775" />
             <source>Folder scan failed: {e}</source>
             <translation>Folder scan failed: {e}</translation>
         </message>
@@ -3383,7 +3383,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Hold selected pending jobs; active transfers continue</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="704" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="723" />
             <source>Hook is invalid: {data}</source>
             <translation>Hook is invalid: {data}</translation>
         </message>
@@ -3495,14 +3495,14 @@ https://youtu.be/*</translation>
             <translation>Import cookies from browser</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="981" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="1000" />
             <source>Import failed: secure credential storage unavailable.</source>
             <translation>Import failed: secure credential storage unavailable.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/monitor.py" line="583" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="641" />
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="918" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="937" />
             <source>Import failed: {e}</source>
             <translation>Import failed: {e}</translation>
         </message>
@@ -3597,7 +3597,7 @@ https://youtu.be/*</translation>
             <translation>Install the provider plugin where possible, start the configured local server, then re-probe. Shows copy-paste steps if it cannot.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="324" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="343" />
             <source>Installing the pinned Deno runtime...</source>
             <translation>Installing the pinned Deno runtime...</translation>
         </message>
@@ -3839,7 +3839,7 @@ https://youtu.be/*</translation>
             <translation>Leave on the inherited default to keep this channel aligned with your global post-processing pipeline.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="666" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="685" />
             <source>Legacy shell command is disabled and will not run: “{preview}”. Enter an executable and arguments, then Save to migrate it.</source>
             <translation>Legacy shell command is disabled and will not run: “{preview}”. Enter an executable and arguments, then Save to migrate it.</translation>
         </message>
@@ -4338,17 +4338,17 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>New name</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="453" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="472" />
             <source>New profile</source>
             <translation>New profile</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="490" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="509" />
             <source>New profile. Save at least one URL pattern.</source>
             <translation>New profile. Save at least one URL pattern.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="386" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="405" />
             <source>New template</source>
             <translation>New template</translation>
         </message>
@@ -4383,7 +4383,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Night limit:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="675" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="694" />
             <source>No action configured for this event.</source>
             <translation>No action configured for this event.</translation>
         </message>
@@ -4502,7 +4502,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No matching downloads</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="759" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="778" />
             <source>No media files found in that folder.</source>
             <translation>No media files found in that folder.</translation>
         </message>
@@ -4540,7 +4540,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="555" />
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="149" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="158" />
             <source>No plugin selected.</source>
             <translation>No plugin selected.</translation>
         </message>
@@ -5372,27 +5372,22 @@ Saves your settings first.</translation>
             <translation>Plugin</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="167" />
-            <source>Plugin contract diagnostics refreshed.</source>
-            <translation>Plugin contract diagnostics refreshed.</translation>
-        </message>
-        <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="245" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="264" />
             <source>Plugin could not be disabled.</source>
             <translation>Plugin could not be disabled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="185" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="204" />
             <source>Plugin is no longer available.</source>
             <translation>Plugin is no longer available.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="216" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="235" />
             <source>Plugin review cancelled; it remains disabled.</source>
             <translation>Plugin review cancelled; it remains disabled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="220" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="239" />
             <source>Plugin review could not be saved.</source>
             <translation>Plugin review could not be saved.</translation>
         </message>
@@ -5402,7 +5397,7 @@ Saves your settings first.</translation>
             <translation>Plugin trust</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="223" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="242" />
             <source>Plugin trust saved, but enabling it failed.</source>
             <translation>Plugin trust saved, but enabling it failed.</translation>
         </message>
@@ -6495,12 +6490,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>saved downloads</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="572" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="591" />
             <source>Saved Smart Mode profile "{profile['name']}".</source>
             <translation>Saved Smart Mode profile "{profile['name']}".</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="424" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="443" />
             <source>Saved yt-dlp argument template "{name}".</source>
             <translation>Saved yt-dlp argument template "{name}".</translation>
         </message>
@@ -6515,7 +6510,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Saved {saved} token(s).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="713" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="732" />
             <source>Saved {state} {event} action.</source>
             <translation>Saved {state} {event} action.</translation>
         </message>
@@ -6794,12 +6789,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Select a browser first, then click Import.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="241" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="260" />
             <source>Select a plugin to disable first.</source>
             <translation>Select a plugin to disable first.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="174" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="193" />
             <source>Select a plugin to review first.</source>
             <translation>Select a plugin to review first.</translation>
         </message>
@@ -6913,7 +6908,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Selected user:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="295" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="314" />
             <source>Selected {runtime.get('display_name') or 'JavaScript runtime'} {runtime.get('version') or 'not available'} — source: {source}. {runtime.get('path') or runtime.get('detail') or ''} {managed_text}</source>
             <translation>Selected {runtime.get('display_name') or 'JavaScript runtime'} {runtime.get('version') or 'not available'} — source: {source}. {runtime.get('path') or runtime.get('detail') or ''} {managed_text}</translation>
         </message>
@@ -7093,17 +7088,17 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Smart Mode</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="611" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="630" />
             <source>Smart Mode off</source>
             <translation>Smart Mode off</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="616" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="635" />
             <source>Smart Mode on — no profile matches this URL</source>
             <translation>Smart Mode on — no profile matches this URL</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="542" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="561" />
             <source>Smart Mode profile is incomplete.</source>
             <translation>Smart Mode profile is incomplete.</translation>
         </message>
@@ -7118,7 +7113,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Smart profile enabled</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="618" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="637" />
             <source>Smart profile: {profile['name']}</source>
             <translation>Smart profile: {profile['name']}</translation>
         </message>
@@ -8682,7 +8677,7 @@ Download again?</translation>
             <translation>{free_gb} GB free</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="231" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="250" />
             <source>{fresh.get('name') or plugin_id} enabled after contract review.</source>
             <translation>{fresh.get('name') or plugin_id} enabled after contract review.</translation>
         </message>
@@ -8854,12 +8849,12 @@ Download again?</translation>
             <translation>{progress.value()}%</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="249" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="268" />
             <source>{report.get('name') or plugin_id} disabled.</source>
             <translation>{report.get('name') or plugin_id} disabled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="157" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="166" />
             <source>{report.get('name') or report.get('id')}: {review_state} Permissions: {contract['permissions']}. Entry points: {contract['entrypoints']}.</source>
             <translation>{report.get('name') or report.get('id')}: {review_state} Permissions: {contract['permissions']}. Entry points: {contract['entrypoints']}.</translation>
         </message>
@@ -8884,7 +8879,7 @@ Download again?</translation>
             <translation>{source}: {checked} manifest file(s) checked; {issue_count} affected file/reason row(s) require review. Nothing was repaired or deleted.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/settings_tools.py" line="511" />
+            <location filename="streamkeep/ui/tabs/settings_tools.py" line="530" />
             <source>{state.capitalize()} profile. First matching profile wins.</source>
             <translation>{state.capitalize()} profile. First matching profile wins.</translation>
         </message>

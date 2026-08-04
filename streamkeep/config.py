@@ -76,6 +76,10 @@ _IMPORT_CAPABILITY_INFO = {
         "yt-dlp argument templates",
         "Keeps imported yt-dlp argument templates disabled until you explicitly approve them.",
     ),
+    "declarative_adapters": (
+        "declarative source adapters",
+        "Enables imported YAML source definitions; requests remain GET/HEAD-only and SSRF-guarded.",
+    ),
 }
 
 _STRING_CONFIG_KEYS = frozenset({
@@ -147,7 +151,9 @@ _DICT_CONFIG_KEYS = frozenset({
     "lifecycle", "media_server", "schedules", "storage_snapshots", "hooks",
     "ytdlp_arg_templates",
 })
-_LIST_CONFIG_KEYS = frozenset({"recent_urls", "proxy_pool", "smart_profiles"})
+_LIST_CONFIG_KEYS = frozenset({
+    "recent_urls", "proxy_pool", "smart_profiles", "source_adapters",
+})
 _FORBIDDEN_IMPORT_KEYS = frozenset({
     "history", "monitor_channels", "download_queue", "accounts", "cookies",
     "companion_extension_origin",
@@ -424,6 +430,7 @@ def _validate_config_schema(config):
     _validate_lifecycle_schema(config.get("lifecycle", {}))
     _validate_ytdlp_templates_schema(config.get("ytdlp_arg_templates", {}))
     _validate_smart_profiles_schema(config.get("smart_profiles", []))
+    _validate_source_adapters_schema(config.get("source_adapters", []))
     _reject_imported_secret_handles(config)
 
 
@@ -572,6 +579,17 @@ def _validate_smart_profiles_schema(value):
         raise ConfigImportError(str(error)) from error
 
 
+def _validate_source_adapters_schema(value):
+    if not value:
+        return
+    from .declarative import DeclarativeAdapterError, validate_config_source_adapters
+
+    try:
+        validate_config_source_adapters(value)
+    except DeclarativeAdapterError as error:
+        raise ConfigImportError(str(error)) from error
+
+
 def _quarantine_import_capabilities(config):
     result = copy.deepcopy(config)
     held = {}
@@ -648,6 +666,14 @@ def _quarantine_import_capabilities(config):
     )
     if ytdlp_templates:
         result["ytdlp_arg_templates"] = {}
+
+    source_adapters = config.get("source_adapters", [])
+    hold(
+        "declarative_adapters", [("source_adapters",)],
+        active=bool(source_adapters),
+    )
+    if source_adapters:
+        result["source_adapters"] = []
 
     smart_profiles = config.get("smart_profiles", [])
     smart_active = bool(config.get("smart_mode") or smart_profiles)

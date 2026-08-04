@@ -37,7 +37,7 @@ def _launcher_has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "server", "extractors", "db", "snapshot", "backup",
+        "download", "dl", "server", "extractors", "plugins", "source-adapters", "db", "snapshot", "backup",
         "startup-check", "import-har", "import-library", "adopt",
         "podcast-sidecars", "capture",
         "register-protocol", "unregister-protocol", "bookmarklet",

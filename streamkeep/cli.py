@@ -1205,6 +1205,36 @@ def _run_plugins(args):
     )
 
 
+def _run_source_adapters(args):
+    """Report the hot-reloaded, data-only YAML source adapter registry."""
+    from .plugins import declarative_adapter_diagnostics
+
+    directory = getattr(args, "directory", "") or None
+    report = declarative_adapter_diagnostics(directory=directory)
+    if getattr(args, "json", False):
+        _print_line(json.dumps(report, indent=2, sort_keys=True))
+        return
+    _print_line(f"StreamKeep v{VERSION} - declarative source adapters:")
+    for adapter in report.get("adapters", []):
+        capabilities = []
+        if adapter.get("supports_vod_listing"):
+            capabilities.append("VOD listing")
+        if adapter.get("supports_live_check"):
+            capabilities.append("live check")
+        _print_line(
+            f"  {adapter.get('id', '?')} v{adapter.get('version', '?')} - "
+            f"{adapter.get('name', '?')} "
+            f"({', '.join(capabilities) or 'resolve only'})"
+        )
+    for error in report.get("errors", []):
+        _print_line(
+            f"  ERROR {error.get('source', 'definition')}: "
+            f"{error.get('error', 'invalid definition')}"
+        )
+    if not report.get("adapters") and not report.get("errors"):
+        _print_line("  No declarative source adapters found.")
+
+
 def _run_operations(args):
     """Read, act on, or export the durable operations view."""
     from .operations import (
@@ -2391,6 +2421,15 @@ def build_parser():
     )
     plugin_p.add_argument("--json", action="store_true", help="Emit JSON diagnostics")
 
+    source_p = sub.add_parser(
+        "source-adapters", help="Inspect YAML declarative source adapters",
+    )
+    source_p.add_argument(
+        "--directory", default="",
+        help="Inspect a source-adapter directory instead of the profile directory",
+    )
+    source_p.add_argument("--json", action="store_true", help="Emit JSON diagnostics")
+
     # -- operations --
     operations_p = sub.add_parser(
         "operations", help="Inspect the paged queue, monitor, and failure view",
@@ -2994,6 +3033,8 @@ def run_cli(argv=None):
         _list_extractors()
     elif args.command == "plugins":
         _run_plugins(args)
+    elif args.command == "source-adapters":
+        _run_source_adapters(args)
     elif args.command == "operations":
         _run_operations(args)
     elif args.command == "gallery":
@@ -3050,7 +3091,7 @@ def has_cli_args():
     if len(sys.argv) <= 1:
         return False
     cli_triggers = {
-        "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
+        "download", "dl", "capture", "server", "extractors", "plugins", "source-adapters", "operations", "gallery", "lux", "db",
         "snapshot", "backup", "bagit", "tokens", "startup-check", "import-har", "import-library",
         "retemplate",
         "adopt", "podcast-sidecars",

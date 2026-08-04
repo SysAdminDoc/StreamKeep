@@ -11,6 +11,7 @@ keyring>=25.0
 argon2-cffi>=25.1.0
 cryptography>=50.0.0
 defusedxml>=0.7.1
+PyYAML>=6.0.2
 urllib3>=2.7.0
 paramiko>=5.0.0
 

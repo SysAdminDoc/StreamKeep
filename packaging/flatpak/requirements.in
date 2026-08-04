@@ -6,6 +6,7 @@ websocket-client>=1.7
 keyring>=25.0
 argon2-cffi>=25.1.0
 cryptography>=50.0.0
+PyYAML>=6.0.2
 
 # Optional runtime extras are intentionally out of this lock. libmpv is
 # platform-managed and boto3 is installed only when S3 uploads are enabled.
