@@ -12,19 +12,10 @@ from the stored history directory, never from a request parameter.
 
 import mimetypes
 import os
-import re
-import secrets
-import threading
 
 from .theme import CAT
 
-# In-memory registry of shared recordings.
-# Populated from HistoryEntry objects that have shared=True + share_id.
-_shared = {}   # share_id -> {"path": str, "title": str, "channel": str, "media": str}
-_shared_lock = threading.Lock()
-
 _MAX_RANGE_CHUNK = 8 * 1024 * 1024  # 8 MB per Range-request read
-PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".ts", ".mov", ".avi", ".flv", ".m4v")
 _AUDIO_EXTS = (".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac")
@@ -48,49 +39,16 @@ def _media_type(path, fallback="video/mp4"):
     return _MIME_OVERRIDES.get(ext) or mimetypes.guess_type(path or "")[0] or fallback
 
 
-def register_shared(share_id, path, title="", channel="", media=""):
-    """Register a recording for sharing."""
-    with _shared_lock:
-        _shared[share_id] = {
-            "path": path,
-            "title": title,
-            "channel": channel,
-            "media": media,
-        }
-
-
-def unregister_shared(share_id):
-    with _shared_lock:
-        _shared.pop(share_id, None)
-
-
-def generate_share_id():
-    return secrets.token_hex(16)
-
-
-def get_shared(share_id):
-    with _shared_lock:
-        entry = _shared.get(share_id)
-        return dict(entry) if entry else None
-
-
-def all_shared():
-    with _shared_lock:
-        return dict(_shared)
-
-
 # ── HTML rendering ──────────────────────────────────────────────────
 
 def render_gallery_html(base_url="", entries=None):
-    """Render the gallery page HTML."""
-    if entries is None:
-        snapshot = all_shared()
-    elif isinstance(entries, dict):
+    """Render the gallery page HTML from explicit publishing entries."""
+    if isinstance(entries, dict):
         snapshot = entries
     else:
         snapshot = {
             str(info.get("share_id", "")): dict(info)
-            for info in entries
+            for info in (entries or ())
             if isinstance(info, dict) and info.get("share_id")
         }
     items_html = ""
@@ -129,7 +87,7 @@ h1 {{ color: {CAT['blue']}; }}
 
 def render_share_html(share_id, base_url="", info=None):
     """Render the player page for a shared recording."""
-    info = dict(info) if isinstance(info, dict) else get_shared(share_id)
+    info = dict(info) if isinstance(info, dict) else None
     if not info:
         return "<h1>Not Found</h1>"
     title = info.get("title", "Untitled")

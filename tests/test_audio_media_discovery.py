@@ -17,13 +17,15 @@ def test_audio_outputs_are_visible_to_gallery_verify_storage_and_media_server(tm
 
 def test_gallery_uses_audio_player_for_audio_share():
     share_id = "audio-test"
-    gallery.register_shared(
-        share_id, "C:/recording", title="Episode", media="episode.mp3"
+    html = gallery.render_share_html(
+        share_id,
+        info={
+            "share_id": share_id,
+            "path": "C:/recording",
+            "title": "Episode",
+            "media": "episode.mp3",
+        },
     )
-    try:
-        html = gallery.render_share_html(share_id)
-    finally:
-        gallery.unregister_shared(share_id)
 
     assert "<audio controls" in html
     assert "</audio>" in html

@@ -11,7 +11,6 @@ Feeds:
 
 import mimetypes
 import os
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -20,7 +19,6 @@ from urllib.parse import urlsplit
 from .metadata import load_metadata_sidecar
 
 
-_PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _MIME_OVERRIDES = {
     ".m4a": "audio/mp4",
     ".mp3": "audio/mpeg",

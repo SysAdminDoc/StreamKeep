@@ -19,15 +19,19 @@ class GalleryTests(unittest.TestCase):
 
     def test_gallery_escapes_base_url_and_share_id_in_attributes(self):
         share_id = 'id"<&'
-        gallery.register_shared(share_id, "/p", "Title", "Channel", "clip.mp4")
-        try:
-            html = gallery.render_gallery_html('https://media.example/"<&')
-            share_html = gallery.render_share_html(
-                share_id,
-                'https://media.example/"<&',
-            )
-        finally:
-            gallery.unregister_shared(share_id)
+        entry = {
+            "share_id": share_id,
+            "path": "/p",
+            "title": "Title",
+            "channel": "Channel",
+            "media": "clip.mp4",
+        }
+        html = gallery.render_gallery_html('https://media.example/"<&', [entry])
+        share_html = gallery.render_share_html(
+            share_id,
+            'https://media.example/"<&',
+            info=entry,
+        )
 
         escaped_base = "https://media.example/&quot;&lt;&amp;"
         escaped_id = "id&quot;&lt;&amp;"
@@ -49,13 +53,6 @@ class GalleryTests(unittest.TestCase):
             self.assertEqual(data, b"2345")
             self.assertEqual(headers["Content-Range"], "bytes 2-5/10")
             self.assertEqual(headers["Content-Length"], "4")
-
-    def test_share_id_has_128_bits_of_entropy(self):
-        ids = {gallery.generate_share_id() for _ in range(200)}
-        self.assertEqual(len(ids), 200)  # no collisions
-        for share_id in ids:
-            self.assertEqual(len(share_id), 32)  # 128 bits as hex
-            self.assertTrue(all(c in "0123456789abcdef" for c in share_id))
 
     def test_serve_media_range_rejects_invalid_ranges(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,36 +98,5 @@ class GalleryTests(unittest.TestCase):
             )
             self.assertIsNone(data)
             self.assertEqual(status, 416)
-
-    def test_shared_registry_thread_safety(self):
-        import threading
-
-        gallery.register_shared("a", "/p", "t", "c", "m")
-        errors = []
-
-        def _iterate():
-            try:
-                for _ in range(50):
-                    gallery.all_shared()
-                    gallery.render_gallery_html()
-            except RuntimeError as e:
-                errors.append(e)
-
-        def _mutate():
-            for i in range(50):
-                sid = f"tmp_{i}"
-                gallery.register_shared(sid, "/p", "t", "c", "m")
-                gallery.unregister_shared(sid)
-
-        t1 = threading.Thread(target=_iterate)
-        t2 = threading.Thread(target=_mutate)
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        self.assertEqual(errors, [])
-        gallery.unregister_shared("a")
-
-
 if __name__ == "__main__":
     unittest.main()

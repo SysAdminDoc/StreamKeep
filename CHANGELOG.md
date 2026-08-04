@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Removed the obsolete in-memory gallery share registry. Gallery and share
+  pages now consume explicit database-backed publishing entries, and the
+  unused feed publishing-ID constant is gone.
+
 - Added explicit, hash-verified Deno acquisition for full YouTube JavaScript
   support. Settings and `youtube-health` can install the pinned Deno 2.3.1
   runtime from the official release or a local ZIP, with no startup/import
