@@ -11,7 +11,7 @@ from ..extractors import TwitchExtractor
 from ..metadata import MetadataSaver
 from ..postprocess import PostProcessor
 from ..postprocess.processor import PP_LOCK as _PP_LOCK
-from ..utils import fmt_size
+from ..utils import OutputPathError, fmt_size, validate_output_path
 from ..upgrade import UpgradePaths, activate_upgrade_version
 from ..verify import (
     STATUS_OK,
@@ -325,6 +325,14 @@ class FinalizeWorker(QThread):
             result["cancelled"] = True
             self.done.emit(result)
             return
+        if out_dir:
+            try:
+                validate_output_path(out_dir, file_base=file_base)
+            except OutputPathError as error:
+                result["finalize_error"] = str(error)
+                self.log.emit(f"[PREFLIGHT] {error}")
+                self.done.emit(result)
+                return
 
         # Only snapshot keys that actually exist on PostProcessor — a stale
         # config key must not AttributeError-crash the entire finalize pass

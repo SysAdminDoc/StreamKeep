@@ -113,6 +113,50 @@ def estimate_download_bytes(stream_info):
 
 DEFAULT_FOLDER_TEMPLATE = "{channel}/{date} - {title}"
 DEFAULT_FILE_TEMPLATE = "{title}"
+WINDOWS_SAFE_PATH_LENGTH = 240
+POSIX_SAFE_PATH_LENGTH = 4096
+MAX_PATH_COMPONENT_BYTES = 240
+
+
+def platform_path_limit():
+    """Return the conservative full-path limit for the current platform."""
+    return WINDOWS_SAFE_PATH_LENGTH if os.name == "nt" else POSIX_SAFE_PATH_LENGTH
+
+
+def truncate_utf8_bytes(value, max_bytes=MAX_PATH_COMPONENT_BYTES):
+    """Trim *value* to a UTF-8 byte limit without splitting a code point."""
+    text = str(value or "")
+    try:
+        limit = max(0, int(max_bytes))
+    except (TypeError, ValueError, OverflowError):
+        limit = MAX_PATH_COMPONENT_BYTES
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode("utf-8", errors="ignore")
+
+
+class OutputPathError(ValueError):
+    """A rendered output path cannot be used safely on this platform."""
+
+    def __init__(self, path, *, kind="path", limit=0, actual=0):
+        self.code = "path_too_long"
+        self.path = str(path)
+        self.offending_path = self.path
+        self.kind = str(kind or "path")
+        self.limit = int(limit or 0)
+        self.actual = int(actual or 0)
+        subject = "Output path component" if self.kind == "component" else "Output path"
+        unit = "UTF-8 bytes" if self.kind == "component" else "platform path units"
+        super().__init__(
+            f"[PREFLIGHT:path_too_long] {subject} exceeds the safe platform "
+            f"limit ({self.actual} {unit} > {self.limit}): {self.path}"
+        )
+
+
+# The longer name is useful to callers that want to make the preflight stage
+# explicit without creating a second exception type.
+OutputPathPreflightError = OutputPathError
 
 
 class TemplateRenderError(ValueError):
@@ -132,7 +176,9 @@ _TEMPLATE_RESERVED_NAMES = (
 _TEMPLATE_INVALID_CHARS = set('<>:"/\\|?*')
 
 
-def _strict_template_component(value, *, max_len=80, field=""):
+def _strict_template_component(
+    value, *, max_len=80, field="", max_bytes=MAX_PATH_COMPONENT_BYTES,
+):
     """Validate one rendered Windows path component without sanitizing it."""
     rendered = str(value or "")
     if not rendered or not rendered.strip():
@@ -168,6 +214,13 @@ def _strict_template_component(value, *, max_len=80, field=""):
         raise TemplateRenderError(
             "component_too_long",
             f"Template component is {len(rendered)} characters; maximum is {max_len}",
+            field=field,
+        )
+    encoded_length = len(rendered.encode("utf-8"))
+    if encoded_length > int(max_bytes):
+        raise TemplateRenderError(
+            "component_too_long",
+            f"Template component is {encoded_length} UTF-8 bytes; maximum is {max_bytes}",
             field=field,
         )
     return rendered
@@ -253,7 +306,7 @@ def fmt_size(b):
     return f"{b:.1f} TB"
 
 
-def safe_filename(s, max_len=60):
+def safe_filename(s, max_len=60, max_bytes=MAX_PATH_COMPONENT_BYTES):
     """Sanitize a string for use as a filename. Strips invalid chars,
     control chars, trailing dots/spaces (invalid on Windows), template
     braces left behind by render_template fallbacks, and truncates."""
@@ -272,12 +325,106 @@ def safe_filename(s, max_len=60):
         cleaned = f"_{cleaned}"
     # Truncate, then re-strip trailing whitespace/dots exposed by the cut.
     cleaned = cleaned[:max_len].rstrip(". ")
+    cleaned = truncate_utf8_bytes(cleaned, max_bytes).rstrip(". ")
     return cleaned or "download"
 
 
-def safe_path_component(s, max_len=80):
+def safe_path_component(
+    s, max_len=80, max_bytes=MAX_PATH_COMPONENT_BYTES,
+):
     """Sanitize a path component (filename or folder name)."""
-    return safe_filename(s, max_len=max_len) or "download"
+    return safe_filename(
+        s, max_len=max_len, max_bytes=max_bytes,
+    ) or "download"
+
+
+def _path_components(path):
+    """Yield non-root components from a Windows or POSIX path."""
+    _drive, tail = os.path.splitdrive(str(path))
+    return (
+        part for part in re.split(r"[\\/]", tail)
+        if part and part not in {".", os.curdir}
+    )
+
+
+def _expected_output_names(file_base):
+    """Return media and sidecar names that may be written for one capture."""
+    base = os.path.basename(str(file_base or "recording")) or "recording"
+    return [
+        f"{base}.{suffix}"
+        for suffix in (
+            "mp4", "mkv", "webm", "ts", "nfo", "chapters.txt",
+            "chapters.json", "markers.json", "chat.json", "chat.txt",
+            "info.json", "description", "vtt",
+        )
+    ] + [
+        "metadata.json", "thumbnail.jpg", ".streamkeep_manifest.json",
+        ".streamkeep_resume.json",
+    ]
+
+
+def validate_output_path(
+    output_dir,
+    *,
+    file_base="",
+    expected_names=(),
+    max_path_bytes=None,
+    max_component_bytes=MAX_PATH_COMPONENT_BYTES,
+):
+    """Validate an output directory and all expected sibling paths.
+
+    The returned value is the absolute output directory.  ``file_base`` adds
+    the normal media and metadata sidecars to the candidate set, while
+    ``expected_names`` lets a caller add format-specific files.  Validation is
+    deliberately conservative on Windows so a later sidecar write cannot be
+    the first operation to discover an unsafe destination.
+    """
+    root = os.path.abspath(os.fspath(output_dir or ""))
+    try:
+        path_limit = int(
+            platform_path_limit() if max_path_bytes is None else max_path_bytes
+        )
+        component_limit = int(max_component_bytes)
+    except (TypeError, ValueError, OverflowError):
+        path_limit = platform_path_limit()
+        component_limit = MAX_PATH_COMPONENT_BYTES
+    candidates = [root]
+    names = []
+    if file_base:
+        names.extend(_expected_output_names(file_base))
+    if isinstance(expected_names, (str, bytes, os.PathLike)):
+        expected_names = [expected_names]
+    names.extend(expected_names or [])
+    for name in names:
+        candidate = os.fspath(name)
+        if not os.path.isabs(candidate):
+            candidate = os.path.join(root, candidate)
+        candidates.append(os.path.abspath(candidate))
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        path_length = (
+            len(candidate)
+            if os.name == "nt"
+            else len(candidate.encode("utf-8"))
+        )
+        if path_length > path_limit:
+            raise OutputPathError(
+                candidate, kind="path", limit=path_limit, actual=path_length,
+            )
+        for component in _path_components(candidate):
+            component_length = len(component.encode("utf-8"))
+            if component_length > component_limit:
+                raise OutputPathError(
+                    candidate,
+                    kind="component",
+                    limit=component_limit,
+                    actual=component_length,
+                )
+    return root
 
 
 def user_videos_dir():

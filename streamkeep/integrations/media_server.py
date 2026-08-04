@@ -27,6 +27,12 @@ from typing import Any, Callable, Iterable
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
+from ..utils import (
+    MAX_PATH_COMPONENT_BYTES,
+    truncate_utf8_bytes,
+    validate_output_path,
+)
+
 
 # Supported server types. Kodi is file-based: NFO files and M3U playlists are
 # native to a Kodi library, while the other three types also support a remote
@@ -42,7 +48,11 @@ _MEDIA_EXTS = (
 )
 
 
-def _safe_name(value: object, max_len: int = 80) -> str:
+def _safe_name(
+    value: object,
+    max_len: int = 80,
+    max_bytes: int = MAX_PATH_COMPONENT_BYTES,
+) -> str:
     """Sanitize a value for use as one filesystem path component."""
     if not value:
         return "Unknown"
@@ -52,12 +62,13 @@ def _safe_name(value: object, max_len: int = 80) -> str:
         "_" if char in bad or ord(char) < 32 else char for char in text
     )
     out = out[:max_len].rstrip(". ")
+    out = truncate_utf8_bytes(out, max_bytes).rstrip(". ")
     return out or "Unknown"
 
 
 def _safe_playlist_name(value: object) -> str:
     """Return a single safe playlist filename with an ``.m3u`` suffix."""
-    name = _safe_name(value, 120)
+    name = _safe_name(value, 120, max_bytes=MAX_PATH_COMPONENT_BYTES - 4)
     if name.lower().endswith(".m3u"):
         return name
     return f"{name}.m3u"
@@ -198,6 +209,23 @@ def plan_media_import(
             break
         episode += 1
     nfo_path = os.path.join(target_dir, f"{os.path.splitext(filename)[0]}.nfo")
+    validate_output_path(
+        target_dir,
+        expected_names=(
+            filename,
+            f"{os.path.splitext(filename)[0]}.nfo",
+            "metadata.json",
+            "thumbnail.jpg",
+        ),
+    )
+    if config.get("portable_m3u") or (
+        str(config.get("server_type", "") or "").lower() == "kodi"
+        and config.get("native_playlist")
+    ):
+        validate_output_path(
+            library_path,
+            expected_names=[_safe_playlist_name(config.get("playlist_name", ""))],
+        )
     return MediaImportPlan(
         media_path=os.path.abspath(media),
         destination=os.path.abspath(destination),

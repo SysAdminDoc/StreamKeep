@@ -40,7 +40,13 @@ from .upgrade import (
     plan_upgrade_paths,
     prepare_upgrade_staging,
 )
-from .utils import default_output_dir, fmt_size, safe_filename
+from .utils import (
+    OutputPathError,
+    default_output_dir,
+    fmt_size,
+    safe_filename,
+    validate_output_path,
+)
 from .workers import (
     DownloadWorker,
     FetchWorker,
@@ -914,6 +920,21 @@ class HeadlessJobService(QObject):
                     file_template=str(job.get("file_template", "") or ""),
                     config=self.config,
                 )
+        is_live = bool(getattr(info, "is_live", False)) or float(
+            getattr(info, "total_secs", 0) or 0
+        ) <= 0
+        segments = [(
+            0, safe_filename(title), 0,
+            0 if is_live else int(getattr(info, "total_secs", 0) or 0),
+        )]
+        try:
+            validate_output_path(output_dir, file_base=segments[0][1])
+        except OutputPathError as error:
+            self._fail_job(
+                job_id, "download", str(error),
+                info=info, output_dir=output_dir,
+            )
+            return
         try:
             os.makedirs(output_dir, exist_ok=True)
         except OSError as error:
@@ -922,14 +943,6 @@ class HeadlessJobService(QObject):
                 info=info, output_dir=output_dir,
             )
             return
-
-        is_live = bool(getattr(info, "is_live", False)) or float(
-            getattr(info, "total_secs", 0) or 0
-        ) <= 0
-        segments = [(
-            0, safe_filename(title), 0,
-            0 if is_live else int(getattr(info, "total_secs", 0) or 0),
-        )]
         from .download_options import (
             resolve_external_downloader_options,
             resolve_ytdlp_arg_template, resolve_ytdlp_transfer_options,

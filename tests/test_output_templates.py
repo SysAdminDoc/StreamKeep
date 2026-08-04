@@ -8,9 +8,13 @@ from streamkeep.models import StreamInfo
 from streamkeep.utils import (
     DEFAULT_FILE_TEMPLATE,
     DEFAULT_FOLDER_TEMPLATE,
+    MAX_PATH_COMPONENT_BYTES,
+    OutputPathError,
     TemplateRenderError,
+    render_template,
     resolve_output_paths,
     render_template_strict,
+    validate_output_path,
 )
 
 
@@ -101,6 +105,25 @@ class TemplateResolverTests(unittest.TestCase):
         second = resolve_output_paths(info, "out", config=config)
         self.assertEqual(first, second)
         self.assertEqual(first[0], os.path.join("out", "SomeChannel", "2026"))
+
+    def test_unicode_folder_components_are_bounded_by_utf8_bytes(self):
+        parts = render_template("{channel}", {"channel": "😀" * 80})
+        self.assertEqual(len(parts), 1)
+        self.assertLessEqual(
+            len(parts[0].encode("utf-8")), MAX_PATH_COMPONENT_BYTES,
+        )
+        self.assertEqual(parts[0], "😀" * 60)
+
+    def test_output_preflight_reports_the_longest_sidecar_path(self):
+        with self.assertRaises(OutputPathError) as raised:
+            validate_output_path(
+                "out",
+                file_base="episode",
+                max_path_bytes=4096,
+                max_component_bytes=20,
+            )
+        self.assertEqual(raised.exception.code, "path_too_long")
+        self.assertIn("episode.chapters.json", raised.exception.path)
 
 
 class NativeContainerTests(unittest.TestCase):

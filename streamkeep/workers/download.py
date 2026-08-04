@@ -51,7 +51,12 @@ from ..twitch_ssai import (
     is_twitch_hls_job,
 )
 from ..twitch_unmute import rewrite_twitch_vod_playlist
-from ..utils import fmt_duration, fmt_size
+from ..utils import (
+    OutputPathError,
+    fmt_duration,
+    fmt_size,
+    validate_output_path,
+)
 
 
 class DownloadWorker(QThread):
@@ -2340,6 +2345,14 @@ class DownloadWorker(QThread):
             self._stop_guarded_transport()
 
     def _run_downloads(self):
+        try:
+            for _seg_idx, label, _start, _duration in self.segments:
+                validate_output_path(self.output_dir, file_base=str(label or ""))
+        except OutputPathError as error:
+            self._last_failure_reason = str(error)
+            self.log.emit(f"[PREFLIGHT] {error}")
+            self.error.emit(0, str(error))
+            return
         logger.info("Download started: %d segment(s) to %s", len(self.segments), self.output_dir)
         all_succeeded = True
         for seg_idx, label, start, duration in self.segments:

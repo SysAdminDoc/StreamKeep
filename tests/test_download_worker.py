@@ -103,6 +103,26 @@ def test_ytdlp_failure_emits_diagnostic_for_persistent_retry_policy(
     assert worker._last_failure_reason.endswith("Retry-After: 120")
 
 
+def test_output_path_preflight_emits_before_transport_start(tmp_path, monkeypatch):
+    output_dir = tmp_path / ("deep-" * 40)
+    worker = DownloadWorker(
+        playlist_url="https://media.example/video.m3u8",
+        segments=[(0, "capture", 0, 30)],
+        output_dir=str(output_dir),
+        format_type="hls",
+    )
+    errors = []
+    worker.error.connect(lambda index, message: errors.append((index, message)))
+    ensure_ffmpeg = mock.Mock(side_effect=AssertionError("transport started"))
+    monkeypatch.setattr(worker, "_ensure_supported_ffmpeg", ensure_ffmpeg)
+
+    worker.run()
+
+    assert errors and errors[0][0] == 0
+    assert "path_too_long" in errors[0][1]
+    ensure_ffmpeg.assert_not_called()
+
+
 def _live_worker(tmp_path):
     """A yt-dlp worker configured like an in-progress live capture."""
     worker = DownloadWorker(

@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a shared output-path preflight for templated downloads, native and
+  yt-dlp workers, finalization, and media-server imports. Full paths are
+  checked before writes, sidecar candidates are included, and Unicode path
+  components are bounded by UTF-8 byte length with named `path_too_long`
+  failures.
+
 - Kept timed-out headless probe workers alive in a service-owned reaper until
   their `QThread` is finished, bounded concurrent probes, and return a
   retryable `429` with `Retry-After` when capacity is occupied.

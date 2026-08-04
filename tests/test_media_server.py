@@ -7,6 +7,7 @@ from streamkeep import config
 from streamkeep import db
 from streamkeep.integrations import media_server
 from streamkeep.models import StreamInfo
+from streamkeep.utils import MAX_PATH_COMPONENT_BYTES, OutputPathError
 
 
 def _recording(tmp_path, name="capture.mp4", contents=b"media"):
@@ -45,6 +46,20 @@ def test_media_import_plan_supports_season_and_flat_layouts_without_collisions(t
     )
     assert flat is not None
     assert flat.relative_path.startswith("My_Channel/My_Channel - S2026E01")
+
+
+def test_media_server_components_use_utf8_byte_bounds(tmp_path):
+    safe_channel = media_server._safe_name("😀" * 80)
+    assert len(safe_channel.encode("utf-8")) <= MAX_PATH_COMPONENT_BYTES
+
+    out_dir = _recording(tmp_path)
+    library = tmp_path / ("library-" * 32)
+    with pytest.raises(OutputPathError, match="path_too_long"):
+        media_server.plan_media_import(
+            {"library_path": str(library), "layout_mode": "seasoned"},
+            out_dir,
+            StreamInfo(channel="😀" * 80, title="Episode"),
+        )
 
 
 def test_portable_m3u_is_relative_atomic_and_excludes_external_paths(tmp_path):

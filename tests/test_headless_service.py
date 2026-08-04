@@ -48,6 +48,23 @@ class _FakeFetchWorker(QObject):
         self._running = False
 
 
+class _LongChannelFetchWorker(_FakeFetchWorker):
+    def start(self):
+        self._running = True
+        self.finished.emit(StreamInfo(
+            platform="Test",
+            channel="😀" * 80,
+            title="Durable job",
+            url=self.url,
+            qualities=[QualityInfo(
+                name="720p", url="https://media.example/video.mp4",
+                resolution="1280x720", format_type="mp4",
+            )],
+            total_secs=60,
+        ))
+        self._running = False
+
+
 class _FakePickerFetchWorker(QObject):
     finished = pyqtSignal(object)
     vods_found = pyqtSignal(list, str, object)
@@ -253,6 +270,40 @@ class HeadlessJobServiceTests(unittest.TestCase):
             self.assertEqual(state["history"][0]["title"], "Durable job")
             self.assertEqual(manifest_count, 1)
             self.assertTrue((output / "Durable job.mp4").is_file())
+
+    def test_long_season_path_fails_before_download_worker_starts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "library.db"
+            output = root / ("deep-" * 28)
+            with (
+                mock.patch.object(db, "DB_PATH", db_path),
+                mock.patch(
+                    "streamkeep.headless_service.FetchWorker",
+                    _LongChannelFetchWorker,
+                ),
+                mock.patch("streamkeep.headless_service.DownloadWorker") as download,
+            ):
+                service = HeadlessJobService(output_dir=str(output), max_concurrent=1)
+                service.start()
+                queued = service.enqueue({
+                    "url": "https://example.com/video",
+                })
+                # Remote queue filtering deliberately strips template fields;
+                # add them as a trusted local queue edit for this renderer test.
+                db.update_queue_job(
+                    queued["job_id"],
+                    folder_template="{channel}/Season {year}",
+                    file_template="{title}",
+                )
+                for _ in range(10):
+                    self.app.processEvents()
+                failed = db.load_queue_job(queued["job_id"])
+                service.stop()
+
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("path_too_long", failed["error"])
+        download.assert_not_called()
 
     def test_cancelled_queued_job_is_terminal_and_observable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
