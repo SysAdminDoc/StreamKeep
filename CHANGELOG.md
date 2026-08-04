@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a schema-v20 append-only history action log for favorites, watched
+  state, playback positions, bookmarks, and deletions. Materialized history
+  state can be replayed after backup restore or library rebuild, and redundant
+  actions are compactable without changing the existing history read shape.
+
 - Added a persistent scheduled health surface across Settings, the `health`
   CLI command, and authenticated `/api/health`: runtime tools, credentials,
   archive roots, extractor retry circuits, and disk pressure are severity-

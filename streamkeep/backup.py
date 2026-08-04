@@ -628,6 +628,19 @@ def _prepare_and_validate_sqlite(path, fname):
         connection.close()
     _remove_sqlite_sidecars(path)
 
+    if fname == "library.db":
+        # The restored file may contain a materialized projection that was
+        # captured mid-update. Reconcile it from the append-only action log
+        # before the file is admitted to the activation set.
+        try:
+            from .db import replay_history_actions
+            replay_history_actions(path)
+        except (OSError, sqlite3.Error, ValueError) as error:
+            raise _RestoreError(
+                f"{fname} history action replay failed"
+            ) from error
+        _remove_sqlite_sidecars(path)
+
     # Validate integrity under an untrusted-schema connection so a malicious
     # backup cannot execute embedded schema logic during the checks.
     connection = sqlite_connect(str(path), configure_journal=False)

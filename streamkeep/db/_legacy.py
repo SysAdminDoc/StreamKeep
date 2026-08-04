@@ -14,6 +14,7 @@ migration so future schema changes are orderly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -33,7 +34,16 @@ from ..sqlite_runtime import connect as sqlite_connect
 from ..sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
+
+HISTORY_ACTION_COMPACTION_LIMIT = 10_000
+_HISTORY_ACTION_STATE_FIELDS = (
+    "favorite", "watched", "watch_position_secs", "bookmarks",
+)
+_HISTORY_ACTION_RECORD_FIELDS = (
+    "date", "platform", "source_id", "webpage_url", "title", "channel",
+    "quality", "size", "path", "url", *_HISTORY_ACTION_STATE_FIELDS,
+)
 
 TOMBSTONE_REASONS = frozenset({"user", "retention", "lifecycle"})
 TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
@@ -515,6 +525,27 @@ def _apply_schema(db):
     _apply_intelligence_schema(db)
     _apply_tombstone_schema(db)
     _apply_integrity_scrub_schema(db)
+    _apply_history_action_schema(db)
+
+
+def _apply_history_action_schema(db):
+    """Create the append-only history projection log and its indexes."""
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS history_actions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id    INTEGER NOT NULL DEFAULT 0,
+            identity_key  TEXT    NOT NULL DEFAULT '',
+            action        TEXT    NOT NULL DEFAULT 'snapshot',
+            value_json    TEXT    NOT NULL DEFAULT '{}',
+            created_at    TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_actions_identity
+            ON history_actions(identity_key, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_history_actions_history
+            ON history_actions(history_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_history_actions_created
+            ON history_actions(created_at DESC, id DESC);
+    """)
 
 
 def _apply_tombstone_schema(db):
@@ -999,6 +1030,23 @@ def _migrate_integrity_v19(db):
     _apply_integrity_scrub_schema(db)
 
 
+def _migrate_history_actions_v20(db):
+    """Install and seed the append-only history projection log."""
+    _apply_history_action_schema(db)
+    if not _sqlite_table_exists(db, "history"):
+        return
+    rows = db.execute("SELECT * FROM history ORDER BY id ASC").fetchall()
+    for row in rows:
+        if db.execute(
+            "SELECT 1 FROM history_actions WHERE history_id=? LIMIT 1",
+            (int(row[0]),),
+        ).fetchone():
+            continue
+        _append_history_action_in_connection(
+            db, int(row[0]), "snapshot", dict(row),
+        )
+
+
 def _apply_integrity_scrub_schema(db):
     """Create per-recording and global rolling-scrub checkpoints."""
     db.executescript("""
@@ -1460,6 +1508,386 @@ def _canonical_history_entry(entry_dict: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _sqlite_table_exists(connection, table_name: str) -> bool:
+    """Return whether a table exists without interpolating its name."""
+    return bool(connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (str(table_name),),
+    ).fetchone())
+
+
+def _history_action_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _history_action_bookmarks(value: Any) -> list[Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "[]")
+        except (json.JSONDecodeError, TypeError):
+            value = []
+    return value if isinstance(value, list) else []
+
+
+def _history_action_record(entry: Mapping[str, Any] | Any) -> dict[str, Any]:
+    """Normalize one history row into a JSON-safe action payload."""
+    if isinstance(entry, Mapping):
+        source = entry
+    else:
+        try:
+            source = dict(entry)
+        except (TypeError, ValueError):
+            source = {}
+    nested = source.get("record")
+    if isinstance(nested, Mapping):
+        source = nested
+    record: dict[str, Any] = {}
+    for field in _HISTORY_ACTION_RECORD_FIELDS:
+        value = source.get(field, "")
+        if field in ("favorite", "watched"):
+            record[field] = _history_action_bool(value)
+        elif field == "watch_position_secs":
+            try:
+                record[field] = float(value or 0)
+            except (TypeError, ValueError):
+                record[field] = 0.0
+        elif field == "bookmarks":
+            record[field] = _history_action_bookmarks(value)
+        else:
+            record[field] = str(value or "")
+    return record
+
+
+def _history_action_identity_key(entry: Mapping[str, Any] | Any) -> str:
+    """Return a bounded, stable identity for one history projection."""
+    record = _history_action_record(entry)
+    platform = record["platform"].strip().casefold()
+    source_id = record["source_id"].strip()
+    webpage_url = record["webpage_url"].strip()
+    if source_id:
+        parts = ["source", platform, source_id]
+    elif webpage_url:
+        parts = ["webpage", platform, webpage_url]
+    else:
+        # A legacy row may have no recognized source identity.  The fallback
+        # remains stable across a database rebuild as long as the on-disk
+        # record has the same path and display metadata.
+        parts = [
+            "fallback", platform, record["path"].strip().casefold(),
+            record["title"], record["channel"], record["date"],
+            record["quality"], record["size"],
+        ]
+    payload = json.dumps(
+        parts, ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    return "v1:" + hashlib.sha256(payload).hexdigest()
+
+
+def _append_history_action_in_connection(
+    connection,
+    history_id: int,
+    action: str,
+    entry: Mapping[str, Any] | Any,
+    *,
+    identity_key: str = "",
+    reason: str = "",
+    created_at: str | None = None,
+) -> int | None:
+    """Append a full history snapshot while the caller owns the transaction."""
+    if not _sqlite_table_exists(connection, "history_actions"):
+        return None
+    normalized_action = str(action or "snapshot").strip().lower()
+    if normalized_action not in {"snapshot", "delete"}:
+        raise ValueError("history action must be snapshot or delete")
+    record = _history_action_record(entry)
+    payload: dict[str, Any] = dict(record)
+    if reason:
+        payload["reason"] = str(reason)
+    key = str(identity_key or _history_action_identity_key(record))
+    cursor = connection.execute(
+        """
+        INSERT INTO history_actions
+            (history_id, identity_key, action, value_json, created_at)
+        VALUES (?,?,?,?,?)
+        """,
+        (
+            int(history_id or 0), key, normalized_action,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            str(created_at or _utc_now_iso()),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _history_action_payload(row) -> dict[str, Any]:
+    item = dict(row)
+    try:
+        value = json.loads(item.get("value_json", "{}") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        value = {}
+    item["value"] = value if isinstance(value, dict) else {}
+    return item
+
+
+def _history_action_count_in_connection(connection) -> int:
+    if not _sqlite_table_exists(connection, "history_actions"):
+        return 0
+    return int(connection.execute(
+        "SELECT COUNT(*) FROM history_actions"
+    ).fetchone()[0] or 0)
+
+
+def _delete_history_projection_rows_in_connection(connection, entry_ids):
+    """Delete rows during replay without emitting another action."""
+    ids = sorted({int(entry_id) for entry_id in entry_ids if int(entry_id) > 0})
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    for table in ("published_recordings", "archive_manifests"):
+        if _sqlite_table_exists(connection, table):
+            connection.execute(
+                f"DELETE FROM {table} WHERE history_id IN ({placeholders})",
+                ids,
+            )
+    cursor = connection.execute(
+        f"DELETE FROM history WHERE id IN ({placeholders})", ids
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _compact_history_actions_in_connection(connection, max_rows: int) -> int:
+    if not _sqlite_table_exists(connection, "history_actions"):
+        return 0
+    rows = connection.execute(
+        "SELECT id, history_id, identity_key FROM history_actions "
+        "ORDER BY id DESC"
+    ).fetchall()
+    if len(rows) <= max_rows:
+        return 0
+    active_keys = {
+        _history_action_identity_key(dict(row))
+        for row in connection.execute("SELECT * FROM history").fetchall()
+    }
+    keep: dict[tuple[str, int], int] = {}
+    for row in rows:
+        key = str(row[2] or "")
+        history_id = int(row[1] or 0)
+        marker = (key, history_id) if key else ("", history_id)
+        keep.setdefault(marker, int(row[0]))
+    keep_ids = set(keep.values())
+    # Every active projection keeps its newest event even if the caller asks
+    # for a cap smaller than the number of active identities.  The remainder
+    # of the cap is spent on the newest deletion/audit identities.
+    active_keep = {
+        action_id for marker, action_id in keep.items()
+        if marker[0] in active_keys
+    }
+    if len(keep_ids) > max_rows:
+        retained = set(active_keep)
+        for row in rows:
+            if len(retained) >= max_rows:
+                break
+            action_id = int(row[0])
+            if action_id in keep_ids:
+                retained.add(action_id)
+        keep_ids = retained
+    stale = [int(row[0]) for row in rows if int(row[0]) not in keep_ids]
+    if stale:
+        connection.executemany(
+            "DELETE FROM history_actions WHERE id=?",
+            ((action_id,) for action_id in stale),
+        )
+    return len(stale)
+
+
+def _maybe_compact_history_actions_in_connection(connection) -> int:
+    count = _history_action_count_in_connection(connection)
+    if count <= HISTORY_ACTION_COMPACTION_LIMIT:
+        return 0
+    return _compact_history_actions_in_connection(
+        connection, HISTORY_ACTION_COMPACTION_LIMIT,
+    )
+
+
+def _replay_history_actions_in_connection(
+    connection, *, seed_missing: bool = True, prefer_identity: bool = True,
+) -> dict[str, int]:
+    """Reconcile materialized history state from the append-only log."""
+    result = {"actions": 0, "applied": 0, "deleted": 0, "seeded": 0}
+    if not (
+        _sqlite_table_exists(connection, "history")
+        and _sqlite_table_exists(connection, "history_actions")
+    ):
+        return result
+    action_rows = connection.execute(
+        "SELECT * FROM history_actions ORDER BY id ASC"
+    ).fetchall()
+    result["actions"] = len(action_rows)
+    latest_by_id: dict[int, dict[str, Any]] = {}
+    latest_by_identity: dict[str, dict[str, Any]] = {}
+    for row in action_rows:
+        action = _history_action_payload(row)
+        history_id = int(action.get("history_id", 0) or 0)
+        identity_key = str(action.get("identity_key", "") or "")
+        if history_id > 0:
+            latest_by_id[history_id] = action
+        if identity_key:
+            latest_by_identity[identity_key] = action
+
+    rows = connection.execute("SELECT * FROM history ORDER BY id ASC").fetchall()
+    delete_ids: list[int] = []
+    for row in rows:
+        row_dict = dict(row)
+        history_id = int(row_dict.get("id", 0) or 0)
+        identity_key = _history_action_identity_key(row_dict)
+        by_id = latest_by_id.get(history_id)
+        if by_id and str(by_id.get("identity_key", "") or "") not in {
+            "", identity_key,
+        }:
+            by_id = None
+        by_identity = latest_by_identity.get(identity_key)
+        selected = by_identity if prefer_identity else by_id
+        if by_id and by_identity:
+            if selected is None or int(by_id.get("id", 0)) > int(
+                selected.get("id", 0)
+            ):
+                selected = by_id
+        elif selected is None:
+            selected = by_id or by_identity
+        if selected is None:
+            if seed_missing:
+                _append_history_action_in_connection(
+                    connection, history_id, "snapshot", row_dict,
+                )
+                result["seeded"] += 1
+            continue
+        if str(selected.get("action", "snapshot")) == "delete":
+            delete_ids.append(history_id)
+            continue
+        value = selected.get("value", {})
+        record = _history_action_record(value)
+        connection.execute(
+            "UPDATE history SET favorite=?, watched=?, "
+            "watch_position_secs=?, bookmarks=? WHERE id=?",
+            (
+                int(record["favorite"]), int(record["watched"]),
+                float(record["watch_position_secs"]),
+                json.dumps(record["bookmarks"], ensure_ascii=False),
+                history_id,
+            ),
+        )
+        result["applied"] += 1
+    result["deleted"] = _delete_history_projection_rows_in_connection(
+        connection, delete_ids,
+    )
+    if seed_missing:
+        _maybe_compact_history_actions_in_connection(connection)
+    return result
+
+
+def load_history_actions(
+    *, history_id: int = 0, identity_key: str = "", limit: int = 500,
+) -> list[dict[str, Any]]:
+    """Return newest-first history actions with decoded JSON values."""
+    try:
+        limit = max(1, min(5000, int(limit or 500)))
+    except (TypeError, ValueError):
+        limit = 500
+    clauses: list[str] = []
+    params: list[Any] = []
+    if history_id:
+        clauses.append("history_id=?")
+        params.append(int(history_id))
+    if identity_key:
+        clauses.append("identity_key=?")
+        params.append(str(identity_key))
+    params.append(limit)
+    connection = _connect(readonly=True)
+    try:
+        if not _sqlite_table_exists(connection, "history_actions"):
+            return []
+        rows = connection.execute(
+            "SELECT * FROM history_actions "
+            + (f"WHERE {' AND '.join(clauses)} " if clauses else "")
+            + "ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [_history_action_payload(row) for row in rows]
+    finally:
+        connection.close()
+
+
+def history_action_count() -> int:
+    """Return the number of retained append-only history actions."""
+    connection = _connect(readonly=True)
+    try:
+        return _history_action_count_in_connection(connection)
+    finally:
+        connection.close()
+
+
+def compact_history_actions(max_rows: int = HISTORY_ACTION_COMPACTION_LIMIT) -> int:
+    """Remove redundant actions while retaining every active projection."""
+    try:
+        max_rows = max(1, min(1_000_000, int(max_rows)))
+    except (TypeError, ValueError):
+        max_rows = HISTORY_ACTION_COMPACTION_LIMIT
+    with _write_lock:
+        connection = _connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            removed = _compact_history_actions_in_connection(
+                connection, max_rows,
+            )
+            connection.commit()
+            return removed
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+
+def replay_history_actions(
+    database_path=None, *, prefer_identity: bool = True,
+) -> dict[str, int]:
+    """Replay history actions against the active or an explicit SQLite file."""
+    if database_path is None:
+        with _write_lock:
+            connection = _connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                result = _replay_history_actions_in_connection(
+                    connection, seed_missing=True,
+                    prefer_identity=prefer_identity,
+                )
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+    connection = sqlite_connect(
+        str(Path(database_path)), check_same_thread=False, timeout=10,
+        row_factory=sqlite3.Row,
+    )
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        result = _replay_history_actions_in_connection(
+            connection, seed_missing=True, prefer_identity=prefer_identity,
+        )
+        connection.commit()
+        return result
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def _canonical_tombstone_fields(
     record=None,
     *,
@@ -1801,6 +2229,10 @@ def save_completed_recording(
                         "file(s)"
                     ),
                 ))
+            _append_history_action_in_connection(
+                db, history_id, "snapshot", entry_dict,
+            )
+            _maybe_compact_history_actions_in_connection(db)
             db.commit()
             return history_id
         except Exception:
@@ -1922,6 +2354,13 @@ def update_completed_recording(
                         f"Captured {len(manifest.get('files', []) or [])} file(s)",
                     ),
                 )
+            current = conn.execute(
+                "SELECT * FROM history WHERE id=?", (history_id,)
+            ).fetchone()
+            _append_history_action_in_connection(
+                conn, history_id, "snapshot", dict(current or normalized),
+            )
+            _maybe_compact_history_actions_in_connection(conn)
             conn.commit()
             return history_id
         except Exception:
@@ -2141,7 +2580,11 @@ def adopt_history_records(
                         json.dumps(entry.get("bookmarks", []) or []),
                     ),
                 )
-                history_ids.append(int(cursor.lastrowid))
+                history_id = int(cursor.lastrowid)
+                history_ids.append(history_id)
+                _append_history_action_in_connection(
+                    conn, history_id, "snapshot", entry,
+                )
 
             for channel_url, additions in seeds.items():
                 row = conn.execute(
@@ -2210,6 +2653,15 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
                 f"UPDATE history SET {', '.join(parts)} WHERE id=?",
                 vals,
             )
+            if db.total_changes:
+                current = db.execute(
+                    "SELECT * FROM history WHERE id=?", (int(entry_id),)
+                ).fetchone()
+                if current is not None:
+                    _append_history_action_in_connection(
+                        db, int(entry_id), "snapshot", dict(current),
+                    )
+                    _maybe_compact_history_actions_in_connection(db)
             db.commit()
         finally:
             db.close()
@@ -2278,6 +2730,13 @@ def relocate_history_recording(
                     "updated_at=? WHERE history_id=?",
                     (destination, _utc_now_iso(), history_id),
                 )
+            current = conn.execute(
+                "SELECT * FROM history WHERE id=?", (history_id,)
+            ).fetchone()
+            _append_history_action_in_connection(
+                conn, history_id, "snapshot", dict(current or {}),
+            )
+            _maybe_compact_history_actions_in_connection(conn)
             conn.commit()
             return True
         except Exception:
@@ -2389,6 +2848,9 @@ def build_rebuilt_library_database(
                         "Rebuilt from on-disk integrity manifest",
                     ),
                 )
+            _replay_history_actions_in_connection(
+                db, seed_missing=True, prefer_identity=True,
+            )
             _configure_history_fts(db)
             db.commit()
             return {
@@ -2694,6 +3156,9 @@ def _delete_history_rows_in_connection(conn, entry_ids, *, reason="user") -> int
         f"SELECT * FROM history WHERE id IN ({placeholders})", ids
     ).fetchall()
     for row in rows:
+        _append_history_action_in_connection(
+            conn, int(row[0]), "delete", dict(row), reason=reason,
+        )
         _upsert_tombstone_in_connection(
             conn,
             _canonical_tombstone_fields(dict(row)),
@@ -2711,6 +3176,7 @@ def _delete_history_rows_in_connection(conn, entry_ids, *, reason="user") -> int
         f"DELETE FROM history WHERE id IN ({placeholders})",
         ids,
     )
+    _maybe_compact_history_actions_in_connection(conn)
     return len(rows)
 
 

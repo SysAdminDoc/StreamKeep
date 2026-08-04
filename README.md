@@ -70,6 +70,9 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 ### Library, Storage, and Search
 
 - Persist history, monitor entries, and queue state in `%APPDATA%\StreamKeep\library.db`.
+- Favorites, watched state, playback positions, bookmarks, and deletions are
+  recorded in a compactable append-only history log so backup restores and
+  database rebuilds can replay the current library state.
 - Keep user preferences in `%APPDATA%\StreamKeep\config.json`; portable mode uses `portable.txt` beside the executable and stores data under `data/`.
 - Search across history, monitor entries, queue rows, transcripts, and tags.
 - Open and search large archives through snapshot-stable, keyset-paged SQLite/Qt models; History metadata search uses FTS indexes and loads 100 rows at a time instead of creating one widget per recording.
