@@ -1360,6 +1360,74 @@ def _run_library_import(args):
         sys.exit(2)
 
 
+def _run_retemplate(args):
+    """Preview or apply a strict archive output-template migration."""
+    from . import db
+    from .maintenance import (
+        apply_library_retemplate,
+        load_retemplate_plan,
+        plan_library_retemplate,
+        save_retemplate_plan,
+    )
+
+    db.init_db()
+    default_plan = Path(db.DB_PATH).parent / "maintenance" / "retemplate-plan.json"
+    plan_path = Path(getattr(args, "plan", "") or default_plan).expanduser()
+    action = str(getattr(args, "retemplate_action", "preview") or "preview")
+    as_json = bool(getattr(args, "json", False))
+    try:
+        if action == "preview":
+            plan = plan_library_retemplate(
+                args.root,
+                getattr(args, "folder_template", "") or "",
+                getattr(args, "file_template", "") or "",
+                db_module=db,
+            )
+            save_retemplate_plan(plan, plan_path)
+            if as_json:
+                payload = plan.to_dict()
+                payload["plan_path"] = str(plan_path)
+                _print_line(json.dumps(payload, indent=2, ensure_ascii=False))
+                return
+            counts = plan.diagnostics["retemplate"]
+            _print_line(
+                f"Re-template preview: {counts['ready']} ready, "
+                f"{counts['unchanged']} unchanged, {counts['conflicts']} conflict(s)."
+            )
+            for item in plan.actions:
+                _print_line(
+                    f"  {item.kind.upper():20s} {item.payload.get('old_path', '')}"
+                    f" → {item.payload.get('new_path', '')}"
+                    f" — {item.payload.get('reason', item.detail)}"
+                )
+            _print_line(f"Plan saved to {plan_path}")
+            return
+
+        plan = load_retemplate_plan(plan_path)
+        requested = [str(value) for value in (getattr(args, "action_id", []) or [])]
+        approved = requested or [
+            item.action_id for item in plan.actions
+            if item.kind == "retemplate" and item.payload.get("status") == "ready"
+        ]
+        result = apply_library_retemplate(plan, approved, db_module=db)
+        if as_json:
+            _print_line(json.dumps(result.__dict__, indent=2, ensure_ascii=False))
+        else:
+            _print_line(
+                f"Re-template {result.status}: {result.applied} applied, "
+                f"{result.failed} failed, {result.skipped} skipped."
+            )
+            if result.backup_path:
+                _print_line(f"Backup: {result.backup_path}")
+            for error in result.errors:
+                _print_line(f"  ERROR: {error}")
+        if result.status != "completed" or result.failed:
+            sys.exit(1)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        _print_line(f"Error: {error}")
+        sys.exit(2)
+
+
 def _run_podcast_sidecars(args):
     """Discover and download an episode's transcript/chapter sidecars."""
     from .image_fetch import ImageFetchError, fetch_url_bytes
@@ -2186,6 +2254,45 @@ def build_parser():
     import_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                           help="Override the config/database directory")
 
+    # -- archive output-template migration --
+    retemplate_p = sub.add_parser(
+        "retemplate",
+        help="Preview or apply an archive-wide output-template migration",
+    )
+    retemplate_sub = retemplate_p.add_subparsers(dest="retemplate_action")
+    retemplate_sub.required = True
+    retemplate_preview = retemplate_sub.add_parser(
+        "preview", help="Show every proposed path before moving anything",
+    )
+    retemplate_preview.add_argument("root", help="Archive root to migrate")
+    retemplate_preview.add_argument(
+        "--folder-template", default="",
+        help="New folder template, e.g. {channel}/{year}",
+    )
+    retemplate_preview.add_argument(
+        "--filename-template", "--file-template", dest="file_template", default="",
+        help="New filename template, e.g. {title}",
+    )
+    retemplate_preview.add_argument(
+        "--plan", default="",
+        help="Preview plan path (default: config maintenance/retemplate-plan.json)",
+    )
+    retemplate_preview.add_argument("--json", action="store_true", help="Emit the full preview as JSON")
+    retemplate_apply = retemplate_sub.add_parser(
+        "apply", help="Apply all ready actions from an unchanged preview",
+    )
+    retemplate_apply.add_argument(
+        "--plan", default="",
+        help="Preview plan path (default: config maintenance/retemplate-plan.json)",
+    )
+    retemplate_apply.add_argument(
+        "--action-id", action="append", default=[],
+        help="Apply only this action id (repeatable; default: all ready actions)",
+    )
+    retemplate_apply.add_argument("--json", action="store_true", help="Emit the result as JSON")
+    retemplate_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                              help="Override the config/database directory")
+
     # -- DRM-free MSE capture (V14) --
     mse_p = sub.add_parser(
         "mse-capture",
@@ -2535,6 +2642,8 @@ def run_cli(argv=None):
         _run_har_import(args)
     elif args.command in ("import-library", "adopt"):
         _run_library_import(args)
+    elif args.command == "retemplate":
+        _run_retemplate(args)
     elif args.command == "mse-capture":
         _run_mse_capture(args)
     elif args.command == "podcast-sidecars":
@@ -2567,6 +2676,7 @@ def has_cli_args():
     cli_triggers = {
         "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
         "snapshot", "backup", "startup-check", "import-har", "import-library",
+        "retemplate",
         "adopt", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",

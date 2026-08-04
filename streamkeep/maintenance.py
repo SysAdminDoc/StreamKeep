@@ -19,7 +19,13 @@ import uuid
 
 from . import backup, db
 from .paths import CONFIG_DIR
-from .storage import import_folders, scan_storage
+from .storage import MEDIA_EXTS, import_folders, scan_storage
+from .utils import (
+    DEFAULT_FILE_TEMPLATE,
+    DEFAULT_FOLDER_TEMPLATE,
+    TemplateRenderError,
+    render_template_strict,
+)
 
 
 @dataclass
@@ -124,6 +130,509 @@ def apply_library_rebuild(
         backup_fn=backup_fn,
         cancel_fn=cancel_fn,
     )
+
+
+def _path_is_within(path, root):
+    try:
+        return os.path.commonpath((_normal_path(path), _normal_path(root))) == _normal_path(root)
+    except (OSError, ValueError):
+        return False
+
+
+def _history_template_context(row, recording_path):
+    """Build a complete context from durable history and its sidecar."""
+    from .metadata import load_metadata_sidecar
+
+    path = Path(recording_path)
+    metadata = load_metadata_sidecar(path / "metadata.json")
+    provenance = metadata.get("provenance")
+    provenance = provenance if isinstance(provenance, dict) else {}
+    title = str(row.get("title") or metadata.get("title") or path.name or "")
+    channel = str(
+        row.get("channel") or metadata.get("channel")
+        or metadata.get("vod_channel") or "unknown"
+    )
+    platform = str(row.get("platform") or metadata.get("platform") or "unknown")
+    source_id = str(
+        row.get("source_id") or provenance.get("source_id")
+        or row.get("id") or ""
+    )
+    quality = str(row.get("quality") or metadata.get("quality") or "")
+    raw_date = str(
+        row.get("date") or metadata.get("downloaded_at")
+        or metadata.get("start_time") or metadata.get("vod_date") or ""
+    )
+    date_value = raw_date[:10] if raw_date else ""
+    if not date_value or len(date_value) != 10 or date_value[4] != "-" or date_value[7] != "-":
+        try:
+            date_value = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            date_value = ""
+    media = sorted(
+        entry for entry in path.iterdir()
+        if entry.is_file() and not entry.name.startswith(".")
+        and entry.suffix.lower() in MEDIA_EXTS
+    ) if path.is_dir() else []
+    extension = media[0].suffix.lstrip(".").lower() if media else ""
+    year, month, day = (
+        date_value.split("-") if len(date_value) == 10 and "-" in date_value
+        else ("", "", "")
+    )
+    return {
+        "title": title,
+        "channel": channel,
+        "platform": platform,
+        "date": date_value,
+        "year": year,
+        "month": month,
+        "day": day,
+        "id": source_id,
+        "quality": quality,
+        "ext": extension,
+    }
+
+
+def _file_rename_preview(recording_path, new_base):
+    """Return safe direct-file renames for one recording directory."""
+    root = Path(recording_path)
+    media = sorted(
+        entry for entry in root.iterdir()
+        if entry.is_file() and not entry.name.startswith(".")
+        and entry.suffix.lower() in MEDIA_EXTS
+    )
+    if not media:
+        raise TemplateRenderError(
+            "missing_media", "Recording directory contains no media file"
+        )
+    specs = []
+    for index, entry in enumerate(media):
+        suffix = entry.suffix
+        stem = str(new_base)
+        if len(media) > 1 and index:
+            stem += f"_{index + 1:03d}"
+        specs.append((entry.name, entry.stem, f"{stem}{suffix}"))
+
+    renames = {
+        old_name: new_name
+        for old_name, _old_stem, new_name in specs
+        if old_name != new_name
+    }
+    # Keep yt-dlp/NFO/chapter/subtitle/chat siblings attached to the media
+    # basename. Generic sidecars (metadata, notes, thumbnail, manifest) stay
+    # named as-is and still move with the directory.
+    all_names = [entry.name for entry in root.iterdir() if entry.is_file()]
+    for name in all_names:
+        if name in renames or name.startswith("."):
+            continue
+        for _old_name, old_stem, new_name in sorted(specs, key=lambda item: len(item[1]), reverse=True):
+            if name.startswith(old_stem + ".") or name.startswith(old_stem + "_"):
+                candidate = new_name.rsplit(".", 1)[0] + name[len(old_stem):]
+                if name != candidate:
+                    renames[name] = candidate
+                break
+    old_names = set(all_names)
+    destinations = list(renames.values())
+    if len(set(destinations)) != len(destinations):
+        raise TemplateRenderError(
+            "filename_collision", "Rendered media sidecars would collide"
+        )
+    for destination in destinations:
+        if destination in old_names and destination not in renames:
+            raise TemplateRenderError(
+                "filename_collision", f"Rendered filename already exists: {destination}"
+            )
+    return [
+        {"old": old_name, "new": new_name}
+        for old_name, new_name in sorted(renames.items(), key=lambda item: item[0].casefold())
+    ]
+
+
+def _template_path_context(row, root, folder_template, file_template):
+    old_path = Path(str(row.get("path") or "")).expanduser()
+    context = _history_template_context(row, old_path)
+    folder_parts = render_template_strict(folder_template, context, max_component=80)
+    file_parts = render_template_strict(file_template, context, max_component=60)
+    if not file_parts:
+        raise TemplateRenderError(
+            "unresolvable_field", "Filename template rendered no filename"
+        )
+    relative_parts = list(folder_parts) + list(file_parts[:-1])
+    new_path = Path(root).joinpath(*relative_parts)
+    if not _path_is_within(new_path, root) or _normal_path(new_path) == _normal_path(root):
+        raise TemplateRenderError(
+            "invalid_destination", "Rendered destination escapes the archive root"
+        )
+    if len(str(new_path)) > 240:
+        raise TemplateRenderError(
+            "path_too_long", "Rendered destination exceeds the safe Windows path length"
+        )
+    renames = _file_rename_preview(old_path, file_parts[-1])
+    for pair in renames:
+        if len(str(new_path / pair["new"])) > 240:
+            raise TemplateRenderError(
+                "path_too_long", "Rendered media path exceeds the safe Windows path length"
+            )
+    return old_path, new_path, renames
+
+
+def _retemplate_diagnostics(
+    root, *, config, history, ready, conflicts, unchanged, db_module=db,
+):
+    try:
+        usage = shutil.disk_usage(root)
+        free_gb = usage.free / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+    except OSError:
+        free_gb = total_gb = -1.0
+    backup_dir = config.get("archive_backup_dir") or str(CONFIG_DIR / "backups")
+    warning_gb = float(config.get("archive_disk_warning_gb", 20) or 20)
+    critical_gb = float(config.get("archive_disk_critical_gb", 5) or 5)
+    disk_status = (
+        "unknown" if free_gb < 0 else
+        "critical" if free_gb <= critical_gb else
+        "warning" if free_gb <= warning_gb else "healthy"
+    )
+    return {
+        "kind": "retemplate",
+        "retemplate": {
+            "rows": len(history), "ready": ready, "conflicts": conflicts,
+            "unchanged": unchanged,
+        },
+        "library": {
+            "rows": len(history), "missing": conflicts, "untracked": 0,
+            "moved": ready,
+        },
+        "database": db_module.db_diagnostics(),
+        "backup": _latest_backup(backup_dir),
+        "backup_dir": str(backup_dir),
+        "disk": {
+            "free_gb": round(free_gb, 2), "total_gb": round(total_gb, 2),
+            "warning_gb": warning_gb, "critical_gb": critical_gb,
+            "status": disk_status,
+        },
+    }
+
+
+def plan_retemplate(
+    root,
+    folder_template="",
+    file_template="",
+    *,
+    config=None,
+    db_module=db,
+    history_ids=None,
+    cancel_fn=None,
+):
+    """Preview a strict, archive-wide output-template migration."""
+    root = str(Path(root).expanduser().resolve())
+    if not os.path.isdir(root):
+        raise ValueError(f"Archive root is not a directory: {root}")
+    config = dict(config or {})
+    folder_template = str(folder_template or config.get("folder_template", "") or DEFAULT_FOLDER_TEMPLATE)
+    file_template = str(file_template or config.get("file_template", "") or DEFAULT_FILE_TEMPLATE)
+    snapshot_id = db_module.history_snapshot_id()
+    history = list(db_module.iter_history(page_size=500))
+    wanted = {int(value) for value in history_ids} if history_ids else None
+    rows = [row for row in history if wanted is None or int(row.get("id", 0)) in wanted]
+    actions = []
+    destinations = {}
+    ready = conflicts = unchanged = 0
+    for row in rows:
+        if cancel_fn and cancel_fn():
+            raise InterruptedError("re-template preview cancelled")
+        payload = {"history_id": int(row["id"]), "old_path": str(row.get("path") or "")}
+        try:
+            old_path, new_path, renames = _template_path_context(
+                row, root, folder_template, file_template
+            )
+            payload.update({
+                "new_path": str(new_path), "file_renames": renames,
+                "status": "ready",
+            })
+            if not _path_is_within(old_path, root):
+                raise TemplateRenderError(
+                    "outside_root", "Current recording is outside the selected archive root"
+                )
+            if not old_path.is_dir() or old_path.is_symlink():
+                raise TemplateRenderError(
+                    "missing_source", "Current recording directory is unavailable"
+                )
+            if _normal_path(new_path) != _normal_path(old_path):
+                if os.path.exists(new_path):
+                    raise TemplateRenderError(
+                        "collision", "Rendered destination already exists"
+                    )
+                if _path_is_within(new_path, old_path):
+                    raise TemplateRenderError(
+                        "invalid_destination", "Rendered destination is inside the source directory"
+                    )
+            destination_key = _normal_path(new_path)
+            if destination_key in destinations:
+                raise TemplateRenderError(
+                    "collision", "Another recording renders to the same destination"
+                )
+            destinations[destination_key] = int(row["id"])
+            if _normal_path(new_path) == _normal_path(old_path) and not renames:
+                payload["status"] = "unchanged"
+                unchanged += 1
+            else:
+                ready += 1
+            actions.append(_action(
+                "retemplate", "Re-template recording",
+                f"{old_path} → {new_path}"
+                + (f" ({len(renames)} file rename(s))" if renames else ""),
+                payload,
+            ))
+        except (OSError, TemplateRenderError, ValueError) as exc:
+            if isinstance(exc, TemplateRenderError):
+                code = exc.code
+                message = str(exc)
+                if exc.field:
+                    message = f"{message} ({exc.field})"
+            else:
+                code = "unresolvable_field"
+                message = str(exc)
+            payload.update({"new_path": "", "file_renames": [], "status": "conflict",
+                            "reason_code": code, "reason": message})
+            conflicts += 1
+            actions.append(_action(
+                "retemplate_conflict", "Re-template conflict",
+                f"{payload['old_path']} — {message}", payload,
+            ))
+    diagnostics = _retemplate_diagnostics(
+        root, config=config, history=rows, ready=ready,
+        conflicts=conflicts, unchanged=unchanged, db_module=db_module,
+    )
+    diagnostics["templates"] = {
+        "folder": folder_template, "file": file_template,
+    }
+    return MaintenancePlan(
+        str(uuid.uuid4()), _utc_now(), root, snapshot_id,
+        _history_fingerprint(history), actions, diagnostics,
+    )
+
+
+def _save_plan_file(plan, path):
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(plan.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, path)
+    return path
+
+
+def save_retemplate_plan(plan, path):
+    return _save_plan_file(plan, path)
+
+
+def load_retemplate_plan(path):
+    path = Path(path).expanduser()
+    return MaintenancePlan.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _restore_retemplate_stage(temp_path, old_path, new_path, file_renames, finalized):
+    stage = Path(temp_path)
+    destination = Path(old_path)
+    final_path = Path(new_path)
+    if finalized and final_path.exists():
+        os.replace(final_path, stage)
+    for pair in reversed(file_renames):
+        source = stage / pair["new"]
+        target = stage / pair["old"]
+        if source.exists() and not target.exists():
+            os.replace(source, target)
+    if stage.exists():
+        os.replace(stage, destination)
+
+
+def _apply_retemplate_action(action, *, db_module, tags_module):
+    payload = action.payload
+    old_path = Path(str(payload.get("old_path") or ""))
+    new_path = Path(str(payload.get("new_path") or ""))
+    history_id = int(payload.get("history_id") or 0)
+    file_renames = list(payload.get("file_renames") or [])
+    if payload.get("status") != "ready":
+        raise RuntimeError(str(payload.get("reason") or "action is not ready"))
+    if not old_path.is_dir() or old_path.is_symlink():
+        raise RuntimeError("source recording directory is no longer available")
+    if new_path.exists() and _normal_path(new_path) != _normal_path(old_path):
+        raise RuntimeError("destination exists; preview is stale")
+    if os.path.splitdrive(str(old_path))[0].casefold() != os.path.splitdrive(str(new_path))[0].casefold():
+        raise RuntimeError("source and destination are on different volumes")
+    for pair in file_renames:
+        if not isinstance(pair, dict) or not pair.get("old") or not pair.get("new"):
+            raise RuntimeError("invalid file rename in preview")
+        if not (old_path / pair["old"]).is_file():
+            raise RuntimeError(f"sidecar changed after preview: {pair['old']}")
+        target = old_path / pair["new"]
+        if target.exists() and target.name not in {item.get("old") for item in file_renames}:
+            raise RuntimeError(f"file destination exists: {target.name}")
+
+    old_manifest_row = None
+    if hasattr(db_module, "load_archive_manifest"):
+        old_manifest_row = db_module.load_archive_manifest(history_id)
+    old_manifest = (
+        dict(old_manifest_row.get("manifest") or {})
+        if isinstance(old_manifest_row, dict) else None
+    )
+    sidecar = old_path / ".streamkeep_manifest.json"
+    old_sidecar_bytes = sidecar.read_bytes() if sidecar.is_file() else None
+    temporary = old_path.parent / f".streamkeep-retemplate-{uuid.uuid4().hex}"
+    new_parent = new_path.parent
+    created_parents = []
+    probe = new_parent
+    while not probe.exists() and probe != probe.parent:
+        created_parents.append(probe)
+        probe = probe.parent
+    new_parent.mkdir(parents=True, exist_ok=True)
+    finalized = False
+    tags_committed = False
+    db_committed = False
+    manifest = None
+    try:
+        os.replace(old_path, temporary)
+        for pair in file_renames:
+            os.replace(temporary / pair["old"], temporary / pair["new"])
+        os.replace(temporary, new_path)
+        finalized = True
+        if old_sidecar_bytes is not None:
+            from .verify import create_archive_manifest
+            manifest = create_archive_manifest(new_path, write_sidecar=True)
+        elif old_manifest is not None:
+            manifest = dict(old_manifest)
+            manifest["root"] = str(new_path)
+        if hasattr(tags_module, "relocate_recording_tags"):
+            tags_module.relocate_recording_tags(str(old_path), str(new_path))
+            tags_committed = True
+        if hasattr(db_module, "relocate_history_recording"):
+            db_module.relocate_history_recording(
+                history_id, str(old_path), str(new_path),
+                manifest=manifest if old_manifest_row is not None else None,
+            )
+        else:
+            db_module.update_history_entry(history_id, {"path": str(new_path)})
+        db_committed = True
+        return {
+            "old_path": str(old_path), "new_path": str(new_path),
+            "file_renames": file_renames,
+        }
+    except Exception:
+        rollback_errors = []
+        if db_committed and hasattr(db_module, "relocate_history_recording"):
+            try:
+                db_module.relocate_history_recording(
+                    history_id, str(new_path), str(old_path), manifest=old_manifest,
+                )
+            except Exception as exc:
+                rollback_errors.append(f"database rollback: {exc}")
+        if tags_committed and hasattr(tags_module, "relocate_recording_tags"):
+            try:
+                tags_module.relocate_recording_tags(str(new_path), str(old_path))
+            except Exception as exc:
+                rollback_errors.append(f"tag rollback: {exc}")
+        try:
+            _restore_retemplate_stage(
+                temporary, old_path, new_path, file_renames, finalized
+            )
+        except Exception as exc:
+            rollback_errors.append(f"filesystem rollback: {exc}")
+        if old_sidecar_bytes is not None and old_path.is_dir():
+            try:
+                (old_path / ".streamkeep_manifest.json").write_bytes(old_sidecar_bytes)
+            except Exception as exc:
+                rollback_errors.append(f"manifest rollback: {exc}")
+        if rollback_errors:
+            raise RuntimeError(
+                f"relocation failed and rollback was incomplete: {'; '.join(rollback_errors)}"
+            )
+        raise
+    finally:
+        for directory in sorted(created_parents, key=lambda item: len(str(item)), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+
+
+def apply_retemplate(
+    plan,
+    approved_action_ids,
+    *,
+    db_module=db,
+    tags_module=None,
+    cancel_fn=None,
+    ledger_path=None,
+    backup_fn=None,
+    config_dir=None,
+):
+    """Apply approved re-template moves as independently rollback-safe units."""
+    from . import tags as default_tags
+
+    approved = set(approved_action_ids or ())
+    selected = [
+        action for action in plan.actions
+        if action.action_id in approved and action.kind == "retemplate"
+        and action.payload.get("status") == "ready"
+    ]
+    result = MaintenanceResult("completed", skipped=len(plan.actions) - len(selected))
+    ledger = Path(ledger_path or audit_path(config_dir))
+    _audit({"event": "apply_started", "at": _utc_now(), "plan_id": plan.plan_id,
+            "kind": "retemplate", "approved": sorted(approved)}, ledger_path=ledger)
+    current_history = list(db_module.iter_history(page_size=500))
+    if (db_module.history_snapshot_id() != plan.history_snapshot_id or
+            _history_fingerprint(current_history) != plan.history_fingerprint):
+        result.status = "stale"
+        result.errors.append("Library changed after preview; create a fresh plan.")
+        _audit({"event": "apply_stale", "at": _utc_now(), "plan_id": plan.plan_id,
+                "kind": "retemplate"}, ledger_path=ledger)
+        return result
+    if selected:
+        backup_dir = Path(plan.diagnostics.get("backup_dir") or
+                          Path(config_dir or CONFIG_DIR) / "backups")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_file = backup_dir / f"maintenance-{plan.plan_id}.skbackup"
+        create = backup_fn or backup.create_backup
+        ok, detail = create(str(backup_file))
+        if not ok:
+            result.status = "backup_failed"
+            result.errors.append(str(detail))
+            _audit({"event": "backup_failed", "at": _utc_now(),
+                    "plan_id": plan.plan_id, "kind": "retemplate",
+                    "detail": str(detail)}, ledger_path=ledger)
+            return result
+        result.backup_path = str(backup_file)
+
+    tags_module = tags_module or default_tags
+    for action in selected:
+        if cancel_fn and cancel_fn():
+            result.status = "cancelled"
+            break
+        try:
+            _apply_retemplate_action(
+                action, db_module=db_module, tags_module=tags_module
+            )
+            result.applied += 1
+            _audit({"event": "action_applied", "at": _utc_now(),
+                    "plan_id": plan.plan_id, "action_id": action.action_id,
+                    "kind": action.kind, "detail": action.detail}, ledger_path=ledger)
+        except Exception as exc:
+            result.failed += 1
+            result.errors.append(f"{action.label}: {exc}")
+            _audit({"event": "action_failed", "at": _utc_now(),
+                    "plan_id": plan.plan_id, "action_id": action.action_id,
+                    "kind": action.kind, "error": str(exc),
+                    "rollback": "attempted"}, ledger_path=ledger)
+    _audit({"event": "apply_finished", "at": _utc_now(), "plan_id": plan.plan_id,
+            "kind": "retemplate", "status": result.status,
+            "applied": result.applied, "failed": result.failed,
+            "skipped": result.skipped}, ledger_path=ledger)
+    return result
+
+
+# Explicit aliases keep the public maintenance vocabulary consistent with
+# adoption and rebuild while allowing callers to use the shorter API names.
+plan_library_retemplate = plan_retemplate
+apply_library_retemplate = apply_retemplate
 
 
 def _normal_path(path):

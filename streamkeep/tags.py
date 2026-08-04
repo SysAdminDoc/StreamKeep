@@ -136,6 +136,45 @@ def get_tags_for_recording(db, path):
     return [(r[0], r[1]) for r in rows]
 
 
+def relocate_recording_tags(old_path, new_path):
+    """Move one recording's tag references in one transaction.
+
+    The maintenance coordinator performs this SQLite transaction as part of
+    the per-recording filesystem/index unit. A pre-existing destination row is
+    refused instead of silently merging two recordings' tag state.
+    """
+    old_path = str(old_path or "")
+    new_path = str(new_path or "")
+    if not old_path or not new_path:
+        raise ValueError("recording paths are required")
+    if old_path == new_path:
+        return 0
+    db = _connect()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        source_count = int(db.execute(
+            "SELECT COUNT(*) FROM recording_tags WHERE recording_path=?",
+            (old_path,),
+        ).fetchone()[0] or 0)
+        destination_count = int(db.execute(
+            "SELECT COUNT(*) FROM recording_tags WHERE recording_path=?",
+            (new_path,),
+        ).fetchone()[0] or 0)
+        if source_count and destination_count:
+            raise ValueError("destination already has recording tags")
+        cursor = db.execute(
+            "UPDATE recording_tags SET recording_path=? WHERE recording_path=?",
+            (new_path, old_path),
+        )
+        db.commit()
+        return int(cursor.rowcount or 0)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def get_all_tags(db):
     """Return all tags as ``[(name, kind, count)]``."""
     rows = db.execute("""

@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import sys
+import string
 from pathlib import Path
 
 
@@ -93,6 +94,123 @@ def estimate_download_bytes(stream_info):
 
 DEFAULT_FOLDER_TEMPLATE = "{channel}/{date} - {title}"
 DEFAULT_FILE_TEMPLATE = "{title}"
+
+
+class TemplateRenderError(ValueError):
+    """A template cannot be rendered without silently changing its value."""
+
+    def __init__(self, code, message, *, field=""):
+        super().__init__(message)
+        self.code = str(code or "invalid_template")
+        self.field = str(field or "")
+
+
+_TEMPLATE_RESERVED_NAMES = (
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+_TEMPLATE_INVALID_CHARS = set('<>:"/\\|?*')
+
+
+def _strict_template_component(value, *, max_len=80, field=""):
+    """Validate one rendered Windows path component without sanitizing it."""
+    rendered = str(value or "")
+    if not rendered or not rendered.strip():
+        raise TemplateRenderError(
+            "unresolvable_field", "Template rendered an empty path component",
+            field=field,
+        )
+    if any(ord(char) < 32 or ord(char) == 127 for char in rendered):
+        raise TemplateRenderError(
+            "invalid_character", "Template contains a control character",
+            field=field,
+        )
+    if any(char in _TEMPLATE_INVALID_CHARS for char in rendered):
+        raise TemplateRenderError(
+            "invalid_character", "Template contains a Windows-invalid character",
+            field=field,
+        )
+    if rendered in {".", ".."}:
+        raise TemplateRenderError(
+            "reserved_name", "Template contains a traversal component", field=field
+        )
+    if rendered != rendered.rstrip(". "):
+        raise TemplateRenderError(
+            "reserved_name", "Template ends with a dot or space", field=field
+        )
+    stem = rendered.split(".", 1)[0].upper()
+    if stem in _TEMPLATE_RESERVED_NAMES:
+        raise TemplateRenderError(
+            "reserved_name", f"Template uses reserved Windows name {rendered!r}",
+            field=field,
+        )
+    if len(rendered) > int(max_len):
+        raise TemplateRenderError(
+            "component_too_long",
+            f"Template component is {len(rendered)} characters; maximum is {max_len}",
+            field=field,
+        )
+    return rendered
+
+
+def render_template_strict(template, context, *, max_component=80):
+    """Render a template for archive migration without lossy sanitization.
+
+    The normal download renderer intentionally cleans user metadata. A
+    migration must refuse values that would be cleaned or truncated, because
+    a preview must describe the exact destination that will be applied.
+    """
+    template = str(template or "")
+    if not template:
+        return []
+    if "\\" in template or template.startswith("/") or os.path.isabs(template):
+        raise TemplateRenderError(
+            "invalid_template", "Templates may contain only relative '/' separators"
+        )
+    formatter = string.Formatter()
+    result = []
+    for segment in template.split("/"):
+        if not segment:
+            raise TemplateRenderError(
+                "invalid_template", "Templates may not contain empty path components"
+            )
+        fields = []
+        try:
+            for _literal, field_name, format_spec, conversion in formatter.parse(segment):
+                if field_name is None:
+                    continue
+                if (
+                    not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field_name)
+                    or format_spec
+                    or conversion
+                ):
+                    raise TemplateRenderError(
+                        "unsupported_field", f"Unsupported template field {field_name!r}",
+                        field=field_name,
+                    )
+                fields.append(field_name)
+                if field_name not in context or context.get(field_name) in (None, ""):
+                    raise TemplateRenderError(
+                        "unresolvable_field",
+                        f"Template field {field_name!r} has no value",
+                        field=field_name,
+                    )
+            rendered = formatter.vformat(segment, (), dict(context))
+        except TemplateRenderError:
+            raise
+        except (KeyError, IndexError, ValueError) as exc:
+            field = str(exc.args[0]) if getattr(exc, "args", None) else ""
+            raise TemplateRenderError(
+                "unresolvable_field", f"Template field {field!r} could not be resolved",
+                field=field,
+            ) from exc
+        result.append(
+            _strict_template_component(
+                rendered, max_len=max_component, field=fields[-1] if fields else ""
+            )
+        )
+    return result
 
 
 def fmt_duration(secs):

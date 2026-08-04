@@ -149,6 +149,8 @@ python StreamKeep.py import-library preview C:\ExistingLibrary --archive C:\Exis
 python StreamKeep.py import-library apply --plan C:\Support\adoption.json --json
 python StreamKeep.py db rebuild --from C:\ExistingLibrary --plan C:\Support\rebuild.json --json
 python StreamKeep.py db rebuild --apply --plan C:\Support\rebuild.json --json
+python StreamKeep.py retemplate preview C:\Videos\StreamKeep --folder-template "{channel}/{year}" --filename-template "{title}" --json
+python StreamKeep.py retemplate apply --plan C:\Users\you\AppData\Roaming\StreamKeep\maintenance\retemplate-plan.json
 python StreamKeep.py register-protocol
 python StreamKeep.py bookmarklet
 python StreamKeep.py "streamkeep://download?url=https://example.com/video"
@@ -160,6 +162,14 @@ python StreamKeep.py backup restore C:\Backups\StreamKeep.skbackup
 python StreamKeep.py backup secrets-export C:\Backups\StreamKeep-secrets.sksbackup
 python StreamKeep.py backup secrets-import C:\Backups\StreamKeep-secrets.sksbackup
 ```
+
+Archive Maintenance also provides a preview-first **re-template archive**
+workflow. It renders the current history against a new folder and filename
+template, shows destinations and conflicts, then applies only checked actions
+after creating a backup. Recording directories move together with media,
+metadata, notes, manifests, and matching media sidecars; history, tags, and
+stable publication links follow the move. Reserved Windows names, unresolved
+fields, collisions, and unsafe long paths are refused rather than rewritten.
 
 Smart Mode is a saved, ordered list of URL profiles shared by the desktop
 download form, queue, CLI, and local REST server. Enable it in Settings or

@@ -6,18 +6,20 @@ send2trash so nothing is ever permanently removed from inside the app.
 
 import json
 import os
+from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QThread, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QLabel, QMenu, QPushButton, QTableView, QTreeWidget, QTreeWidgetItem,
+    QLabel, QLineEdit, QMenu, QPushButton, QTableView, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ...maintenance import (
-    apply_library_adoption, apply_maintenance, load_pending_plan,
-    plan_library_adoption, plan_maintenance, save_pending_plan,
+    apply_library_adoption, apply_library_retemplate, apply_maintenance,
+    load_pending_plan, plan_library_adoption, plan_library_retemplate,
+    plan_maintenance, save_pending_plan, save_retemplate_plan,
 )
 from ... import db as _db
 from ...storage import scan_storage
@@ -68,6 +70,44 @@ class _MaintenanceWorker(QThread):
                 save_pending_plan(result)
             else:
                 result = apply_maintenance(
+                    self.plan, self.approved,
+                    cancel_fn=self.isInterruptionRequested,
+                )
+            self.completed.emit(result)
+        except InterruptedError:
+            self.completed.emit(None)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class _RetemplateWorker(QThread):
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, root, folder_template, file_template, config, *, plan=None,
+                 approved=None, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.folder_template = str(folder_template or "")
+        self.file_template = str(file_template or "")
+        self.config = dict(config or {})
+        self.plan = plan
+        self.approved = list(approved or ())
+
+    def run(self):
+        try:
+            if self.plan is None:
+                result = plan_library_retemplate(
+                    self.root, self.folder_template, self.file_template,
+                    config=self.config,
+                    cancel_fn=self.isInterruptionRequested,
+                )
+                save_retemplate_plan(
+                    result,
+                    Path(_db.DB_PATH).parent / "maintenance" / "retemplate-plan.json",
+                )
+            else:
+                result = apply_library_retemplate(
                     self.plan, self.approved,
                     cancel_fn=self.isInterruptionRequested,
                 )
@@ -272,6 +312,30 @@ def build_storage_tab(win):
     maintenance_actions.addWidget(win.maintenance_cancel_btn)
     maintenance_actions.addStretch(1)
     maintenance_lay.addLayout(maintenance_actions)
+    retemplate_row = QHBoxLayout()
+    retemplate_row.setSpacing(8)
+    retemplate_label = QLabel("Re-template archive")
+    retemplate_label.setObjectName("fieldLabel")
+    retemplate_row.addWidget(retemplate_label)
+    win.retemplate_folder_input = QLineEdit()
+    win.retemplate_folder_input.setPlaceholderText("Folder template, e.g. {channel}/{year}")
+    win.retemplate_folder_input.setAccessibleName("New archive folder template")
+    win.retemplate_folder_input.setAccessibleDescription(
+        "Relative folder template used by the archive-wide migration preview"
+    )
+    retemplate_row.addWidget(win.retemplate_folder_input, 1)
+    win.retemplate_file_input = QLineEdit()
+    win.retemplate_file_input.setPlaceholderText("Filename template, e.g. {title}")
+    win.retemplate_file_input.setAccessibleName("New archive filename template")
+    win.retemplate_file_input.setAccessibleDescription(
+        "Filename template used to rename media and matching sidecars"
+    )
+    retemplate_row.addWidget(win.retemplate_file_input, 1)
+    win.retemplate_preview_btn = QPushButton("Preview re-template")
+    win.retemplate_preview_btn.setObjectName("secondary")
+    win.retemplate_preview_btn.clicked.connect(win._on_retemplate_preview)
+    retemplate_row.addWidget(win.retemplate_preview_btn)
+    maintenance_lay.addLayout(retemplate_row)
     win.maintenance_summary = QLabel("No maintenance preview yet.")
     win.maintenance_summary.setObjectName("subtleText")
     win.maintenance_summary.setWordWrap(True)
@@ -731,16 +795,43 @@ class StorageTabMixin:
 
     def _set_maintenance_running(self, running):
         self.maintenance_preview_btn.setEnabled(not running)
+        self.retemplate_preview_btn.setEnabled(not running)
         self.maintenance_apply_btn.setEnabled(
             not running and getattr(self, "_maintenance_plan", None) is not None
         )
         self.maintenance_cancel_btn.setEnabled(running)
+
+    def _on_retemplate_preview(self):
+        current = getattr(self, "_maintenance_worker", None)
+        if current is not None and current.isRunning():
+            return
+        self._maintenance_plan = None
+        self._maintenance_mode = "retemplate"
+        self.maintenance_tree.clear()
+        self.maintenance_tree.setVisible(True)
+        self.maintenance_summary.setVisible(True)
+        self.maintenance_summary.setText("Building a read-only re-template preview…")
+        self._set_maintenance_running(True)
+        self._set_status("Previewing the archive re-template in the background.", "working")
+        worker = _RetemplateWorker(
+            self._storage_scan_root(),
+            self.retemplate_folder_input.text().strip(),
+            self.retemplate_file_input.text().strip(),
+            self._config,
+            parent=self,
+        )
+        worker.completed.connect(self._on_maintenance_preview_done)
+        worker.failed.connect(self._on_maintenance_failed)
+        worker.finished.connect(worker.deleteLater)
+        self._maintenance_worker = worker
+        worker.start()
 
     def _on_maintenance_preview(self):
         current = getattr(self, "_maintenance_worker", None)
         if current is not None and current.isRunning():
             return
         self._maintenance_plan = None
+        self._maintenance_mode = "maintenance"
         self.maintenance_tree.clear()
         self.maintenance_tree.setVisible(True)
         self.maintenance_summary.setVisible(True)
@@ -765,6 +856,8 @@ class StorageTabMixin:
             self._set_maintenance_running(False)
             self._set_status("Maintenance preview cancelled.", "idle")
             return
+        if plan.diagnostics.get("kind") == "retemplate":
+            return self._on_retemplate_preview_done(plan)
         self._maintenance_plan = plan
         self.maintenance_tree.clear()
         for action in plan.actions:
@@ -795,6 +888,36 @@ class StorageTabMixin:
         self._set_maintenance_running(False)
         self._set_status("Maintenance preview ready for approval.", "success")
 
+    def _on_retemplate_preview_done(self, plan):
+        self._maintenance_mode = "retemplate"
+        self._maintenance_plan = plan
+        self.maintenance_tree.clear()
+        for action in plan.actions:
+            ready = (
+                action.kind == "retemplate"
+                and action.payload.get("status") == "ready"
+            )
+            item = QTreeWidgetItem(["", action.label, action.detail])
+            item.setData(0, Qt.ItemDataRole.UserRole, action.action_id)
+            item.setCheckState(0, Qt.CheckState.Checked if ready else Qt.CheckState.Unchecked)
+            if not ready:
+                item.setToolTip(
+                    0, str(action.payload.get("reason") or "This result is review-only.")
+                )
+            self.maintenance_tree.addTopLevelItem(item)
+        self.maintenance_tree.setVisible(bool(plan.actions))
+        counts = plan.diagnostics["retemplate"]
+        templates = plan.diagnostics.get("templates", {})
+        self.maintenance_summary.setVisible(True)
+        self.maintenance_summary.setText(
+            f"Re-template preview: {counts['ready']} ready, "
+            f"{counts['unchanged']} unchanged, {counts['conflicts']} conflict(s). "
+            f"Folder: {templates.get('folder', '')}; file: {templates.get('file', '')}. "
+            "Conflicts, reserved names, and long paths remain unchecked."
+        )
+        self._set_maintenance_running(False)
+        self._set_status("Re-template preview ready for approval.", "success")
+
     def _on_maintenance_apply(self):
         plan = getattr(self, "_maintenance_plan", None)
         if plan is None:
@@ -809,12 +932,15 @@ class StorageTabMixin:
         if not approved:
             self._set_status("Select at least one maintenance action to apply.", "warning")
             return
+        is_retemplate = getattr(self, "_maintenance_mode", "maintenance") == "retemplate"
         if not ask_premium_confirmation(
             self,
-            title="Apply approved archive maintenance?",
+            title=("Apply approved archive re-template?" if is_retemplate
+                   else "Apply approved archive maintenance?"),
             body=(f"Apply {len(approved)} selected action(s) from the current preview. "
                   "StreamKeep creates a backup first and records every outcome."),
-            eyebrow="MAINTENANCE", badge_text="Backup first", tone="warning",
+            eyebrow=("RE-TEMPLATE" if is_retemplate else "MAINTENANCE"),
+            badge_text="Backup first", tone="warning",
             summary_title="Only checked actions will run.",
             summary_body="If the library changed since preview, the batch is refused.",
             details_title="Approved actions", details_body="\n".join(details),
@@ -824,9 +950,16 @@ class StorageTabMixin:
             return
         self._set_maintenance_running(True)
         self._set_status("Applying approved maintenance in the background.", "working")
-        worker = _MaintenanceWorker(
-            plan.root, self._config, plan=plan, approved=approved, parent=self
-        )
+        if is_retemplate:
+            templates = plan.diagnostics.get("templates", {})
+            worker = _RetemplateWorker(
+                plan.root, templates.get("folder", ""), templates.get("file", ""),
+                self._config, plan=plan, approved=approved, parent=self,
+            )
+        else:
+            worker = _MaintenanceWorker(
+                plan.root, self._config, plan=plan, approved=approved, parent=self
+            )
         worker.completed.connect(self._on_maintenance_apply_done)
         worker.failed.connect(self._on_maintenance_failed)
         worker.finished.connect(worker.deleteLater)
@@ -836,6 +969,7 @@ class StorageTabMixin:
     def _on_maintenance_apply_done(self, result):
         self._maintenance_worker = None
         self._maintenance_plan = None
+        self._maintenance_mode = "maintenance"
         self._set_maintenance_running(False)
         self.maintenance_apply_btn.setEnabled(False)
         if result is None or result.status == "cancelled":
@@ -870,6 +1004,7 @@ class StorageTabMixin:
     def _on_maintenance_failed(self, message):
         self._maintenance_worker = None
         self._maintenance_plan = None
+        self._maintenance_mode = "maintenance"
         self._set_maintenance_running(False)
         self.maintenance_apply_btn.setEnabled(False)
         self.maintenance_summary.setVisible(True)

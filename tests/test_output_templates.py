@@ -8,7 +8,9 @@ from streamkeep.models import StreamInfo
 from streamkeep.utils import (
     DEFAULT_FILE_TEMPLATE,
     DEFAULT_FOLDER_TEMPLATE,
+    TemplateRenderError,
     resolve_output_paths,
+    render_template_strict,
 )
 
 
@@ -20,6 +22,17 @@ def _info(title="A Stream", channel="SomeChannel", platform="Twitch"):
 
 
 class TemplateResolverTests(unittest.TestCase):
+    def test_strict_renderer_refuses_lossy_values(self):
+        with self.assertRaises(TemplateRenderError) as reserved:
+            render_template_strict("{title}", {"title": "CON"})
+        self.assertEqual(reserved.exception.code, "reserved_name")
+        with self.assertRaises(TemplateRenderError) as unresolved:
+            render_template_strict("{quality}", {"quality": ""})
+        self.assertEqual(unresolved.exception.code, "unresolvable_field")
+        with self.assertRaises(TemplateRenderError) as long_value:
+            render_template_strict("{title}", {"title": "x" * 81})
+        self.assertEqual(long_value.exception.code, "component_too_long")
+
     def test_the_built_in_defaults_apply_without_configuration(self):
         directory, base = resolve_output_paths(_info(), os.path.join("R", "out"))
         self.assertEqual(base, "A Stream")
@@ -166,3 +179,20 @@ class CliTemplateFlagTests(unittest.TestCase):
         args = build_parser().parse_args(["download", "https://example.com/v"])
         self.assertEqual(args.file_template, "")
         self.assertEqual(args.folder_template, "")
+
+    def test_retemplate_cli_has_preview_and_apply_contract(self):
+        from streamkeep.cli import build_parser
+
+        preview = build_parser().parse_args([
+            "retemplate", "preview", "archive",
+            "--folder-template", "{channel}/{year}",
+            "--filename-template", "{title}", "--json",
+        ])
+        self.assertEqual(preview.retemplate_action, "preview")
+        self.assertEqual(preview.folder_template, "{channel}/{year}")
+        self.assertTrue(preview.json)
+        apply = build_parser().parse_args([
+            "retemplate", "apply", "--plan", "plan.json", "--action-id", "abc",
+        ])
+        self.assertEqual(apply.retemplate_action, "apply")
+        self.assertEqual(apply.action_id, ["abc"])

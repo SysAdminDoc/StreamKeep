@@ -2007,6 +2007,78 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
             db.close()
 
 
+def relocate_history_recording(
+    history_id: int,
+    expected_old_path: str,
+    new_path: str,
+    *,
+    manifest: dict[str, Any] | None = None,
+) -> bool:
+    """Commit one recording relocation and its index references atomically.
+
+    ``published_recordings`` intentionally stores the stable history id, not
+    a second path. Updating the canonical history row therefore updates every
+    publication join without leaving a stale path copy behind. The manifest
+    row is updated in the same SQLite transaction when it exists.
+    """
+    try:
+        history_id = int(history_id)
+    except (TypeError, ValueError):
+        raise ValueError("history id is invalid") from None
+    if history_id <= 0:
+        raise ValueError("history id is invalid")
+    old_path = str(expected_old_path or "")
+    destination = str(new_path or "")
+    if not old_path or not destination:
+        raise ValueError("recording paths are required")
+
+    def _same_path(left, right):
+        return os.path.normcase(os.path.normpath(str(left))) == os.path.normcase(
+            os.path.normpath(str(right))
+        )
+
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT path FROM history WHERE id=?", (history_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("history row no longer exists")
+            if not _same_path(row[0] or "", old_path):
+                raise RuntimeError("history path changed after preview")
+            conn.execute(
+                "UPDATE history SET path=? WHERE id=?", (destination, history_id)
+            )
+            if manifest is not None:
+                if not isinstance(manifest, dict):
+                    raise TypeError("archive manifest must be a dictionary")
+                conn.execute(
+                    "UPDATE archive_manifests SET recording_path=?, "
+                    "manifest_json=?, updated_at=? WHERE history_id=?",
+                    (
+                        destination,
+                        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+                        _utc_now_iso(),
+                        history_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE archive_manifests SET recording_path=?, "
+                    "updated_at=? WHERE history_id=?",
+                    (destination, _utc_now_iso(), history_id),
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
 def build_rebuilt_library_database(
     target_path,
     entries: list[dict[str, Any]],

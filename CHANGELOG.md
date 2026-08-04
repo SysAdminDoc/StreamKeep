@@ -4,6 +4,13 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added archive-wide output re-templating with a strict preview/apply plan.
+  Existing recording directories move as atomic units with media, notes, and
+  sidecars; matching media sidecars can be renamed together, history,
+  manifests, tags, and publication joins are updated, and every action is
+  audited with rollback on failure. Reserved names, collisions, unresolved
+  fields, and unsafe path lengths remain review-only conflicts.
+
 - Added same-identity quality-upgrade decisions with explicit ordered ladders,
   cutoffs, scored matchers, named audit reasons, and per-item history tooltips.
   Verified replacements publish atomically beside the known-good recording and

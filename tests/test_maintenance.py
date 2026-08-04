@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
 
-from streamkeep import db
+from streamkeep import db, tags
 from streamkeep.maintenance import (
-    apply_maintenance, load_pending_plan, plan_maintenance, save_pending_plan,
+    apply_maintenance, apply_retemplate, load_pending_plan, plan_maintenance,
+    plan_retemplate, save_pending_plan,
 )
 
 
@@ -165,3 +166,137 @@ def test_cancelled_apply_stops_between_atomic_actions(tmp_path, monkeypatch):
     assert result.status == "cancelled"
     assert result.applied == 1
     assert len(db.load_history()) == 1
+
+
+def test_retemplate_preview_and_apply_moves_the_complete_recording_unit(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "library.db"
+    tag_database = tmp_path / "tags.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    monkeypatch.setattr(tags, "DB_PATH", tag_database)
+    db.init_db()
+    root = tmp_path / "archive"
+    old = root / "legacy"
+    old.mkdir(parents=True)
+    (old / "video.mp4").write_bytes(b"media")
+    (old / "video.nfo").write_text("nfo", encoding="utf-8")
+    (old / "video.chapters.txt").write_text("00:00:00 Intro\n", encoding="utf-8")
+    (old / "metadata.json").write_text(json.dumps({
+        "platform": "Twitch", "channel": "alpha", "title": "Show",
+        "downloaded_at": "2026-07-17T00:00:00+00:00",
+    }), encoding="utf-8")
+    (old / ".notes.md").write_text("keep these notes", encoding="utf-8")
+    from streamkeep.verify import create_archive_manifest
+    history_id = _history(old, platform="Twitch", channel="alpha", title="Show")
+    manifest = create_archive_manifest(old, write_sidecar=True)
+    db.save_archive_manifest(history_id, str(old), manifest)
+    tag_conn = tags._connect()
+    tags.tag_recording(tag_conn, str(old), "keep")
+    tag_conn.close()
+    published = db.publish_recording(history_id)
+    plan = plan_retemplate(
+        root, "{channel}/{year}", "{title}",
+        config={"archive_backup_dir": str(tmp_path / "backups")},
+    )
+    action = next(item for item in plan.actions if item.kind == "retemplate")
+    assert action.payload["new_path"] == str(root / "alpha" / "2026")
+    assert {pair["new"] for pair in action.payload["file_renames"]} == {
+        "Show.mp4", "Show.nfo", "Show.chapters.txt",
+    }
+
+    result = apply_retemplate(
+        plan, [action.action_id], backup_fn=_backup,
+        ledger_path=tmp_path / "audit.jsonl", config_dir=tmp_path / "state",
+    )
+    new = root / "alpha" / "2026"
+    assert result.status == "completed"
+    assert result.applied == 1
+    assert not old.exists()
+    assert (new / "Show.mp4").read_bytes() == b"media"
+    assert (new / "Show.nfo").read_text(encoding="utf-8") == "nfo"
+    assert (new / "Show.chapters.txt").is_file()
+    assert (new / "metadata.json").is_file()
+    assert (new / ".notes.md").read_text(encoding="utf-8") == "keep these notes"
+    row = next(item for item in db.load_history() if item["id"] == history_id)
+    assert row["path"] == str(new)
+    stored_manifest = db.load_archive_manifest(history_id)
+    assert stored_manifest["recording_path"] == str(new)
+    assert stored_manifest["manifest"]["root"] == str(new)
+    assert db.published_recording(published["share_id"])["path"] == str(new)
+    tag_conn = tags._connect()
+    assert tags.get_tags_for_recording(tag_conn, str(old)) == []
+    assert tags.get_tags_for_recording(tag_conn, str(new)) == [("keep", "user")]
+    tag_conn.close()
+    events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert events[-2]["event"] == "action_applied"
+    assert events[-2]["kind"] == "retemplate"
+
+
+def test_retemplate_refuses_reserved_names_and_duplicate_destinations(tmp_path, monkeypatch):
+    database = tmp_path / "library.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    db.init_db()
+    root = tmp_path / "archive"
+    first = _recording(root, "first", title="Same")
+    second = _recording(root, "second", title="Same")
+    _history(first, title="Same")
+    _history(second, title="Same")
+    reserved = _recording(root, "reserved", title="CON")
+    _history(reserved, title="CON")
+    plan = plan_retemplate(root, "{channel}", "{title}")
+    conflicts = [item for item in plan.actions if item.kind == "retemplate_conflict"]
+    assert len(conflicts) == 2
+    reasons = {item.payload["reason_code"] for item in conflicts}
+    assert "collision" in reasons
+    assert "reserved_name" in reasons
+    assert all(item.payload["status"] == "conflict" for item in conflicts)
+
+
+def test_retemplate_cancel_and_database_failure_leave_each_item_untouched(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "library.db"
+    tag_database = tmp_path / "tags.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    monkeypatch.setattr(tags, "DB_PATH", tag_database)
+    db.init_db()
+    root = tmp_path / "archive"
+    first = _recording(root, "first", title="One")
+    second = _recording(root, "second", title="Two")
+    _history(first, title="One")
+    second_id = _history(second, title="Two")
+    plan = plan_retemplate(root, "{title}", "{title}")
+    actions = [item for item in plan.actions if item.kind == "retemplate"]
+    result_checks = [False, True]
+    result = apply_retemplate(
+        plan, [item.action_id for item in actions],
+        cancel_fn=lambda: result_checks.pop(0), backup_fn=_backup,
+        ledger_path=tmp_path / "cancel-audit.jsonl",
+        config_dir=tmp_path / "state",
+    )
+    assert result.status == "cancelled"
+    assert result.applied == 1
+    assert first.exists() is False
+    assert second.exists()
+    assert next(row for row in db.load_history() if row["id"] == second_id)["path"] == str(second)
+
+    # Re-preview the untouched row, then make the canonical DB commit fail.
+    fresh = plan_retemplate(root, "{title}", "{title}")
+    fresh_action = next(
+        item for item in fresh.actions
+        if item.kind == "retemplate"
+        and item.payload.get("old_path") == str(second)
+        and item.payload.get("status") == "ready"
+    )
+    monkeypatch.setattr(
+        db, "relocate_history_recording",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("injected db failure")),
+    )
+    result = apply_retemplate(
+        fresh, [fresh_action.action_id], backup_fn=_backup,
+        ledger_path=tmp_path / "failure-audit.jsonl", config_dir=tmp_path / "state",
+    )
+    assert result.failed == 1
+    assert second.exists()
+    assert next(row for row in db.load_history() if row["id"] == second_id)["path"] == str(second)
