@@ -5,6 +5,7 @@ and the release-claim checks — without paying for a PyInstaller build.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -126,6 +127,23 @@ class StageDriverTests(unittest.TestCase):
 class ReleaseClaimTests(unittest.TestCase):
     def test_the_shipped_tree_passes_its_own_claim_check(self):
         self.assertEqual(gate.validate_release_claims(ROOT), [])
+
+    def test_page_claim_drift_against_the_tab_registry_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "streamkeep" / "ui").mkdir(parents=True)
+            (root / "README.md").write_text(
+                "Releases are unsigned. Spanish is beta.\n", encoding="utf-8",
+            )
+            (root / "CLAUDE.md").write_text(
+                "The GUI uses a 4-page QStackedWidget.\n", encoding="utf-8",
+            )
+            (root / "streamkeep" / "ui" / "main_window.py").write_text(
+                "self._tab_names = ['Download', 'Monitor', 'History', 'Operations', 'Storage']\n",
+                encoding="utf-8",
+            )
+            problems = gate.validate_release_claims(root)
+        self.assertTrue(any("states a 4-page" in problem for problem in problems))
 
     def test_a_signing_promise_is_reported(self):
         with mock.patch.object(Path, "read_text", autospec=True) as read_text:

@@ -18,7 +18,9 @@ passed; 1 names the first failure.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -269,12 +271,81 @@ _UNSIGNED_MARKERS = (
     "not code signed",
     "no code signing",
 )
+_PAGE_COUNT_CLAIM = re.compile(r"\b(\d+)-page\s+QStackedWidget\b", re.IGNORECASE)
+
+
+def _read_tab_registry(root) -> tuple[str, ...] | None:
+    """Read the literal tab registry without importing the Qt application."""
+    source_path = Path(root) / "streamkeep" / "ui" / "main_window.py"
+    try:
+        source = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(source_path))
+    except (OSError, SyntaxError):
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        else:
+            continue
+        if not any(
+            isinstance(target, ast.Attribute) and target.attr == "_tab_names"
+            for target in targets
+        ):
+            continue
+        if not isinstance(node.value, (ast.List, ast.Tuple)):
+            return None
+        names = []
+        for element in node.value.elts:
+            if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+                return None
+            names.append(element.value)
+        return tuple(names)
+    return None
+
+
+def _validate_page_count_claim(root) -> list[str]:
+    """Ensure CLAUDE's page count still matches the shipped tab registry."""
+    root = Path(root)
+    try:
+        notes = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    except OSError as error:
+        return [f"CLAUDE.md could not be read for the page-count claim: {error}"]
+
+    claims = [int(match.group(1)) for match in _PAGE_COUNT_CLAIM.finditer(notes)]
+    if not claims:
+        return [
+            "CLAUDE.md must state the current page count as '<N>-page "
+            "QStackedWidget'"
+        ]
+    if len(set(claims)) != 1:
+        return [
+            "CLAUDE.md contains conflicting QStackedWidget page-count claims: "
+            + ", ".join(str(count) for count in claims)
+        ]
+
+    registry = _read_tab_registry(root)
+    if registry is None:
+        return [
+            "streamkeep/ui/main_window.py does not expose a literal "
+            "self._tab_names registry for release-claim validation"
+        ]
+    claimed_count = claims[0]
+    if claimed_count != len(registry):
+        return [
+            "CLAUDE.md states a "
+            f"{claimed_count}-page QStackedWidget but the shipped tab registry "
+            f"contains {len(registry)} pages: {', '.join(registry)}"
+        ]
+    return []
 
 
 def validate_release_claims(root) -> list[str]:
     """Return documentation claims that contradict the shipped product."""
     root = Path(root)
-    problems: list[str] = []
+    problems: list[str] = _validate_page_count_claim(root)
 
     try:
         readme = (root / "README.md").read_text(encoding="utf-8")

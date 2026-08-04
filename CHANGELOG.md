@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Corrected the agent-facing architecture notes for the seven-page shell,
+  SQLite package layout, and side-effect-free dependency bootstrap. The release
+  claims gate now detects drift between that documented page count and the
+  shipped tab registry.
+
 - Split the SQLite library, Browser Companion server, and post-processing
   Settings presets behind stable facades. Schema migration ordering, database
   table-family boundaries, server authentication/routes/static assets, and the
