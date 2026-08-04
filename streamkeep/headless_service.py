@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,6 +111,10 @@ class HeadlessJobService(QObject):
         self._probe_reapers: set[Any] = set()
         self._probe_reaper_releases: dict[Any, Any] = {}
         self._probe_reaper_lock = threading.Lock()
+        self._draining_workers: set[Any] = set()
+        self._draining_workers_lock = threading.Lock()
+        self._drain_thread: threading.Thread | None = None
+        self._lease_lock = threading.Lock()
         self._download_errors: set[str] = set()
         self._last_progress: dict[str, int] = {}
         self._started = False
@@ -137,6 +142,8 @@ class HeadlessJobService(QObject):
 
     def start(self) -> int:
         """Recover interrupted work and begin dispatching eligible jobs."""
+        if self._drain_thread is not None and self._drain_thread.is_alive():
+            raise RuntimeError("Queue executor is still draining workers")
         db.init_db()
         from .auth_profiles import ensure_migrated
         ensure_migrated()
@@ -159,6 +166,8 @@ class HeadlessJobService(QObject):
 
     def stop(self, wait_ms: int = 3000) -> None:
         """Stop workers without turning a service restart into job failure."""
+        if self._drain_thread is not None and self._drain_thread.is_alive():
+            return
         self._stopping = True
         self._started = False
         self._dispatch_timer.stop()
@@ -176,10 +185,11 @@ class HeadlessJobService(QObject):
                 worker.requestInterruption()
             except Exception:
                 pass
-        for worker in [
+        workers = [
             *self._fetchers.values(), *self._downloads.values(),
             *self._finalizers.values(),
-        ]:
+        ]
+        for worker in workers:
             if worker.isRunning():
                 worker.wait(max(0, int(wait_ms)))
         for worker in list(self._probe_reapers):
@@ -189,6 +199,12 @@ class HeadlessJobService(QObject):
             except Exception:
                 pass
         self._reap_probe_workers()
+        unfinished = [
+            worker for worker in workers
+            if not self._worker_finished(worker)
+        ]
+        if unfinished:
+            self._begin_worker_drain(unfinished)
         if self._backup_worker is not None and self._backup_worker.isRunning():
             # A backup is a short, self-contained write; let it finish so the
             # claim is released and no partial archive is left behind.
@@ -199,9 +215,8 @@ class HeadlessJobService(QObject):
             self._integrity_worker.requestInterruption()
             self._integrity_worker.wait(max(0, int(wait_ms)))
         self._integrity_worker = None
-        if self._lease_acquired:
-            db.release_executor_lease(self.owner_id)
-            self._lease_acquired = False
+        if not unfinished:
+            self._release_executor_lease()
         self._fetchers.clear()
         self._downloads.clear()
         self._finalizers.clear()
@@ -212,8 +227,8 @@ class HeadlessJobService(QObject):
         self._last_progress.clear()
 
     @staticmethod
-    def _probe_worker_finished(worker: Any) -> bool:
-        """Return the terminal state without trusting a completion signal."""
+    def _worker_finished(worker: Any) -> bool:
+        """Read terminal state directly instead of inferring it from signals."""
         try:
             return bool(worker.isFinished())
         except Exception:
@@ -221,6 +236,65 @@ class HeadlessJobService(QObject):
                 return not bool(worker.isRunning())
             except Exception:
                 return False
+
+    def _release_executor_lease(self) -> None:
+        with self._lease_lock:
+            if not self._lease_acquired:
+                return
+            db.release_executor_lease(self.owner_id)
+            self._lease_acquired = False
+
+    def _begin_worker_drain(self, workers: list[Any]) -> None:
+        with self._draining_workers_lock:
+            self._draining_workers.update(workers)
+            current = self._drain_thread
+            if current is not None and current.is_alive():
+                return
+            self._drain_thread = threading.Thread(
+                target=self._drain_workers,
+                name="streamkeep-worker-drain",
+                daemon=True,
+            )
+            self._drain_thread.start()
+
+    def _drain_workers(self) -> None:
+        """Keep the lease alive until every stopped worker is really finished."""
+        last_heartbeat = 0.0
+        while True:
+            with self._draining_workers_lock:
+                workers = tuple(self._draining_workers)
+            unfinished = [
+                worker for worker in workers
+                if not self._worker_finished(worker)
+            ]
+            if not unfinished:
+                break
+            now = time.monotonic()
+            if now - last_heartbeat >= 5.0:
+                with self._lease_lock:
+                    lease_acquired = self._lease_acquired
+                if lease_acquired and not db.heartbeat_executor_lease(self.owner_id):
+                    with self._lease_lock:
+                        self._lease_acquired = False
+                    write_log_line(
+                        "[SERVICE] Executor lease was lost while workers drained."
+                    )
+                last_heartbeat = now
+            for worker in unfinished:
+                try:
+                    worker.wait(250)
+                except Exception:
+                    pass
+            threading.Event().wait(0.05)
+        with self._draining_workers_lock:
+            self._draining_workers.clear()
+            self._drain_thread = None
+        self._release_executor_lease()
+
+    @staticmethod
+    def _probe_worker_finished(worker: Any) -> bool:
+        """Return the terminal state without trusting a completion signal."""
+        return HeadlessJobService._worker_finished(worker)
 
     def _reap_probe_workers(self) -> None:
         """Release timed-out probe workers only after QThread termination."""
@@ -565,7 +639,12 @@ class HeadlessJobService(QObject):
                 f"{job.get('platform', '') or 'source'} / "
                 f"{job.get('source_id', '') or job.get('webpage_url', '') or job.get('url', '')}"
             )
-        available = self.max_concurrent - len(self._fetchers) - len(self._downloads)
+        available = (
+            self.max_concurrent
+            - len(self._fetchers)
+            - len(self._downloads)
+            - len(self._finalizers)
+        )
         if available <= 0:
             return
         for job in db.load_queue_by_status("queued"):

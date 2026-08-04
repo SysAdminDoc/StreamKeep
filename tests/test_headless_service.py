@@ -205,6 +205,21 @@ class _FakeFinalizeWorker(QObject):
         return True
 
 
+class _BlockingFinalizeWorker(_FakeFinalizeWorker):
+    active = 0
+    max_active = 0
+
+    def start(self):
+        self._running = True
+        type(self).active += 1
+        type(self).max_active = max(type(self).max_active, type(self).active)
+
+    def cancel(self):
+        if self._running:
+            self._running = False
+            type(self).active -= 1
+
+
 class HeadlessJobServiceTests(unittest.TestCase):
     def setUp(self):
         self.app = QCoreApplication.instance() or QCoreApplication([])
@@ -340,6 +355,65 @@ class HeadlessJobServiceTests(unittest.TestCase):
             self.assertNotIn(worker, service._probe_reapers)
             self.assertTrue(service._probe_slots.acquire(blocking=False))
             service._probe_slots.release()
+
+    def test_stop_holds_executor_lease_until_unfinished_worker_is_finished(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with mock.patch.object(db, "DB_PATH", root / "library.db"):
+                db.init_db()
+                service = HeadlessJobService(
+                    output_dir=str(root / "output"),
+                    owner_id="draining-owner",
+                )
+                service.start()
+                worker = _StuckProbeWorker("https://example.com/stuck")
+                service._fetchers["stuck-job"] = worker
+                service.stop(wait_ms=0)
+
+                lease = db.get_executor_lease()
+                self.assertIsNotNone(lease)
+                refused = db.acquire_executor_lease(
+                    "replacement-owner", owner_kind="headless server",
+                )
+                self.assertFalse(refused["acquired"])
+                self.assertIn(worker, service._draining_workers)
+
+                worker._finished = True
+                for _ in range(50):
+                    if db.get_executor_lease() is None:
+                        break
+                    time.sleep(0.01)
+                self.assertIsNone(db.get_executor_lease())
+
+    def test_finalizers_consume_the_download_concurrency_budget(self):
+        _BlockingFinalizeWorker.active = 0
+        _BlockingFinalizeWorker.max_active = 0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with (
+                mock.patch.object(db, "DB_PATH", root / "library.db"),
+                mock.patch("streamkeep.headless_service.FetchWorker", _FakeFetchWorker),
+                mock.patch("streamkeep.headless_service.DownloadWorker", _FakeDownloadWorker),
+                mock.patch(
+                    "streamkeep.headless_service.FinalizeWorker",
+                    _BlockingFinalizeWorker,
+                ),
+            ):
+                service = HeadlessJobService(
+                    output_dir=str(root / "output"), max_concurrent=1,
+                )
+                service.start()
+                service.enqueue("https://example.com/one")
+                service.enqueue("https://example.com/two")
+                for _ in range(10):
+                    self.app.processEvents()
+                state = service.state_snapshot()
+                service.stop()
+
+        self.assertEqual(_BlockingFinalizeWorker.max_active, 1)
+        self.assertEqual(len([job for job in state["queue"] if job["status"] == "finalizing"]), 1)
+        self.assertEqual(len([job for job in state["queue"] if job["status"] == "queued"]), 1)
+
 
     def test_second_executor_refuses_with_actionable_owner_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:
