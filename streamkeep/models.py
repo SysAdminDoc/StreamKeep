@@ -261,6 +261,7 @@ class MonitorEntry:
     interval_secs: int = 120
     auto_record: bool = False
     subscribe_vods: bool = False          # Check for new VODs and queue them
+    capture_comments: bool = False        # Archive public comments for VOD jobs
     last_check: float = 0
     last_status: str = "unknown"          # live, offline, error
     is_recording: bool = False
@@ -332,6 +333,7 @@ class ResumeState:
     mute: bool = False
     download_subs: bool = False
     capture_youtube_chat: bool = False
+    capture_comments: bool = False
     subtitle_languages: str = ""
     subtitle_auto: bool = True
     subtitle_convert: str = ""

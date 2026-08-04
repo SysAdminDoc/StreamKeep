@@ -180,10 +180,13 @@ class DownloadFinalizeMixin:
                         )
                     except Exception:
                         pass  # safe: best-effort fallback; preserve the primary operation
-        if succeeded and is_upgrade:
+        if succeeded:
+            # Finalize may have just created comments/transcript sidecars;
+            # refresh local indexes after the worker has finished.
             self._index_finalized_recording(
                 result.get("out_dir", ""), result.get("info"),
             )
+        if succeeded and is_upgrade:
             self._media_server_import(
                 result.get("out_dir", ""), result.get("info"),
             )
@@ -367,6 +370,18 @@ class DownloadFinalizeMixin:
             "feed_url": (getattr(info_copy, "feed_url", "") if info_copy else ""),
             "write_nfo": bool(self._write_nfo and info_copy),
             "download_chat": bool(TwitchExtractor.download_chat_enabled and info_copy),
+            "capture_comments": bool(
+                queue_item.get(
+                    "capture_comments",
+                    self._config.get("capture_comments", False),
+                )
+                if queue_item is not None
+                else self._config.get("capture_comments", False)
+            ),
+            "comment_max_count": self._config.get("comment_max_count", 5000),
+            "comment_max_bytes": self._config.get(
+                "comment_max_bytes", 4 * 1024 * 1024,
+            ),
             "postprocess_snapshot": self._postprocess_snapshot() if info_copy else {},
             "platform": (info_copy.platform if info_copy and info_copy.platform else "?"),
             "channel": self._infer_history_channel(

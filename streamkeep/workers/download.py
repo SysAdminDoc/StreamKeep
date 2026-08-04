@@ -112,6 +112,9 @@ class DownloadWorker(QThread):
         # Opt-in: fetch the YouTube live-chat replay as a live_chat.json sidecar
         # (finalize normalizes it into the shared chat model). YouTube only.
         self.capture_youtube_chat = False
+        # Opt-in: ask yt-dlp to retain public platform comments in info JSON;
+        # finalize converts that bounded payload into a searchable sidecar.
+        self.capture_comments = False
         self.sponsorblock = False
         self.sponsorblock_mark = ""
         self.sponsorblock_remove = ""
@@ -261,6 +264,7 @@ class DownloadWorker(QThread):
             state.mute = bool(self.mute)
             state.download_subs = bool(self.download_subs)
             state.capture_youtube_chat = bool(self.capture_youtube_chat)
+            state.capture_comments = bool(self.capture_comments)
             state.subtitle_languages = self.subtitle_languages or ""
             state.subtitle_auto = bool(self.subtitle_auto)
             state.subtitle_convert = self.subtitle_convert or ""
@@ -1226,6 +1230,13 @@ class DownloadWorker(QThread):
         capture_chat = bool(self.capture_youtube_chat) and _yt_url(
             self._effective_ytdlp_source()
         )
+        capture_comments = bool(self.capture_comments) and _yt_url(
+            self._effective_ytdlp_source()
+        )
+        if capture_comments:
+            # --write-comments stores the public comment objects in the info
+            # JSON; finalize reads that local artifact without profile calls.
+            cmd.extend(["--write-info-json", "--write-comments"])
         if subtitle_options["enabled"] or capture_chat:
             langs = subtitle_options["languages"] if subtitle_options["enabled"] else ""
             if capture_chat:

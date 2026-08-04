@@ -212,6 +212,7 @@ class MainWindowJobsMixin:
                 mute=bool(getattr(state, "mute", False)),
                 download_subs=bool(state.download_subs),
                 capture_youtube_chat=bool(state.capture_youtube_chat),
+                capture_comments=bool(getattr(state, "capture_comments", False)),
                 subtitle_languages=state.subtitle_languages or "",
                 subtitle_auto=bool(state.subtitle_auto),
                 subtitle_convert=state.subtitle_convert or "",

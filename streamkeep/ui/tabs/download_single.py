@@ -1176,6 +1176,7 @@ class DownloadSingleMixin:
             auth_profile_id=auth_profile_id,
             download_subs=subtitle_options["enabled"],
             capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            capture_comments=YtDlpExtractor.capture_comments,
             subtitle_languages=subtitle_options["languages"],
             subtitle_auto=subtitle_options["automatic"],
             subtitle_convert=subtitle_options["convert"],

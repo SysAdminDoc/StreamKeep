@@ -235,7 +235,10 @@ class ChannelMonitor(QObject):
         self._timer.timeout.connect(self._poll_tick)
         self._timer.start(15_000)  # check one channel every 15s
 
-    def add_channel(self, url, interval=120, auto_record=False, subscribe_vods=False):
+    def add_channel(
+        self, url, interval=120, auto_record=False, subscribe_vods=False,
+        capture_comments=False,
+    ):
         ext = Extractor.detect(url)
         if not ext:
             return False
@@ -253,6 +256,7 @@ class ChannelMonitor(QObject):
                 url=url, platform=ext.NAME, channel_id=ch_id,
                 interval_secs=interval, auto_record=auto_record,
                 subscribe_vods=subscribe_vods,
+                capture_comments=bool(capture_comments),
             ))
         self.status_changed.emit()
         return True
@@ -351,6 +355,7 @@ class ChannelMonitor(QObject):
             "platform": e.platform, "channel_id": e.channel_id,
             "auto_record": e.auto_record,
             "subscribe_vods": e.subscribe_vods,
+            "capture_comments": bool(e.capture_comments),
             "archive_ids": list(e.archive_ids),
             "override_output_dir": e.override_output_dir or "",
             "override_quality_pref": e.override_quality_pref or "",
@@ -376,6 +381,7 @@ class ChannelMonitor(QObject):
                 "url": e.url, "interval": e.interval_secs,
                 "auto_record": e.auto_record,
                 "subscribe_vods": e.subscribe_vods,
+                "capture_comments": bool(e.capture_comments),
                 "archive_ids": list(e.archive_ids),
                 "override_output_dir": e.override_output_dir or "",
                 "override_quality_pref": e.override_quality_pref or "",
@@ -424,6 +430,7 @@ class ChannelMonitor(QObject):
                     if isinstance(archive_ids, list):
                         e.archive_ids = [str(x) for x in archive_ids if x]
                     e.override_output_dir = str(ch.get("override_output_dir", "") or "")
+                    e.capture_comments = bool(ch.get("capture_comments", False))
                     e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
                     e.override_filename_template = str(ch.get("override_filename_template", "") or "")
                     e.schedule_start_hhmm = str(ch.get("schedule_start_hhmm", "") or "")

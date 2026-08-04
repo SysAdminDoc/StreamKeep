@@ -603,6 +603,7 @@ class MonitorTabMixin:
             if ok:
                 for e in self.monitor.entries:
                     if e.url == ch["url"]:
+                        e.capture_comments = bool(ch.get("capture_comments", False))
                         e.override_output_dir = str(ch.get("override_output_dir", "") or "")
                         e.override_quality_pref = str(ch.get("override_quality_pref", "") or "")
                         e.override_filename_template = str(ch.get("override_filename_template", "") or "")
@@ -1626,10 +1627,12 @@ class MonitorTabMixin:
         added = 0
         source_url = ""
         template_name = ""
+        capture_comments = False
         for entry in self.monitor.entries:
             if entry.channel_id == channel_id:
                 source_url = entry.url
                 template_name = entry.ytdlp_template_name or ""
+                capture_comments = bool(getattr(entry, "capture_comments", False))
                 break
         archive_path = ""
         if source_url:
@@ -1674,6 +1677,7 @@ class MonitorTabMixin:
                 download_archive="" if is_upgrade else archive_path,
                 break_on_existing=False if is_upgrade else bool(archive_path),
                 ytdlp_template_name=template_name,
+                capture_comments=capture_comments,
                 is_upgrade=is_upgrade,
                 upgrade_history_id=(
                     upgrade_from.db_id if upgrade_from is not None else 0

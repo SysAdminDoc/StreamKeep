@@ -74,7 +74,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
   recorded in a compactable append-only history log so backup restores and
   database rebuilds can replay the current library state.
 - Keep user preferences in `%APPDATA%\StreamKeep\config.json`; portable mode uses `portable.txt` beside the executable and stores data under `data/`.
-- Search across history, monitor entries, queue rows, transcripts, and tags.
+- Search across history, monitor entries, queue rows, transcripts, platform comments, and tags. YouTube VOD comments are opt-in per job or monitor profile, written as bounded versioned `*.comments.json` sidecars, and indexed by author and text without profile lookups.
 - Open and search large archives through snapshot-stable, keyset-paged SQLite/Qt models; History metadata search uses FTS indexes and loads 100 rows at a time instead of creating one widget per recording.
 - Scan storage by platform/channel/title, detect orphaned files, and recycle selected recordings through the OS recycle bin.
 - Storage scans run in an interruptible background worker, and History/Storage schedule thumbnails only for visible and near-visible rows while cancelling stale page work.
@@ -202,7 +202,7 @@ For sources resolved through yt-dlp direct mode, the desktop Advanced panel and 
 
 Raw captures use FFmpeg directly and never route through yt-dlp. RTSP supports explicit TCP/UDP transport, RTMP-listen and SRT-listener jobs bind local listener endpoints, SRT caller/listener passphrases are read from stdin or `STREAMKEEP_SRT_PASSPHRASE`, multicast jobs require numeric multicast addresses, and ICY radio can preserve `StreamTitle` changes as a redacted track manifest plus per-track MP3 fragments. Every raw job has a hard maximum duration; the default is seven days and can be lowered with `--max-duration`. Self-signed TLS is opt-in for RTSPS/RTMPS and requires FFmpeg 8 or newer.
 
-Playlist/channel expansion can be narrowed in Advanced with yt-dlp item ranges, after/before dates, match filters, and a maximum download count. Incremental archive sync stores a private archive per source, stops expansion when it reaches previously downloaded entries, and is also applied automatically to monitor VOD subscriptions.
+Playlist/channel expansion can be narrowed in Advanced with yt-dlp item ranges, after/before dates, match filters, and a maximum download count. Incremental archive sync stores a private archive per source, stops expansion when it reaches previously downloaded entries, and is also applied automatically to monitor VOD subscriptions. For a YouTube VOD, `python StreamKeep.py download <url> --comments` opts that job into bounded public-comment archival; Settings controls the default, maximum comment count, and sidecar byte cap, while each monitor profile can opt in independently. A source that refuses or rate-limits comments is logged as unavailable and does not fail the media download.
 
 Portable-secret commands prompt for a password. For non-interactive automation, provide it through `STREAMKEEP_PORTABLE_SECRET_PASSWORD`; passwords are never accepted in command-line arguments or written to logs.
 

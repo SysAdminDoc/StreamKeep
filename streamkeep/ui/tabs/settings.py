@@ -1746,11 +1746,50 @@ def build_settings_tab(win):
         "normalized into StreamKeep's chat pipeline at finalize; unavailable "
         "replay is non-fatal."
     )
+    win.capture_comments_check = QCheckBox(
+        "Archive YouTube comments for VODs"
+    )
+    win.capture_comments_check.setChecked(
+        bool(win._config.get("capture_comments", False))
+    )
+    win.capture_comments_check.setToolTip(
+        "Opt in per download to retain public comment text and published author "
+        "names. Refused or rate-limited comments are recorded as unavailable "
+        "without failing the media download."
+    )
+    comments_limits_row = QHBoxLayout()
+    comments_limits_row.setSpacing(8)
+    comments_limits_row.addWidget(QLabel("Comment bounds:"))
+    from ...metadata import DEFAULT_COMMENT_MAX_COUNT, DEFAULT_COMMENT_MAX_BYTES
+    win.comment_max_count_spin = QSpinBox()
+    win.comment_max_count_spin.setRange(1, 100000)
+    win.comment_max_count_spin.setValue(int(win._config.get(
+        "comment_max_count", DEFAULT_COMMENT_MAX_COUNT
+    ) or DEFAULT_COMMENT_MAX_COUNT))
+    win.comment_max_count_spin.setSuffix(" comments")
+    win.comment_max_count_spin.setToolTip(
+        "Maximum number of comments written per recording."
+    )
+    comments_limits_row.addWidget(win.comment_max_count_spin)
+    win.comment_max_bytes_spin = QSpinBox()
+    win.comment_max_bytes_spin.setRange(1, 4 * 1024 * 1024)
+    win.comment_max_bytes_spin.setSingleStep(64 * 1024)
+    win.comment_max_bytes_spin.setValue(int(win._config.get(
+        "comment_max_bytes", DEFAULT_COMMENT_MAX_BYTES
+    ) or DEFAULT_COMMENT_MAX_BYTES))
+    win.comment_max_bytes_spin.setSuffix(" bytes")
+    win.comment_max_bytes_spin.setToolTip(
+        "Maximum UTF-8 size of the versioned comments sidecar."
+    )
+    comments_limits_row.addWidget(win.comment_max_bytes_spin)
+    comments_limits_row.addStretch(1)
     win.sponsorblock_check = QCheckBox("Enable SponsorBlock by default")
     yt_lay.addWidget(win.subs_check)
     yt_lay.addLayout(subs_languages_row)
     yt_lay.addLayout(subs_output_row)
     yt_lay.addWidget(win.capture_youtube_chat_check)
+    yt_lay.addWidget(win.capture_comments_check)
+    yt_lay.addLayout(comments_limits_row)
     yt_lay.addWidget(win.sponsorblock_check)
 
     sb_delay_row = QHBoxLayout()
@@ -1836,6 +1875,7 @@ def build_settings_tab(win):
     win.subs_check.setChecked(bool(win._config.get("download_subs", False)))
     YtDlpExtractor.download_subs = win.subs_check.isChecked()
     YtDlpExtractor.capture_youtube_chat = win.capture_youtube_chat_check.isChecked()
+    YtDlpExtractor.capture_comments = win.capture_comments_check.isChecked()
     YtDlpExtractor.subtitle_languages = win.subs_languages_input.text()
     YtDlpExtractor.subtitle_auto = win.subs_auto_check.isChecked()
     YtDlpExtractor.subtitle_convert = saved_sub_convert

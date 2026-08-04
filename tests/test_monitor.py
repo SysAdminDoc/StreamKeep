@@ -191,6 +191,20 @@ class ChannelMonitorDedupTests(unittest.TestCase):
             self.assertEqual(len(restored.entries), 1)
             self.assertEqual(restored.entries[0].auth_profile_id, "ap_members")
 
+    def test_db_roundtrip_preserves_comment_capture_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = f"{tmpdir}/library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                self.assertTrue(self.monitor.add_channel("https://x/chan"))
+                self.monitor.entries[0].capture_comments = True
+                self.monitor.save_to_db()
+
+                restored = ChannelMonitor()
+                restored.load_from_db()
+
+            assert restored.entries[0].capture_comments is True
+
     def test_new_vods_filter_user_tombstones_but_keep_lifecycle_markers_nonblocking(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = f"{tmpdir}/library.db"

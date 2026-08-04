@@ -34,7 +34,7 @@ from ..sqlite_runtime import connect as sqlite_connect
 from ..sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 HISTORY_ACTION_COMPACTION_LIMIT = 10_000
 _HISTORY_ACTION_STATE_FIELDS = (
@@ -353,6 +353,7 @@ def _apply_schema(db):
             interval_secs               INTEGER NOT NULL DEFAULT 120,
             auto_record                 INTEGER NOT NULL DEFAULT 0,
             subscribe_vods              INTEGER NOT NULL DEFAULT 0,
+            capture_comments            INTEGER NOT NULL DEFAULT 0,
             archive_ids                 TEXT    NOT NULL DEFAULT '[]',
             override_output_dir         TEXT    NOT NULL DEFAULT '',
             override_quality_pref       TEXT    NOT NULL DEFAULT '',
@@ -1044,6 +1045,20 @@ def _migrate_history_actions_v20(db):
             continue
         _append_history_action_in_connection(
             db, int(row[0]), "snapshot", dict(row),
+        )
+
+
+def _migrate_comments_v21(db):
+    """Add the per-monitor opt-in for bounded VOD comment archives."""
+    existing_cols = {
+        row[1] for row in db.execute(
+            "PRAGMA table_info(monitor_channels)"
+        ).fetchall()
+    }
+    if existing_cols and "capture_comments" not in existing_cols:
+        db.execute(
+            "ALTER TABLE monitor_channels ADD COLUMN "
+            "capture_comments INTEGER NOT NULL DEFAULT 0"
         )
 
 
@@ -3350,7 +3365,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
             cur = db.execute("""
                 INSERT OR REPLACE INTO monitor_channels
                     (url, platform, channel_id, interval_secs, auto_record,
-                     subscribe_vods, archive_ids,
+                     subscribe_vods, capture_comments, archive_ids,
                      override_output_dir, override_quality_pref,
                      override_filename_template,
                      schedule_start_hhmm, schedule_end_hhmm, schedule_days_mask,
@@ -3358,7 +3373,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                      ytdlp_template_name, auto_upgrade, min_upgrade_quality,
                      upgrade_profile_json,
                      auth_profile_id, media_server_layout)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(entry_dict.get("url", "")),
                 str(entry_dict.get("platform", "")),
@@ -3366,6 +3381,7 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
                 int(entry_dict.get("interval_secs", 120) or 120),
                 int(bool(entry_dict.get("auto_record", False))),
                 int(bool(entry_dict.get("subscribe_vods", False))),
+                int(bool(entry_dict.get("capture_comments", False))),
                 json.dumps(entry_dict.get("archive_ids", []) or []),
                 str(entry_dict.get("override_output_dir", "") or ""),
                 str(entry_dict.get("override_quality_pref", "") or ""),
@@ -3404,7 +3420,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                 db.execute("""
                     INSERT INTO monitor_channels
                         (url, platform, channel_id, interval_secs, auto_record,
-                         subscribe_vods, archive_ids,
+                         subscribe_vods, capture_comments, archive_ids,
                          override_output_dir, override_quality_pref,
                          override_filename_template,
                          schedule_start_hhmm, schedule_end_hhmm,
@@ -3413,7 +3429,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                          ytdlp_template_name, auto_upgrade, min_upgrade_quality,
                          upgrade_profile_json,
                          auth_profile_id, media_server_layout)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     str(d.get("url", "")),
                     str(d.get("platform", "")),
@@ -3421,6 +3437,7 @@ def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
                     int(d.get("interval_secs", 120) or 120),
                     int(bool(d.get("auto_record", False))),
                     int(bool(d.get("subscribe_vods", False))),
+                    int(bool(d.get("capture_comments", False))),
                     json.dumps(d.get("archive_ids", []) or []),
                     str(d.get("override_output_dir", "") or ""),
                     str(d.get("override_quality_pref", "") or ""),
@@ -6326,6 +6343,7 @@ def _row_to_monitor_dict(row):
     d = dict(row)
     d["auto_record"] = bool(d.get("auto_record", 0))
     d["subscribe_vods"] = bool(d.get("subscribe_vods", 0))
+    d["capture_comments"] = bool(d.get("capture_comments", 0))
     d["auto_upgrade"] = bool(d.get("auto_upgrade", 0))
     try:
         d["archive_ids"] = json.loads(d.get("archive_ids", "[]") or "[]")
@@ -6574,6 +6592,7 @@ def migrate_from_config(cfg: dict[str, Any]) -> bool:
                 "interval_secs": ch.get("interval", 120),
                 "auto_record": ch.get("auto_record", False),
                 "subscribe_vods": ch.get("subscribe_vods", False),
+                "capture_comments": ch.get("capture_comments", False),
                 "archive_ids": ch.get("archive_ids", []),
                 "override_output_dir": ch.get("override_output_dir", ""),
                 "override_quality_pref": ch.get("override_quality_pref", ""),

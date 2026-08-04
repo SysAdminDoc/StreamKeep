@@ -481,6 +481,7 @@ def _run_download(args):
             mute=output_options["mute"],
             download_subs=subtitle_options["enabled"],
             capture_youtube_chat=bool(getattr(args, "youtube_chat", False)),
+            capture_comments=bool(getattr(args, "capture_comments", False)),
             subtitle_languages=subtitle_options["languages"],
             subtitle_auto=subtitle_options["automatic"],
             subtitle_convert=subtitle_options["convert"],
@@ -2261,6 +2262,11 @@ def build_parser():
         "--youtube-chat", action="store_true",
         help="For YouTube VODs, also fetch the live-chat replay "
              "(live_chat.json), normalized into the chat pipeline at finalize",
+    )
+    dl.add_argument(
+        "--comments", "--capture-comments", dest="capture_comments",
+        action="store_true",
+        help="For YouTube VODs, archive bounded public comments in a sidecar",
     )
     dl.add_argument(
         "--sponsorblock-mark", default="",

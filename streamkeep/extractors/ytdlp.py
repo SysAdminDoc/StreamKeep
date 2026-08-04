@@ -477,6 +477,7 @@ class YtDlpExtractor(Extractor):
     resolve_timeout = 300
     download_subs = False
     capture_youtube_chat = False
+    capture_comments = False
     subtitle_languages = "en.*,en"
     subtitle_auto = True
     subtitle_convert = ""

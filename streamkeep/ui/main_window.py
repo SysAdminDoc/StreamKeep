@@ -2999,9 +2999,9 @@ class StreamKeep(
                 items.append(item)
                 count += 1
 
-        # Transcript FTS search (F27)
+        # Transcript and platform-comment FTS search (F27/V100)
         try:
-            from ..search import search_transcripts
+            from ..search import search_comments, search_transcripts
             hits = search_transcripts(query, limit=cap)
             for hit in hits:
                 snippet = (hit.get("text", "") or "")[:80]
@@ -3010,8 +3010,17 @@ class StreamKeep(
                 )
                 item.setData(Qt.ItemDataRole.UserRole, ("transcript", hit))
                 items.append(item)
+            for hit in search_comments(query, limit=cap):
+                snippet = (hit.get("text", "") or "")[:80]
+                author = (hit.get("author", "") or "anonymous")[:32]
+                item = QListWidgetItem(
+                    f"[Comment] {author}: {snippet}... "
+                    f"({hit.get('recording_path', '')[-40:]})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("comment", hit))
+                items.append(item)
         except Exception as error:
-            self._log(f"[SEARCH] Transcript search unavailable: {error}")
+            self._log(f"[SEARCH] Transcript/comment search unavailable: {error}")
 
         if items:
             for it in items:
@@ -3046,6 +3055,13 @@ class StreamKeep(
             self._switch_tab(2)
             if hasattr(self, "history_search") and hasattr(self, "transcript_search_check"):
                 self.transcript_search_check.setChecked(True)
+                self.history_search.setText(
+                    self._global_search.text().strip()[:30]
+                )
+        elif source == "comment":
+            self._switch_tab(2)
+            if hasattr(self, "history_search") and hasattr(self, "comment_search_check"):
+                self.comment_search_check.setChecked(True)
                 self.history_search.setText(
                     self._global_search.text().strip()[:30]
                 )

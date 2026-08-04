@@ -1104,6 +1104,19 @@ class SettingsPreferencesMixin:
             self._config["capture_youtube_chat"] = (
                 self.capture_youtube_chat_check.isChecked()
             )
+        if hasattr(self, "capture_comments_check"):
+            YtDlpExtractor.capture_comments = (
+                self.capture_comments_check.isChecked()
+            )
+            self._config["capture_comments"] = (
+                self.capture_comments_check.isChecked()
+            )
+            self._config["comment_max_count"] = int(
+                self.comment_max_count_spin.value()
+            )
+            self._config["comment_max_bytes"] = int(
+                self.comment_max_bytes_spin.value()
+            )
         if hasattr(self, "youtube_client_combo"):
             preset = str(self.youtube_client_combo.currentData() or "")
             YtDlpExtractor.youtube_player_client = preset

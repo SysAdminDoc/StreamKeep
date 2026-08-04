@@ -246,6 +246,9 @@ def _sanitize_resume_payload(data, output_dir):
         "capture_youtube_chat": _sanitize_bool(
             data.get("capture_youtube_chat", False)
         ),
+        "capture_comments": _sanitize_bool(
+            data.get("capture_comments", False)
+        ),
         "subtitle_languages": _sanitize_text(
             data.get("subtitle_languages", ""), max_len=1024
         ),

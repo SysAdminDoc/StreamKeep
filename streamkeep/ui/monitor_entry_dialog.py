@@ -300,6 +300,20 @@ class MonitorEntryDialog(TranslatableDialog):
         self.ytdlp_template_combo.currentIndexChanged.connect(self._update_summary)
         content.addWidget(self.ytdlp_template_combo)
 
+        self.capture_comments_check = QCheckBox(
+            "Archive public comments for subscribed VODs"
+        )
+        self.capture_comments_check.setChecked(
+            bool(getattr(self.entry, "capture_comments", False))
+        )
+        self.capture_comments_check.setToolTip(
+            "Opt this monitored channel into bounded yt-dlp comment capture. "
+            "The source's published author name and comment text are stored "
+            "without profile lookups; unavailable comments are non-fatal."
+        )
+        self.capture_comments_check.toggled.connect(self._update_summary)
+        content.addWidget(self.capture_comments_check)
+
         self.auto_upgrade_check = QCheckBox("Auto-upgrade when a better quality VOD appears")
         self.auto_upgrade_check.setChecked(bool(self.entry.auto_upgrade))
         self.auto_upgrade_check.toggled.connect(self._update_summary)
@@ -410,6 +424,8 @@ class MonitorEntryDialog(TranslatableDialog):
             parts.append(
                 f"yt-dlp args {self.ytdlp_template_combo.currentData()}"
             )
+        if self.capture_comments_check.isChecked():
+            parts.append("archive VOD comments")
         if self.auto_upgrade_check.isChecked():
             parts.append("auto-upgrade")
             if self.upgrade_profile_input.text().strip():
@@ -463,6 +479,7 @@ class MonitorEntryDialog(TranslatableDialog):
         entry.filter_keywords = self.keywords_input.text().strip()
         entry.override_pp_preset = self.pp_preset_combo.currentData() or ""
         entry.ytdlp_template_name = self.ytdlp_template_combo.currentData() or ""
+        entry.capture_comments = self.capture_comments_check.isChecked()
         entry.auto_upgrade = self.auto_upgrade_check.isChecked()
         entry.min_upgrade_quality = self.min_upgrade_combo.currentData() or ""
         profile_text = self.upgrade_profile_input.text().strip()

@@ -186,6 +186,8 @@ class FinalizeWorker(QThread):
             steps.append(("Exporting chapters", "chapters"))
         if getattr(info, "markers", None) or getattr(info, "marker_schedules", None):
             steps.append(("Exporting HLS markers", "markers"))
+        if task.get("capture_comments"):
+            steps.append(("Archiving platform comments", "comments"))
         if task.get("download_chat") and self._chat_vod_id(info):
             steps.append(("Downloading chat", "chat"))
         if self._podcast_feed_url(task, info):
@@ -205,6 +207,51 @@ class FinalizeWorker(QThread):
         if task.get("is_upgrade") and task.get("record_manifest", True):
             steps.append(("Activating verified upgrade", "activate"))
         return steps
+
+    def _comments_info_path(self, out_dir, file_base):
+        """Resolve the info JSON produced by the current yt-dlp job."""
+        base = os.path.basename(file_base) if file_base else "recording"
+        expected = os.path.join(out_dir, f"{base}.info.json")
+        if os.path.isfile(expected):
+            return expected
+        try:
+            candidates = [
+                os.path.join(out_dir, name)
+                for name in os.listdir(out_dir)
+                if name.lower().endswith(".info.json")
+                and os.path.isfile(os.path.join(out_dir, name))
+            ]
+        except OSError:
+            return expected
+        return candidates[0] if len(candidates) == 1 else expected
+
+    def _run_comments(self, task, out_dir, file_base):
+        """Extract comments best-effort; comments never fail finalization."""
+        try:
+            result = MetadataSaver.write_comments(
+                out_dir,
+                file_base=file_base,
+                source_url=task.get("history_url", ""),
+                info_path=self._comments_info_path(out_dir, file_base),
+                max_count=task.get("comment_max_count", 5000),
+                max_bytes=task.get("comment_max_bytes", 4 * 1024 * 1024),
+            )
+        except Exception as error:
+            self.log.emit(f"[COMMENTS] Sidecar write skipped: {error}")
+            return
+        if result["status"] != "captured":
+            self.log.emit(
+                f"[COMMENTS] Unavailable: {result['reason'] or 'unknown source response'}"
+            )
+        elif result["truncated"]:
+            self.log.emit(
+                f"[COMMENTS] Saved {result['count']} comment(s); archive was bounded"
+            )
+        else:
+            self.log.emit(
+                f"[COMMENTS] Saved {result['count']} comment(s) to "
+                f"{os.path.basename(result['path'])}"
+            )
 
     def _run_podcast_sidecars(self, task, info, out_dir, file_base):
         """Fetch transcript/chapter sidecars for a podcast episode from its
@@ -404,6 +451,12 @@ class FinalizeWorker(QThread):
                             f"[HLS] Exported marker sidecar for "
                             f"{file_base or 'recording'}"
                         )
+                if task.get("capture_comments") and not self._interrupted():
+                    step_no += 1
+                    self._emit_progress(
+                        "Archiving platform comments", step_no, total_steps,
+                    )
+                    self._run_comments(task, out_dir, file_base)
                 if task.get("download_chat") and chat_vod_id and not self._interrupted():
                     step_no += 1
                     self._emit_progress("Downloading chat", step_no, total_steps)

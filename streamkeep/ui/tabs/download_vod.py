@@ -464,6 +464,7 @@ class DownloadVodMixin:
             proxy=YtDlpExtractor.proxy,
             download_subs=YtDlpExtractor.download_subs,
             capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            capture_comments=YtDlpExtractor.capture_comments,
             subtitle_languages=YtDlpExtractor.subtitle_languages,
             subtitle_auto=YtDlpExtractor.subtitle_auto,
             subtitle_convert=YtDlpExtractor.subtitle_convert,

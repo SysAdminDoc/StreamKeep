@@ -390,6 +390,7 @@ class DownloadQueueMixin:
                 item.get("download_archive", "") or ""
             ),
             "break_on_existing": bool(item.get("break_on_existing", False)),
+            "capture_comments": bool(item.get("capture_comments", False)),
             "ytdlp_template_name": str(
                 item.get("ytdlp_template_name", "") or ""
             ),
@@ -473,6 +474,7 @@ class DownloadQueueMixin:
         upgrade_min_quality="",
         upgrade_profile=None,
         request_headers=None,
+        capture_comments=None,
     ):
         """Append a URL to the persistent download queue.
         If start_at (ISO timestamp) is set, the item will only be picked
@@ -581,6 +583,10 @@ class DownloadQueueMixin:
             "webpage_url": webpage_url,
             "download_archive": download_archive,
             "break_on_existing": break_on_existing,
+            "capture_comments": (
+                bool(self._config.get("capture_comments", False))
+                if capture_comments is None else bool(capture_comments)
+            ),
             "ytdlp_template_name": (
                 smart_job.get("arg_template") or ytdlp_template_name
             ),
@@ -1198,6 +1204,7 @@ class DownloadQueueMixin:
             auth_profile_id=auth_profile_id,
             download_subs=YtDlpExtractor.download_subs,
             capture_youtube_chat=YtDlpExtractor.capture_youtube_chat,
+            capture_comments=bool(item.get("capture_comments", self._config.get("capture_comments", False))),
             subtitle_languages=YtDlpExtractor.subtitle_languages,
             subtitle_auto=YtDlpExtractor.subtitle_auto,
             subtitle_convert=YtDlpExtractor.subtitle_convert,
@@ -1332,6 +1339,7 @@ class DownloadQueueMixin:
         self._fire_hook("download_complete", title=title)
         self._save_metadata(
             out_dir, q_name, history_url=item.get("url", ""), info=info,
+            queue_item=item,
         )
         self._media_server_import(out_dir, info)
         # Handle recurrence or mark done
@@ -1985,6 +1993,7 @@ class DownloadQueueMixin:
                 state.mute = bool(worker.mute)
                 state.download_subs = bool(worker.download_subs)
                 state.capture_youtube_chat = bool(worker.capture_youtube_chat)
+                state.capture_comments = bool(getattr(worker, "capture_comments", False))
                 state.subtitle_languages = worker.subtitle_languages or ""
                 state.subtitle_auto = bool(worker.subtitle_auto)
                 state.subtitle_convert = worker.subtitle_convert or ""

@@ -19,6 +19,12 @@ METADATA_SCHEMA = "streamkeep.metadata"
 METADATA_SCHEMA_VERSION = 3
 MAX_METADATA_BYTES = 4 * 1024 * 1024
 MAX_IMPORT_SIDECAR_BYTES = 32 * 1024 * 1024
+COMMENTS_SCHEMA = "streamkeep.comments"
+COMMENTS_SCHEMA_VERSION = 1
+DEFAULT_COMMENT_MAX_COUNT = 5000
+DEFAULT_COMMENT_MAX_BYTES = 4 * 1024 * 1024
+MAX_COMMENT_MAX_COUNT = 100_000
+MAX_COMMENT_MAX_BYTES = MAX_METADATA_BYTES
 NFO_PARSE_ERROR = "nfo_parse_error"
 
 _PUBLIC_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
@@ -1048,6 +1054,139 @@ def _atomic_write_text(path, text):
     return str(target)
 
 
+def _comment_limit(value, default, maximum):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(1, min(int(maximum), value))
+
+
+def _comment_public_text(value, limit):
+    return scrub_public_text(str(value or "")).strip()[:limit]
+
+
+def _comment_published_at(value):
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        try:
+            timestamp = float(value)
+            if math.isfinite(timestamp) and 0 < timestamp < 4_102_444_800:
+                return datetime.fromtimestamp(
+                    timestamp, timezone.utc,
+                ).isoformat(timespec="seconds")
+        except (OverflowError, OSError, ValueError):
+            return ""
+    return _comment_public_text(value, 64)
+
+
+def _comment_like_count(value):
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(2_147_483_647, count))
+
+
+def normalize_ytdlp_comments(
+    info,
+    *,
+    source_url="",
+    max_count=DEFAULT_COMMENT_MAX_COUNT,
+    max_bytes=DEFAULT_COMMENT_MAX_BYTES,
+    captured_at=None,
+):
+    """Build a bounded public comment archive from a yt-dlp info dict.
+
+    yt-dlp's comment objects are intentionally reduced to fields published by
+    the source. In particular, author IDs, thumbnails, and any profile data
+    are not copied and no follow-up profile lookup is performed.
+    """
+    max_count = _comment_limit(
+        max_count, DEFAULT_COMMENT_MAX_COUNT, MAX_COMMENT_MAX_COUNT,
+    )
+    max_bytes = _comment_limit(
+        max_bytes, DEFAULT_COMMENT_MAX_BYTES, MAX_COMMENT_MAX_BYTES,
+    )
+    captured = captured_at or datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    payload = {
+        "schema": COMMENTS_SCHEMA,
+        "schema_version": COMMENTS_SCHEMA_VERSION,
+        "status": "unavailable",
+        "reason": "",
+        "source_url": _comment_public_text(
+            (info or {}).get("webpage_url", "") if isinstance(info, dict)
+            else source_url,
+            2048,
+        ) or _comment_public_text(source_url, 2048),
+        "source_id": _comment_public_text(
+            (info or {}).get("id", "") if isinstance(info, dict) else "",
+            256,
+        ),
+        "captured_at": _comment_public_text(captured, 64),
+        "max_count": max_count,
+        "max_bytes": max_bytes,
+        "count": 0,
+        "truncated": False,
+        "comments": [],
+    }
+    raw_comments = info.get("comments") if isinstance(info, dict) else None
+    if raw_comments is None:
+        payload["reason"] = (
+            "yt-dlp returned no comments; the source may refuse or rate-limit "
+            "comment requests"
+        )
+        return payload
+    if not isinstance(raw_comments, list):
+        payload["reason"] = "yt-dlp returned an invalid comments payload"
+        return payload
+
+    payload["status"] = "captured"
+    if not raw_comments:
+        payload["reason"] = "No comments were returned by yt-dlp"
+    for raw in raw_comments:
+        if not isinstance(raw, dict):
+            continue
+        text = _comment_public_text(raw.get("text"), 8192)
+        if not text:
+            continue
+        parent_id = _comment_public_text(
+            raw.get("parent_id", raw.get("parent", "")), 256,
+        )
+        comment = {
+            "id": _comment_public_text(raw.get("id"), 256),
+            "parent_id": parent_id,
+            "author": _comment_public_text(
+                raw.get("author", raw.get("author_name", "")), 256,
+            ),
+            "text": text,
+            "published_at": _comment_published_at(
+                raw.get("timestamp", raw.get("published_at", ""))
+            ),
+            "like_count": _comment_like_count(raw.get("like_count", 0)),
+            "is_reply": bool(parent_id),
+        }
+        candidate = dict(payload)
+        candidate["comments"] = [*payload["comments"], comment]
+        candidate["count"] = len(candidate["comments"])
+        encoded = (
+            json.dumps(candidate, indent=2, ensure_ascii=False) + "\n"
+        ).encode("utf-8")
+        if len(candidate["comments"]) > max_count or len(encoded) > max_bytes:
+            payload["truncated"] = True
+            break
+        payload["comments"].append(comment)
+        payload["count"] = len(payload["comments"])
+    if payload["truncated"]:
+        payload["reason"] = "Comment archive truncated at the configured bound"
+    elif not payload["comments"] and raw_comments:
+        payload["reason"] = "No usable public comments were returned by yt-dlp"
+    return payload
+
+
 class MetadataSaver:
     @staticmethod
     def save_thumbnail(output_dir, stream_info):
@@ -1131,6 +1270,73 @@ class MetadataSaver:
         return _atomic_write_text(
             str(path), json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
         )
+
+    @staticmethod
+    def write_comments(
+        output_dir,
+        file_base="",
+        *,
+        source_url="",
+        info_path="",
+        max_count=DEFAULT_COMMENT_MAX_COUNT,
+        max_bytes=DEFAULT_COMMENT_MAX_BYTES,
+    ):
+        """Write a bounded yt-dlp comment sidecar next to a recording.
+
+        A status sidecar is written even when yt-dlp did not produce an info
+        JSON file. That makes source refusal/rate limiting observable without
+        making comment availability part of media-download success.
+        """
+        if not output_dir or not os.path.isdir(output_dir):
+            raise MetadataWriteError("Recording directory does not exist")
+        base = os.path.basename(file_base) if file_base else "recording"
+        if not base or base in {".", ".."}:
+            base = "recording"
+        source_path = Path(info_path) if info_path else Path(output_dir) / f"{base}.info.json"
+        info = None
+        reason = ""
+        try:
+            if not source_path.is_file():
+                reason = (
+                    f"yt-dlp did not write {source_path.name}; the source may "
+                    "refuse or rate-limit comment requests"
+                )
+            elif source_path.stat().st_size > MAX_IMPORT_SIDECAR_BYTES:
+                reason = (
+                    f"yt-dlp info JSON exceeds the {MAX_IMPORT_SIDECAR_BYTES} "
+                    "byte safety limit"
+                )
+            else:
+                info = json.loads(source_path.read_text(encoding="utf-8"))
+                if not isinstance(info, dict):
+                    reason = "yt-dlp info JSON is not an object"
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            reason = f"could not read yt-dlp info JSON: {error}"
+        if info is None:
+            info = {}
+        payload = normalize_ytdlp_comments(
+            info,
+            source_url=source_url,
+            max_count=max_count,
+            max_bytes=max_bytes,
+        )
+        if reason:
+            payload["status"] = "unavailable"
+            payload["reason"] = reason
+            payload["comments"] = []
+            payload["count"] = 0
+            payload["truncated"] = False
+        path = Path(output_dir) / f"{base}.comments.json"
+        _atomic_write_text(
+            str(path), json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        )
+        return {
+            "path": str(path),
+            "status": payload["status"],
+            "reason": payload["reason"],
+            "count": int(payload["count"] or 0),
+            "truncated": bool(payload["truncated"]),
+        }
 
     @staticmethod
     def write_chapters(output_dir, stream_info, file_base=""):

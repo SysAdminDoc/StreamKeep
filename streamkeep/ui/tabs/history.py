@@ -165,7 +165,7 @@ def build_history_tab(win):
     search_title = QLabel("Find a Download")
     search_title.setObjectName("fieldLabel")
     search_title.setVisible(False)
-    search_hint = QLabel("Search metadata or transcript text.")
+    search_hint = QLabel("Search metadata, transcript text, or comments.")
     search_hint.setObjectName("subtleText")
     search_hint.setWordWrap(True)
     search_hint.setVisible(False)
@@ -190,6 +190,18 @@ def build_history_tab(win):
     )
     win.transcript_search_check.toggled.connect(lambda _: win._on_history_search(""))
     search_row.addWidget(win.transcript_search_check)
+    win.comment_search_check = QCheckBox("Search Comments")
+    win.comment_search_check.setToolTip(
+        "When checked, queries search indexed platform-comment text and author names."
+    )
+    win.comment_search_check.toggled.connect(lambda checked: (
+        win.transcript_search_check.setChecked(False) if checked else None
+    ))
+    win.comment_search_check.toggled.connect(lambda _: win._on_history_search(""))
+    win.transcript_search_check.toggled.connect(lambda checked: (
+        win.comment_search_check.setChecked(False) if checked else None
+    ))
+    search_row.addWidget(win.comment_search_check)
     search_wrap.addLayout(search_row)
     card_lay.addWidget(search_card)
 
@@ -304,6 +316,10 @@ class HistoryTabMixin:
             hasattr(self, "transcript_search_check")
             and self.transcript_search_check.isChecked()
         )
+        comment_mode = (
+            hasattr(self, "comment_search_check")
+            and self.comment_search_check.isChecked()
+        )
         transcript_hits = sum(
             len(items) for items in getattr(self, "_transcript_hits", {}).values()
         )
@@ -350,7 +366,20 @@ class HistoryTabMixin:
         self._refresh_shell_overview()
 
         if total:
-            if query and transcript_mode:
+            if query and comment_mode:
+                if hasattr(self, "history_filter_summary"):
+                    self.history_filter_summary.setText(
+                        f"{visible} matching download(s) • {transcript_hits} comment hit(s)"
+                    )
+                if visible:
+                    self.history_summary_label.setText(
+                        "Comment search matches indexed author names and public text. Hover a title to preview matching comments, then double-click to open the folder."
+                    )
+                else:
+                    self.history_summary_label.setText(
+                        "No indexed comments matched that phrase. Clear the query or switch back to metadata search."
+                    )
+            elif query and transcript_mode:
                 if hasattr(self, "history_filter_summary"):
                     self.history_filter_summary.setText(
                         tr_format(
@@ -459,17 +488,31 @@ class HistoryTabMixin:
             hasattr(self, "transcript_search_check")
             and self.transcript_search_check.isChecked()
         )
+        comment_mode = (
+            hasattr(self, "comment_search_check")
+            and self.comment_search_check.isChecked()
+        )
+        search_mode = transcript_mode or comment_mode
         self._transcript_hits = {}  # path -> list of {text, start_sec, end_sec}
         recording_paths = ()
-        if query and transcript_mode:
-            from ...search import search_transcripts
+        if query and search_mode:
+            from ...search import search_comments, search_transcripts
             try:
-                hits = search_transcripts(query, limit=200)
+                hits = (
+                    search_comments(query, limit=200)
+                    if comment_mode else search_transcripts(query, limit=200)
+                )
             except Exception:
                 hits = []
             hit_paths = set()
             for h in hits:
                 rp = h["recording_path"]
+                if comment_mode:
+                    h = dict(h)
+                    h["text"] = (
+                        f"{h.get('author', '') or 'anonymous'}: "
+                        f"{h.get('text', '')}"
+                    )
                 hit_paths.add(rp)
                 self._transcript_hits.setdefault(rp, []).append(h)
             recording_paths = tuple(hit_paths)
@@ -479,8 +522,8 @@ class HistoryTabMixin:
             if (entry := self.history_model.entry_at(index.row())) is not None
         }
         self.history_model.set_filter(
-            "" if transcript_mode else query,
-            recording_paths=recording_paths if transcript_mode else None,
+            "" if search_mode else query,
+            recording_paths=recording_paths if search_mode else None,
         )
         self.history_model.set_transcript_hits(
             hit for hits in self._transcript_hits.values() for hit in hits

@@ -39,7 +39,7 @@ def _strip_vtt_markup(text):
     return html.unescape(text).strip()
 
 DB_PATH = CONFIG_DIR / "search.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _SCHEMA_LOCK = threading.Lock()
 
 
@@ -65,6 +65,17 @@ def _ensure_schema(db):
             end_sec        REAL NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ts_path ON transcript_segments(recording_path);
+        CREATE TABLE IF NOT EXISTS comment_entries (
+            rowid          INTEGER PRIMARY KEY AUTOINCREMENT,
+            recording_path TEXT NOT NULL,
+            comment_id     TEXT NOT NULL DEFAULT '',
+            parent_id      TEXT NOT NULL DEFAULT '',
+            author         TEXT NOT NULL DEFAULT '',
+            text           TEXT NOT NULL,
+            published_at   TEXT NOT NULL DEFAULT '',
+            like_count     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_comments_path ON comment_entries(recording_path);
     """)
     fts5_fixed = sqlite_runtime_status().get("fts5_fixed", True)
     existing = db.execute(
@@ -106,6 +117,46 @@ def _ensure_schema(db):
             DROP TRIGGER IF EXISTS transcript_segments_ai;
             DROP TRIGGER IF EXISTS transcript_segments_ad;
             DROP TRIGGER IF EXISTS transcript_segments_au;
+        """)
+    comment_existing = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='comment_fts'"
+    ).fetchone()
+    comment_trigger_names = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name IN ('comment_entries_ai', 'comment_entries_ad', "
+            "'comment_entries_au')"
+        ).fetchall()
+    }
+    if fts5_fixed:
+        db.executescript("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5(
+                recording_path, author, text, published_at,
+                content='comment_entries',
+                content_rowid='rowid'
+            );
+            CREATE TRIGGER IF NOT EXISTS comment_entries_ai AFTER INSERT ON comment_entries BEGIN
+                INSERT INTO comment_fts(rowid, recording_path, author, text, published_at)
+                VALUES (new.rowid, new.recording_path, new.author, new.text, new.published_at);
+            END;
+            CREATE TRIGGER IF NOT EXISTS comment_entries_ad AFTER DELETE ON comment_entries BEGIN
+                INSERT INTO comment_fts(comment_fts, rowid, recording_path, author, text, published_at)
+                VALUES ('delete', old.rowid, old.recording_path, old.author, old.text, old.published_at);
+            END;
+            CREATE TRIGGER IF NOT EXISTS comment_entries_au AFTER UPDATE ON comment_entries BEGIN
+                INSERT INTO comment_fts(comment_fts, rowid, recording_path, author, text, published_at)
+                VALUES ('delete', old.rowid, old.recording_path, old.author, old.text, old.published_at);
+                INSERT INTO comment_fts(rowid, recording_path, author, text, published_at)
+                VALUES (new.rowid, new.recording_path, new.author, new.text, new.published_at);
+            END;
+        """)
+        if comment_existing is None or len(comment_trigger_names) != 3:
+            db.execute("INSERT INTO comment_fts(comment_fts) VALUES('rebuild')")
+    else:
+        db.executescript("""
+            DROP TRIGGER IF EXISTS comment_entries_ai;
+            DROP TRIGGER IF EXISTS comment_entries_ad;
+            DROP TRIGGER IF EXISTS comment_entries_au;
         """)
     row = db.execute(
         "SELECT value FROM search_meta WHERE key = 'schema_version'"
@@ -229,6 +280,44 @@ def _parse_transcript_json(path):
     return segments
 
 
+def _parse_comments_json(path):
+    """Parse a versioned ``*.comments.json`` sidecar."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return []
+    if (
+        not isinstance(data, dict)
+        or data.get("schema") != "streamkeep.comments"
+        or data.get("schema_version") != 1
+    ):
+        return []
+    rows = data.get("comments", [])
+    if not isinstance(rows, list):
+        return []
+    comments = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "") or "").strip()
+        if not text:
+            continue
+        try:
+            like_count = max(0, int(item.get("like_count", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            like_count = 0
+        comments.append({
+            "comment_id": str(item.get("id", "") or "")[:256],
+            "parent_id": str(item.get("parent_id", "") or "")[:256],
+            "author": str(item.get("author", "") or "")[:256],
+            "text": text[:8192],
+            "published_at": str(item.get("published_at", "") or "")[:64],
+            "like_count": like_count,
+        })
+    return comments
+
+
 def index_recording(recording_path):
     """Index all transcript files found in a recording directory.
 
@@ -239,10 +328,15 @@ def index_recording(recording_path):
         return 0
 
     all_segments = []
+    all_comments = []
     db = _connect()
     try:
         db.execute(
             "DELETE FROM transcript_segments WHERE recording_path = ?",
+            (recording_path,),
+        )
+        db.execute(
+            "DELETE FROM comment_entries WHERE recording_path = ?",
             (recording_path,),
         )
         if os.path.isdir(recording_path):
@@ -255,6 +349,8 @@ def index_recording(recording_path):
                     all_segments.extend(_parse_vtt(fpath))
                 elif fl.endswith(".transcript.json"):
                     all_segments.extend(_parse_transcript_json(fpath))
+                elif fl.endswith(".comments.json"):
+                    all_comments.extend(_parse_comments_json(fpath))
             if all_segments:
                 db.executemany(
                     "INSERT INTO transcript_segments (recording_path, text, start_sec, end_sec) "
@@ -262,6 +358,21 @@ def index_recording(recording_path):
                     [
                         (recording_path, text, start, end)
                         for start, end, text in all_segments
+                    ],
+                )
+            if all_comments:
+                db.executemany(
+                    "INSERT INTO comment_entries "
+                    "(recording_path, comment_id, parent_id, author, text, "
+                    "published_at, like_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            recording_path,
+                            row["comment_id"], row["parent_id"],
+                            row["author"], row["text"],
+                            row["published_at"], row["like_count"],
+                        )
+                        for row in all_comments
                     ],
                 )
         db.commit()
@@ -281,6 +392,15 @@ def _fts5_literal_query(query):
         for term in str(query or "").strip().split()
     ]
     return f"text : ({' '.join(terms)})" if terms else ""
+
+
+def _fts5_any_literal_query(query):
+    """Quote a query so FTS5 searches every indexed comment column."""
+    terms = [
+        _quote_fts5_term(term)
+        for term in str(query or "").strip().split()
+    ]
+    return " AND ".join(terms)
 
 
 def _like_transcript_filter(query):
@@ -335,6 +455,72 @@ def search_transcripts(query, limit=100):
     return [
         {"recording_path": r[0], "text": r[1], "start_sec": r[2], "end_sec": r[3]}
         for r in rows
+    ]
+
+
+def _like_comment_filter(query):
+    terms = [term for term in str(query or "").strip().split() if term]
+    clauses = []
+    params = []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append(
+            "(author LIKE ? ESCAPE '\\' COLLATE NOCASE "
+            "OR text LIKE ? ESCAPE '\\' COLLATE NOCASE)"
+        )
+        params.extend([f"%{escaped}%", f"%{escaped}%"])
+    return " AND ".join(clauses), params
+
+
+def search_comments(query, limit=100):
+    """Search indexed platform comments by author or published text."""
+    query = str(query or "").strip()
+    if not query:
+        return []
+    fts_query = _fts5_any_literal_query(query)
+    if not fts_query:
+        return []
+    try:
+        limit = max(1, int(limit or 100))
+    except (TypeError, ValueError):
+        limit = 100
+    db = _connect()
+    try:
+        if sqlite_runtime_status().get("fts5_fixed", True):
+            rows = db.execute(
+                "SELECT c.recording_path, c.comment_id, c.parent_id, c.author, "
+                "c.text, c.published_at, c.like_count "
+                "FROM comment_fts f "
+                "JOIN comment_entries c ON c.rowid = f.rowid "
+                "WHERE comment_fts MATCH ? "
+                "ORDER BY bm25(comment_fts), c.rowid LIMIT ?",
+                (fts_query, limit),
+            ).fetchall()
+        else:
+            like_filter, like_params = _like_comment_filter(query)
+            rows = db.execute(
+                "SELECT recording_path, comment_id, parent_id, author, text, "
+                "published_at, like_count FROM comment_entries "
+                f"WHERE {like_filter} ORDER BY rowid LIMIT ?",
+                (*like_params, limit),
+            ).fetchall()
+    except sqlite3.Error:
+        rows = []
+    finally:
+        db.close()
+    return [
+        {
+            "recording_path": row[0],
+            "comment_id": row[1],
+            "parent_id": row[2],
+            "author": row[3],
+            "text": row[4],
+            "published_at": row[5],
+            "like_count": row[6],
+            "start_sec": 0.0,
+            "end_sec": 0.0,
+        }
+        for row in rows
     ]
 
 

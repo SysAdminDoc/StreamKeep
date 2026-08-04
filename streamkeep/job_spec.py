@@ -113,6 +113,7 @@ class DownloadJobSpec:
     subtitle_embed: bool = True
 
     capture_youtube_chat: bool = False
+    capture_comments: bool = False
 
     sponsorblock: bool = False
     sponsorblock_mark: str = ""
@@ -262,6 +263,7 @@ class DownloadJobSpec:
         worker.subtitle_convert = self.subtitle_convert
         worker.subtitle_embed = self.subtitle_embed
         worker.capture_youtube_chat = self.capture_youtube_chat
+        worker.capture_comments = self.capture_comments
         worker.sponsorblock = self.sponsorblock
         worker.sponsorblock_mark = self.sponsorblock_mark
         worker.sponsorblock_remove = self.sponsorblock_remove
@@ -335,6 +337,9 @@ class DownloadJobSpec:
             subtitle_embed=bool(worker.subtitle_embed),
             capture_youtube_chat=bool(
                 getattr(worker, "capture_youtube_chat", False)
+            ),
+            capture_comments=bool(
+                getattr(worker, "capture_comments", False)
             ),
             sponsorblock=bool(worker.sponsorblock),
             sponsorblock_mark=worker.sponsorblock_mark or "",

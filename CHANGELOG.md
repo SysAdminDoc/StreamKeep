@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added opt-in YouTube VOD comment archival (V100). Jobs and monitor profiles
+  can request bounded public comments; finalize writes versioned
+  `*.comments.json` sidecars with published author names and text, logs source
+  refusal/rate limiting without failing media downloads, and indexes comments
+  for FTS search. Settings and the CLI expose the capture switch and count/
+  byte limits.
 - Added a capability-gated FFmpeg whisper transcription fallback. Settings can
   configure a local whisper.cpp model path when the resolved FFmpeg build
   exposes the filter; WhisperX, faster-whisper, and whisper.cpp remain ahead of
