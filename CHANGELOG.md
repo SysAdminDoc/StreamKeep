@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added opt-in BagIt 0.97 fixity export from the authoritative archive
+  manifest, including SHA-256 payload/tag manifests, bag metadata, and a
+  per-file SHA-384 SRI manifest that verifies through podcast integrity.
+
 - Archived typed Twitch and Kick chat events in `chat.jsonl`, retaining raw
   unknown envelopes, rendering event rows distinctly in ASS and chat-video
   overlays, and giving raids, subscriptions, moderation and announcements

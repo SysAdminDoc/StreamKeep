@@ -594,3 +594,21 @@ def test_mse_capture_parser_exposes_headless_drm_free_controls():
     assert args.seconds == 12
     assert args.allow_lan is True
     assert args.keep_staging is True
+
+
+def test_bagit_export_is_an_explicit_cli_command(tmp_path, monkeypatch):
+    from streamkeep.verify import create_archive_manifest
+
+    recording = tmp_path / "recording"
+    recording.mkdir()
+    (recording / "clip.mp4").write_bytes(b"cli bagit")
+    create_archive_manifest(recording)
+    args = cli.build_parser().parse_args([
+        "bagit", str(recording), "--json",
+    ])
+    output = []
+    monkeypatch.setattr(cli, "_print_line", output.append)
+    cli._run_bagit(args)
+    summary = json.loads(output[0])
+    assert summary["bagit_version"] == "0.97"
+    assert (recording / "manifest-sha256.txt").is_file()

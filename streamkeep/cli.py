@@ -617,6 +617,26 @@ def _on_download_done(state, app, job_output_dir):
     app.quit()
 
 
+def _run_bagit(args):
+    """Export BagIt fixity tags from an existing archive manifest."""
+    from .verify import export_bagit
+
+    try:
+        result = export_bagit(args.path)
+    except (OSError, ValueError) as error:
+        _print_line(f"Error: BagIt export failed: {error}")
+        sys.exit(2)
+    if getattr(args, "json", False):
+        _print_line(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    _print_line(
+        f"BagIt export -> {args.path} ({result['payload_files']} file(s), "
+        f"{result['payload_bytes']} bytes)"
+    )
+    for entry in result["files"]:
+        _print_line(f"  {entry['path']}: {entry['sha384_sri']}")
+
+
 def _pick_quality(qualities, pref):
     """Pick a quality entry matching *pref*."""
     if not qualities:
@@ -2267,6 +2287,15 @@ def build_parser():
     backup_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                           help="Override the config/database directory")
 
+    # -- BagIt fixity export --
+    bagit_p = sub.add_parser(
+        "bagit", help="Export BagIt fixity tags from an archive manifest",
+    )
+    bagit_p.add_argument("path", help="Recording directory containing the archive manifest")
+    bagit_p.add_argument("--json", action="store_true", help="Emit the export summary as JSON")
+    bagit_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                         help="Override the config/database directory")
+
     # -- HAR import: extract media/manifest links from a browser capture --
     har_p = sub.add_parser(
         "import-har",
@@ -2724,6 +2753,8 @@ def run_cli(argv=None):
         _run_snapshot(args)
     elif args.command == "backup":
         _run_backup(args)
+    elif args.command == "bagit":
+        _run_bagit(args)
     elif args.command == "import-har":
         _run_har_import(args)
     elif args.command in ("import-library", "adopt"):
@@ -2761,7 +2792,7 @@ def has_cli_args():
         return False
     cli_triggers = {
         "download", "dl", "capture", "server", "extractors", "plugins", "operations", "gallery", "lux", "db",
-        "snapshot", "backup", "startup-check", "import-har", "import-library",
+        "snapshot", "backup", "bagit", "startup-check", "import-har", "import-library",
         "retemplate",
         "adopt", "podcast-sidecars",
         "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",

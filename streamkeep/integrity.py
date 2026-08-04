@@ -8,6 +8,7 @@ repairing or deleting a recording.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import math
@@ -18,6 +19,14 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from . import db, verify
+
+
+def sha384_sri_from_digest(digest):
+    """Return a standards-shaped SRI token for one SHA-384 digest."""
+    raw = bytes(digest or b"")
+    if len(raw) != 48:
+        raise ValueError("SHA-384 digests must contain 48 bytes")
+    return "sha384-" + base64.b64encode(raw).decode("ascii")
 
 
 @dataclass

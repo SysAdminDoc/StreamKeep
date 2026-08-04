@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,13 @@ STATUS_FAIL = "failed"
 MANIFEST_FILENAME = ".streamkeep_manifest.json"
 MANIFEST_VERSION = 1
 HASH_CHUNK_SIZE = 1024 * 1024
+BAGIT_FILENAMES = frozenset({
+    "bagit.txt",
+    "manifest-sha256.txt",
+    "manifest-sha384-sri.txt",
+    "tagmanifest-sha256.txt",
+    "bag-info.txt",
+})
 
 MEDIA_EXTS = {
     ".mp4", ".mkv", ".ts", ".webm", ".flv", ".mov", ".avi", ".m4v",
@@ -34,6 +42,7 @@ MEDIA_EXTS = {
 }
 MANIFEST_SKIP_NAMES = {
     MANIFEST_FILENAME,
+    *BAGIT_FILENAMES,
     ".streamkeep_resume.json",
 }
 MANIFEST_SKIP_SUFFIXES = {
@@ -189,6 +198,17 @@ def _sha256_file(path: Path, *, cancel_fn=None, rate_bytes_per_sec=0) -> str:
     return h.hexdigest()
 
 
+def _hash_file_digests(path: Path):
+    """Read one file once and return its SHA-256 and SHA-384 digests."""
+    sha256 = hashlib.sha256()
+    sha384 = hashlib.sha384()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(HASH_CHUNK_SIZE), b""):
+            sha256.update(chunk)
+            sha384.update(chunk)
+    return sha256.hexdigest(), sha384.digest()
+
+
 def _manifest_sidecar_path(recording_dir) -> Path:
     return Path(recording_dir) / MANIFEST_FILENAME
 
@@ -204,12 +224,15 @@ def create_archive_manifest(recording_dir, *, write_sidecar=True):
         try:
             st = path.stat()
             rel = path.relative_to(root).as_posix()
+            sha256, sha384 = _hash_file_digests(path)
+            from .integrity import sha384_sri_from_digest
             files.append({
                 "path": rel,
                 "role": _classify_manifest_file(path),
                 "size": int(st.st_size),
                 "mtime_ns": int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
-                "sha256": _sha256_file(path),
+                "sha256": sha256,
+                "sha384_sri": sha384_sri_from_digest(sha384),
             })
         except (OSError, ValueError):
             continue
@@ -429,6 +452,129 @@ def verify_archive_manifest(
 def rescan_archive_manifest(recording_dir, *, write_sidecar=True):
     """Intentionally replace the archive manifest with current file state."""
     return create_archive_manifest(recording_dir, write_sidecar=write_sidecar)
+
+
+def _atomic_write_bagit_file(path: Path, data: bytes):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _bagit_payload_entries(root: Path, manifest):
+    if not isinstance(manifest, dict):
+        raise ValueError("Archive manifest is not an object")
+    raw_entries = manifest.get("files")
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise ValueError("Archive manifest contains no payload files")
+    entries = []
+    seen = set()
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            raise ValueError("Archive manifest contains an invalid file entry")
+        rel = str(raw.get("path", "") or raw.get("relative_path", ""))
+        if rel in BAGIT_FILENAMES or rel in seen:
+            continue
+        target = _safe_manifest_target(root, rel)
+        if target is None or not target.is_file():
+            raise ValueError(f"Archive manifest payload is missing or unsafe: {rel}")
+        sha256 = str(raw.get("sha256", "") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise ValueError(f"Archive manifest has an invalid SHA-256 for: {rel}")
+        sri = str(raw.get("sha384_sri", "") or "").strip()
+        if not re.fullmatch(r"sha384-[A-Za-z0-9+/]{64}", sri):
+            raise ValueError(
+                f"Archive manifest lacks a SHA-384 SRI value for: {rel}"
+            )
+        seen.add(rel)
+        entries.append({
+            "path": rel.replace("\\", "/"),
+            "sha256": sha256,
+            "sha384_sri": sri,
+            "size": int(raw.get("size", 0) or 0),
+        })
+    if not entries:
+        raise ValueError("Archive manifest contains no BagIt payload files")
+    return entries
+
+
+def export_bagit(recording_dir, manifest=None):
+    """Emit a BagIt 0.97 tag set from the authoritative archive manifest.
+
+    The payload remains in its existing recording directory. BagIt checksum
+    lines are generated solely from the stored manifest values; no payload is
+    re-read or re-hashed during export. New archive manifests carry a SHA-384
+    SRI token alongside SHA-256 so the same value can be copied into a
+    Podcasting 2.0 ``podcast:integrity`` declaration.
+    """
+    root = Path(recording_dir)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Recording directory not found: {recording_dir}")
+    if manifest is None:
+        manifest = load_archive_manifest_sidecar(root)
+    entries = _bagit_payload_entries(root, manifest)
+
+    payload_manifest = "".join(
+        f"{entry['sha256']}  {entry['path']}\n" for entry in entries
+    ).encode("utf-8")
+    sri_manifest = "".join(
+        f"{entry['sha384_sri']}  {entry['path']}\n" for entry in entries
+    ).encode("utf-8")
+    total_bytes = sum(max(0, int(entry["size"])) for entry in entries)
+    now = datetime.now(timezone.utc).date().isoformat()
+    bag_info = (
+        "Bag-Software-Agent: StreamKeep\n"
+        f"Bagging-Date: {now}\n"
+        f"Bag-Size: {total_bytes} bytes\n"
+        f"Payload-Oxum: {total_bytes}.{len(entries)}\n"
+        "Payload-Manifest: manifest-sha256.txt\n"
+        "Payload-SRI-Manifest: manifest-sha384-sri.txt\n"
+        "Bag-Count: 1 of 1\n"
+    ).encode("utf-8")
+    bagit = (
+        "BagIt-Version: 0.97\n"
+        "Tag-File-Character-Encoding: UTF-8\n"
+    ).encode("utf-8")
+
+    tag_bytes = {
+        "bagit.txt": bagit,
+        "manifest-sha256.txt": payload_manifest,
+        "manifest-sha384-sri.txt": sri_manifest,
+        "bag-info.txt": bag_info,
+    }
+    sidecar = root / MANIFEST_FILENAME
+    if sidecar.is_file():
+        tag_bytes[MANIFEST_FILENAME] = sidecar.read_bytes()
+    tag_manifest = "".join(
+        f"{hashlib.sha256(data).hexdigest()}  {name}\n"
+        for name, data in tag_bytes.items()
+    ).encode("utf-8")
+    tag_bytes["tagmanifest-sha256.txt"] = tag_manifest
+
+    paths = {}
+    for name, data in tag_bytes.items():
+        path = root / name
+        _atomic_write_bagit_file(path, data)
+        paths[name] = str(path)
+    return {
+        "bagit_version": "0.97",
+        "payload_bytes": total_bytes,
+        "payload_files": len(entries),
+        "files": entries,
+        "paths": paths,
+    }
+
+
+write_bagit_package = export_bagit
 
 
 class VerifyWorker(QThread):

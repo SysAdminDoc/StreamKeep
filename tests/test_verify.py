@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 import tempfile
@@ -14,6 +16,7 @@ from streamkeep.verify import (
     STATUS_FAIL,
     STATUS_OK,
     create_archive_manifest,
+    export_bagit,
     rescan_archive_manifest,
     verify_archive_manifest,
     verify_media,
@@ -96,8 +99,74 @@ class VerifyTests(unittest.TestCase):
             status, details, report = verify_archive_manifest(root, rescanned)
 
             self.assertEqual(status, STATUS_OK)
-            self.assertIn("Integrity verified", details)
-            self.assertEqual(report["checked"], 1)
+        self.assertIn("Integrity verified", details)
+        self.assertEqual(report["checked"], 1)
+
+    def test_bagit_export_uses_manifest_hashes_and_records_sri(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            media = root / "episode.mp3"
+            sidecar = root / "metadata.json"
+            media.write_bytes(b"bagit media")
+            sidecar.write_text('{"title":"BagIt"}\n', encoding="utf-8")
+            manifest = create_archive_manifest(root)
+            original_sidecar = (root / MANIFEST_FILENAME).read_bytes()
+
+            with mock.patch(
+                "streamkeep.verify._hash_file_digests",
+                side_effect=AssertionError("BagIt export must not rehash payload"),
+            ):
+                result = export_bagit(root, manifest)
+
+            self.assertEqual(
+                (root / MANIFEST_FILENAME).read_bytes(), original_sidecar,
+            )
+            self.assertEqual(
+                (root / "bagit.txt").read_text(encoding="utf-8"),
+                "BagIt-Version: 0.97\nTag-File-Character-Encoding: UTF-8\n",
+            )
+            self.assertIn("Payload-Oxum: 30.2", (root / "bag-info.txt").read_text(encoding="utf-8"))
+
+            payload_lines = (root / "manifest-sha256.txt").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(
+                payload_lines,
+                [f"{entry['sha256']}  {entry['path']}" for entry in manifest["files"]],
+            )
+            sri_rows = {
+                line.rsplit("  ", 1)[1]: line.split("  ", 1)[0]
+                for line in (root / "manifest-sha384-sri.txt").read_text(encoding="utf-8").splitlines()
+            }
+            by_path = {entry["path"]: entry for entry in manifest["files"]}
+            self.assertEqual(
+                sri_rows,
+                {path: entry["sha384_sri"] for path, entry in by_path.items()},
+            )
+            for path, sri in sri_rows.items():
+                encoded = sri.split("-", 1)[1]
+                self.assertEqual(
+                    base64.b64decode(encoded),
+                    hashlib.sha384((root / path).read_bytes()).digest(),
+                )
+
+            from streamkeep.podcast_sidecars import verify_podcast_integrity
+            verified = verify_podcast_integrity(
+                str(media),
+                [{
+                    "sources": [{"uri": "https://cdn.example/episode.mp3"}],
+                    "integrity": {
+                        "type": "sri",
+                        "value": by_path["episode.mp3"]["sha384_sri"],
+                    },
+                }],
+                "https://cdn.example/episode.mp3",
+            )
+            self.assertEqual(verified[0]["status"], "verified")
+            self.assertEqual(result["payload_files"], 2)
+
+            tag_lines = (root / "tagmanifest-sha256.txt").read_text(encoding="utf-8").splitlines()
+            tag_names = {line.rsplit("  ", 1)[1] for line in tag_lines}
+            self.assertIn("bagit.txt", tag_names)
+            self.assertIn(MANIFEST_FILENAME, tag_names)
 
     def test_storage_scan_runs_cheap_manifest_check_without_hashing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
