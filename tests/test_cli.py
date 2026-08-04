@@ -256,6 +256,16 @@ def test_credentials_command_reports_no_stored_credentials(tmp_path):
     assert "token" not in result.stdout.lower() or "no_credential" in result.stdout
 
 
+def test_health_parser_exposes_json_timeout_and_config_dir():
+    args = cli.build_parser().parse_args([
+        "health", "--json", "--timeout", "3", "--config-dir", "isolated",
+    ])
+    assert args.command == "health"
+    assert args.json is True
+    assert args.timeout == 3
+    assert args.config_dir == "isolated"
+
+
 def test_youtube_health_command_emits_report(tmp_path):
     config_dir = tmp_path / "isolated"
     result = _run_launcher(

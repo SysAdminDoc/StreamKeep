@@ -18,7 +18,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar,
-    QFrame, QStackedWidget, QSystemTrayIcon,
+    QFrame, QStackedWidget, QSystemTrayIcon, QTableWidgetItem,
     QMenu, QAbstractItemView,
 )
 from PyQt6.QtCore import QPoint, QRectF, Qt, QThread, QTimer, pyqtSignal
@@ -103,6 +103,31 @@ def _stop_worker(
     except Exception as error:
         _LOGGER.warning("[SHUTDOWN] Could not stop %s: %s", label, error)
         return False
+
+
+class _HealthCheckWorker(QThread):
+    """Run the persistent health probes away from the Qt event thread."""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self._config = dict(config or {})
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        if self._cancelled:
+            return
+        from streamkeep.health import run_health_check
+        snapshot = run_health_check(
+            self._config,
+            dispatch_events=False,
+        )
+        if not self._cancelled:
+            self.result_ready.emit(snapshot)
 
 
 def _chrome_icon(kind, *, active=False):
@@ -319,6 +344,9 @@ class StreamKeep(
         self._companion_server = None        # LocalCompanionServer instance
         self._companion_last_error = ""
         self._notifications = NotificationCenter(capacity=50)
+        from streamkeep.health import load_health_snapshot
+        self._health_snapshot = load_health_snapshot()
+        self._health_worker = None
         self._taskbar_progress = None
         self._power_pause_active = False
         self._power_state = None
@@ -354,6 +382,7 @@ class StreamKeep(
         self.clipboard_monitor = ClipboardMonitor()
         self.clipboard_monitor.url_detected.connect(self._on_clipboard_url)
         self._init_ui()
+        self._refresh_health_panel(self._health_snapshot)
         translate_widget_tree(self)
         # History is restored by _apply_config(), which immediately refreshes
         # the table and may queue thumbnails for existing recordings.  Create
@@ -389,6 +418,7 @@ class StreamKeep(
         self._refresh_companion_ui()
         self._init_tray_icon()
         self._init_disk_monitor()
+        self._init_health_monitor()
         self._init_windows_integration()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
@@ -1440,6 +1470,10 @@ class StreamKeep(
             getattr(self, "download_worker", None), 3000,
             cancel=True, terminate_timeout=1000, label="active download",
         )
+        _stop_worker(
+            getattr(self, "_health_worker", None), 1500,
+            cancel=True, terminate_timeout=500, label="health probe",
+        )
         for attr, label in (
             ("_fetch_worker", "fetch"),
             ("_vod_page_worker", "VOD page"),
@@ -1521,6 +1555,7 @@ class StreamKeep(
             (getattr(self, "_scheduler_timer", None), "scheduler timer"),
             (getattr(self, "_config_save_timer", None), "config timer"),
             (getattr(self, "_executor_lease_timer", None), "executor lease timer"),
+            (getattr(self, "_health_timer", None), "health timer"),
         ):
             if timer is None:
                 continue
@@ -2456,6 +2491,131 @@ class StreamKeep(
                 clear_progress_notification()
         except Exception as error:
             _LOGGER.debug("[WINDOWS] Could not update queue shell surfaces: %s", error)
+
+    def _init_health_monitor(self):
+        """Start the background health schedule and show the last snapshot."""
+        from ..health import DEFAULT_INTERVAL_MINUTES, load_health_snapshot
+
+        self._health_snapshot = load_health_snapshot()
+        self._health_timer = QTimer(self)
+        try:
+            minutes = int(self._config.get(
+                "health_interval_minutes", DEFAULT_INTERVAL_MINUTES,
+            ) or DEFAULT_INTERVAL_MINUTES)
+        except (TypeError, ValueError):
+            minutes = DEFAULT_INTERVAL_MINUTES
+        minutes = max(1, min(24 * 60, minutes))
+        self._health_timer.setInterval(minutes * 60 * 1000)
+        self._health_timer.timeout.connect(self._start_health_check)
+        if bool(self._config.get("health_monitor_enabled", True)) and not self._startup_check:
+            self._health_timer.start()
+            QTimer.singleShot(0, self._start_health_check)
+
+    def _start_health_check(self):
+        """Run one health pass unless the previous pass is still active."""
+        worker = getattr(self, "_health_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        worker = _HealthCheckWorker(self._config, self)
+        worker.result_ready.connect(self._on_health_snapshot)
+        worker.finished.connect(
+            lambda current=worker: self._on_health_worker_finished(current)
+        )
+        self._health_worker = worker
+        if hasattr(self, "health_run_btn"):
+            self.health_run_btn.setEnabled(False)
+        worker.start()
+
+    def _on_health_worker_finished(self, worker):
+        if getattr(self, "_health_worker", None) is worker:
+            self._health_worker = None
+        if hasattr(self, "health_run_btn"):
+            self.health_run_btn.setEnabled(True)
+        worker.deleteLater()
+
+    def _on_health_snapshot(self, snapshot):
+        """Update the panel and fan out newly transitioned conditions."""
+        if not isinstance(snapshot, dict):
+            return
+        self._health_snapshot = snapshot
+        self._refresh_health_panel(snapshot)
+        for event in snapshot.get("events", []):
+            if not isinstance(event, dict):
+                continue
+            state = str(event.get("state") or "changed")
+            severity = str(event.get("severity") or "info")
+            level = (
+                "success" if state == "resolved" else
+                "error" if severity in {"critical", "error"} else
+                "warning" if severity == "warning" else "info"
+            )
+            title = str(event.get("title") or "Health condition")
+            detail = str(event.get("detail") or "")
+            self._notify_center(f"{title} ({state})", level)
+            event_name = str(event.get("event") or "").strip()
+            if not event_name:
+                continue
+            context = {
+                "title": title,
+                "condition": event.get("condition", ""),
+                "state": state,
+                "severity": severity,
+                "detail": detail,
+                "repair": event.get("repair", ""),
+            }
+            self._fire_hook(event_name, **context)
+            self._send_webhook(event_name, title, detail)
+
+    def _refresh_health_panel(self, snapshot=None):
+        """Render the persisted/last-run condition list in Settings."""
+        table = getattr(self, "health_table", None)
+        if table is None:
+            return
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        conditions = [
+            item for item in snapshot.get("conditions", [])
+            if isinstance(item, dict)
+        ]
+        table.setSortingEnabled(False)
+        if table.rowCount():
+            table.setSpan(0, 0, 1, 1)
+        table.clearContents()
+        table.setRowCount(len(conditions) or 1)
+        if not conditions:
+            table.setItem(0, 0, QTableWidgetItem("No active health conditions."))
+            table.setSpan(0, 0, 1, 4)
+        else:
+            for row, condition in enumerate(conditions):
+                table.setItem(row, 0, QTableWidgetItem(
+                    str(condition.get("title") or condition.get("id") or "Condition")
+                ))
+                table.setItem(row, 1, QTableWidgetItem(
+                    str(condition.get("severity") or "warning").title()
+                ))
+                table.setItem(row, 2, QTableWidgetItem(
+                    str(condition.get("detail") or "")
+                ))
+                repair = str(condition.get("repair") or "Inspect Settings")
+                action = QPushButton("Inspect Settings")
+                action.setObjectName("commandGhost")
+                action.setToolTip(repair)
+                action.clicked.connect(
+                    lambda _checked=False: self._switch_tab(
+                        self._tab_names.index("Settings")
+                    )
+                )
+                table.setCellWidget(row, 3, action)
+        summary = snapshot.get("summary", {})
+        status = str(snapshot.get("status") or "healthy").title()
+        active = int(summary.get("active", len(conditions)) or 0)
+        if hasattr(self, "health_status_label"):
+            self.health_status_label.setText(
+                f"Status: {status} · {active} active condition(s)"
+            )
+        if hasattr(self, "health_updated_label"):
+            self.health_updated_label.setText(
+                f"Last checked: {snapshot.get('checked_at') or 'Never'}"
+            )
 
     def _init_disk_monitor(self):
         """Instantiate and start the storage-health monitor (F67).

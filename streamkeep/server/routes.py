@@ -12,6 +12,7 @@ PRODUCT_REST_PATHS = frozenset({
     "POST /api/shares/feed/revoke",
     "GET /api/uploads",
     "GET /api/uploads/profiles",
+    "GET /api/health",
     "GET /api/intelligence",
     "GET /api/intelligence/profiles",
     "POST /api/uploads",

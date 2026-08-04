@@ -1043,9 +1043,28 @@ class LocalServerTests(unittest.TestCase):
 
     def test_status_scope_allows_read_endpoints(self):
         tok = self.server.create_scoped_token({SCOPE_STATUS})
-        for path in ("/api/status", "/api/library", "/api/monitor"):
+        for path in ("/api/status", "/api/library", "/api/monitor", "/api/health"):
             payload, code = self._open_json(path, token=tok)
             self.assertEqual(code, 200, f"{path} should be allowed with status scope")
+
+    def test_health_endpoint_returns_state_provider_snapshot(self):
+        self.server.stop()
+        self.server.state_provider = lambda: {
+            "health": {
+                "status": "warning",
+                "summary": {"active": 1, "warning": 1},
+                "conditions": [{
+                    "id": "disk:archive",
+                    "severity": "warning",
+                    "target_path": r"C:\private",
+                }],
+            },
+        }
+        self.server.start()
+        payload, code = self._open_json("/api/health", token=self.server.token)
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["health"]["status"], "warning")
+        self.assertNotIn("target_path", payload["health"]["conditions"][0])
 
     def test_status_scope_denies_queue_send(self):
         tok = self.server.create_scoped_token({SCOPE_STATUS})

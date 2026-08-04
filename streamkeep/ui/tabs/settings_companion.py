@@ -749,6 +749,11 @@ class SettingsCompanionMixin:
                 })
         except Exception:
             pass  # safe: best-effort fallback; preserve the primary operation
+        health = getattr(self, "_health_snapshot", None)
+        if not isinstance(health, dict):
+            from ...health import load_health_snapshot
+            health = load_health_snapshot()
+        from ...health import public_snapshot
         return {
             "downloads": downloads,
             "queue": queue_items,
@@ -760,6 +765,7 @@ class SettingsCompanionMixin:
             "live_channels": live_channels,
             "active_workers": active_workers,
             "resumable": resumable,
+            "health": public_snapshot(health),
         }
 
     # ── Auto-update checker ──────────────────────────────────────────

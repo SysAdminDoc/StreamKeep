@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added a persistent scheduled health surface across Settings, the `health`
+  CLI command, and authenticated `/api/health`: runtime tools, credentials,
+  archive roots, extractor retry circuits, and disk pressure are severity-
+  ranked, repair-guided, persisted, and emitted through stable hook/webhook
+  event names as conditions open or resolve.
+
 - Corrected the agent-facing architecture notes for the seven-page shell,
   SQLite package layout, and side-effect-free dependency bootstrap. The release
   claims gate now detects drift between that documented page count and the

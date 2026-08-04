@@ -139,6 +139,7 @@ python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite
 python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
 python StreamKeep.py credentials
 python StreamKeep.py credentials twitch --json
+python StreamKeep.py health --json
 python StreamKeep.py youtube-health
 python StreamKeep.py download "https://www.youtube.com/watch?v=VIDEO" --youtube-client web_safari
 python StreamKeep.py capture rtsp "rtsp://camera.lan/live" --transport tcp --duration 3600 --output C:\Captures\camera.mkv

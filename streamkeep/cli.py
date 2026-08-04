@@ -1693,6 +1693,43 @@ def _run_credentials_check(args):
         sys.exit(1)
 
 
+def _run_health_check(args):
+    """Run the aggregate health probes and report standing conditions."""
+    from .config import load_config
+    from .health import public_snapshot, run_health_check
+
+    as_json = bool(getattr(args, "json", False))
+
+    def event_sink(event):
+        if as_json:
+            return
+        state = str(event.get("state") or "changed")
+        title = str(event.get("title") or event.get("condition") or "Health condition")
+        _print_line(f"  {state}: {title}")
+
+    snapshot = run_health_check(
+        load_config(),
+        credential_timeout=max(1, int(getattr(args, "timeout", 8) or 8)),
+        event_sink=event_sink,
+    )
+    visible = public_snapshot(snapshot)
+    if as_json:
+        _print_line(json.dumps(visible, indent=2))
+    else:
+        _print_line(
+            f"Health: {visible.get('status', 'healthy')} — "
+            f"{visible.get('summary', {}).get('active', 0)} active condition(s)"
+        )
+        for condition in visible.get("conditions", []):
+            _print_line(
+                f"  [{condition.get('severity', 'warning')}] "
+                f"{condition.get('title', condition.get('id', 'condition'))}: "
+                f"{condition.get('repair', 'Inspect Settings')}"
+            )
+    if visible.get("status") in {"critical", "error"}:
+        sys.exit(1)
+
+
 def _run_auth(args, parser):
     """Manage site-bound authentication profiles without printing secrets."""
     from . import auth_profiles as ap
@@ -2704,6 +2741,17 @@ def build_parser():
     cred_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
 
+    health_p = sub.add_parser(
+        "health",
+        help="Run aggregate runtime, credential, archive, extractor, and disk probes",
+    )
+    health_p.add_argument("--json", action="store_true",
+                          help="Emit the redacted health snapshot as JSON")
+    health_p.add_argument("--timeout", type=int, default=8,
+                          help="Per-credential probe network timeout in seconds")
+    health_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                          help="Override the config/database directory")
+
     auth_p = sub.add_parser(
         "auth",
         help="Manage named, site-bound authentication profiles",
@@ -2976,6 +3024,8 @@ def run_cli(argv=None):
         _run_podcast_sidecars(args)
     elif args.command == "credentials":
         _run_credentials_check(args)
+    elif args.command == "health":
+        _run_health_check(args)
     elif args.command == "auth":
         _run_auth(args, p)
     elif args.command == "youtube-health":
@@ -3004,7 +3054,7 @@ def has_cli_args():
         "snapshot", "backup", "bagit", "tokens", "startup-check", "import-har", "import-library",
         "retemplate",
         "adopt", "podcast-sidecars",
-        "credentials", "auth", "youtube-health", "mse-capture", "register-protocol",
+        "credentials", "health", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

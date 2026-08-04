@@ -41,10 +41,16 @@ HOOK_EVENTS = [
     "auto_record_start",
     "auto_record_end",
     "transcode_complete",
+    "health_runtime_degraded",
+    "health_credentials_expired",
+    "health_archive_offline",
+    "health_extractor_failures",
+    "health_disk_pressure",
 ]
 
 HOOK_CONTEXT_KEYS = frozenset({
     "title", "channel", "platform", "path", "url", "quality", "error",
+    "condition", "state", "severity", "detail", "repair",
 })
 
 # Only these environment variables are forwarded to a hook process. Everything

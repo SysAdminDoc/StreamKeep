@@ -187,6 +187,67 @@ def build_settings_tab(win):
     win.settings_nav_buttons = settings_nav_buttons
     lay.addWidget(settings_nav)
 
+    # Persistent scheduled health conditions (V96)
+    health_block, health_lay = make_field_block(
+        "System health",
+        "Scheduled probes keep runtime, credentials, archives, extractors, and disk pressure visible.",
+    )
+    health_toolbar = QHBoxLayout()
+    health_toolbar.setContentsMargins(0, 0, 0, 0)
+    health_toolbar.setSpacing(8)
+    win.health_status_label = QLabel("Status: Healthy · 0 active condition(s)")
+    win.health_status_label.setObjectName("subtleText")
+    health_toolbar.addWidget(win.health_status_label)
+    health_toolbar.addStretch(1)
+    win.health_updated_label = QLabel("Last checked: Never")
+    win.health_updated_label.setObjectName("subtleText")
+    health_toolbar.addWidget(win.health_updated_label)
+    win.health_run_btn = QPushButton("Run health check")
+    win.health_run_btn.setObjectName("commandGhost")
+    win.health_run_btn.setToolTip("Run all bounded health probes now")
+    set_accessible(
+        win.health_run_btn,
+        "Run health check",
+        "Run the aggregate system health probes now.",
+    )
+    win.health_run_btn.clicked.connect(win._start_health_check)
+    health_toolbar.addWidget(win.health_run_btn)
+    health_lay.addLayout(health_toolbar)
+
+    win.health_table = QTableWidget(0, 4)
+    win.health_table.setHorizontalHeaderLabels(
+        ["Condition", "Severity", "Details", "Repair"]
+    )
+    win.health_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    win.health_table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    win.health_table.setSelectionMode(
+        QAbstractItemView.SelectionMode.SingleSelection
+    )
+    win.health_table.horizontalHeader().setSectionResizeMode(
+        0, QHeaderView.ResizeMode.ResizeToContents
+    )
+    win.health_table.horizontalHeader().setSectionResizeMode(
+        1, QHeaderView.ResizeMode.ResizeToContents
+    )
+    win.health_table.horizontalHeader().setSectionResizeMode(
+        2, QHeaderView.ResizeMode.Stretch
+    )
+    win.health_table.horizontalHeader().setSectionResizeMode(
+        3, QHeaderView.ResizeMode.ResizeToContents
+    )
+    win.health_table.setMinimumHeight(88)
+    win.health_table.setMaximumHeight(260)
+    style_table(
+        win.health_table,
+        row_height=40,
+        accessible_name="Persistent system health conditions",
+        accessible_description="Severity-ranked conditions with repair actions.",
+    )
+    health_lay.addWidget(win.health_table)
+    lay.addWidget(health_block)
+
     # ── Card body ───────────────────────────────────────────────────
     card = QFrame()
     card.setObjectName("card")

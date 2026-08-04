@@ -61,6 +61,7 @@ def do_GET(self):
     elif path.startswith("/media/"):
     elif path.startswith("/feed/") and path.endswith(".xml"):
     elif path == "/api/status":
+    elif path == "/api/health":
     elif path == "/api/operations":
     elif path == "/api/library":
     elif path == "/api/shares":

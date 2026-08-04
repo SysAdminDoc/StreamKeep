@@ -12,6 +12,7 @@ scopes. ``rotate_token()`` replaces it atomically;
 
 REST API endpoints (F37):
   GET  /api/status    — active downloads, queue, live channels  [status]
+  GET  /api/health    — persistent severity-ranked health state  [status]
   GET  /api/operations — paged queue/monitor/failure operations [status]
   GET  /api/jobs/{id} — inspect one durable queue job            [status]
   POST /api/validate  — resolve a URL into safe picker metadata  [queue]
@@ -1232,6 +1233,9 @@ def _build_handler(
             elif path == "/api/status":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_status()
+            elif path == "/api/health":
+                if self._require_auth(SCOPE_STATUS):
+                    self._handle_api_health()
             elif path == "/api/operations":
                 if self._require_auth(SCOPE_STATUS):
                     self._handle_api_operations()
@@ -1680,6 +1684,14 @@ def _build_handler(
                 "live_channels": state.get("live_channels", []),
                 "active_workers": state.get("active_workers", []),
                 "resumable": state.get("resumable", []),
+            })
+
+        def _handle_api_health(self):
+            state = self._get_state()
+            from ..health import public_snapshot
+            self._json_response(200, {
+                "ok": True,
+                "health": public_snapshot(state.get("health", {})),
             })
 
         def _handle_api_operations(self):

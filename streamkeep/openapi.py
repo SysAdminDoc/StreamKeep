@@ -31,6 +31,7 @@ DOCUMENTED_OPERATIONS = frozenset({
     "POST /api/tokens",
     "DELETE /api/tokens/{id}",
     "GET /api/status",
+    "GET /api/health",
     "GET /api/operations",
     "POST /api/operations/action",
     "POST /api/operations/export",
@@ -524,6 +525,25 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "403": forbidden,
                     },
                 }
+            },
+            "/api/health": {
+                "get": {
+                    "summary": "Persistent severity-ranked health conditions and the last scheduled run.",
+                    "tags": ["status"],
+                    "security": bearer,
+                    "responses": {
+                        "200": json_ok("Persistent health snapshot.", {
+                            "type": "object",
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "health": {"type": "object"},
+                            },
+                            "required": ["ok", "health"],
+                        }),
+                        "401": unauthorized,
+                        "403": forbidden,
+                    },
+                },
             },
             "/api/operations": {
                 "get": {

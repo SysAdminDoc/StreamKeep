@@ -641,6 +641,7 @@ class HeadlessJobService(QObject):
 
     def state_snapshot(self) -> dict[str, Any]:
         """Return API state exclusively from durable SQLite records."""
+        from .health import load_health_snapshot, public_snapshot
         queue = db.load_queue()
         active = [
             item for item in queue
@@ -663,6 +664,7 @@ class HeadlessJobService(QObject):
                 item for item in queue
                 if item.get("status") in {"queued", "failed"}
             ],
+            "health": public_snapshot(load_health_snapshot()),
         }
 
     def _dispatch(self) -> None:
