@@ -24,10 +24,13 @@ def is_mpv_available():
     if _MPV_AVAILABLE is not None:
         return _MPV_AVAILABLE
     try:
+        from ..capabilities import CapabilityUnavailableError, require_capability
+        require_capability("mpv")
         __import__("mpv")
-        _MPV_AVAILABLE = True
-    except (ImportError, OSError):
+    except (CapabilityUnavailableError, ImportError, KeyError, OSError, RuntimeError):
         _MPV_AVAILABLE = False
+    else:
+        _MPV_AVAILABLE = True
     return _MPV_AVAILABLE
 
 

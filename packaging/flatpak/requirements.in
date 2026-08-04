@@ -6,3 +6,10 @@ websocket-client>=1.7
 keyring>=25.0
 argon2-cffi>=25.1.0
 cryptography>=50.0.0
+
+# Optional runtime extras are intentionally out of this lock. libmpv is
+# platform-managed and boto3 is installed only when S3 uploads are enabled.
+# packaging/sbom.py records these declarations in the release SBOM.
+# python-mpv>=1.0.8
+# libmpv>=0.41.0  # native runtime; required by python-mpv
+# boto3>=1.43.0

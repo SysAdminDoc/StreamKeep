@@ -13,3 +13,10 @@ cryptography>=50.0.0
 defusedxml>=0.7.1
 urllib3>=2.7.0
 paramiko>=5.0.0
+
+# Optional runtime extras. These remain out of requirements.lock because
+# libmpv is a platform-managed native library and S3 support is opt-in.
+# packaging/sbom.py records each declaration in the release SBOM.
+# python-mpv>=1.0.8
+# libmpv>=0.41.0  # native runtime; required by python-mpv
+# boto3>=1.43.0

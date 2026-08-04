@@ -279,12 +279,23 @@ def test_lock_driven_sbom_and_license_inventory_are_deterministic(
     assert licenses.read_bytes() == first_licenses
     data = json.loads(first_sbom)
     assert data["metadata"]["timestamp"] == "2024-01-01T00:00:00+00:00"
-    assert data["components"] == [{
+    components = data["components"]
+    assert {
         "name": "pillow",
         "purl": "pkg:pypi/pillow@12.3.0",
         "type": "library",
         "version": "12.3.0",
-    }]
+    } in components
+    optional = {
+        component["name"]: component
+        for component in components
+        if component.get("scope") == "optional"
+    }
+    assert set(optional) == {"boto3", "libmpv", "python-mpv"}
+    for component in optional.values():
+        properties = {row["name"]: row["value"] for row in component["properties"]}
+        assert properties["streamkeep:lock-status"] == "out-of-lock"
+        assert properties["streamkeep:requirement"].startswith(component["name"] + ">=")
     inventory = json.loads(first_licenses)
     assert inventory["generated_from"] == "runtime.lock"
     assert inventory["packages"][0]["version"] == "12.3.0"

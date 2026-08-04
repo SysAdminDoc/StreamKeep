@@ -9,20 +9,31 @@ Config keys: endpoint_url, bucket, access_key, secret_key, prefix, region.
 import os
 import urllib.parse
 
+from ..capabilities import CapabilityUnavailableError, require_capability
 from .base import UploadDestination
 
 
 class S3Destination(UploadDestination):
     NAME = "S3 / B2 / MinIO"
 
+    @staticmethod
+    def _boto3():
+        try:
+            require_capability("boto3")
+            import boto3
+        except CapabilityUnavailableError as error:
+            return None, str(error)
+        except ImportError:
+            return None, "boto3 not installed. Run: pip install \"boto3>=1.43.0\""
+        return boto3, ""
+
     def upload(self, file_path, metadata=None, progress_cb=None):
         cfg, err = self._validate_config(file_path=file_path)
         if err:
             return False, err
-        try:
-            import boto3
-        except ImportError:
-            return False, "boto3 not installed. Run: pip install boto3"
+        boto3, dependency_error = self._boto3()
+        if boto3 is None:
+            return False, dependency_error
 
         try:
             s3 = boto3.client("s3", **self._client_kwargs(cfg))
@@ -47,10 +58,9 @@ class S3Destination(UploadDestination):
         cfg, err = self._validate_config()
         if err:
             return False, err
-        try:
-            import boto3
-        except ImportError:
-            return False, "boto3 not installed"
+        boto3, dependency_error = self._boto3()
+        if boto3 is None:
+            return False, dependency_error
 
         try:
             s3 = boto3.client("s3", **self._client_kwargs(cfg))

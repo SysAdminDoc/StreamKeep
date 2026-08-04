@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import copy
+import ctypes
+import ctypes.util
 import importlib.metadata
 import importlib.util
 import os
@@ -23,10 +25,15 @@ MINIMUM_VERSIONS = {
     "yt_dlp": "2026.07.04",
     "pillow": "12.3.0",
     "paramiko": "5.0.0",
+    "python_mpv": "1.0.8",
+    "boto3": "1.43.0",
+    "libmpv": "0.41.0",
     "curl": "8.21.0",
     "ffmpeg": "8.1.2",
     "ffprobe": "8.1.2",
 }
+
+LIBMPV_ADVISORY = "GHSA-546v-22c3-7927"
 
 
 @dataclass(frozen=True)
@@ -472,6 +479,18 @@ def _probe_registry(*, preference="path"):
         ["sftp-upload"],
         "Install Paramiko 5.0.0 or newer from the signed StreamKeep dependency set.",
     )
+    python_mpv = _probe_module(
+        "python_mpv", "python-mpv", "mpv", MINIMUM_VERSIONS["python_mpv"],
+        ["embedded-playback"],
+        "Install the optional python-mpv 1.0.8 or newer extra.",
+    )
+    libmpv = _probe_libmpv()
+    mpv = _aggregate_mpv(python_mpv, libmpv)
+    boto3 = _probe_module(
+        "boto3", "boto3", "boto3", MINIMUM_VERSIONS["boto3"],
+        ["s3-upload"],
+        "Install the optional boto3 1.43.0 or newer extra for S3 uploads.",
+    )
     curl = _probe_executable(
         "curl", ["curl"], ["--version"], MINIMUM_VERSIONS["curl"],
         ["https-fetch", "range-download", "webhook"],
@@ -498,6 +517,10 @@ def _probe_registry(*, preference="path"):
         "youtube": youtube,
         "pillow": pillow,
         "paramiko": paramiko,
+        "python_mpv": python_mpv,
+        "libmpv": libmpv,
+        "mpv": mpv,
+        "boto3": boto3,
         "curl": curl,
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
@@ -581,6 +604,191 @@ def _probe_module(name, distribution, module, minimum, capabilities, repair):
         supported=available and version_at_least(version, minimum),
         provenance=_path_provenance(path, module=True) if available else "missing",
     )
+
+
+def _probe_libmpv():
+    """Load libmpv without importing the optional Python wrapper.
+
+    The native runtime owns the security-relevant release version.  The
+    python-mpv module only exposes its API version at import time, and older
+    libraries can make that import raise before the player has a chance to
+    report a useful diagnostic.  A no-video/no-audio client reads the native
+    ``mpv-version`` property and is destroyed before returning.
+    """
+    minimum = MINIMUM_VERSIONS["libmpv"]
+    repair = (
+        f"Install libmpv {minimum} or newer; versions below {minimum} are "
+        f"affected by {LIBMPV_ADVISORY}."
+    )
+    library, path, load_detail = _load_libmpv()
+    if library is None:
+        record = _base_record(
+            "libmpv", "libmpv", "native-library", minimum,
+            ["embedded-playback"], repair,
+            provenance="missing", detail=load_detail or "libmpv was not found.",
+        )
+        record["advisory"] = LIBMPV_ADVISORY
+        return record
+
+    try:
+        version, api_version = _read_libmpv_version(library)
+    except Exception as error:
+        # Capability discovery must fail closed without making an optional
+        # native runtime prevent the rest of the application from starting.
+        version = ""
+        api_version = ""
+        detail = f"libmpv loaded but its version could not be read: {error}"
+    else:
+        detail = f"libmpv {version} (client API {api_version}) loaded from {path}"
+
+    supported = bool(version) and version_at_least(version, minimum)
+    record = _base_record(
+        "libmpv", "libmpv", "native-library", minimum,
+        ["embedded-playback"], repair,
+        path=path, version=version, available=True, supported=supported,
+        provenance=_path_provenance(path), detail=detail,
+    )
+    record["api_version"] = api_version
+    record["advisory"] = LIBMPV_ADVISORY
+    if not supported:
+        record["state"] = "degraded"
+        record["detail"] = (
+            f"libmpv {version or 'unknown'} is below the required {minimum}; "
+            f"upgrade before embedded playback ({LIBMPV_ADVISORY})."
+        )
+    return record
+
+
+def _load_libmpv():
+    """Return ``(library, path, detail)`` for the first loadable libmpv."""
+    if os.name == "nt":
+        names = ("mpv-2.dll", "libmpv-2.dll", "mpv-1.dll")
+    elif sys.platform == "darwin":
+        names = ("mpv", "libmpv.dylib")
+    else:
+        names = ("mpv", "libmpv.so.2", "libmpv.so")
+
+    candidates = []
+    for name in names:
+        try:
+            found = ctypes.util.find_library(name)
+        except (OSError, TypeError):
+            found = None
+        if found:
+            candidates.append(str(found))
+
+    try:
+        spec = importlib.util.find_spec("mpv")
+    except (ImportError, AttributeError, ValueError):
+        spec = None
+    module_path = str(getattr(spec, "origin", "") or "") if spec else ""
+    if module_path:
+        module_dir = Path(module_path).parent
+        candidates.extend(str(module_dir / name) for name in names)
+
+    seen = set()
+    last_error = ""
+    for candidate in candidates:
+        key = os.path.normcase(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return ctypes.CDLL(candidate), candidate, ""
+        except OSError as error:
+            last_error = str(error)
+
+    if last_error:
+        return None, "", f"libmpv could not be loaded: {last_error}"
+    return None, "", "libmpv was not found."
+
+
+def _read_libmpv_version(library):
+    """Read the native release and client API versions from a loaded library."""
+    api = library.mpv_client_api_version
+    api.restype = ctypes.c_ulong
+    api_value = int(api())
+    api_version = f"{api_value >> 16}.{api_value & 0xFFFF}"
+
+    create = library.mpv_create
+    create.restype = ctypes.c_void_p
+    handle = create()
+    if not handle:
+        raise RuntimeError("mpv_create returned a null handle")
+
+    initialized = False
+    try:
+        set_option = getattr(library, "mpv_set_option_string", None)
+        if set_option is not None:
+            set_option.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
+            set_option.restype = ctypes.c_int
+            for name, value in ((b"config", b"no"), (b"vo", b"null"), (b"ao", b"null")):
+                set_option(handle, name, value)
+
+        initialize = library.mpv_initialize
+        initialize.argtypes = [ctypes.c_void_p]
+        initialize.restype = ctypes.c_int
+        result = int(initialize(handle))
+        if result != 0:
+            raise RuntimeError(f"mpv_initialize returned {result}")
+        initialized = True
+
+        get_property = library.mpv_get_property_string
+        get_property.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        get_property.restype = ctypes.c_void_p
+        pointer = get_property(handle, b"mpv-version")
+        if not pointer:
+            raise RuntimeError("mpv-version property was empty")
+        try:
+            value = ctypes.cast(pointer, ctypes.c_char_p).value
+            if not value:
+                raise RuntimeError("mpv-version property was empty")
+            version = value.decode("utf-8", errors="replace").strip()
+        finally:
+            free = library.mpv_free
+            free.argtypes = [ctypes.c_void_p]
+            free(pointer)
+        return version, api_version
+    finally:
+        destroy_name = "mpv_terminate_destroy" if initialized else "mpv_destroy"
+        destroy = getattr(library, destroy_name, None)
+        if destroy is not None:
+            destroy.argtypes = [ctypes.c_void_p]
+            destroy(handle)
+
+
+def _aggregate_mpv(python_mpv, libmpv):
+    """Expose one player capability while retaining wrapper/native evidence."""
+    supported = bool(python_mpv.get("supported") and libmpv.get("supported"))
+    available = bool(python_mpv.get("available") and libmpv.get("available"))
+    repair = " ".join(
+        item.get("repair", "") for item in (python_mpv, libmpv) if item.get("repair")
+    )
+    problems = " ".join(
+        format_capability_problem(item)
+        for item in (python_mpv, libmpv)
+        if not item.get("supported")
+    )
+    record = _base_record(
+        "mpv", "Embedded mpv player", "aggregate", MINIMUM_VERSIONS["libmpv"],
+        ["embedded-playback"], repair,
+        path=libmpv.get("path", ""), version=libmpv.get("version", ""),
+        available=available, supported=supported,
+        provenance="deterministic-local-components",
+        detail=(
+            f"python-mpv {python_mpv.get('version')} with libmpv "
+            f"{libmpv.get('version')} at {libmpv.get('path')}"
+            if supported else problems
+        ),
+    )
+    record.update({
+        "python_mpv": python_mpv,
+        "libmpv": libmpv,
+        "advisory": LIBMPV_ADVISORY,
+    })
+    if libmpv.get("state") == "degraded":
+        record["state"] = "degraded"
+    return record
 
 
 def _probe_yt_dlp():

@@ -21,6 +21,31 @@ from locked_requirements import canonical_name, locked_packages
 ROOT = Path(__file__).resolve().parents[1]
 
 
+OPTIONAL_RUNTIME_DEPENDENCIES = (
+    {
+        "name": "python-mpv",
+        "purl": "pkg:pypi/python-mpv",
+        "requirement": "python-mpv>=1.0.8",
+        "minimum": "1.0.8",
+        "reason": "Optional Python wrapper for embedded playback.",
+    },
+    {
+        "name": "libmpv",
+        "purl": "pkg:generic/libmpv",
+        "requirement": "libmpv>=0.41.0",
+        "minimum": "0.41.0",
+        "reason": "Platform-managed native playback runtime; GHSA-546v-22c3-7927 is fixed in 0.41.0.",
+    },
+    {
+        "name": "boto3",
+        "purl": "pkg:pypi/boto3",
+        "requirement": "boto3>=1.43.0",
+        "minimum": "1.43.0",
+        "reason": "Optional S3-compatible upload adapter dependency.",
+    },
+)
+
+
 def _installed_packages():
     """Return installed packages as a list of (name, version) tuples."""
     result = subprocess.run(
@@ -64,6 +89,26 @@ def _license_value(metadata):
     return "; ".join(sorted(set(licenses))) or "UNKNOWN"
 
 
+def _optional_components():
+    """Return deterministic SBOM entries for declared, unbundled extras."""
+    components = []
+    for dependency in OPTIONAL_RUNTIME_DEPENDENCIES:
+        components.append({
+            "type": "library",
+            "name": dependency["name"],
+            "purl": dependency["purl"],
+            "scope": "optional",
+            "properties": [
+                {"name": "streamkeep:optional", "value": "true"},
+                {"name": "streamkeep:requirement", "value": dependency["requirement"]},
+                {"name": "streamkeep:minimum", "value": dependency["minimum"]},
+                {"name": "streamkeep:lock-status", "value": "out-of-lock"},
+                {"name": "streamkeep:reason", "value": dependency["reason"]},
+            ],
+        })
+    return components
+
+
 def generate_sbom(output_path=None, *, lock_path=None, license_output=None):
     """Generate a CycloneDX 1.5 SBOM JSON. Returns (ok, path_or_error)."""
     packages = locked_packages(lock_path) if lock_path else _installed_packages()
@@ -78,6 +123,8 @@ def generate_sbom(output_path=None, *, lock_path=None, license_output=None):
             "version": version,
             "purl": f"pkg:pypi/{name.lower()}@{version}",
         })
+    components.extend(_optional_components())
+    components.sort(key=lambda component: (component["name"], component.get("version", "")))
 
     sbom = {
         "bomFormat": "CycloneDX",

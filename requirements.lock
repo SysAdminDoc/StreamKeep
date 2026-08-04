@@ -4,6 +4,9 @@
 #
 #    pip-compile --generate-hashes --no-emit-index-url --output-file=requirements.lock --strip-extras requirements.txt
 #
+# Optional out-of-lock declarations are recorded by packaging/sbom.py:
+# python-mpv>=1.0.8, libmpv>=0.41.0, boto3>=1.43.0
+#
 argon2-cffi==25.1.0 \
     --hash=sha256:694ae5cc8a42f4c4e2bf2ca0e64e51e23a040c6a517a85074683d3959e1346c1 \
     --hash=sha256:fdc8b074db390fccb6eb4a3604ae7231f219aa669a2652e0f20e16ba513d5741

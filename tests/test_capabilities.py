@@ -30,6 +30,9 @@ class CapabilityRegistryTests(unittest.TestCase):
             "yt_dlp": "2026.07.04",
             "pillow": "12.3.0",
             "paramiko": "5.0.0",
+            "python_mpv": "1.0.8",
+            "boto3": "1.43.0",
+            "libmpv": "0.41.0",
             "curl": "8.21.0",
             "ffmpeg": "8.1.2",
             "ffprobe": "8.1.2",
@@ -58,6 +61,52 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertFalse(record["supported"])
         self.assertEqual(record["minimum"], "5.0.0")
         self.assertIn("Install Paramiko 5.0.0", capabilities.format_capability_problem(record))
+
+    def test_libmpv_probe_reports_native_release_version_and_advisory(self):
+        with mock.patch.object(
+                capabilities, "_load_libmpv",
+                return_value=(object(), r"C:\Media\libmpv-2.dll", ""),
+        ), mock.patch.object(
+                capabilities, "_read_libmpv_version",
+                return_value=("0.40.0", "2.2"),
+        ):
+            record = capabilities._probe_libmpv()
+
+        self.assertTrue(record["available"])
+        self.assertFalse(record["supported"])
+        self.assertEqual(record["version"], "0.40.0")
+        self.assertEqual(record["api_version"], "2.2")
+        self.assertEqual(record["state"], "degraded")
+        self.assertEqual(record["advisory"], "GHSA-546v-22c3-7927")
+        self.assertIn("GHSA-546v-22c3-7927", record["detail"])
+
+    def test_libmpv_absence_is_missing_without_loading_player_module(self):
+        with mock.patch.object(
+                capabilities, "_load_libmpv", return_value=(None, "", "not installed"),
+        ):
+            record = capabilities._probe_libmpv()
+
+        self.assertFalse(record["available"])
+        self.assertFalse(record["supported"])
+        self.assertEqual(record["state"], "missing")
+        self.assertIn("not installed", record["detail"])
+
+    def test_player_availability_fails_closed_when_registry_has_no_mpv(self):
+        from streamkeep.player import mpv_widget
+
+        missing = capabilities._base_record(
+            "mpv", "Embedded mpv player", "aggregate", "0.41.0",
+            ["embedded-playback"], "Install the optional player runtime.",
+        )
+        previous = mpv_widget._MPV_AVAILABLE
+        mpv_widget._MPV_AVAILABLE = None
+        try:
+            with mock.patch.object(
+                    capabilities, "get_runtime_capabilities", return_value={"mpv": missing},
+            ), mock.patch.dict("sys.modules", {"mpv": None}):
+                self.assertFalse(mpv_widget.is_mpv_available())
+        finally:
+            mpv_widget._MPV_AVAILABLE = previous
 
     def test_unsafe_tool_is_blocked_with_repair_guidance(self):
         unsafe = _record(
@@ -272,7 +321,8 @@ class CapabilityRegistryTests(unittest.TestCase):
             name: _record(name)
             for name in (
                 "sqlite", "yt_dlp", "yt_dlp_ejs", "javascript", "youtube",
-                "pillow", "curl", "ffmpeg", "ffprobe",
+                "pillow", "paramiko", "python_mpv", "libmpv", "mpv", "boto3",
+                "curl", "ffmpeg", "ffprobe",
             )
         }
         with mock.patch.object(capabilities, "_probe_registry", return_value=registry):
@@ -323,6 +373,10 @@ class ReleaseFloorTests(unittest.TestCase):
 
         self.assertIn("Pillow>=12.3.0", requirements)
         self.assertIn("yt-dlp[default]>=2026.07.04", requirements)
+        self.assertIn("python-mpv>=1.0.8", requirements)
+        self.assertIn("libmpv>=0.41.0", requirements)
+        self.assertIn("boto3>=1.43.0", requirements)
+        self.assertNotRegex(requirements, r"(?m)^(?:python-mpv|boto3)>=")
         self.assertRegex(flatpak_lock, r"(?m)^yt-dlp==2026\.7\.4 \\")
         self.assertRegex(flatpak_lock, r"(?m)^pillow==12\.3\.0 \\")
         self.assertIn("python3-requirements.json", flatpak)

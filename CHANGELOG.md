@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Declared the optional `python-mpv>=1.0.8`, platform-managed
+  `libmpv>=0.41.0`, and `boto3>=1.43.0` runtimes outside the reproducible
+  locks, recorded them in the SBOM, and added native libmpv version/advisory
+  probing so player and S3 operations fail closed with repair guidance.
+
 - Made broad exception fallbacks distinguishable: diagnostic paths now report
   through the structured log bridge, all intentional swallows carry safety
   reasons, and the main-window worker shutdown path uses one escalation helper.
