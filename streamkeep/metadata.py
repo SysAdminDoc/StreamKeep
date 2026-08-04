@@ -911,6 +911,7 @@ def normalize_metadata_payload(data):
         "archive_key": archive_key,
         "channel": channel,
         "title": scrub_public_text(raw.get("title", "") or ""),
+        "description": scrub_public_text(raw.get("description", "") or "")[:100_000],
         "duration": scrub_public_text(raw.get("duration", "") or ""),
         "total_secs": total_secs,
         "start_time": scrub_public_text(raw.get("start_time", "") or ""),
@@ -1220,6 +1221,10 @@ class MetadataSaver:
                 getattr(stream_info, "title", "")
                 or (getattr(vod_info, "title", "") if vod_info else "")
             ),
+            "description": (
+                getattr(stream_info, "description", "")
+                or (getattr(vod_info, "description", "") if vod_info else "")
+            ),
             "duration": getattr(stream_info, "duration_str", "") or "",
             "total_secs": getattr(stream_info, "total_secs", 0) or 0,
             "start_time": getattr(stream_info, "start_time", "") or "",
@@ -1454,6 +1459,8 @@ class MetadataSaver:
         file_base="",
         *,
         source_url="",
+        title_override="",
+        description_override="",
     ):
         """Write a local-only Kodi/Jellyfin NFO with stable source identity."""
         if stream_info is None:
@@ -1464,6 +1471,7 @@ class MetadataSaver:
             getattr(stream_info, "title", "")
             or (getattr(vod_info, "title", "") if vod_info else "")
         ).strip() or "Untitled"
+        display_title = str(title_override or title).strip() or title
         provenance = build_archival_provenance(
             stream_info, vod_info, source_url=source_url,
         )
@@ -1485,12 +1493,18 @@ class MetadataSaver:
         runtime_min = int(
             (getattr(stream_info, "total_secs", 0) or 0) // 60
         )
+        description = scrub_public_text(
+            description_override
+            or getattr(stream_info, "description", "")
+            or (getattr(vod_info, "description", "") if vod_info else "")
+            or ""
+        )[:100_000]
 
         esc = MetadataSaver._xml_escape
         lines = [
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
             "<movie>",
-            f"  <title>{esc(scrub_public_text(title))}</title>",
+            f"  <title>{esc(scrub_public_text(display_title))}</title>",
             f"  <originaltitle>{esc(scrub_public_text(title))}</originaltitle>",
             f"  <studio>{esc(provenance.platform)}</studio>",
         ]
@@ -1516,10 +1530,11 @@ class MetadataSaver:
             lines.append(f"  <runtime>{runtime_min}</runtime>")
         if os.path.isfile(os.path.join(output_dir, "thumbnail.jpg")):
             lines.append("  <thumb>thumbnail.jpg</thumb>")
-        lines.append(
-            f"  <plot>Archived from {esc(provenance.platform)} on "
-            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.</plot>"
+        plot = description or (
+            f"Archived from {provenance.platform} on "
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}."
         )
+        lines.append(f"  <plot>{esc(plot)}</plot>")
         lines.append("</movie>")
         safe_base = os.path.basename(file_base) if file_base else ""
         nfo_path = os.path.join(

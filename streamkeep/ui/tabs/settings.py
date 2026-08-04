@@ -2521,6 +2521,37 @@ def build_settings_tab(win):
     semantic_actions.addStretch(1)
     semantic_lay.addLayout(semantic_actions)
     card_lay.addWidget(semantic_block)
+    translation_block, translation_lay = make_field_block(
+        "Metadata translation",
+        "Optional local-first translation of titles, descriptions, and chapter "
+        "names into the current app language. Originals are always preserved.",
+    )
+    win.translate_metadata_check = QCheckBox(
+        "Translate embedded metadata and chapters after download"
+    )
+    win.translate_metadata_check.setChecked(
+        bool(win._config.get("translate_metadata_enabled", False))
+    )
+    win.translate_metadata_check.setToolTip(
+        "Uses the local Ollama provider by default. Cloud providers are not "
+        "reachable from this setting and require an explicit per-run consent "
+        "through the translation API."
+    )
+    translation_lay.addWidget(win.translate_metadata_check)
+    translation_model_row = QHBoxLayout()
+    translation_model_row.setSpacing(8)
+    translation_model_row.addWidget(QLabel("Local model:"))
+    win.translation_model_input = QLineEdit(
+        str(win._config.get("translation_model", "") or "")
+    )
+    win.translation_model_input.setPlaceholderText("Ollama model, e.g. llama3")
+    translation_model_row.addWidget(win.translation_model_input, 1)
+    translation_lay.addLayout(translation_model_row)
+    translation_lay.addWidget(QLabel(
+        "Target language follows Settings → Appearance. Translation failures "
+        "never fail a download."
+    ))
+    card_lay.addWidget(translation_block)
     card_lay.addWidget(lib_block)
 
     # ── Media Server Auto-Import (F33) ────────────────────────────

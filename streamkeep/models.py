@@ -123,6 +123,7 @@ class StreamInfo:
     platform: str = ""
     channel: str = ""
     title: str = ""
+    description: str = ""
     url: str = ""
     qualities: list[QualityInfo] = field(default_factory=list)
     total_secs: float = 0
@@ -152,6 +153,7 @@ class StreamInfo:
 @dataclass
 class VODInfo:
     title: str = ""
+    description: str = ""
     date: str = ""
     source: str = ""
     is_live: bool = False

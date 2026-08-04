@@ -81,13 +81,17 @@ class PlannedStepsTests(unittest.TestCase):
         task = {
             "write_nfo": True,
             "download_chat": True,
+            "translate_metadata": True,
             "record_manifest": True,
         }
         steps = _worker()._planned_steps(task, info, {"extract_audio": True})
         keys = [k for _label, k in steps]
         self.assertEqual(
             keys,
-            ["metadata", "nfo", "chapters", "chat", "postprocess", "manifest"],
+            [
+                "metadata", "nfo", "chapters", "translation", "chat",
+                "postprocess", "manifest",
+            ],
         )
 
     def test_manifest_can_be_opted_out(self):

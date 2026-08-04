@@ -912,7 +912,7 @@ class YtDlpExtractor(Extractor):
     # post-live manifestless VODs). Two ``--print`` args → two JSON lines:
     # the metadata object, then the formats array.
     _FAST_META_FIELDS = (
-        "id", "title", "channel", "uploader", "uploader_id", "channel_id",
+        "id", "title", "description", "channel", "uploader", "uploader_id", "channel_id",
         "is_live", "duration", "chapters", "subtitles", "automatic_captions",
     )
     _FAST_FORMAT_FIELDS = (
@@ -1182,6 +1182,7 @@ class YtDlpExtractor(Extractor):
             platform="yt-dlp",
             url=url,
             title=data.get("title", ""),
+            description=str(data.get("description") or ""),
             channel=(
                 data.get("channel")
                 or data.get("uploader_id")

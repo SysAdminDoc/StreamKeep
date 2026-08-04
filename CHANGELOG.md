@@ -10,6 +10,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   available, and the separate semantic index is excluded from portable
   backups by default.
 
+- Added opt-in local-first translation for public metadata and chapter names.
+  The configured app language selects the target, Ollama is the default local
+  provider, translated metadata/chapter/NFO sidecars retain the originals, and
+  cloud providers require explicit per-run consent before any request.
+
 - Added opt-in YouTube VOD comment archival (V100). Jobs and monitor profiles
   can request bounded public comments; finalize writes versioned
   `*.comments.json` sidecars with published author names and text, logs source

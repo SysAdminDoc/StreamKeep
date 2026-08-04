@@ -242,6 +242,18 @@ SPANISH_CORE = {
     ("StreamKeep", "Save Settings"): "Guardar configuración",
     ("StreamKeep", "Settings saved and applied to future downloads."):
         "La configuración se guardó y se aplicará a futuras descargas.",
+    ("StreamKeep", "Metadata translation"): "Traducción de metadatos",
+    ("StreamKeep", "Local model:"): "Modelo local:",
+    ("StreamKeep", "Ollama model, e.g. llama3"):
+        "Modelo de Ollama, p. ej., llama3",
+    ("StreamKeep", "Optional local-first translation of titles, descriptions, and chapter names into the current app language. Originals are always preserved."):
+        "Traducción local opcional de títulos, descripciones y nombres de capítulos al idioma actual de la aplicación. Los originales siempre se conservan.",
+    ("StreamKeep", "Target language follows Settings → Appearance. Translation failures never fail a download."):
+        "El idioma de destino sigue Configuración → Apariencia. Los errores de traducción nunca hacen fallar una descarga.",
+    ("StreamKeep", "Translate embedded metadata and chapters after download"):
+        "Traducir metadatos y capítulos incrustados después de la descarga",
+    ("StreamKeep", "Uses the local Ollama provider by default. Cloud providers are not reachable from this setting and require an explicit per-run consent through the translation API."):
+        "Usa el proveedor local Ollama de forma predeterminada. Los proveedores en la nube no están disponibles desde este ajuste y requieren consentimiento explícito en cada ejecución mediante la API de traducción.",
     ("StreamKeep", "Restore available unmuted audio in Twitch VODs"):
         "Restaurar el audio sin silenciar disponible en los VOD de Twitch",
     ("StreamKeep", "For finished Twitch VODs, probe same-format CDN fragments whose paths end in -muted and use the unmuted fragment when it exists. Unreachable fragments remain muted; live captures are not probed."):

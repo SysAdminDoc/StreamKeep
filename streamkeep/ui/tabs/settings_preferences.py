@@ -1095,6 +1095,14 @@ class SettingsPreferencesMixin:
             self._config["semantic_max_index_bytes"] = int(
                 self.semantic_max_index_bytes_spin.value()
             )
+        if hasattr(self, "translate_metadata_check"):
+            self._config["translate_metadata_enabled"] = bool(
+                self.translate_metadata_check.isChecked()
+            )
+        if hasattr(self, "translation_model_input"):
+            self._config["translation_model"] = (
+                self.translation_model_input.text().strip()[:128]
+            )
         if hasattr(self, "quality_defaults_combos"):
             self._config["quality_defaults"] = {
                 plat: (combo.currentData() or "")

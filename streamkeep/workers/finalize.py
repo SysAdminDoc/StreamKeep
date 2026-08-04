@@ -184,6 +184,8 @@ class FinalizeWorker(QThread):
             steps.append(("Writing NFO", "nfo"))
         if getattr(info, "chapters", None):
             steps.append(("Exporting chapters", "chapters"))
+        if task.get("translate_metadata"):
+            steps.append(("Translating metadata and chapters", "translation"))
         if getattr(info, "markers", None) or getattr(info, "marker_schedules", None):
             steps.append(("Exporting HLS markers", "markers"))
         if task.get("capture_comments"):
@@ -251,6 +253,36 @@ class FinalizeWorker(QThread):
             self.log.emit(
                 f"[COMMENTS] Saved {result['count']} comment(s) to "
                 f"{os.path.basename(result['path'])}"
+            )
+
+    def _run_translation(self, task, out_dir, file_base):
+        """Translate public sidecars best-effort without cloud consent."""
+        try:
+            from ..translation import translate_recording
+
+            result = translate_recording(
+                out_dir,
+                file_base=file_base,
+                target_language=task.get("translation_language", "en"),
+                provider=task.get("translation_provider", "ollama"),
+                model=task.get("translation_model", ""),
+                api_url=task.get("translation_api_url", ""),
+                api_key=task.get("translation_api_key", ""),
+                cloud_consent=bool(task.get("translation_cloud_consent", False)),
+            )
+        except Exception as error:
+            self.log.emit(f"[TRANSLATION] Unavailable: {error}")
+            return
+        if result.get("status") == "translated":
+            self.log.emit(
+                f"[TRANSLATION] Wrote {result.get('target_language', 'target')} "
+                "metadata/chapter sidecars while preserving originals"
+            )
+        elif result.get("status") == "empty":
+            self.log.emit("[TRANSLATION] No public metadata or chapters to translate")
+        else:
+            self.log.emit(
+                f"[TRANSLATION] Unavailable: {result.get('reason', 'unknown reason')}"
             )
 
     def _run_podcast_sidecars(self, task, info, out_dir, file_base):
@@ -435,6 +467,12 @@ class FinalizeWorker(QThread):
                     if MetadataSaver.write_chapters(out_dir, info, file_base=file_base):
                         count = len(getattr(info, "chapters", None) or [])
                         self.log.emit(f"[CHAPTERS] Exported {count} chapter(s) to {file_base}.chapters.txt/.json")
+                if task.get("translate_metadata") and not self._interrupted():
+                    step_no += 1
+                    self._emit_progress(
+                        "Translating metadata and chapters", step_no, total_steps,
+                    )
+                    self._run_translation(task, out_dir, file_base)
                 if (
                     getattr(info, "markers", None)
                     or getattr(info, "marker_schedules", None)

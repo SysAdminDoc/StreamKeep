@@ -382,6 +382,16 @@ class DownloadFinalizeMixin:
             "comment_max_bytes": self._config.get(
                 "comment_max_bytes", 4 * 1024 * 1024,
             ),
+            "translate_metadata": bool(
+                self._config.get("translate_metadata_enabled", False)
+            ),
+            "translation_language": self._config.get("language", "en"),
+            "translation_provider": self._config.get(
+                "translation_provider", "ollama"
+            ),
+            "translation_model": self._config.get(
+                "translation_model", ""
+            ),
             "postprocess_snapshot": self._postprocess_snapshot() if info_copy else {},
             "platform": (info_copy.platform if info_copy and info_copy.platform else "?"),
             "channel": self._infer_history_channel(

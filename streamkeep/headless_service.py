@@ -1257,6 +1257,14 @@ class HeadlessJobService(QObject):
             "comment_max_bytes": self.config.get(
                 "comment_max_bytes", 4 * 1024 * 1024,
             ),
+            "translate_metadata": bool(
+                self.config.get("translate_metadata_enabled", False)
+            ),
+            "translation_language": self.config.get("language", "en"),
+            "translation_provider": self.config.get(
+                "translation_provider", "ollama"
+            ),
+            "translation_model": self.config.get("translation_model", ""),
             "postprocess_snapshot": self._postprocess_snapshot(),
             "record_manifest": True,
             "platform": str(getattr(info, "platform", "") or job.get("platform", "")),
