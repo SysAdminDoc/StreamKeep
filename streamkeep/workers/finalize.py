@@ -513,6 +513,7 @@ class FinalizeWorker(QThread):
                     final_dir = activate_upgrade_version(
                         paths,
                         version_keep=int(task.get("upgrade_version_keep", 3) or 3),
+                        log_fn=self.log.emit,
                     )
                     out_dir = str(final_dir)
                     result["out_dir"] = out_dir

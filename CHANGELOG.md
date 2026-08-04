@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Routed upgrade-version pruning through the recycle bin, refusing to delete
+  when `send2trash` is unavailable and removing pruned history rows through
+  the existing retention tombstone transaction.
+
 - Made re-template file renames dependency-aware and case-insensitive, with
   named cycle conflicts and byte-preserving overlap coverage so a destination
   can never overwrite a source still awaiting its move.

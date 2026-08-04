@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 import os
 import re
-import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -507,8 +506,9 @@ def prune_upgrade_versions(
     *,
     keep: int = DEFAULT_VERSION_KEEP,
     active: str | os.PathLike[str] | None = None,
+    log_fn=None,
 ) -> list[Path]:
-    """Keep a bounded newest set of published versions, never the original."""
+    """Recycle old published versions and remove their history rows."""
     keep = max(1, min(MAX_VERSION_KEEP, int(keep or DEFAULT_VERSION_KEEP)))
     existing = Path(existing_path).expanduser().resolve(strict=False)
     versions = list_upgrade_versions(existing)
@@ -516,6 +516,16 @@ def prune_upgrade_versions(
     retained = set(versions[:keep])
     if active_path is not None:
         retained.add(active_path)
+    try:
+        from send2trash import send2trash as _send2trash
+    except ImportError:
+        if log_fn:
+            log_fn(
+                "[UPGRADE] send2trash not installed — refusing to delete. "
+                "Install with: pip install send2trash"
+            )
+        return []
+
     removed: list[Path] = []
     for path in versions:
         if path in retained or path == existing:
@@ -527,10 +537,24 @@ def prune_upgrade_versions(
         ):
             continue
         try:
-            shutil.rmtree(path)
-            removed.append(path)
-        except OSError:
+            _send2trash(str(path))
+        except Exception as error:
+            if log_fn:
+                log_fn(f"[UPGRADE] Failed to recycle {path}: {error}")
             continue
+        try:
+            from . import db as _db
+            _db.delete_history_for_paths([path], reason="retention")
+        except Exception as error:
+            # Recycling remains successful even if a legacy or externally
+            # supplied database cannot accept the tombstone transaction.
+            if log_fn:
+                log_fn(
+                    f"[UPGRADE] Could not record tombstone for {path}: {error}"
+                )
+        removed.append(path)
+        if log_fn:
+            log_fn(f"[UPGRADE] Recycled: {path.name}")
     return removed
 
 
@@ -538,6 +562,7 @@ def activate_upgrade_version(
     paths: UpgradePaths,
     *,
     version_keep: int = DEFAULT_VERSION_KEEP,
+    log_fn=None,
 ) -> Path:
     """Atomically publish a validated staged version beside the original."""
     _validate_siblings(paths.existing, paths.staging, paths.final)
@@ -548,7 +573,9 @@ def activate_upgrade_version(
     if paths.final.exists():
         raise UpgradeSafetyError("Upgrade version target already exists")
     os.replace(paths.staging, paths.final)
-    prune_upgrade_versions(paths.existing, keep=version_keep, active=paths.final)
+    prune_upgrade_versions(
+        paths.existing, keep=version_keep, active=paths.final, log_fn=log_fn,
+    )
     return paths.final
 
 

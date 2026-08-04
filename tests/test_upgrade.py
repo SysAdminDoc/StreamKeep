@@ -1,7 +1,10 @@
 """Identity and crash-safety coverage for monitor quality upgrades."""
 
+import os
+import sys
 from types import SimpleNamespace
 from unittest import mock
+from pathlib import Path
 
 from streamkeep.upgrade import (
     UpgradeSafetyError,
@@ -11,6 +14,7 @@ from streamkeep.upgrade import (
     list_upgrade_versions,
     plan_upgrade_paths,
     prepare_upgrade_staging,
+    prune_upgrade_versions,
     quality_rank,
 )
 from streamkeep.verify import STATUS_FAIL, STATUS_OK
@@ -223,6 +227,68 @@ def test_version_retention_keeps_known_good_and_bounded_siblings(tmp_path):
 
     assert original.read_text(encoding="utf-8") == "known good"
     assert len(list_upgrade_versions(existing)) <= 2
+
+
+def _upgrade_version_dir(existing, quality, token, mtime):
+    path = existing.parent / f"{existing.name} [upgrade {quality} {token}]"
+    path.mkdir()
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_upgrade_pruning_refuses_to_delete_without_recycle_bin(tmp_path, monkeypatch):
+    existing = tmp_path / "recording"
+    existing.mkdir()
+    old = _upgrade_version_dir(existing, "720p", "old00001", 100)
+    newest = _upgrade_version_dir(existing, "1080p", "new00001", 200)
+    database = tmp_path / "library.db"
+    with mock.patch.object(db, "DB_PATH", database):
+        db.init_db()
+        old_id = db.save_history_entry({
+            "platform": "Twitch", "source_id": "vod:old",
+            "title": "Old", "path": str(old),
+        })
+        monkeypatch.setitem(sys.modules, "send2trash", None)
+        logs = []
+        removed = prune_upgrade_versions(
+            existing, keep=1, active=newest, log_fn=logs.append,
+        )
+        assert removed == []
+        assert old.is_dir()
+        assert next(row for row in db.load_history() if row["id"] == old_id)["path"] == str(old)
+        assert any("refusing to delete" in message for message in logs)
+
+
+def test_upgrade_pruning_recycles_versions_and_removes_history_rows(
+    tmp_path, monkeypatch,
+):
+    existing = tmp_path / "recording"
+    existing.mkdir()
+    old = _upgrade_version_dir(existing, "720p", "old00001", 100)
+    newest = _upgrade_version_dir(existing, "1080p", "new00001", 200)
+    database = tmp_path / "library.db"
+    with mock.patch.object(db, "DB_PATH", database):
+        db.init_db()
+        old_id = db.save_history_entry({
+            "platform": "Twitch", "source_id": "vod:old",
+            "title": "Old", "path": str(old),
+        })
+        with mock.patch(
+            "send2trash.send2trash",
+            side_effect=lambda path: Path(path).rmdir(),
+        ) as recycle:
+            logs = []
+            removed = prune_upgrade_versions(
+                existing, keep=1, active=newest, log_fn=logs.append,
+            )
+        assert removed == [old]
+        recycle.assert_called_once_with(str(old))
+        assert not old.exists()
+        assert newest.exists()
+        assert all(row["id"] != old_id for row in db.load_history())
+        tombstone = db.find_tombstone("Twitch", "vod:old", blocking_only=False)
+        assert tombstone["reason"] == "retention"
+        assert any("Recycled" in message for message in logs)
 
 
 def test_source_identity_survives_immutable_job_round_trip():
