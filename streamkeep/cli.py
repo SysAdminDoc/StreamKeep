@@ -1878,18 +1878,18 @@ def _run_intelligence(args):
 
 
 def _run_protocol_register(args):
-    """Register the per-user streamkeep:// handler (Windows)."""
-    from .protocol import register_windows_protocol
-    ok, message = register_windows_protocol()
+    """Register the per-user streamkeep:// handler on the current OS."""
+    from .protocol import register_protocol
+    ok, message = register_protocol()
     _print_line(message)
     if not ok:
         sys.exit(1)
 
 
 def _run_protocol_unregister(args):
-    """Remove the per-user streamkeep:// handler (Windows)."""
-    from .protocol import unregister_windows_protocol
-    ok, message = unregister_windows_protocol()
+    """Remove the per-user streamkeep:// handler on the current OS."""
+    from .protocol import unregister_protocol
+    ok, message = unregister_protocol()
     _print_line(message)
     if not ok:
         sys.exit(1)
@@ -2406,12 +2406,12 @@ def build_parser():
     # -- streamkeep:// protocol handler + bookmarklet (V23) --
     sub.add_parser(
         "register-protocol",
-        help="Register the per-user streamkeep:// handler (Windows)",
+        help="Register the per-user streamkeep:// handler on this OS",
     ).add_argument("--config-dir", default=argparse.SUPPRESS,
                    help="Override the config/database directory")
     sub.add_parser(
         "unregister-protocol",
-        help="Remove the per-user streamkeep:// handler (Windows)",
+        help="Remove the per-user streamkeep:// handler on this OS",
     ).add_argument("--config-dir", default=argparse.SUPPRESS,
                    help="Override the config/database directory")
     sub.add_parser(

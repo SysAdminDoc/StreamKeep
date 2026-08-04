@@ -78,6 +78,12 @@ def test_flatpak_manifest_uses_locked_linux_modules_and_current_base():
     assert "install -Dm644 icon.png /app/bin/icon.png" in manifest
     assert "hicolor/512x512/apps/com.github.SysAdminDoc.StreamKeep.png" in manifest
     assert "runtime-version: '6.10'" in manifest
+    desktop = (
+        ROOT / "packaging" / "flatpak" /
+        "com.github.SysAdminDoc.StreamKeep.desktop"
+    ).read_text(encoding="utf-8")
+    assert "Exec=streamkeep %u" in desktop
+    assert "MimeType=x-scheme-handler/streamkeep;" in desktop
     assert "base-version: '6.10'" in manifest
     assert "python3-requirements.json" in manifest
     assert "pip3 install --no-index --find-links=." not in manifest

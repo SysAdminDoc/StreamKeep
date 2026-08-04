@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added per-user `streamkeep://` registration for Linux XDG/`xdg-mime` and
+  macOS LaunchServices, updated the Flatpak desktop entry for URI routing, and
+  kept the existing HTTP(S)-only validation shared across every platform.
+
 - Moved the Windows reproducible-build and release-gate lane to Python 3.14.6,
   regenerated the hash-locked build inputs under Python 3.14, and made frozen
   release entry points reject older interpreters. The Flatpak lock remains

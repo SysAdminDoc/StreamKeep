@@ -2,8 +2,10 @@
 Type=Application
 Name=StreamKeep
 Comment=Download VODs, live streams, and podcasts
-Exec=streamkeep
+Exec=streamkeep %u
 Icon=com.github.SysAdminDoc.StreamKeep
 Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/streamkeep;
 Categories=AudioVideo;Video;Network;
 Keywords=stream;download;vod;twitch;kick;youtube;archive;
