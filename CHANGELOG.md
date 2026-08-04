@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Constrained headless queue requests to a frozen safe field set, confined
+  client-selected output directories to the configured root, and kept upgrade
+  and archive controls under trusted server/config ownership. Rejected fields
+  are logged without preventing the URL from being queued.
+
 - Retired the unsupported MSIX packaging lane and removed its blocked roadmap
   entry. The shipped matrix is now the unsigned Inno installer, portable
   onedir zip, Flatpak manifest, and WinGet manifest because MSIX requires

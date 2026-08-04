@@ -173,6 +173,12 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                 "Job": _job_schema(),
                 "QueueRequest": {
                     "type": "object",
+                    "description": (
+                        "Only the listed URL, picker, quality, clip, and "
+                        "same-root output fields are accepted from a queue "
+                        "client. Unknown executor fields are ignored."
+                    ),
+                    "additionalProperties": False,
                     "properties": {
                         "url": {"type": "string", "format": "uri"},
                         "quality": {"type": "string"},
@@ -208,6 +214,28 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                             "type": "object",
                             "description": "Non-secret active-tab context for a browser handoff.",
                             "additionalProperties": {"type": "string"},
+                        },
+                        "media_item_type": {
+                            "type": "string",
+                            "enum": ["video", "audio", "photo", "gif"],
+                        },
+                        "vod_source": {"type": "string"},
+                        "vod_platform": {"type": "string"},
+                        "title": {"type": "string"},
+                        "platform": {"type": "string"},
+                        "source_id": {"type": "string"},
+                        "webpage_url": {"type": "string", "format": "uri"},
+                        "vod_title": {"type": "string"},
+                        "vod_channel": {"type": "string"},
+                        "feed_url": {"type": "string", "format": "uri"},
+                        "clip_start": {"type": "string"},
+                        "clip_end": {"type": "string"},
+                        "output_dir": {
+                            "type": "string",
+                            "description": (
+                                "Optional subdirectory below StreamKeep's "
+                                "configured output root."
+                            ),
                         },
                     },
                     "required": ["url"],

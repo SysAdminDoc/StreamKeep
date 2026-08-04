@@ -10,12 +10,15 @@ validation id refers to a private, expiring server-side result instead.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import threading
 import time
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
+
+from .job_spec import split_remote_queue_fields
 
 
 MEDIA_ITEM_TYPES = ("video", "audio", "photo", "gif")
@@ -77,8 +80,10 @@ def _media_type(value: Any, default: str = "video") -> str:
 def validate_queue_payload(payload: Any) -> dict[str, Any]:
     """Return a normalized, bounded queue payload.
 
-    Unknown fields are retained for existing queue features, while all fields
-    that can influence picker selection are type-checked and bounded here.
+    Unknown fields are retained for trusted local queue consumers, while all
+    fields that can influence picker selection are type-checked and bounded
+    here. The headless remote boundary calls
+    :func:`filter_remote_queue_payload` before persisting a job.
     GUI VOD rows may retain a legacy numeric Twitch VOD id as url when the
     real source is present in vod_source.
     """
@@ -145,6 +150,57 @@ def validate_queue_payload(payload: Any) -> dict[str, Any]:
         if field in payload and payload.get(field) not in (None, ""):
             normalized[field] = _bounded_text(payload.get(field), field)
     return normalized
+
+
+def _path_is_within_root(path: Any, root: Any) -> bool:
+    """Return whether real *path* stays within the configured real *root*."""
+    try:
+        root_real = os.path.normcase(os.path.realpath(os.fspath(root)))
+        path_real = os.path.normcase(os.path.realpath(os.fspath(path)))
+        return bool(root_real) and os.path.commonpath(
+            (root_real, path_real)
+        ) == root_real
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def filter_remote_queue_payload(
+    payload: Any,
+    *,
+    output_root: str,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Filter a remote queue request before it can become a durable job.
+
+    The returned field names are rejected rather than raised as validation
+    errors so clients can continue to queue a URL when they send a stale or
+    speculative executor option. ``output_dir`` is the sole path-bearing
+    exception and is accepted only below the service's configured output root.
+    """
+    normalized = validate_queue_payload(payload)
+    filtered, rejected = split_remote_queue_fields(normalized)
+    rejected_set = set(rejected)
+    if "output_dir" in filtered:
+        raw_output_dir = filtered["output_dir"]
+        if raw_output_dir in (None, ""):
+            filtered.pop("output_dir", None)
+        elif not isinstance(raw_output_dir, str):
+            filtered.pop("output_dir", None)
+            rejected_set.add("output_dir")
+        else:
+            try:
+                output_dir = _bounded_text(
+                    raw_output_dir, "output_dir", MAX_URL_LENGTH
+                )
+            except PreflightError:
+                filtered.pop("output_dir", None)
+                rejected_set.add("output_dir")
+            else:
+                if not _path_is_within_root(output_dir, output_root):
+                    filtered.pop("output_dir", None)
+                    rejected_set.add("output_dir")
+                else:
+                    filtered["output_dir"] = output_dir
+    return filtered, tuple(sorted(rejected_set))
 
 
 def validate_probe_request(payload: Any) -> dict[str, Any]:

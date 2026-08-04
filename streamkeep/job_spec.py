@@ -9,9 +9,62 @@ manually copy fields and drift over time.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Any
 
 
 SCHEMA_VERSION = 3
+
+# This is the only set of queue-job fields a remote ``queue`` token may set.
+# Keep this list deliberately separate from the much larger worker spec: adding
+# a field to ``DownloadJobSpec`` must never silently expand the REST API.
+REMOTE_QUEUE_ALLOWED_KEYS = frozenset({
+    "url",
+    "vod_source",
+    "vod_platform",
+    "validation_id",
+    "media_item_id",
+    "media_item_ids",
+    "background_audio_id",
+    "media_item_type",
+    "quality",
+    "title",
+    "platform",
+    "source_id",
+    "webpage_url",
+    "vod_title",
+    "vod_channel",
+    "feed_url",
+    "clip_start",
+    "clip_end",
+    "output_dir",
+})
+
+# These values are transport metadata, not durable executor controls. They are
+# accepted long enough for the headless boundary to consume them and are
+# removed before the job is persisted.
+REMOTE_QUEUE_TRANSPORT_KEYS = frozenset({
+    "action",
+    "request_headers",
+    "source",
+    "source_context",
+})
+
+
+def split_remote_queue_fields(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Return the frozen remote queue subset and rejected field names."""
+    accepted: dict[str, Any] = {}
+    rejected: set[str] = set()
+    for key, value in payload.items():
+        if isinstance(key, str) and (
+            key in REMOTE_QUEUE_ALLOWED_KEYS
+            or key in REMOTE_QUEUE_TRANSPORT_KEYS
+        ):
+            accepted[key] = value
+        else:
+            rejected.add(str(key))
+    return accepted, tuple(sorted(rejected))
 
 
 @dataclass(frozen=True)

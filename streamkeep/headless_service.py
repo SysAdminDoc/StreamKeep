@@ -22,6 +22,7 @@ from .preflight import (
     ProbeCache,
     build_picker_response,
     collect_probe_result,
+    filter_remote_queue_payload,
     normalize_media_selection,
     serialize_stream_picker,
     serialize_vod_picker,
@@ -300,6 +301,19 @@ class HeadlessJobService(QObject):
                     continue
                 item.setdefault(key, value)
             item.pop("validation_id", None)
+        item, rejected_fields = filter_remote_queue_payload(
+            item, output_root=self.output_dir,
+        )
+        if rejected_fields:
+            write_log_line(
+                "[QUEUE] Ignored remote queue fields: "
+                + ", ".join(rejected_fields)
+            )
+        source = str(item.pop("source", "") or "").strip().lower()
+        if source not in {"browser", "rest-api"}:
+            source = "headless-api"
+        item.pop("action", None)
+        item.pop("source_context", None)
         request_headers = normalize_replay_headers(
             item.pop("request_headers", None)
         )
@@ -321,7 +335,7 @@ class HeadlessJobService(QObject):
             "quality": str(item.get("quality", "") or "best"),
             "output_dir": str(item.get("output_dir", "") or self.output_dir),
             "status": "queued",
-            "source": str(item.get("source", "") or "headless-api"),
+            "source": source,
         })
         job = db.enqueue_queue_job(item)
         if job.get("tombstone_skipped"):
@@ -839,7 +853,11 @@ class HeadlessJobService(QObject):
             ytdlp_template_args=tuple(ytdlp_template_args),
             chunk_length_secs=chunk_secs,
             download_sections=download_sections,
-            download_archive=str(job.get("download_archive", "") or ""),
+            # The archive path is a trusted config concern, never a remote
+            # queue field. Desktop/monitor jobs still carry their own spec.
+            download_archive=str(
+                self.config.get("download_archive", "") or ""
+            ),
             break_on_existing=bool(job.get("break_on_existing", False)),
         )
         worker = DownloadWorker.from_spec(spec)
