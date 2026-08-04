@@ -1576,6 +1576,58 @@ def _run_youtube_health(args):
     from .extractors.ytdlp import youtube_health_report
 
     config = load_config()
+    runtime_actions = []
+    preference = str(
+        getattr(args, "javascript_runtime_preference", "") or ""
+    ).strip().lower()
+    if preference:
+        from .config import save_config
+        from .capabilities import invalidate_runtime_capabilities_cache
+
+        config["javascript_runtime_preference"] = preference
+        if not save_config(config):
+            _print_line("Error: JavaScript runtime preference could not be saved.")
+            sys.exit(1)
+        invalidate_runtime_capabilities_cache()
+        runtime_actions.append({
+            "action": "set-preference",
+            "preference": preference,
+            "ok": True,
+        })
+    if getattr(args, "remove_deno", False):
+        from .javascript_runtime import DenoRuntimeError, remove_managed_deno
+        from .capabilities import invalidate_runtime_capabilities_cache
+
+        try:
+            removed = remove_managed_deno()
+        except DenoRuntimeError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(1)
+        invalidate_runtime_capabilities_cache()
+        runtime_actions.append({
+            "action": "remove-deno",
+            "removed": bool(removed),
+            "ok": True,
+        })
+    archive_path = str(getattr(args, "deno_archive", "") or "").strip()
+    if getattr(args, "install_deno", False) or archive_path:
+        from .javascript_runtime import DenoRuntimeError, install_managed_deno
+        from .capabilities import invalidate_runtime_capabilities_cache
+
+        try:
+            installed = install_managed_deno(archive_path or None)
+        except DenoRuntimeError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(1)
+        invalidate_runtime_capabilities_cache()
+        runtime_actions.append({
+            "action": "install-deno",
+            "ok": True,
+            "path": installed.get("path", ""),
+            "version": installed.get("version", ""),
+            "source": installed.get("source", ""),
+            "sha256": installed.get("sha256", ""),
+        })
     if getattr(args, "setup_pot_provider", False):
         from .pot_provider import ensure_provider
         ok, message = ensure_provider(config, log_fn=_print_line)
@@ -1585,6 +1637,8 @@ def _run_youtube_health(args):
 
     preset = str(config.get("youtube_player_client", "") or "")
     report = youtube_health_report(player_client=preset, config=config)
+    if runtime_actions:
+        report["runtime_actions"] = runtime_actions
 
     if getattr(args, "json", False):
         _print_line(json.dumps(report, indent=2))
@@ -1593,6 +1647,11 @@ def _run_youtube_health(args):
         _print_line(f"  yt-dlp version : {report['yt_dlp_version'] or 'unknown'}")
         runtime = report.get("js_runtime") or {}
         _print_line(f"  JS runtime     : {runtime.get('name') or 'none'}")
+        _print_line(
+            f"  Runtime source : {runtime.get('source') or runtime.get('provenance') or 'none'}"
+        )
+        for action in runtime_actions:
+            _print_line(f"  Runtime action : {action['action']} completed")
         _print_line(f"  EJS available  : {'yes' if report['ejs_available'] else 'no'}")
         _print_line(f"  player_client  : {report['player_client']}")
         endpoint = report.get("pot_endpoint") or {}
@@ -2362,6 +2421,22 @@ def build_parser():
             "Set up the local PO-token provider: install the plugin where "
             "possible, launch a configured local server, then re-probe"
         ),
+    )
+    yth_p.add_argument(
+        "--install-deno", action="store_true",
+        help="Explicitly download and install the pinned Deno runtime",
+    )
+    yth_p.add_argument(
+        "--deno-archive", default="",
+        help="Install the pinned Deno ZIP from a local archive without network access",
+    )
+    yth_p.add_argument(
+        "--remove-deno", action="store_true",
+        help="Remove the managed Deno runtime installed by StreamKeep",
+    )
+    yth_p.add_argument(
+        "--javascript-runtime-preference", choices=["path", "managed"], default="",
+        help="Prefer a PATH runtime or StreamKeep-managed Deno for YouTube",
     )
     yth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")

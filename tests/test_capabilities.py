@@ -168,6 +168,72 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertEqual(record["runtime"], "node")
         self.assertEqual(calls, [["deno"], ["node", "nodejs"]])
 
+    def test_managed_javascript_preference_preserves_provenance(self):
+        managed = _record(
+            "javascript", version="2.3.1", minimum="2.3.0",
+            path=r"C:\StreamKeep\runtimes\deno.exe", repair="Reinstall Deno.",
+        )
+        managed.update({
+            "runtime": "deno",
+            "managed": True,
+            "runtime_source": "offline-archive",
+            "provenance": "offline-archive",
+        })
+
+        with mock.patch.object(
+                capabilities, "_probe_managed_javascript_runtime",
+                return_value=managed,
+        ), mock.patch.object(
+                capabilities, "_probe_executable",
+                side_effect=AssertionError("PATH must not win managed preference"),
+        ):
+            record = capabilities._probe_javascript_runtime(preference="managed")
+
+        self.assertEqual(record["runtime"], "deno")
+        self.assertTrue(record["managed"])
+        self.assertEqual(record["runtime_source"], "offline-archive")
+        self.assertEqual(record["provenance"], "offline-archive")
+
+    def test_path_javascript_preference_keeps_user_runtime_first(self):
+        managed = _record(
+            "javascript", version="2.3.1", minimum="2.3.0",
+            path=r"C:\StreamKeep\runtimes\deno.exe", repair="Reinstall Deno.",
+        )
+        managed.update({"runtime": "deno", "managed": True})
+        path_record = _record(
+            "javascript", version="2.3.1", minimum="2.3.0",
+            path=r"C:\Tools\deno.exe", repair="Install Deno.",
+        )
+
+        with mock.patch.object(
+                capabilities, "_probe_managed_javascript_runtime",
+                return_value=managed,
+        ), mock.patch.object(
+                capabilities, "_probe_executable", return_value=path_record,
+        ):
+            record = capabilities._probe_javascript_runtime(preference="path")
+
+        self.assertEqual(record["path"], r"C:\Tools\deno.exe")
+        self.assertFalse(record["managed"])
+        self.assertEqual(record["runtime_source"], "user-supplied")
+
+    def test_unverified_managed_runtime_is_not_executed(self):
+        with mock.patch(
+                "streamkeep.javascript_runtime.bundled_deno_path", return_value="",
+        ), mock.patch(
+                "streamkeep.javascript_runtime.get_managed_deno_info",
+                return_value={
+                    "available": False,
+                    "path": r"C:\StreamKeep\runtimes\deno.exe",
+                    "detail": "Metadata is invalid.",
+                },
+        ), mock.patch.object(capabilities, "_run_version_command") as run_version:
+            record = capabilities._probe_managed_javascript_runtime()
+
+        run_version.assert_not_called()
+        self.assertFalse(record["available"])
+        self.assertEqual(record["path"], "")
+
     def test_ejs_must_exactly_match_ytdlp_requirement(self):
         ejs = _record(
             "yt_dlp_ejs", version="0.9.0", minimum="",

@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added explicit, hash-verified Deno acquisition for full YouTube JavaScript
+  support. Settings and `youtube-health` can install the pinned Deno 2.3.1
+  runtime from the official release or a local ZIP, with no startup/import
+  download; runtime preference, managed provenance, removal, and offline
+  diagnostics are surfaced while PATH runtimes remain selectable.
+
 - Added Podcasting 2.0-fidelity archiving. Podcast feeds now retain stable
   GUID-first episode identity, paged-feed traversal, namespace metadata,
   per-episode artwork, alternate enclosure/source declarations, and raw

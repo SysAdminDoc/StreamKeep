@@ -58,6 +58,27 @@ def test_pot_provider_absent_gives_actionable_detail():
     assert "bgutil" in status["detail"].lower()
 
 
+def test_runtime_status_reports_managed_runtime_source():
+    registry = {
+        "yt_dlp": {"supported": True, "version": "2026.07.04", "path": "yt-dlp"},
+        "yt_dlp_ejs": {"supported": True, "version": "0.8.0", "required_by_ytdlp": ""},
+        "javascript": {
+            "name": "javascript", "runtime": "deno", "command": ["deno.exe"],
+            "path": r"C:\StreamKeep\runtimes\deno.exe", "available": True,
+            "supported": True, "version": "2.3.1", "minimum": "2.3.0",
+            "provenance": "offline-archive", "runtime_source": "offline-archive",
+            "managed": True,
+        },
+        "youtube": {"supported": True},
+    }
+    with mock.patch("streamkeep.capabilities.get_runtime_capabilities", return_value=registry):
+        status = ytdlp.ytdlp_runtime_status()
+
+    assert status["runtime_source"] == "offline-archive"
+    assert status["js_runtime"]["source"] == "offline-archive"
+    assert status["js_runtime"]["managed"] is True
+
+
 def test_health_report_aggregates_runtime_pot_and_client():
     fake_runtime = {
         "state": "ready", "summary": "Ready", "yt_dlp_version": "2026.06.09",

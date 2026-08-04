@@ -347,6 +347,7 @@ def validate_product_capability_claims(root, *, claims=PRODUCT_CAPABILITY_CLAIMS
     return problems
 
 _CACHE = None
+_CACHE_KEY = None
 _CACHE_LOCK = threading.Lock()
 
 
@@ -380,13 +381,25 @@ def version_at_least(value, minimum):
     )
 
 
-def get_runtime_capabilities(*, refresh=False):
+def get_runtime_capabilities(*, refresh=False, config=None):
     """Return exact runtime identities, versions, provenance, and readiness."""
-    global _CACHE
+    global _CACHE, _CACHE_KEY
+    from .javascript_runtime import read_runtime_preference
+
+    cache_key = read_runtime_preference(config)
     with _CACHE_LOCK:
-        if _CACHE is None or refresh:
-            _CACHE = _probe_registry()
+        if _CACHE is None or refresh or _CACHE_KEY != cache_key:
+            _CACHE = _probe_registry(preference=cache_key)
+            _CACHE_KEY = cache_key
         return copy.deepcopy(_CACHE)
+
+
+def invalidate_runtime_capabilities_cache():
+    """Force the next capability read to re-probe managed runtimes."""
+    global _CACHE, _CACHE_KEY
+    with _CACHE_LOCK:
+        _CACHE = None
+        _CACHE_KEY = None
 
 
 def get_capability(name, *, refresh=False):
@@ -446,7 +459,7 @@ def capability_state(record):
     return "unsafe" if record.get("available") else "missing"
 
 
-def _probe_registry():
+def _probe_registry(*, preference="path"):
     sqlite = _probe_sqlite_runtime()
     yt_dlp = _probe_yt_dlp()
     pillow = _probe_module(
@@ -475,7 +488,7 @@ def _probe_registry():
         "Install the ffprobe 8.1.2 companion binary from the same FFmpeg build.",
     )
     ejs = _probe_ejs(yt_dlp)
-    javascript = _probe_javascript_runtime()
+    javascript = _probe_javascript_runtime(preference=preference)
     youtube = _aggregate_youtube(yt_dlp, ejs, javascript)
     return {
         "sqlite": sqlite,
@@ -700,7 +713,81 @@ def _run_version_command(path, args):
         return "", -1
 
 
-def _probe_javascript_runtime():
+def _probe_managed_javascript_runtime():
+    from .javascript_runtime import (
+        DENO_VERSION,
+        DENO_MINIMUM_VERSION,
+        bundled_deno_path,
+        get_managed_deno_info,
+    )
+
+    bundled = bundled_deno_path()
+    managed = get_managed_deno_info() if not bundled else {}
+    info = managed or {
+        "available": bool(bundled),
+        "path": bundled,
+        "version": "",
+        "provenance": "bundled" if bundled else "",
+        "source": "bundled" if bundled else "",
+        "asset": "",
+        "sha256": "",
+        "detail": "No bundled or managed Deno runtime is installed.",
+    }
+    path = str(info.get("path") or "") if info.get("available") else ""
+    if not path:
+        record = _base_record(
+            "javascript", "Deno", "managed-executable", DENO_MINIMUM_VERSION,
+            ["youtube-js-runtime"],
+            "Install the pinned Deno runtime from StreamKeep Settings or "
+            "`python StreamKeep.py youtube-health --install-deno`.",
+            provenance="missing",
+            detail=info.get("detail", ""),
+        )
+        record.update({
+            "runtime": "deno",
+            "managed": True,
+            "runtime_source": "",
+        })
+        return record
+    output, returncode = _run_version_command(path, ["--version"])
+    version = ".".join(str(part) for part in parse_version(output))
+    available = returncode == 0 and bool(version)
+    source = str(info.get("source") or info.get("provenance") or "managed")
+    record = _base_record(
+        "javascript", "Deno", "managed-executable", DENO_MINIMUM_VERSION,
+        ["youtube-js-runtime"],
+        "Reinstall the pinned Deno runtime from StreamKeep Settings or "
+        "`python StreamKeep.py youtube-health --install-deno`.",
+        path=path,
+        version=version,
+        available=available,
+        supported=(
+            available
+            and version == DENO_VERSION
+            and version_at_least(version, DENO_MINIMUM_VERSION)
+        ),
+        command=[path],
+        provenance=source,
+        detail=output.splitlines()[0][:240] if output else info.get("detail", ""),
+    )
+    record.update({
+        "runtime": "deno",
+        "managed": True,
+        "runtime_source": source,
+        "asset": str(info.get("asset") or ""),
+        "sha256": str(info.get("sha256") or ""),
+    })
+    return record
+
+
+def _decorate_javascript_record(record, runtime):
+    record["runtime"] = runtime
+    record["managed"] = False
+    record["runtime_source"] = "user-supplied"
+    return record
+
+
+def _probe_javascript_runtime(*, preference="path"):
     candidates = [
         ("deno", ["deno"], "2.3.0", ""),
         ("node", ["node", "nodejs"], "22.0.0", ""),
@@ -708,16 +795,13 @@ def _probe_javascript_runtime():
         ("bun", ["bun"], "1.2.11", "1.3.14"),
     ]
     first_unsafe = None
-    for name, commands, minimum, maximum in candidates:
-        record = _probe_executable(
-            "javascript", commands, ["--version"], minimum,
-            ["youtube-js-runtime"],
-            "Install Deno 2.3+ (recommended) or Node.js 22+ and add it to PATH.",
-            display_name=name,
-        )
-        if not record.get("available"):
-            continue
-        record["runtime"] = name
+
+    def consider(record, name, maximum=""):
+        nonlocal first_unsafe
+        if record.get("managed"):
+            record["runtime"] = name
+        else:
+            record = _decorate_javascript_record(record, name)
         record["maximum"] = maximum
         if maximum and parse_version(record.get("version")) > parse_version(maximum):
             record["supported"] = False
@@ -727,8 +811,38 @@ def _probe_javascript_runtime():
             )
         if record.get("supported"):
             return record
-        if first_unsafe is None:
+        if first_unsafe is None and record.get("available"):
             first_unsafe = record
+        return None
+
+    def probe_path_runtimes():
+        for name, commands, minimum, maximum in candidates:
+            record = _probe_executable(
+                "javascript", commands, ["--version"], minimum,
+                ["youtube-js-runtime"],
+                "Install Deno 2.3+ (recommended) or Node.js 22+ and add it to PATH.",
+                display_name=name,
+            )
+            selected = consider(record, name, maximum)
+            if selected is not None:
+                return selected
+        return None
+
+    if preference == "managed":
+        selected = consider(_probe_managed_javascript_runtime(), "deno")
+        if selected is not None:
+            return selected
+        selected = probe_path_runtimes()
+        if selected is not None:
+            return selected
+    else:
+        selected = probe_path_runtimes()
+        if selected is not None:
+            return selected
+        selected = consider(_probe_managed_javascript_runtime(), "deno")
+        if selected is not None:
+            return selected
+
     if first_unsafe:
         return first_unsafe
     missing = _base_record(
@@ -738,6 +852,8 @@ def _probe_javascript_runtime():
     )
     missing["runtime"] = ""
     missing["maximum"] = ""
+    missing["managed"] = False
+    missing["runtime_source"] = ""
     return missing
 
 

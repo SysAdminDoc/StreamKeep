@@ -1552,7 +1552,10 @@ class StreamKeep(
             except Exception:
                 pass
         # Stop transcribe / chat-render / bundle workers (F27/F22 audit fix)
-        for attr in ("_transcribe_worker", "_chat_render_worker", "_bundle_worker"):
+        for attr in (
+            "_transcribe_worker", "_chat_render_worker", "_bundle_worker",
+            "_deno_worker",
+        ):
             w = getattr(self, attr, None)
             if w is not None and w.isRunning():
                 try:

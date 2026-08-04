@@ -491,6 +491,15 @@ def build_settings_tab(win):
         "version": "Not found",
         "detail": "SQLite runtime status is unavailable.",
     })
+    from ...javascript_runtime import get_managed_deno_info
+    try:
+        deno = get_managed_deno_info()
+    except Exception as error:
+        deno = {
+            "available": False,
+            "version": "",
+            "detail": f"Managed Deno status unavailable: {error}",
+        }
     yt_status = ytdlp_runtime_status()
     win._ytdlp_status_snapshot = yt_status
     ff_card, _, _ = make_metric_card(
@@ -518,12 +527,18 @@ def build_settings_tab(win):
         str(sqlite.get("state") or "unknown").title(),
         str(sqlite.get("version") or "Not found"),
     )
+    deno_card, _, _ = make_metric_card(
+        "Managed Deno",
+        "Ready" if deno.get("available") else "Missing",
+        str(deno.get("version") or "Not found"),
+    )
     for runtime_card, detail in (
         (ff_card, ffmpeg.get("detail", "")),
         (yt_card, yt_status.get("detail", "")),
         (curl_card, curl.get("detail", "")),
         (pillow_card, pillow.get("detail", "")),
         (sqlite_card, sqlite.get("detail", "")),
+        (deno_card, deno.get("detail", "")),
     ):
         runtime_card.setToolTip(str(detail or ""))
 
@@ -534,8 +549,59 @@ def build_settings_tab(win):
     tools_metrics.addWidget(curl_card)
     tools_metrics.addWidget(pillow_card)
     tools_metrics.addWidget(sqlite_card)
+    tools_metrics.addWidget(deno_card)
     tools_lay.addLayout(tools_metrics)
     sections_top.addWidget(tools_block, 1)
+
+    deno_block, deno_lay = make_field_block(
+        "YouTube JavaScript runtime",
+        "Install the pinned Deno runtime only when you request it. "
+        "A local ZIP provides an offline installation path; PATH remains the default.",
+    )
+    deno_preference_row = QHBoxLayout()
+    deno_preference_row.setSpacing(8)
+    deno_preference_label = QLabel("Preference:")
+    deno_preference_label.setFixedWidth(100)
+    deno_preference_row.addWidget(deno_preference_label)
+    win.deno_preference_combo = QComboBox()
+    win.deno_preference_combo.addItem("Prefer PATH runtime", userData="path")
+    win.deno_preference_combo.addItem("Prefer managed Deno", userData="managed")
+    saved_deno_preference = str(
+        win._config.get("javascript_runtime_preference", "path") or "path"
+    )
+    saved_deno_idx = win.deno_preference_combo.findData(
+        "managed" if saved_deno_preference == "managed" else "path"
+    )
+    win.deno_preference_combo.setCurrentIndex(max(0, saved_deno_idx))
+    win.deno_preference_combo.currentIndexChanged.connect(
+        win._on_javascript_runtime_preference_changed
+    )
+    deno_preference_row.addWidget(win.deno_preference_combo, 1)
+    deno_lay.addLayout(deno_preference_row)
+
+    deno_actions = QHBoxLayout()
+    deno_actions.setSpacing(8)
+    win.deno_install_btn = QPushButton("Install pinned Deno")
+    win.deno_install_btn.setObjectName("secondary")
+    win.deno_install_btn.clicked.connect(win._on_install_deno_clicked)
+    deno_actions.addWidget(win.deno_install_btn)
+    win.deno_archive_btn = QPushButton("Install from ZIP")
+    win.deno_archive_btn.setObjectName("secondary")
+    win.deno_archive_btn.clicked.connect(win._on_install_deno_archive_clicked)
+    deno_actions.addWidget(win.deno_archive_btn)
+    win.deno_remove_btn = QPushButton("Remove managed Deno")
+    win.deno_remove_btn.setObjectName("secondary")
+    win.deno_remove_btn.setEnabled(False)
+    win.deno_remove_btn.clicked.connect(win._on_remove_deno_clicked)
+    deno_actions.addWidget(win.deno_remove_btn)
+    deno_actions.addStretch(1)
+    deno_lay.addLayout(deno_actions)
+    win.deno_runtime_status = QLabel("")
+    win.deno_runtime_status.setObjectName("subtleText")
+    win.deno_runtime_status.setWordWrap(True)
+    deno_lay.addWidget(win.deno_runtime_status)
+    sections_top.addWidget(deno_block, 1)
+    win._refresh_deno_runtime_controls()
     card_lay.addLayout(sections_top)
 
     # ── Cookies ─────────────────────────────────────────────────────

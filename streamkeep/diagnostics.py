@@ -122,6 +122,37 @@ def _runtime_info():
         "config_dir": str(CONFIG_DIR),
     }
     info["runtime_capabilities"] = get_runtime_capabilities(refresh=True)
+    javascript = info["runtime_capabilities"].get("javascript", {})
+    try:
+        from .javascript_runtime import get_managed_deno_info
+        managed_deno = get_managed_deno_info()
+    except Exception as error:
+        managed_deno = {
+            "available": False,
+            "path": "",
+            "version": "",
+            "provenance": "",
+            "source": "",
+            "detail": f"Managed Deno status unavailable: {error}",
+        }
+    info["javascript_runtime"] = {
+        "name": javascript.get("runtime", ""),
+        "path": javascript.get("path", ""),
+        "version": javascript.get("version", ""),
+        "provenance": javascript.get("provenance", ""),
+        "source": javascript.get(
+            "runtime_source", javascript.get("provenance", "")
+        ),
+        "managed": bool(javascript.get("managed", False)),
+        "managed_runtime": {
+            "available": bool(managed_deno.get("available", False)),
+            "path": managed_deno.get("path", ""),
+            "version": managed_deno.get("version", ""),
+            "provenance": managed_deno.get("provenance", ""),
+            "source": managed_deno.get("source", ""),
+            "detail": managed_deno.get("detail", ""),
+        },
+    }
     info["local_server_security_events"] = load_security_events(limit=200)
     return info
 

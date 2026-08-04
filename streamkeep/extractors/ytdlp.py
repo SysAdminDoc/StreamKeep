@@ -101,10 +101,10 @@ def ytdlp_command():
     return resolve_command_prefix("yt_dlp")
 
 
-def ytdlp_runtime_status():
+def ytdlp_runtime_status(config=None):
     """Return yt-dlp/EJS/JavaScript readiness from the shared registry."""
     from ..capabilities import format_capability_problem, get_runtime_capabilities
-    registry = get_runtime_capabilities()
+    registry = get_runtime_capabilities(config=config)
     yt_dlp = registry["yt_dlp"]
     ejs = registry["yt_dlp_ejs"]
     runtime_record = registry["javascript"]
@@ -119,6 +119,10 @@ def ytdlp_runtime_status():
         "minimum": runtime_record.get("minimum", ""),
         "message": "" if runtime_record.get("supported") else format_capability_problem(runtime_record),
         "provenance": runtime_record.get("provenance", ""),
+        "source": runtime_record.get(
+            "runtime_source", runtime_record.get("provenance", "")
+        ),
+        "managed": bool(runtime_record.get("managed", False)),
     }
     components = (yt_dlp, ejs, runtime_record)
     problems = [
@@ -148,6 +152,7 @@ def ytdlp_runtime_status():
         "ejs_available": ejs.get("supported", False),
         "ejs_version": ejs.get("version", ""),
         "ejs_requirement": ejs.get("required_by_ytdlp", ""),
+        "runtime_source": runtime.get("source", runtime.get("provenance", "")),
         "js_runtime": runtime,
         "problems": problems,
     }
@@ -378,7 +383,7 @@ def youtube_health_report(player_client="", config=None):
     strategy, local PO-token provider presence, and the optional remote
     backend reachability, plus a list of plain-language warnings.
     """
-    runtime = ytdlp_runtime_status()
+    runtime = ytdlp_runtime_status(config=config)
     pot = youtube_pot_provider_status()
     client_value = youtube_player_client_value(player_client)
     warnings = list(runtime.get("problems") or [])

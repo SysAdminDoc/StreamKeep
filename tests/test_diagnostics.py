@@ -108,6 +108,12 @@ class SnapshotTests(unittest.TestCase):
                 self.assertIn("_snapshot_meta.json", names)
                 runtime = json.loads(zf.read("runtime.json"))
                 self.assertIn("streamkeep_version", runtime)
+                self.assertIn("javascript_runtime", runtime)
+                self.assertIn("source", runtime["javascript_runtime"])
+                self.assertIn("managed", runtime["javascript_runtime"])
+                managed = runtime["javascript_runtime"]["managed_runtime"]
+                for key in ("available", "path", "version", "provenance", "source"):
+                    self.assertIn(key, managed)
                 capabilities = runtime["runtime_capabilities"]
                 self.assertEqual(
                     set(capabilities),

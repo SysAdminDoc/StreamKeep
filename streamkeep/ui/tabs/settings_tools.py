@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QFileDialog
 
 from ...config import save_config as _save_config
@@ -13,8 +14,154 @@ from ...utils import default_output_dir as _default_output_dir
 from ..widgets import ask_premium_confirmation
 
 
+class _DenoInstallWorker(QThread):
+    """Run the explicit Deno archive/download action off the GUI thread."""
+
+    result = pyqtSignal(bool, str)
+
+    def __init__(self, archive_path="", parent=None):
+        super().__init__(parent)
+        self.archive_path = str(archive_path or "")
+
+    def run(self):
+        try:
+            from ...javascript_runtime import install_managed_deno
+
+            info = install_managed_deno(self.archive_path or None)
+            self.result.emit(
+                True,
+                f"Deno {info.get('version', '')} installed from "
+                f"{info.get('source', 'managed')}.",
+            )
+        except Exception as error:
+            self.result.emit(False, str(error))
+
+
 class SettingsToolsMixin:
     """Advanced templates/hooks plus manual conversion and config transfer."""
+
+    def _on_javascript_runtime_preference_changed(self, index):
+        value = str(self.deno_preference_combo.itemData(index) or "path")
+        self._config["javascript_runtime_preference"] = (
+            "managed" if value == "managed" else "path"
+        )
+        self._persist_config()
+        from ...capabilities import invalidate_runtime_capabilities_cache
+
+        invalidate_runtime_capabilities_cache()
+        self._refresh_deno_runtime_controls()
+        self._set_status(
+            "JavaScript runtime preference saved; managed Deno is preferred."
+            if value == "managed"
+            else "JavaScript runtime preference saved; PATH is preferred.",
+            "success",
+        )
+
+    def _refresh_deno_runtime_controls(self):
+        if not hasattr(self, "deno_runtime_status"):
+            return
+        from ...capabilities import get_runtime_capabilities
+        from ...javascript_runtime import get_managed_deno_info
+
+        registry = get_runtime_capabilities(refresh=True, config=self._config)
+        self._runtime_registry_snapshot = registry
+        runtime = registry.get("javascript", {})
+        source = runtime.get("runtime_source") or runtime.get("provenance") or "none"
+        try:
+            managed = get_managed_deno_info()
+        except Exception as error:
+            managed = {
+                "available": False,
+                "path": "",
+                "version": "",
+                "source": "",
+                "detail": f"Managed Deno status unavailable: {error}",
+            }
+        managed_text = "Managed Deno: not installed."
+        if managed.get("available"):
+            managed_source = managed.get("source") or managed.get("provenance") or "managed"
+            managed_text = (
+                f"Managed Deno {managed.get('version') or 'unknown'} "
+                f"({managed_source}) at {managed.get('path')}."
+            )
+        self.deno_runtime_status.setText(
+            f"Selected {runtime.get('display_name') or 'JavaScript runtime'} "
+            f"{runtime.get('version') or 'not available'} — source: {source}. "
+            f"{runtime.get('path') or runtime.get('detail') or ''} "
+            f"{managed_text}"
+        )
+        self.deno_remove_btn.setEnabled(bool(managed.get("available")))
+        preference = str(
+            self._config.get("javascript_runtime_preference", "path") or "path"
+        )
+        index = self.deno_preference_combo.findData(
+            "managed" if preference == "managed" else "path"
+        )
+        if index >= 0 and self.deno_preference_combo.currentIndex() != index:
+            self.deno_preference_combo.blockSignals(True)
+            self.deno_preference_combo.setCurrentIndex(index)
+            self.deno_preference_combo.blockSignals(False)
+
+    def _start_deno_install(self, archive_path=""):
+        worker = getattr(self, "_deno_worker", None)
+        if worker is not None and worker.isRunning():
+            self._set_status("A Deno installation is already running.", "warning")
+            return
+        self._deno_worker = _DenoInstallWorker(archive_path, self)
+        self._deno_worker.result.connect(self._on_deno_install_result)
+        self._deno_worker.finished.connect(self._clear_deno_worker)
+        self._deno_worker.finished.connect(self._deno_worker.deleteLater)
+        self.deno_install_btn.setEnabled(False)
+        self.deno_archive_btn.setEnabled(False)
+        self._set_status("Installing the pinned Deno runtime...", "working")
+        self._deno_worker.start()
+
+    def _clear_deno_worker(self):
+        self._deno_worker = None
+
+    def _on_deno_install_result(self, ok, message):
+        self.deno_install_btn.setEnabled(True)
+        self.deno_archive_btn.setEnabled(True)
+        if ok:
+            from ...capabilities import invalidate_runtime_capabilities_cache
+
+            invalidate_runtime_capabilities_cache()
+            self._refresh_deno_runtime_controls()
+            self._set_status(message, "success")
+            self._log(f"[RUNTIME] {message}")
+        else:
+            self._set_status(f"Deno installation failed: {message}", "error")
+            self._log(f"[RUNTIME] Deno installation failed: {message}")
+
+    def _on_install_deno_clicked(self):
+        self._start_deno_install()
+
+    def _on_install_deno_archive_clicked(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select pinned Deno archive",
+            str(Path.home()),
+            "Deno ZIP archive (*.zip);;All files (*)",
+        )
+        if path:
+            self._start_deno_install(path)
+
+    def _on_remove_deno_clicked(self):
+        try:
+            from ...javascript_runtime import remove_managed_deno
+
+            removed = remove_managed_deno()
+        except Exception as error:
+            self._set_status(f"Deno removal failed: {error}", "error")
+            return
+        from ...capabilities import invalidate_runtime_capabilities_cache
+
+        invalidate_runtime_capabilities_cache()
+        self._refresh_deno_runtime_controls()
+        self._set_status(
+            "Managed Deno removed." if removed else "No managed Deno was installed.",
+            "success" if removed else "warning",
+        )
 
     def _refresh_ytdlp_template_editor(self, selected=""):
         from ...download_options import normalize_ytdlp_arg_templates

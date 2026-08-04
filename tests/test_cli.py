@@ -74,6 +74,60 @@ def test_youtube_health_command_emits_report(tmp_path):
     assert isinstance(payload["warnings"], list)
 
 
+def test_youtube_health_parser_exposes_explicit_deno_actions(tmp_path):
+    parser = cli.build_parser()
+    args = parser.parse_args([
+        "youtube-health",
+        "--install-deno",
+        "--deno-archive", str(tmp_path / "deno.zip"),
+        "--remove-deno",
+        "--javascript-runtime-preference", "managed",
+        "--json",
+    ])
+
+    assert args.install_deno is True
+    assert args.deno_archive == str(tmp_path / "deno.zip")
+    assert args.remove_deno is True
+    assert args.javascript_runtime_preference == "managed"
+
+
+def test_youtube_health_deno_actions_are_explicit_and_reported():
+    output = StringIO()
+    config = {"youtube_player_client": ""}
+    args = cli.build_parser().parse_args([
+        "youtube-health", "--json", "--remove-deno", "--install-deno",
+        "--javascript-runtime-preference", "managed",
+    ])
+    installed = {
+        "path": r"C:\StreamKeep\runtimes\deno.exe",
+        "version": "2.3.1",
+        "source": "managed-download",
+        "sha256": "abc123",
+    }
+
+    with mock.patch("streamkeep.config.load_config", return_value=config), \
+            mock.patch("streamkeep.config.save_config", return_value=True) as save_config, \
+            mock.patch("streamkeep.javascript_runtime.remove_managed_deno", return_value=True) as remove, \
+            mock.patch("streamkeep.javascript_runtime.install_managed_deno", return_value=installed) as install, \
+            mock.patch("streamkeep.capabilities.invalidate_runtime_capabilities_cache") as invalidate, \
+            mock.patch(
+                "streamkeep.extractors.ytdlp.youtube_health_report",
+                return_value={"healthy": True, "summary": "ready"},
+            ), \
+            mock.patch.object(cli, "_get_output_stream", return_value=output):
+        cli._run_youtube_health(args)
+
+    payload = json.loads(output.getvalue())
+    assert config["javascript_runtime_preference"] == "managed"
+    save_config.assert_called_once_with(config)
+    remove.assert_called_once_with()
+    install.assert_called_once_with(None)
+    assert invalidate.call_count == 3
+    assert [item["action"] for item in payload["runtime_actions"]] == [
+        "set-preference", "remove-deno", "install-deno",
+    ]
+
+
 def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     config_dir = tmp_path / "isolated"
     result = _run_launcher(
