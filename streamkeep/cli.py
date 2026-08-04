@@ -1096,6 +1096,68 @@ def _list_extractors():
     _print_line(f"\n  ({len(_ExtBase._registry)} extractors registered)")
 
 
+def _print_plugin_diagnostics(diagnostics, *, heading="StreamKeep plugin contract diagnostics:"):
+    """Print the same contract review data exposed by ``plugins --json``."""
+    _print_line(heading)
+    if not diagnostics:
+        _print_line("  No plugins discovered.")
+        return
+    for plugin in diagnostics:
+        state = "compatible" if plugin.get("compatible") else "incompatible"
+        trusted = "trusted" if plugin.get("trusted") else "untrusted"
+        review = (
+            "current contract approved"
+            if plugin.get("trust_reviewed")
+            else "review required before enabling"
+        )
+        _print_line(
+            f"  {plugin.get('id', '?')} v{plugin.get('version', '?')} - "
+            f"{state} ({trusted}; {review})"
+        )
+        permissions = plugin.get("permissions") or []
+        _print_line(
+            "    Permissions: "
+            + (", ".join(str(permission) for permission in permissions) or "none")
+        )
+        dependencies = plugin.get("dependencies") or []
+        dependency_labels = []
+        for dependency in dependencies:
+            label = str(dependency.get("name", ""))
+            minimum = str(dependency.get("minimum_version", "") or "")
+            if minimum:
+                label += f" >= {minimum}"
+            dependency_labels.append(label)
+        _print_line(
+            "    Dependencies: " + (", ".join(dependency_labels) or "none")
+        )
+        compatibility = plugin.get("compatibility") or {}
+        _print_line(
+            "    Compatibility: "
+            f"{compatibility.get('range', 'unspecified')} "
+            f"(manifest v{compatibility.get('manifest_version', '?')}, "
+            f"running {compatibility.get('current_app_version', VERSION)})"
+        )
+        entrypoints = plugin.get("entrypoints") or []
+        entrypoint_labels = [
+            f"{item.get('type', '?')}:{item.get('entrypoint', '?')}"
+            for item in entrypoints
+        ]
+        _print_line(
+            "    Entry points: "
+            + (", ".join(entrypoint_labels) or "none")
+        )
+        for adapter in plugin.get("adapters", []):
+            _print_line(
+                f"    Adapter {adapter.get('type', '?')}:{adapter.get('entrypoint', '?')} "
+                f"(interface {adapter.get('interface_version', '?')}, "
+                f"timeout {float(adapter.get('timeout_seconds', 0)):g}s)"
+            )
+        for error in plugin.get("errors", []):
+            _print_line(f"    ERROR: {error}")
+        for warning in plugin.get("warnings", []):
+            _print_line(f"    WARNING: {warning}")
+
+
 def _run_plugins(args):
     """Report plugin adapter compatibility and optionally load trusted plugins."""
     from .plugins import discover_plugins, diagnose_plugin, load_all_plugins
@@ -1113,6 +1175,13 @@ def _run_plugins(args):
         diagnostics.append(report)
 
     if getattr(args, "load_trusted", False):
+        if not getattr(args, "json", False):
+            _print_plugin_diagnostics(
+                diagnostics,
+                heading=(
+                    "StreamKeep plugin contract review (shown before loading):"
+                ),
+            )
         events = []
         loaded, errors = load_all_plugins(events.append)
         if getattr(args, "json", False):
@@ -1125,30 +1194,15 @@ def _run_plugins(args):
         _print_line(f"Trusted plugins loaded: {loaded}; errors: {errors}")
         for event in events:
             _print_line(event)
+        return
 
     if getattr(args, "json", False):
         _print_line(json.dumps({"plugins": diagnostics}, indent=2, sort_keys=True))
         return
-    _print_line(f"StreamKeep v{VERSION} - plugin adapter diagnostics:")
-    if not diagnostics:
-        _print_line("  No plugins discovered.")
-        return
-    for plugin in diagnostics:
-        state = "compatible" if plugin["compatible"] else "incompatible"
-        _print_line(
-            f"  {plugin['id']} v{plugin['version']} - {state} "
-            f"({'trusted' if plugin['trusted'] else 'untrusted'})"
-        )
-        for adapter in plugin["adapters"]:
-            _print_line(
-                f"    {adapter['type']}:{adapter['entrypoint']} "
-                f"(interface {adapter['interface_version']}, "
-                f"timeout {adapter['timeout_seconds']:g}s)"
-            )
-        for error in plugin["errors"]:
-            _print_line(f"    ERROR: {error}")
-        for warning in plugin["warnings"]:
-            _print_line(f"    WARNING: {warning}")
+    _print_plugin_diagnostics(
+        diagnostics,
+        heading=f"StreamKeep v{VERSION} - plugin adapter diagnostics:",
+    )
 
 
 def _run_operations(args):

@@ -5,8 +5,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import QFileDialog, QTableWidgetItem
 
 from ...config import save_config as _save_config
 from ...postprocess import AUDIO_EXTS, VIDEO_EXTS, ConvertWorker
@@ -39,6 +39,214 @@ class _DenoInstallWorker(QThread):
 
 class SettingsToolsMixin:
     """Advanced templates/hooks plus manual conversion and config transfer."""
+
+    @staticmethod
+    def _plugin_contract_text(report):
+        permissions = report.get("permissions") or []
+        permission_text = ", ".join(str(item) for item in permissions) or "none"
+        dependencies = report.get("dependencies") or []
+        dependency_text = []
+        for dependency in dependencies:
+            label = str(dependency.get("name", ""))
+            minimum = str(dependency.get("minimum_version", "") or "")
+            if minimum:
+                label += f" >= {minimum}"
+            dependency_text.append(label)
+        dependency_text = ", ".join(dependency_text) or "none"
+        compatibility = report.get("compatibility") or {}
+        compatibility_text = str(
+            compatibility.get("range", "Any StreamKeep version")
+        )
+        entrypoints = report.get("entrypoints") or []
+        entrypoint_text = ", ".join(
+            f"{item.get('type', '?')}:{item.get('entrypoint', '?')}"
+            for item in entrypoints
+        ) or "none"
+        return {
+            "permissions": permission_text,
+            "dependencies": dependency_text,
+            "compatibility": compatibility_text,
+            "entrypoints": entrypoint_text,
+        }
+
+    def _plugin_reports(self):
+        from ... import plugins
+
+        reports = []
+        for plugin in plugins.discover_plugins():
+            report = plugins.diagnose_plugin(plugin)
+            report.update({
+                "enabled": bool(plugin.get("enabled", False)),
+                "trusted": bool(plugin.get("trusted", False)),
+                "path": plugin.get("path", ""),
+                "error": plugin.get("error", ""),
+            })
+            reports.append(report)
+        return reports
+
+    @staticmethod
+    def _plugin_state_label(report):
+        if report.get("error") or not report.get("compatible"):
+            return "Needs attention"
+        if report.get("enabled"):
+            if report.get("trust_reviewed"):
+                return "Enabled"
+            return "Review required"
+        if report.get("trust_reviewed"):
+            return "Disabled"
+        return "Review required"
+
+    def _refresh_plugin_trust_ui(self):
+        if not hasattr(self, "plugin_trust_table"):
+            return
+        reports = self._plugin_reports()
+        self._plugin_trust_snapshot = reports
+        table = self.plugin_trust_table
+        table.blockSignals(True)
+        table.clearContents()
+        table.setRowCount(len(reports))
+        for row, report in enumerate(reports):
+            contract = self._plugin_contract_text(report)
+            values = (
+                f"{report.get('name') or report.get('id') or 'Unknown'} "
+                f"v{report.get('version', '?')}",
+                contract["permissions"],
+                contract["dependencies"],
+                contract["compatibility"],
+                contract["entrypoints"],
+                self._plugin_state_label(report),
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, report.get("id", ""))
+                table.setItem(row, column, item)
+        table.blockSignals(False)
+        if reports:
+            table.selectRow(0)
+        else:
+            self._on_plugin_selection_changed()
+
+    def _selected_plugin_report(self):
+        table = getattr(self, "plugin_trust_table", None)
+        if table is None or table.currentRow() < 0:
+            return None
+        item = table.item(table.currentRow(), 0)
+        plugin_id = item.data(Qt.ItemDataRole.UserRole) if item else ""
+        return next(
+            (
+                report for report in getattr(self, "_plugin_trust_snapshot", [])
+                if report.get("id") == plugin_id
+            ),
+            None,
+        )
+
+    def _on_plugin_selection_changed(self):
+        report = self._selected_plugin_report()
+        if report is None:
+            self.plugin_enable_btn.setEnabled(False)
+            self.plugin_disable_btn.setEnabled(False)
+            self.plugin_trust_status.setText("No plugin selected.")
+            return
+        contract = self._plugin_contract_text(report)
+        review_state = (
+            "Current contract approved."
+            if report.get("trust_reviewed")
+            else "Explicit review is required before this plugin can run."
+        )
+        self.plugin_trust_status.setText(
+            f"{report.get('name') or report.get('id')}: "
+            f"{review_state} Permissions: {contract['permissions']}. "
+            f"Entry points: {contract['entrypoints']}."
+        )
+        self.plugin_enable_btn.setEnabled(bool(report.get("compatible")))
+        self.plugin_disable_btn.setEnabled(bool(report.get("enabled")))
+
+    def _on_plugin_refresh_clicked(self):
+        self._refresh_plugin_trust_ui()
+        self._set_status("Plugin contract diagnostics refreshed.", "info")
+
+    def _on_plugin_enable_clicked(self):
+        from ... import plugins
+
+        selected = self._selected_plugin_report()
+        if selected is None:
+            self._set_status("Select a plugin to review first.", "warning")
+            return
+        # Re-read the manifest immediately before the confirmation so the
+        # approval is for the contract on disk, not a stale table row.
+        fresh = next(
+            (report for report in self._plugin_reports()
+             if report.get("id") == selected.get("id")),
+            None,
+        )
+        if fresh is None:
+            self._refresh_plugin_trust_ui()
+            self._set_status("Plugin is no longer available.", "error")
+            return
+        if not fresh.get("compatible"):
+            detail = "; ".join(fresh.get("errors") or []) or "incompatible contract"
+            self._set_status(f"Cannot enable plugin: {detail}", "error")
+            return
+        contract = self._plugin_contract_text(fresh)
+        if not ask_premium_confirmation(
+            self,
+            title=f"Review {fresh.get('name') or fresh.get('id')} plugin",
+            body=(
+                "This plugin is requesting the contract below. StreamKeep will "
+                "remember this exact contract and ask again if it changes.\n\n"
+                f"Permissions: {contract['permissions']}\n"
+                f"Dependencies: {contract['dependencies']}\n"
+                f"Compatibility: {contract['compatibility']}\n"
+                f"Entry points: {contract['entrypoints']}"
+            ),
+            eyebrow="PLUGIN TRUST",
+            badge_text="Explicit review",
+            tone="warning" if fresh.get("permissions") else "info",
+            summary_title="Review before enabling",
+            summary_body=(
+                "Only the declared adapter contract is approved. A later "
+                "permission or contract change requires this review again."
+            ),
+            primary_label="Enable plugin",
+            secondary_label="Keep disabled",
+            default_action="secondary",
+            min_width=650,
+        ):
+            self._set_status("Plugin review cancelled; it remains disabled.", "idle")
+            return
+        plugin_id = str(fresh.get("id", ""))
+        if not plugins.mark_trusted(plugin_id, True):
+            self._set_status("Plugin review could not be saved.", "error")
+            return
+        if not plugins.set_plugin_enabled(plugin_id, True):
+            self._set_status("Plugin trust saved, but enabling it failed.", "error")
+            self._refresh_plugin_trust_ui()
+            return
+        self._log(
+            f"[PLUGIN] Enabled after explicit contract review: {plugin_id} "
+            f"({fresh.get('contract_fingerprint', '')[:12]})"
+        )
+        self._refresh_plugin_trust_ui()
+        self._set_status(
+            f"{fresh.get('name') or plugin_id} enabled after contract review.",
+            "success",
+        )
+
+    def _on_plugin_disable_clicked(self):
+        from ... import plugins
+
+        report = self._selected_plugin_report()
+        if report is None:
+            self._set_status("Select a plugin to disable first.", "warning")
+            return
+        plugin_id = str(report.get("id", ""))
+        if not plugins.set_plugin_enabled(plugin_id, False):
+            self._set_status("Plugin could not be disabled.", "error")
+            return
+        self._log(f"[PLUGIN] Disabled: {plugin_id}")
+        self._refresh_plugin_trust_ui()
+        self._set_status(f"{report.get('name') or plugin_id} disabled.", "success")
 
     def _on_javascript_runtime_preference_changed(self, index):
         value = str(self.deno_preference_combo.itemData(index) or "path")

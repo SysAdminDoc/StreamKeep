@@ -41,6 +41,8 @@ from ..widgets import (
     make_field_block,
     make_metric_card,
     make_status_banner,
+    set_accessible,
+    style_table,
     show_premium_message,
 )
 from .settings_companion import SettingsCompanionMixin
@@ -607,6 +609,80 @@ def build_settings_tab(win):
     deno_lay.addWidget(win.deno_runtime_status)
     sections_top.addWidget(deno_block, 1)
     win._refresh_deno_runtime_controls()
+
+    plugin_block, plugin_lay = make_field_block(
+        "Plugin trust",
+        "Review a plugin's declared permissions and compatibility before it can run.",
+    )
+    plugin_hint = QLabel(
+        "A contract change, including a new permission, requires a fresh review. "
+        "Plugins are never enabled from this panel without your explicit approval."
+    )
+    plugin_hint.setObjectName("subtleText")
+    plugin_hint.setWordWrap(True)
+    plugin_lay.addWidget(plugin_hint)
+    win.plugin_trust_table = QTableWidget(0, 6)
+    win.plugin_trust_table.setHorizontalHeaderLabels([
+        "Plugin", "Permissions", "Dependencies", "Compatibility",
+        "Entry points", "State",
+    ])
+    win.plugin_trust_table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    win.plugin_trust_table.setSelectionMode(
+        QAbstractItemView.SelectionMode.SingleSelection
+    )
+    win.plugin_trust_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    win.plugin_trust_table.setMinimumHeight(150)
+    style_table(
+        win.plugin_trust_table,
+        row_height=42,
+        accessible_name="Plugin trust review",
+        accessible_description=(
+            "Declared plugin permissions, dependencies, compatibility, and entry points"
+        ),
+    )
+    plugin_header = win.plugin_trust_table.horizontalHeader()
+    plugin_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    plugin_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    plugin_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    plugin_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+    plugin_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+    plugin_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+    win.plugin_trust_table.itemSelectionChanged.connect(
+        win._on_plugin_selection_changed
+    )
+    plugin_lay.addWidget(win.plugin_trust_table)
+
+    plugin_actions = QHBoxLayout()
+    plugin_actions.setSpacing(8)
+    win.plugin_refresh_btn = QPushButton("Refresh plugins")
+    win.plugin_refresh_btn.setObjectName("secondary")
+    win.plugin_refresh_btn.clicked.connect(win._on_plugin_refresh_clicked)
+    plugin_actions.addWidget(win.plugin_refresh_btn)
+    win.plugin_enable_btn = QPushButton("Review and enable")
+    win.plugin_enable_btn.setObjectName("primary")
+    win.plugin_enable_btn.clicked.connect(win._on_plugin_enable_clicked)
+    plugin_actions.addWidget(win.plugin_enable_btn)
+    win.plugin_disable_btn = QPushButton("Disable plugin")
+    win.plugin_disable_btn.setObjectName("secondary")
+    win.plugin_disable_btn.clicked.connect(win._on_plugin_disable_clicked)
+    plugin_actions.addWidget(win.plugin_disable_btn)
+    plugin_actions.addStretch(1)
+    plugin_lay.addLayout(plugin_actions)
+    win.plugin_trust_status = QLabel("No plugin selected.")
+    win.plugin_trust_status.setObjectName("subtleText")
+    win.plugin_trust_status.setWordWrap(True)
+    set_accessible(
+        win.plugin_trust_status,
+        "Plugin trust status",
+        "Status of the selected plugin trust review",
+    )
+    plugin_lay.addWidget(win.plugin_trust_status)
+    sections_top.addWidget(plugin_block, 1)
+    win._refresh_plugin_trust_ui()
     card_lay.addLayout(sections_top)
 
     # ── Cookies ─────────────────────────────────────────────────────

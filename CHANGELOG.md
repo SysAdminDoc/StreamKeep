@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added explicit plugin contract review in Settings and the CLI. Permissions,
+  dependencies, compatibility ranges, and entry points are shown before an
+  adapter is enabled; a changed manifest contract, including a new permission,
+  must be reviewed again before a trusted plugin can load.
+
 - Added unsigned Windows shell integration: aggregate queue progress, paused
   and failed states on the taskbar, an opt-in battery/Energy Saver queue hold
   that resumes on AC, and one optional progress-bound notification for long

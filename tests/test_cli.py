@@ -634,3 +634,123 @@ def test_tokens_cli_parser_supports_list_create_and_revoke():
     revoked = parser.parse_args(["tokens", "revoke", "opaque-id"])
     assert revoked.tokens_command == "revoke"
     assert revoked.token_id == "opaque-id"
+
+
+def test_plugins_json_includes_reviewable_contract_fields(monkeypatch):
+    from streamkeep import plugins
+
+    plugin = {
+        "id": "json-plugin",
+        "name": "JSON Plugin",
+        "version": "1.0.0",
+        "enabled": False,
+        "trusted": False,
+        "path": "C:/plugins/json-plugin",
+        "error": "",
+    }
+    report = {
+        "id": "json-plugin",
+        "name": "JSON Plugin",
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "compatible": True,
+        "errors": [],
+        "warnings": [],
+        "permissions": ["network"],
+        "dependencies": [{"name": "requests", "minimum_version": "2.0.0"}],
+        "compatibility": {
+            "manifest_version": 2,
+            "min_app_version": "4.0.0",
+            "max_app_version": "5.0.0",
+            "current_app_version": "4.44.0",
+            "range": ">= 4.0.0 and <= 5.0.0",
+        },
+        "entrypoints": [{
+            "type": "extractor",
+            "entrypoint": "Extractor",
+            "interface_version": 1,
+        }],
+        "adapters": [],
+        "contract_fingerprint": "a" * 64,
+        "trusted": False,
+        "trust_reviewed": False,
+        "review_required": True,
+    }
+    monkeypatch.setattr(plugins, "discover_plugins", lambda: [plugin])
+    monkeypatch.setattr(plugins, "diagnose_plugin", lambda _plugin: dict(report))
+    output = []
+    monkeypatch.setattr(cli, "_print_line", output.append)
+
+    cli._run_plugins(cli.build_parser().parse_args(["plugins", "--json"]))
+
+    payload = json.loads(output[0])
+    item = payload["plugins"][0]
+    assert item["permissions"] == ["network"]
+    assert item["dependencies"][0]["name"] == "requests"
+    assert item["compatibility"]["range"] == ">= 4.0.0 and <= 5.0.0"
+    assert item["entrypoints"][0]["entrypoint"] == "Extractor"
+    assert item["review_required"] is True
+
+
+def test_plugins_load_trusted_prints_contract_before_loading(monkeypatch):
+    from streamkeep import plugins
+
+    plugin = {
+        "id": "ordered-plugin",
+        "name": "Ordered Plugin",
+        "version": "1.0.0",
+        "enabled": True,
+        "trusted": True,
+        "path": "C:/plugins/ordered-plugin",
+        "error": "",
+    }
+    report = {
+        "id": "ordered-plugin",
+        "name": "Ordered Plugin",
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "compatible": True,
+        "errors": [],
+        "warnings": [],
+        "permissions": ["filesystem_read"],
+        "dependencies": [],
+        "compatibility": {
+            "manifest_version": 2,
+            "min_app_version": "",
+            "max_app_version": "",
+            "current_app_version": "4.44.0",
+            "range": "Any StreamKeep version",
+        },
+        "entrypoints": [{
+            "type": "postprocess",
+            "entrypoint": "Processor",
+            "interface_version": 1,
+        }],
+        "adapters": [],
+        "contract_fingerprint": "b" * 64,
+        "trusted": True,
+        "trust_reviewed": True,
+        "review_required": False,
+    }
+    calls = []
+    monkeypatch.setattr(plugins, "discover_plugins", lambda: [plugin])
+    monkeypatch.setattr(plugins, "diagnose_plugin", lambda _plugin: dict(report))
+
+    def load_all(log_fn):
+        calls.append("load")
+        log_fn("[PLUGIN] loaded")
+        return 1, 0
+
+    monkeypatch.setattr(plugins, "load_all_plugins", load_all)
+    output = []
+    monkeypatch.setattr(cli, "_print_line", output.append)
+
+    cli._run_plugins(cli.build_parser().parse_args([
+        "plugins", "--load-trusted",
+    ]))
+
+    assert calls == ["load"]
+    permission_index = next(
+        index for index, line in enumerate(output) if "Permissions:" in line
+    )
+    assert permission_index < output.index("Trusted plugins loaded: 1; errors: 0")

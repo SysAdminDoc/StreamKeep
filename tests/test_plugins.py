@@ -107,6 +107,101 @@ class PluginTests(unittest.TestCase):
 
         self.assertTrue(updated)
         self.assertTrue(data["trusted"])
+        self.assertIn("trust_review", data)
+        self.assertEqual(len(data["trust_review"]["contract_fingerprint"]), 64)
+
+    def test_contract_diagnostics_expose_reviewable_fields(self):
+        manifest = {
+            "id": "reviewable",
+            "name": "Reviewable",
+            "version": "1.2.3",
+            "manifest_version": 2,
+            "min_app_version": "4.0.0",
+            "max_app_version": "5.0.0",
+            "adapters": [{
+                "type": "extractor",
+                "entrypoint": "Extractor",
+                "interface_version": 1,
+                "permissions": ["network", "filesystem_read"],
+                "dependencies": [
+                    "json",
+                    {"name": "requests", "minimum_version": "2.0.0"},
+                ],
+                "timeout_seconds": 12,
+            }],
+        }
+
+        details = plugins.plugin_contract_details(manifest)
+
+        self.assertEqual(details["permissions"], ["filesystem_read", "network"])
+        self.assertEqual(
+            details["dependencies"],
+            [
+                {"name": "json"},
+                {"name": "requests", "minimum_version": "2.0.0"},
+            ],
+        )
+        self.assertEqual(details["compatibility"]["range"], ">= 4.0.0 and <= 5.0.0")
+        self.assertEqual(
+            details["entrypoints"],
+            [{
+                "type": "extractor",
+                "entrypoint": "Extractor",
+                "interface_version": 1,
+            }],
+        )
+        self.assertEqual(len(details["contract_fingerprint"]), 64)
+
+    def test_permission_change_requires_new_trust_review(self):
+        log_events = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            plugin_dir = base / "changed_plugin"
+            plugin_dir.mkdir()
+            manifest = plugin_dir / "plugin.json"
+            payload = {
+                "id": "changed",
+                "name": "Changed Plugin",
+                "version": "1.0.0",
+                "manifest_version": 2,
+                "enabled": True,
+                "trusted": False,
+                "adapters": [{
+                    "type": "postprocess",
+                    "entrypoint": "process",
+                    "interface_version": 1,
+                    "permissions": ["network"],
+                    "dependencies": [],
+                    "timeout_seconds": 5,
+                }],
+            }
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            (plugin_dir / "__init__.py").write_text(
+                "def process(value, context=None):\n    return value\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(plugins, "PLUGINS_DIR", base):
+                self.assertTrue(plugins.mark_trusted("changed", True))
+                approved = plugins.discover_plugins()[0]
+                self.assertTrue(approved["trust_reviewed"])
+
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                payload["adapters"][0]["permissions"].append("filesystem_write")
+                manifest.write_text(json.dumps(payload), encoding="utf-8")
+                changed = plugins.discover_plugins()[0]
+                self.assertTrue(changed["trusted"])
+                self.assertFalse(changed["trust_reviewed"])
+
+                with mock.patch.object(plugins, "load_plugin") as load_plugin:
+                    loaded, errors = plugins.load_all_plugins(log_events.append)
+
+        self.assertEqual((loaded, errors), (0, 1))
+        load_plugin.assert_not_called()
+        self.assertTrue(any(
+            "Skipped contract review required: changed" in event
+            for event in log_events
+        ))
 
 
     def test_validate_manifest_rejects_missing_required_fields(self):

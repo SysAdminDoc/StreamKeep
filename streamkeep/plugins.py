@@ -354,6 +354,114 @@ def _parse_adapter_specs(meta: dict[str, Any], plugin_id: str = ""):
     return specs, errors
 
 
+def plugin_contract_details(
+    meta: dict[str, Any],
+    specs: list[PluginAdapterSpec] | None = None,
+) -> dict[str, Any]:
+    """Return the plain-language, reviewable contract declared by a plugin.
+
+    The fingerprint covers the declared capabilities and adapter shape, but
+    not the plugin version or current StreamKeep version.  Implementation
+    fixes with an unchanged contract do not need a second prompt; any
+    permission, dependency, compatibility, entrypoint, interface, or timeout
+    change does.
+    """
+    if not isinstance(meta, dict):
+        meta = {}
+    plugin_id = str(meta.get("id", ""))
+    if specs is None:
+        raw_specs = meta.get("adapters")
+        if not isinstance(raw_specs, list) and isinstance(meta.get("adapter_specs"), list):
+            raw_specs = meta.get("adapter_specs")
+            meta = dict(meta)
+            meta["manifest_version"] = 2
+            meta["adapters"] = raw_specs
+        specs, _ = _parse_adapter_specs(meta, plugin_id)
+
+    permissions = sorted({
+        permission
+        for spec in specs
+        for permission in spec.permissions
+    })
+    dependency_map: dict[tuple[str, str], PluginDependency] = {}
+    for spec in specs:
+        for dependency in spec.dependencies:
+            dependency_map[(dependency.name, dependency.minimum_version)] = dependency
+    dependencies = [
+        dependency.to_dict()
+        for _, dependency in sorted(dependency_map.items(), key=lambda item: item[0])
+    ]
+
+    raw_min = meta.get("min_app_version", "")
+    raw_max = meta.get("max_app_version", "")
+    min_app_version = str(raw_min).strip() if raw_min else ""
+    max_app_version = str(raw_max).strip() if raw_max else ""
+    if min_app_version and max_app_version:
+        compatibility_range = f">= {min_app_version} and <= {max_app_version}"
+    elif min_app_version:
+        compatibility_range = f">= {min_app_version}"
+    elif max_app_version:
+        compatibility_range = f"<= {max_app_version}"
+    else:
+        compatibility_range = "Any StreamKeep version"
+    compatibility = {
+        "manifest_version": _manifest_version(meta),
+        "min_app_version": min_app_version,
+        "max_app_version": max_app_version,
+        "current_app_version": VERSION,
+        "range": compatibility_range,
+    }
+    adapters = [spec.to_dict() for spec in specs]
+    entrypoints = [
+        {
+            "type": spec.adapter_type,
+            "entrypoint": spec.entrypoint,
+            "interface_version": spec.interface_version,
+        }
+        for spec in specs
+    ]
+    fingerprint_payload = {
+        "manifest_version": compatibility["manifest_version"],
+        "min_app_version": min_app_version,
+        "max_app_version": max_app_version,
+        "permissions": permissions,
+        "dependencies": dependencies,
+        "adapters": adapters,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            fingerprint_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "permissions": permissions,
+        "dependencies": dependencies,
+        "compatibility": compatibility,
+        "entrypoints": entrypoints,
+        "adapters": adapters,
+        "contract_fingerprint": fingerprint,
+    }
+
+
+def _trust_review_matches(meta: dict[str, Any], contract: dict[str, Any]) -> bool:
+    """Return whether a trusted manifest approved its current contract."""
+    if not isinstance(meta, dict) or not meta.get("trusted", False):
+        return False
+    review = meta.get("trust_review")
+    if not isinstance(review, dict):
+        return False
+    if review.get("contract_fingerprint") != contract.get("contract_fingerprint"):
+        return False
+    reviewed_permissions = review.get("permissions")
+    return (
+        isinstance(reviewed_permissions, list)
+        and sorted(str(permission) for permission in reviewed_permissions)
+        == list(contract.get("permissions", []))
+    )
+
+
 def validate_manifest(meta, entry_name=""):
     """Validate a plugin manifest dict. Returns a list of error strings."""
     errors: list[str] = []
@@ -382,15 +490,31 @@ def validate_manifest(meta, entry_name=""):
         errors.extend(adapter_errors)
 
     min_ver = meta.get("min_app_version", "")
+    max_ver = meta.get("max_app_version", "")
+    current = _parse_semver(VERSION)
+    minimum = None
     if min_ver:
-        required = _parse_semver(min_ver)
-        current = _parse_semver(VERSION)
-        if required is None:
+        minimum = _parse_semver(min_ver)
+        if minimum is None:
             errors.append(f"Invalid min_app_version format: {min_ver!r}")
-        elif current and required > current:
+        elif current and minimum > current:
             errors.append(
                 f"Requires StreamKeep >= {min_ver} (running {VERSION})"
             )
+    maximum = None
+    if max_ver:
+        maximum = _parse_semver(max_ver)
+        if maximum is None:
+            errors.append(f"Invalid max_app_version format: {max_ver!r}")
+        elif current and maximum < current:
+            errors.append(
+                f"Supports StreamKeep <= {max_ver} (running {VERSION})"
+            )
+    if minimum and maximum and minimum > maximum:
+        errors.append(
+            f"Invalid app version range: min_app_version {min_ver!r} exceeds "
+            f"max_app_version {max_ver!r}"
+        )
     return errors
 
 
@@ -454,7 +578,15 @@ def _manifest_for_info(plugin_info: dict[str, Any]):
 def diagnose_plugin(plugin_info):
     """Return compatibility diagnostics without importing or executing code."""
     if not isinstance(plugin_info, dict):
-        return {"compatible": False, "errors": ["Plugin info is not an object"], "warnings": []}
+        contract = plugin_contract_details({})
+        return {
+            "compatible": False,
+            "errors": ["Plugin info is not an object"],
+            "warnings": [],
+            **contract,
+            "trust_reviewed": False,
+            "review_required": True,
+        }
     meta = _manifest_for_info(plugin_info)
     if meta is None:
         # Direct loader callers may provide the legacy metadata shape without a
@@ -473,6 +605,8 @@ def diagnose_plugin(plugin_info):
     errors.extend(error for error in spec_errors if error not in errors)
     dependency_errors, warnings = _dependency_diagnostics(specs)
     errors.extend(dependency_errors)
+    contract = plugin_contract_details(meta, specs)
+    trust_reviewed = _trust_review_matches(meta, contract)
     return {
         "id": plugin_info.get("id", meta.get("id", "")),
         "name": plugin_info.get("name", meta.get("name", "")),
@@ -481,7 +615,10 @@ def diagnose_plugin(plugin_info):
         "compatible": not errors,
         "errors": errors,
         "warnings": warnings,
-        "adapters": [spec.to_dict() for spec in specs],
+        **contract,
+        "trusted": bool(meta.get("trusted", plugin_info.get("trusted", False))),
+        "trust_reviewed": trust_reviewed,
+        "review_required": not trust_reviewed,
     }
 
 
@@ -499,11 +636,15 @@ def discover_plugins():
         try:
             meta = _read_manifest(str(plugin_path))
         except (OSError, json.JSONDecodeError) as error:
+            contract = plugin_contract_details({})
             plugins.append({
                 "id": entry, "name": entry, "version": "?",
                 "author": "", "description": "", "manifest_version": -1,
                 "enabled": False, "trusted": False, "path": str(plugin_path),
                 "adapter_specs": [],
+                **contract,
+                "trust_reviewed": False,
+                "review_required": True,
                 "error": f"Invalid plugin.json: {error}",
             })
             continue
@@ -515,6 +656,8 @@ def discover_plugins():
         all_errors.extend(error for error in spec_errors if error not in all_errors)
         all_errors.extend(compatibility_errors)
         error_msg = "; ".join(all_errors)
+        contract = plugin_contract_details(meta, specs)
+        trust_reviewed = _trust_review_matches(meta, contract)
         plugins.append({
             "id": meta.get("id", entry),
             "name": meta.get("name", entry),
@@ -526,6 +669,9 @@ def discover_plugins():
             "trusted": bool(meta.get("trusted", False)),
             "path": str(plugin_path),
             "adapter_specs": [spec.to_dict() for spec in specs],
+            **contract,
+            "trust_reviewed": trust_reviewed,
+            "review_required": not trust_reviewed,
             "warnings": warnings,
             "error": error_msg,
         })
@@ -743,6 +889,14 @@ def load_all_plugins(log_fn=None):
             if log_fn:
                 log_fn(f"[PLUGIN] Skipped untrusted: {plugin.get('id', '?')}")
             continue
+        if not plugin.get("trust_reviewed", False):
+            if log_fn:
+                log_fn(
+                    f"[PLUGIN] Skipped contract review required: "
+                    f"{plugin.get('id', '?')}"
+                )
+            errors += 1
+            continue
         if load_plugin(plugin, log_fn):
             loaded += 1
         elif plugin.get("error"):
@@ -888,14 +1042,18 @@ def execute_plugin_adapter(
 
 
 def untrusted_plugins():
-    """Return plugins that are enabled but not yet trusted by the user."""
+    """Return enabled plugins that need trust or contract review."""
     return [plugin for plugin in discover_plugins()
-            if plugin.get("enabled", True) and not plugin.get("trusted", False)
+            if plugin.get("enabled", True)
+            and (
+                not plugin.get("trusted", False)
+                or not plugin.get("trust_reviewed", False)
+            )
             and not plugin.get("error")]
 
 
-def mark_trusted(plugin_id, trusted=True):
-    """Set or clear the ``trusted`` flag in a plugin's manifest."""
+def mark_trusted(plugin_id, trusted=True, review=None):
+    """Set or clear trust and the reviewed contract in a plugin manifest."""
     _ensure_dir()
     for entry in os.listdir(str(PLUGINS_DIR)):
         plugin_path = PLUGINS_DIR / entry
@@ -906,7 +1064,20 @@ def mark_trusted(plugin_id, trusted=True):
             meta = _read_manifest(str(plugin_path))
             if meta.get("id", entry) == plugin_id:
                 meta["trusted"] = bool(trusted)
-                if not trusted:
+                if trusted:
+                    specs, _ = _parse_adapter_specs(meta, str(plugin_id))
+                    contract = plugin_contract_details(meta, specs)
+                    approved = review if isinstance(review, dict) else {}
+                    meta["trust_review"] = {
+                        "contract_fingerprint": approved.get(
+                            "contract_fingerprint", contract["contract_fingerprint"]
+                        ),
+                        "permissions": list(approved.get(
+                            "permissions", contract["permissions"]
+                        )),
+                    }
+                else:
+                    meta.pop("trust_review", None)
                     meta["enabled"] = False
                 tmp_path = manifest_path.with_suffix(".json.tmp")
                 with open(tmp_path, "w", encoding="utf-8") as handle:
