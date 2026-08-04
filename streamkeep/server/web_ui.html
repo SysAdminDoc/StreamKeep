@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{t:app_title}}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#1e1e2e;color:#cdd6f4;min-height:100vh;padding:16px}
+h1{color:#89b4fa;font-size:1.4em;margin-bottom:12px}
+h2{color:#a6adc8;font-size:1.1em;margin:16px 0 8px}
+.card{background:#313244;border-radius:10px;padding:14px;margin-bottom:12px}
+input,button{font-size:14px;border:none;border-radius:6px;padding:8px 14px;outline:none}
+input{background:#45475a;color:#cdd6f4;width:100%}
+input::placeholder{color:#6c7086}
+button{background:#89b4fa;color:#1e1e2e;cursor:pointer;font-weight:600}
+button:hover{background:#74c7ec}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.row input{flex:1}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;
+  font-weight:600;margin-right:6px}
+.badge-live{background:#a6e3a1;color:#1e1e2e}
+.badge-offline{background:#45475a;color:#6c7086}
+.badge-queue{background:#fab387;color:#1e1e2e}
+.badge-failure{background:#f38ba8;color:#1e1e2e}
+.item-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.item-actions button{font-size:12px;padding:5px 9px}
+.item{padding:8px 0;border-bottom:1px solid #45475a}
+.item:last-child{border:none}
+.item .title{color:#cdd6f4}
+.item .meta{color:#6c7086;font-size:12px;margin-top:2px}
+.progress{height:4px;background:#45475a;border-radius:2px;margin-top:4px}
+.progress .fill{height:100%;background:#a6e3a1;border-radius:2px;transition:width .3s}
+.empty{color:#6c7086;font-style:italic;padding:8px 0}
+#auth{max-width:360px;margin:80px auto}
+#auth h1{text-align:center;margin-bottom:20px}
+#app{display:none;max-width:600px;margin:0 auto}
+.tab-bar{display:flex;gap:4px;margin-bottom:12px}
+.tab-bar button{flex:1;background:#313244;color:#a6adc8}
+.tab-bar button.active{background:#89b4fa;color:#1e1e2e}
+.tab-content{display:none}
+.tab-content.active{display:block}
+</style>
+</head>
+<body>
+<div id="auth">
+<h1>{{t:app_title}}</h1>
+<div class="card">
+<p style="color:#a6adc8;margin-bottom:12px">{{t:auth_instructions}}</p>
+<div class="row"><input id="token-input" type="password" placeholder="{{t:pairing_code}}"></div>
+<button onclick="doAuth()" style="width:100%;margin-top:8px">{{t:pair_and_connect}}</button>
+<p id="auth-err" style="color:#f38ba8;margin-top:8px;display:none"></p>
+</div>
+</div>
+<div id="app">
+<h1>{{t:app_title}}</h1>
+<div class="tab-bar">
+<button class="active" onclick="switchTab('status',this)">{{t:status}}</button>
+<button onclick="switchTab('queue',this)">{{t:add_url}}</button>
+<button onclick="switchTab('library',this)">{{t:library}}</button>
+<button onclick="switchTab('monitor',this)">{{t:channels}}</button>
+</div>
+<div id="tab-status" class="tab-content active">
+<div class="card"><h2>{{t:active_downloads}}</h2><div id="dl-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:active_workers}}</h2><div id="worker-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:queue}}</h2><div id="q-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:resumable}}</h2><div id="resume-list"><p class="empty">{{t:loading}}</p></div></div>
+<div class="card"><h2>{{t:failures}}</h2><div id="failure-list"><p class="empty">{{t:loading}}</p></div></div>
+</div>
+<div id="tab-queue" class="tab-content">
+<div class="card">
+<h2>{{t:add_to_queue}}</h2>
+<div class="row"><input id="url-input" placeholder="{{t:url_placeholder}}">
+<button onclick="addUrl()">{{t:add}}</button></div>
+<p id="q-msg" style="color:#a6e3a1;display:none;margin-top:8px"></p>
+</div>
+</div>
+<div id="tab-library" class="tab-content">
+<div class="card"><h2>{{t:library}}</h2><div id="lib-list"><p class="empty">{{t:loading}}</p></div></div>
+</div>
+<div id="tab-monitor" class="tab-content">
+<div class="card"><h2>{{t:monitored_channels}}</h2><div id="mon-list"><p class="empty">{{t:loading}}</p></div></div>
+</div>
+</div>
+<script>
+let TOKEN='';
+const I18N={{web_i18n}};
+function T(key){return I18N[key]||key;}
+const BASE=location.origin;
+function freshHeaders(){
+  const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+  return {'X-StreamKeep-Timestamp':String(Math.floor(Date.now()/1000)),
+    'X-StreamKeep-Nonce':Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')};
+}
+function api(path,opts){
+  opts=opts||{};opts.headers=opts.headers||{};
+  opts.headers['Authorization']='Bearer '+TOKEN;
+  if((opts.method||'GET').toUpperCase()!=='GET'){
+    Object.assign(opts.headers,freshHeaders());
+    opts.headers['Content-Type']=opts.headers['Content-Type']||'application/json';}
+  return fetch(BASE+path,opts).then(async r=>{
+    let d={};try{d=await r.json();}catch(e){}
+    if(r.status===401){clearInterval(_refreshId);
+      document.getElementById('app').style.display='none';
+      document.getElementById('auth').style.display='block';
+      document.getElementById('auth-err').style.display='block';
+      document.getElementById('auth-err').textContent=
+        d.message||d.err||T('session_rejected');}
+    if(!r.ok)throw new Error(d.message||d.err||T('request_failed').replace('{status}',r.status));
+    return d;});
+}
+function doAuth(){
+  const code=document.getElementById('token-input').value.trim();
+  fetch(BASE+'/pair',{method:'POST',headers:Object.assign(
+    {'Content-Type':'application/json'},freshHeaders()),
+    body:JSON.stringify({code,scopes:['status','queue','recovery']})}).then(async r=>{
+      const d=await r.json();if(!r.ok)throw new Error(d.message||d.err||T('pairing_failed'));
+      TOKEN=d.token||'';return api('/ping');}).then(d=>{
+    if(d.ok){document.getElementById('auth').style.display='none';
+      document.getElementById('app').style.display='block';refresh();
+      _refreshId=setInterval(refresh,5000);}
+    else throw new Error(d.message||'');
+  }).catch(e=>{
+    document.getElementById('auth-err').style.display='block';
+    var msg=e&&e.message?e.message:
+      T('pairing_hint');
+    document.getElementById('auth-err').textContent=msg;
+  });
+}
+function switchTab(name,btn){
+  document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.tab-bar button').forEach(e=>e.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+}
+function addUrl(){
+  const url=document.getElementById('url-input').value.trim();
+  if(!url)return;
+  api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({url})}).then(d=>{
+    const m=document.getElementById('q-msg');m.style.display='block';
+    m.textContent=d.ok?T('added_to_queue'):T('failed_prefix')+(d.err||T('unknown'));
+    document.getElementById('url-input').value='';
+    setTimeout(()=>m.style.display='none',3000);
+  });
+}
+function renderItems(el,items,empty,renderFn){
+  if(!items||!items.length){el.innerHTML='<p class="empty">'+empty+'</p>';return;}
+  el.innerHTML=items.map(renderFn).join('');
+}
+function retryFailure(id){
+  api('/api/failures/retry',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
+function cancelFailureRetry(id){
+  api('/api/failures/cancel-retry',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
+function discardFailure(id){
+  api('/api/failures/discard',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(()=>refresh());
+}
+function refresh(){
+  api('/api/status').then(d=>{
+    renderItems(document.getElementById('dl-list'),d.downloads,T('no_active_downloads'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
+        '<div class="meta">'+esc(i.status||'')+'</div>'+
+        (i.percent!=null?'<div class="progress"><div class="fill" style="width:'+i.percent+'%"></div></div>':'')+
+        '</div>');
+    renderItems(document.getElementById('q-list'),d.queue,T('queue_empty'),
+      i=>'<div class="item"><span class="badge badge-queue">'+esc((i.status||T('queued')).toUpperCase())+'</span>'+
+        esc(i.title||i.url||'?')+
+        (i.note?'<div class="meta">'+esc(i.note)+'</div>':'')+'</div>');
+    renderItems(document.getElementById('worker-list'),d.active_workers||[],T('no_active_workers'),
+      i=>'<div class="item"><span class="badge badge-live">'+esc((i.type||T('worker_lower')).toUpperCase())+'</span>'+
+        esc(i.title||i.channel||T('worker'))+
+        (i.running?' <span style="color:#a6e3a1">'+esc(T('running'))+'</span>':'')+'</div>');
+    renderItems(document.getElementById('resume-list'),d.resumable||[],T('no_resumable_downloads'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
+        '<div class="meta">'+esc(T('segments_remaining').replace('{count}',String(i.remaining||0)))+'</div></div>');
+    renderItems(document.getElementById('failure-list'),d.failures,T('no_failures'),
+      i=>'<div class="item"><span class="badge badge-failure">'+esc((i.stage||T('failed')).toUpperCase())+'</span>'+
+        '<span class="title">'+esc(i.title||T('failed_job'))+'</span>'+
+        '<div class="meta">'+esc(i.platform||'')+' &middot; '+
+        esc(T('retry_count').replace('{count}',String(i.retry_count||0)))+
+        ' &middot; '+esc(i.category||T('unknown'))+' &middot; '+esc(i.last_reason||'')+
+        (i.next_attempt_at?' &middot; '+esc(T('next_attempt').replace('{value}',i.next_attempt_at)):'')+
+        (i.resume_available?' &middot; <span style="color:#a6e3a1">'+esc(T('resume_available'))+'</span>':'')+
+        '</div>'+
+        '<div class="item-actions"><button onclick="retryFailure('+Number(i.id||0)+')">'+T('retry')+'</button>'+
+        (i.auto_retry?'<button onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
+        '<button onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
+  }).catch(()=>{});
+  api('/api/library').then(d=>{
+    renderItems(document.getElementById('lib-list'),d.history,T('no_recordings'),
+      i=>'<div class="item"><div class="title">'+esc(i.title||T('untitled'))+'</div>'+
+        '<div class="meta">'+esc(i.platform||'')+' &middot; '+esc(i.date||'')+' &middot; '+esc(i.quality||'')+'</div></div>');
+  }).catch(()=>{});
+  api('/api/monitor').then(d=>{
+    renderItems(document.getElementById('mon-list'),d.channels,T('no_channels'),
+      i=>'<div class="item"><span class="badge '+(i.status==='live'?'badge-live':'badge-offline')+'">'+
+        esc(T(i.status==='live'?'live':'offline').toUpperCase())+'</span>'+esc(i.channel||i.channel_id||'?')+
+        ' <span style="color:#6c7086">('+esc(i.platform||'')+')</span></div>');
+  }).catch(()=>{});
+}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+let _refreshId=0;
+</script>
+</body>
+</html>

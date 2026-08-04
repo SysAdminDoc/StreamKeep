@@ -28,9 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .paths import CONFIG_DIR
-from .sqlite_runtime import connect as sqlite_connect
-from .sqlite_runtime import runtime_status
+from ..paths import CONFIG_DIR
+from ..sqlite_runtime import connect as sqlite_connect
+from ..sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
 SCHEMA_VERSION = 19
@@ -262,12 +262,12 @@ def init_db() -> None:
     # before opening the database. Lazy imports avoid backup<->db and
     # rebuild<->db cycles.
     try:
-        from .backup import finalize_interrupted_restore
+        from ..backup import finalize_interrupted_restore
         finalize_interrupted_restore()
     except Exception:
         pass  # safe: best-effort fallback; preserve the primary operation
     try:
-        from .rebuild import finalize_interrupted_rebuild
+        from ..rebuild import finalize_interrupted_rebuild
         finalize_interrupted_rebuild()
     except Exception:
         pass  # safe: best-effort fallback; preserve the primary operation
@@ -279,51 +279,8 @@ def init_db() -> None:
             raise DatabaseSchemaError(v, SCHEMA_VERSION)
         db.execute("BEGIN IMMEDIATE")
         if v < SCHEMA_VERSION:
-            if v >= 1 and v < 4:
-                _migrate_queue_v4(db)
-            if v >= 1 and v < 5:
-                _migrate_queue_v5(db)
-            if v >= 1 and v < 6:
-                _migrate_monitor_v6(db)
-            if 0 < v < 8:
-                _migrate_execution_v8(db)
-            if 0 < v < 9:
-                _migrate_identity_v9(db)
-            if 0 < v < 10:
-                _migrate_retry_v10(db)
-            if 0 < v < 11:
-                _migrate_auth_profiles_v11(db)
-            if 0 < v < 12:
-                _migrate_media_layout_v12(db)
-            if 0 < v < 13:
-                _migrate_publishing_v13(db)
-            if 0 < v < 14:
-                _migrate_upload_v14(db)
-            if 0 < v < 15:
-                _migrate_intelligence_v15(db)
-            if v < 16:
-                _migrate_identity_v16(db)
-            if v < 17:
-                _migrate_tombstones_v17(db)
-            if v < 18:
-                _migrate_upgrade_v18(db)
-            if v < 19:
-                _migrate_integrity_v19(db)
-            _apply_schema(db)
-            if v == 0:
-                _migrate_execution_v8(db)
-            try:
-                db.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_queue_status "
-                    "ON download_queue(status)"
-                )
-            except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
-            db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id "
-                "ON download_queue(job_id) WHERE job_id <> ''"
-            )
-            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            from .schema import migrate_database
+            migrate_database(db, v, SCHEMA_VERSION)
         _configure_history_fts(db)
         db.commit()
     except Exception:
@@ -334,7 +291,7 @@ def init_db() -> None:
     # Repair an interrupted re-template after the schema is open so recovery
     # can compare the durable history path with the staged filesystem move.
     try:
-        from .maintenance import finalize_interrupted_retemplates
+        from ..maintenance import finalize_interrupted_retemplates
         finalize_interrupted_retemplates(config_dir=CONFIG_DIR)
     except Exception:
         pass  # safe: best-effort fallback; preserve the primary operation
@@ -940,8 +897,8 @@ def _migrate_identity_v9(db):
     # Only derive content identities from legacy public URLs. Channel-level
     # identities are deliberately excluded: they identify a creator, not one
     # recording, and must never make unrelated VODs upgrade-eligible.
-    from .metadata import build_archival_provenance
-    from .models import StreamInfo
+    from ..metadata import build_archival_provenance
+    from ..models import StreamInfo
     rows = db.execute(
         "SELECT id, platform, channel, url FROM history WHERE source_id=''"
     ).fetchall()
@@ -979,8 +936,8 @@ def _migrate_identity_v16(db):
             "webpage_url TEXT NOT NULL DEFAULT ''"
         )
 
-    from .metadata import build_archival_provenance
-    from .models import StreamInfo
+    from ..metadata import build_archival_provenance
+    from ..models import StreamInfo
 
     rows = db.execute(
         "SELECT id, platform, source_id, channel, url, webpage_url "
@@ -1156,7 +1113,7 @@ def _migrate_retry_v10(db):
         )
     """)
 
-    from .retry import (
+    from ..retry import (
         classify_failure,
         retry_delay_seconds,
         retry_source,
@@ -1482,8 +1439,8 @@ def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
 
 def _canonical_history_entry(entry_dict: dict[str, Any]) -> dict[str, Any]:
     """Normalize history identity before it can be indexed or searched."""
-    from .metadata import build_archival_provenance
-    from .models import StreamInfo
+    from ..metadata import build_archival_provenance
+    from ..models import StreamInfo
 
     raw = dict(entry_dict or {})
     raw_url = str(raw.get("webpage_url", "") or raw.get("url", "") or "")
@@ -1533,8 +1490,8 @@ def _canonical_tombstone_fields(
         title = title or getattr(record, "title", "") or getattr(record, "vod_title", "")
         channel = channel or getattr(record, "channel", "") or getattr(record, "vod_channel", "")
 
-    from .metadata import build_archival_provenance
-    from .models import StreamInfo
+    from ..metadata import build_archival_provenance
+    from ..models import StreamInfo
 
     platform = str(platform or "").strip()
     source_id = str(source_id or "").strip()
@@ -2003,7 +1960,7 @@ def record_upgrade_decision(
     safe_profile = {}
     if isinstance(profile, Mapping) and profile:
         try:
-            from .upgrade import normalize_upgrade_profile
+            from ..upgrade import normalize_upgrade_profile
             safe_profile = normalize_upgrade_profile(
                 profile, allow_legacy_default=False,
             )
@@ -2237,7 +2194,7 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
         elif k == "watch_position_secs":
             v = float(v or 0)
         elif k == "webpage_url":
-            from .metadata import canonical_webpage_url
+            from ..metadata import canonical_webpage_url
             v = canonical_webpage_url(v)
         else:
             v = str(v)
@@ -2837,7 +2794,7 @@ def find_history_by_url(url: str) -> dict[str, Any] | None:
     """Return the most recent history entry matching *url*, or None."""
     if not url:
         return None
-    from .metadata import canonical_webpage_url
+    from ..metadata import canonical_webpage_url
     raw_url = str(url).strip()
     canonical_url = canonical_webpage_url(raw_url)
     clauses = ["url=?"]
@@ -4889,7 +4846,7 @@ def save_failed_job(
     Active rows are deduplicated by URL, stage, and output directory so a
     flapping network failure does not flood the recovery list.
     """
-    from .retry import (
+    from ..retry import (
         CIRCUIT_FAILURE_THRESHOLD,
         CIRCUIT_OPEN_SECONDS,
         CIRCUIT_WINDOW_SECONDS,
@@ -5223,7 +5180,7 @@ def load_due_failed_jobs(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Return automatically retryable failures whose durable delay elapsed."""
-    from .retry import utc_iso
+    from ..retry import utc_iso
 
     due_at = utc_iso(time.time() if now is None else float(now))
     db = _connect(readonly=True)
@@ -5249,7 +5206,7 @@ def promote_failed_job_retry(
     now: float | None = None,
 ) -> dict[str, Any] | None:
     """Atomically claim a failure and return it to the durable queue."""
-    from .retry import iso_timestamp, utc_iso
+    from ..retry import iso_timestamp, utc_iso
 
     failure_id = int(job_id or 0)
     if failure_id <= 0:
@@ -5805,7 +5762,7 @@ def release_backup_claim(
 
 def backup_state_public_view(state: dict[str, Any]) -> dict[str, Any]:
     """Project backup state into the operations API shape (no host paths)."""
-    from .retry import sanitize_failure_reason
+    from ..retry import sanitize_failure_reason
 
     normalized = _normalize_backup_state(dict(state or {}))
     last_path = normalized["last_path"]
@@ -5828,20 +5785,20 @@ def backup_state_public_view(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _utc_iso(timestamp: float) -> str:
-    from .retry import utc_iso
+    from ..retry import utc_iso
 
     return utc_iso(timestamp)
 
 
 def _iso_epoch(value: object) -> float:
-    from .retry import iso_timestamp
+    from ..retry import iso_timestamp
 
     return iso_timestamp(value)
 
 
 def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
     """Project a failure into the credential-free operations API shape."""
-    from .retry import failure_remediation, sanitize_failure_reason
+    from ..retry import failure_remediation, sanitize_failure_reason
 
     category = str(row.get("category", "unknown") or "unknown")
     last_reason = sanitize_failure_reason(

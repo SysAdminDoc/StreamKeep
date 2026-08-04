@@ -2062,7 +2062,7 @@ class DownloadQueueMixin:
         overrides = getattr(self, "_dl_overrides", {})
         preset_name = overrides.get("pp_preset", "")
         if preset_name:
-            from .settings import BUILTIN_PRESETS, _get_user_presets
+            from .settings_presets import BUILTIN_PRESETS, _get_user_presets
             all_presets = dict(BUILTIN_PRESETS)
             all_presets.update(_get_user_presets(self))
             if preset_name in all_presets:

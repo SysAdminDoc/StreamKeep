@@ -262,7 +262,7 @@ class MonitorEntryDialog(TranslatableDialog):
         self.pp_preset_combo = QComboBox()
         self.pp_preset_combo.addItem("Use global default", userData="")
         try:
-            from .tabs.settings import BUILTIN_PRESETS, _get_user_presets
+            from .tabs.settings_presets import BUILTIN_PRESETS, _get_user_presets
 
             for name in BUILTIN_PRESETS:
                 self.pp_preset_combo.addItem(f"★ {name}", userData=name)

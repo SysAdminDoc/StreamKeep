@@ -13,7 +13,7 @@ OVERRIDES_LABEL_MODIFIED = "Per-download overrides · Modified"
 
 def _populate_adv_pp(win):
     """Populate the per-download PP preset combo from settings presets."""
-    from .settings import BUILTIN_PRESETS, _get_user_presets
+    from .settings_presets import BUILTIN_PRESETS, _get_user_presets
     combo = win.adv_pp_combo
     combo.blockSignals(True)
     current = combo.currentData() or ""

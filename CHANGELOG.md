@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Split the SQLite library, Browser Companion server, and post-processing
+  Settings presets behind stable facades. Schema migration ordering, database
+  table-family boundaries, server authentication/routes/static assets, and the
+  external web UI now have explicit package-level ownership without changing
+  existing import paths or endpoint behavior.
+
 - Added subprocess/file-worker coverage for safe argv construction, player and
   companion-settings paths, and partial-output cleanup; transcript and summary
   sidecars now use atomic writes, and the measured coverage gate is 64.0%.
