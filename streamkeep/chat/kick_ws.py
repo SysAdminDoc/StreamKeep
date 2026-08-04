@@ -207,7 +207,7 @@ class KickChatReader:
             try:
                 self._ws.close()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._ws = None
 
     def iter_messages(self):

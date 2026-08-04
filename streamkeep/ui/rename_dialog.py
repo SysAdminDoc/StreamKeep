@@ -290,7 +290,7 @@ class RenameDialog(TranslatableDialog):
                 with open(log_path, "w", encoding="utf-8") as f:
                     json.dump(existing[-20:], f, indent=2)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
         if self._parent_win:
             self._parent_win._refresh_history_table()

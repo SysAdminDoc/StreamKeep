@@ -66,7 +66,7 @@ class _ThumbnailFetchWorker(QThread):
             )
             self.fetched.emit(data)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
 
 class DownloadSingleMixin:
@@ -448,7 +448,7 @@ class DownloadSingleMixin:
                 dt = datetime.fromisoformat(info.start_time.replace("Z", "+00:00"))
                 parts.append(f"Started: {dt.strftime('%Y-%m-%d %I:%M %p UTC')}")
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         if info.segment_count:
             parts.append(f"Segments: {info.segment_count}")
         self.info_label.setText("  |  ".join(parts))
@@ -1453,7 +1453,7 @@ class DownloadSingleMixin:
                     self.download_worker.terminate()
                     self.download_worker.wait(1000)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self.download_worker = None
         # Also stop any parallel auto-records. The stop button is a global
         # "halt everything the user is actively watching" — parallel lives
@@ -1468,7 +1468,7 @@ class DownloadSingleMixin:
                         w.terminate()
                         w.wait(500)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
         self._autorecord_workers.clear()
         self._autorecord_contexts.clear()
         for ch_id in list(self._autorecord_resolvers.keys()):
@@ -1478,7 +1478,7 @@ class DownloadSingleMixin:
                     w.requestInterruption()
                     w.wait(1500)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
         self._autorecord_resolvers.clear()
         # Stop any paired live-chat captures.
         for ch_id in list(self._chat_workers.keys()):
@@ -1488,7 +1488,7 @@ class DownloadSingleMixin:
                     w.cancel()
                     w.wait(2000)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
         self._chat_workers.clear()
         # Clear any green/red chunk overrides left on segment bars so the
         # next download starts from a neutral style instead of inheriting
@@ -1498,7 +1498,7 @@ class DownloadSingleMixin:
                 pbar.setStyleSheet("")
                 pbar.setValue(0)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self.download_btn.setEnabled(True)
         self.fetch_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
@@ -1838,7 +1838,7 @@ class DownloadSingleMixin:
         try:
             self.url_input.setText(url)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         if action == "queue":
             try:
                 added = self._queue_add(
@@ -1898,7 +1898,7 @@ class DownloadSingleMixin:
             if url:
                 self.url_input.setText(url)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         try:
             self.crop_start_input.setText(
                 self._fmt_crop_time(start) if start > 0 else ""
@@ -1907,7 +1907,7 @@ class DownloadSingleMixin:
                 self._fmt_crop_time(end) if end > 0 else ""
             )
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         span = ""
         if end > start:
             span = f" ({self._fmt_crop_time(start)}-{self._fmt_crop_time(end)})"

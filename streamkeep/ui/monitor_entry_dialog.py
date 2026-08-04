@@ -270,7 +270,7 @@ class MonitorEntryDialog(TranslatableDialog):
                 for name in _get_user_presets(parent):
                     self.pp_preset_combo.addItem(name, userData=name)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         current_preset = self.entry.override_pp_preset or ""
         idx = max(0, self.pp_preset_combo.findData(current_preset))
         self.pp_preset_combo.setCurrentIndex(idx)

@@ -43,7 +43,7 @@ def _ensure_table():
         finally:
             db.close()
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""):
@@ -64,7 +64,7 @@ def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""
         finally:
             db.close()
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def get_channel_stats(channel_id, weeks=8):

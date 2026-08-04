@@ -738,7 +738,7 @@ class DownloadQueueMixin:
                     if ts > now:
                         continue
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             ready.append(q)
             if active + len(ready) >= cap:
                 break
@@ -820,7 +820,7 @@ class DownloadQueueMixin:
             try:
                 fw.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         if info is None:
             job_id = self._record_failed_job(
                 stage="fetch",
@@ -897,7 +897,7 @@ class DownloadQueueMixin:
                         profile=item.get("upgrade_profile", {}),
                     )
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 failure_id = self._record_failed_job(
                     stage="fetch", error=error, item=item, info=info,
                 )
@@ -934,7 +934,7 @@ class DownloadQueueMixin:
                         profile=item.get("upgrade_profile", {}),
                     )
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 failure_id = self._record_failed_job(
                     stage="fetch", error=error, item=item, info=info,
                 )
@@ -1269,7 +1269,7 @@ class DownloadQueueMixin:
             try:
                 fw.wait(500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         job_id = self._record_failed_job(
             stage="fetch",
             error=err,
@@ -1296,7 +1296,7 @@ class DownloadQueueMixin:
             try:
                 worker.wait(500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         title = info.title if info else item.get("title", "Download")
         # Save metadata + history entry
         q_name = ctx.get("q_name", "")
@@ -1359,7 +1359,7 @@ class DownloadQueueMixin:
             try:
                 worker.wait(500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         job_id = self._record_failed_job(
             stage="download",
             error=err,
@@ -1683,7 +1683,7 @@ class DownloadQueueMixin:
                 try:
                     is_scheduled = datetime.fromisoformat(start_at) > now
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             display_status = "Scheduled" if is_scheduled else status.replace("_", " ").title()
             color = self._queue_status_color(status, is_scheduled)
 

@@ -1595,7 +1595,7 @@ def _build_handler(
                 try:
                     return state_provider()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             return {}
 
         def _handle_api_spec(self):

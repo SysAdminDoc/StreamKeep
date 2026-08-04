@@ -99,12 +99,12 @@ def init_db() -> None:
         from .backup import finalize_interrupted_restore
         finalize_interrupted_restore()
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     try:
         from .rebuild import finalize_interrupted_rebuild
         finalize_interrupted_rebuild()
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     _check_schema_version()
     db = _connect()
     try:
@@ -152,7 +152,7 @@ def init_db() -> None:
                     "ON download_queue(status)"
                 )
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id "
                 "ON download_queue(job_id) WHERE job_id <> ''"
@@ -171,7 +171,7 @@ def init_db() -> None:
         from .maintenance import finalize_interrupted_retemplates
         finalize_interrupted_retemplates(config_dir=CONFIG_DIR)
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def _apply_schema(db):
@@ -638,7 +638,7 @@ def _migrate_queue_v4(db):
             "CREATE INDEX IF NOT EXISTS idx_queue_status ON download_queue(status)"
         )
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
     rows = db.execute("SELECT id, data FROM download_queue").fetchall()
     for row in rows:

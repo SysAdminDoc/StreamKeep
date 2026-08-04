@@ -580,10 +580,10 @@ class DownloadVodMixin:
         try:
             worker.requestInterruption()
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         if worker.isRunning():
             try:
                 worker.wait(1500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._batch_fetch_worker = None

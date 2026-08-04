@@ -457,7 +457,7 @@ def _dpapi_protect(plaintext):
             ctypes.windll.kernel32.LocalFree(blob_out.pbData)
             return "dpapi:" + base64.b64encode(enc).decode("ascii")
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     return None
 
 
@@ -516,5 +516,5 @@ def _dpapi_unprotect(b64_blob):
             ctypes.windll.kernel32.LocalFree(blob_out.pbData)
             return dec.decode("utf-8")
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     return None

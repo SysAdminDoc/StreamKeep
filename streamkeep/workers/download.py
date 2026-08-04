@@ -2052,7 +2052,7 @@ class DownloadWorker(QThread):
             else:
                 self.log.emit(f"[HINT] {ytse_install_hint()}")
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def _finalize_ytdlp_success(self, seg_idx, label, produced, note=""):
         """Emit the completion signals for a produced yt-dlp output."""

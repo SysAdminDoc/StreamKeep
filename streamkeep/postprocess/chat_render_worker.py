@@ -210,7 +210,7 @@ class ChatRenderWorker(QThread):
                             )
                             emote_images[name] = eimg
                         except Exception:
-                            pass
+                            pass  # safe: best-effort fallback; preserve the primary operation
                 self.log.emit(
                     f"[CHAT RENDER] {len(emote_images)}/{len(emote_map)} "
                     f"emote images loaded"
@@ -387,7 +387,7 @@ class ChatRenderWorker(QThread):
             try:
                 stderr = proc.stderr.read().decode("utf-8", errors="replace")[:300]
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self.done.emit(False, f"ffmpeg failed (exit {proc.returncode}): {stderr}")
             return
 

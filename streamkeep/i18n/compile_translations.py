@@ -28,7 +28,7 @@ def _find_lrelease():
             if sys.platform == "win32" and os.path.isfile(candidate + ".exe"):
                 return candidate + ".exe"
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     for name in ("lrelease6", "lrelease", "pyside6-lrelease"):
         try:
             subprocess.run([name, "-version"], capture_output=True, timeout=5)

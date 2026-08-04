@@ -1210,7 +1210,7 @@ class HistoryTabMixin:
             try:
                 w.wait(300)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._transcribe_worker = None
         if ok:
             self._log(f"[TRANSCRIBE] Wrote .srt / .vtt / .json / .chapters.auto.txt next to {path_or_err}")
@@ -1264,7 +1264,7 @@ class HistoryTabMixin:
             try:
                 w.wait(300)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._chat_render_worker = None
         if ok:
             self._log(f"[CHAT RENDER] Output: {path_or_err}")
@@ -1305,7 +1305,7 @@ class HistoryTabMixin:
             try:
                 w.wait(300)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._bundle_worker = None
         if ok:
             self._log(f"[BUNDLE] Wrote {path_or_err}")

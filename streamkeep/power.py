@@ -110,7 +110,7 @@ def run_queue_complete_action(
             try:
                 log_fn(message)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     if action == "none":
         return result

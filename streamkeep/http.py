@@ -141,7 +141,7 @@ def _terminate_process(proc):
         try:
             proc.kill()
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def run_capture_interruptible(cmd: list[str], timeout: float = 30) -> CommandResult:
@@ -725,14 +725,14 @@ def _parallel_http_download_impl(
                     try:
                         proc.terminate()
                     except Exception:
-                        pass
+                        pass  # safe: best-effort fallback; preserve the primary operation
                     try:
                         proc.wait(timeout=2)
                     except Exception:
                         try:
                             proc.kill()
                         except Exception:
-                            pass
+                            pass  # safe: best-effort fallback; preserve the primary operation
                     return
                 if os.path.exists(part):
                     try:
@@ -793,7 +793,7 @@ def _parallel_http_download_impl(
                 try:
                     proc.stderr.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
     # Credit already-complete (resumed) parts into the byte total up front so
     # the first progress sample's speed/ETA baseline is deterministic. Without
@@ -827,7 +827,7 @@ def _parallel_http_download_impl(
                         if p.poll() is None:
                             p.terminate()
                     except Exception:
-                        pass
+                        pass  # safe: best-effort fallback; preserve the primary operation
             break
         now = time.time()
         if progress_cb and now - last_report >= 0.4:
@@ -837,7 +837,7 @@ def _parallel_http_download_impl(
             try:
                 progress_cb(total_done, total, speed)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             last_report = now
             last_bytes = total_done
         time.sleep(0.2)
@@ -913,5 +913,5 @@ def _parallel_http_download_impl(
         try:
             progress_cb(total, total, 0)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
     return True

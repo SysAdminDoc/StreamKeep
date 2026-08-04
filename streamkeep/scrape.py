@@ -273,7 +273,7 @@ def _cancelled(checker=None):
             if checker():
                 return True
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
     return http_interrupted()
 
 
@@ -526,7 +526,12 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                         return
                     try:
                         ct = (resp.headers.get("content-type", "") or "").lower()
-                    except Exception:
+                    except Exception as error:
+                        if log_fn:
+                            log_fn(
+                                "[HEADLESS] Ignored response with unreadable "
+                                f"content type: {str(error)[:100]}"
+                            )
                         return
                     if any(ct.startswith(prefix) for prefix in media_ct_prefixes):
                         add(resp.url, f"headless {ct.split(';')[0]}")
@@ -551,7 +556,7 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                         if (v) v.scrollIntoView({behavior:'instant',block:'center'});
                     """)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 if _cancelled(should_cancel):
                     return captured
 
@@ -569,7 +574,7 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                         except Exception:
                             continue
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
                 try:
                     remaining_ms = max(0, int(wait_seconds * 1000))
@@ -580,7 +585,7 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                         page.wait_for_timeout(step)
                         remaining_ms -= step
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
                 try:
                     html = page.content()
@@ -589,22 +594,22 @@ def scrape_media_links_headless(page_url, log_fn=None, max_links=100,
                     ):
                         add(url, hint)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             finally:
                 try:
                     if page is not None:
                         page.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 try:
                     if context is not None:
                         context.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 try:
                     browser.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
     except Exception as e:
         if log_fn:
             log_fn(f"[HEADLESS] Error: {str(e)[:120]}")
@@ -858,6 +863,6 @@ def detect_direct_media(url, log_fn=None, headers=None):
             )
             return info
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
     return None

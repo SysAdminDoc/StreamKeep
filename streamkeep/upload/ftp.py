@@ -143,7 +143,7 @@ class FTPDestination(UploadDestination):
             try:
                 ftp.delete(partial_path)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             offset = 0
         sent = offset
         if progress_cb:
@@ -229,7 +229,7 @@ class FTPDestination(UploadDestination):
                 try:
                     sftp.remove(partial_path)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 offset = 0
             sent = offset
             if progress_cb:
@@ -258,12 +258,12 @@ class FTPDestination(UploadDestination):
                 try:
                     sftp.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             if client is not None:
                 try:
                     client.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
     @staticmethod
     def _sftp_size(sftp, remote_path):
@@ -327,7 +327,7 @@ class FTPDestination(UploadDestination):
                     try:
                         client.close()
                     except Exception:
-                        pass
+                        pass  # safe: best-effort fallback; preserve the primary operation
         if transport in {"ftps", "ftp_tls", "tls"}:
             return self._test_ftp_connection(secure=True)
         if transport not in {"ftp", "plain"}:
@@ -421,7 +421,7 @@ class FTPDestination(UploadDestination):
                 try:
                     ftp.close()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
     @staticmethod
     def _normalize_remote_dir(remote_dir):

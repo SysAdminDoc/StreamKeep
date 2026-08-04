@@ -37,7 +37,7 @@ class MainWindowJobsMixin:
         try:
             _push(self.output_input.text().strip())
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         _push(self._config.get("output_dir", ""))
         _push(str(_default_output_dir()))
         for entry in getattr(self.monitor, "entries", []) or []:
@@ -104,7 +104,7 @@ class MainWindowJobsMixin:
                 clear_resume_state(state.output_dir)
                 count += 1
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._resume_candidates = []
         self._refresh_resume_banner()
         if count:

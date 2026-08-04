@@ -57,7 +57,7 @@ class ClipWorker(QThread):
             try:
                 self._proc.terminate()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def _build_cmd(self):
         """Build the ffmpeg command. `-ss` placement is deliberate:
@@ -211,7 +211,7 @@ class HighlightWorker(QThread):
             try:
                 self._proc.terminate()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def run(self):
         if not self.ranges:

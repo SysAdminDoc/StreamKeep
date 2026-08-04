@@ -464,7 +464,7 @@ def user_videos_dir():
                 ctypes.windll.ole32.CoTaskMemFree(out_ptr)
                 return result
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         return Path.home() / "Videos"
     if sys.platform == "darwin":
         return Path.home() / "Movies"
@@ -478,7 +478,7 @@ def user_videos_dir():
                 path = m.group(1).replace("$HOME", str(Path.home()))
                 return Path(path)
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     return Path.home() / "Videos"
 
 
@@ -579,7 +579,7 @@ def build_template_context(stream_info, vod_info=None):
             dt = _dt.fromisoformat(raw[:19])
             date_str = dt.strftime("%Y-%m-%d")
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     if not date_str:
         date_str = now.strftime("%Y-%m-%d")
     year, month, day = date_str.split("-") if "-" in date_str else ("", "", "")

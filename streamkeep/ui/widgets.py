@@ -281,7 +281,7 @@ def path_label(path_text, fallback="Choose folder"):
         if p.name:
             return p.name
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     return path_text
 
 

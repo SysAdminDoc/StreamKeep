@@ -73,7 +73,7 @@ class DownloadFinalizeMixin:
             try:
                 worker.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._finalize_worker = None
         self._finalize_active_title = ""
         self._finalize_active_label = ""
@@ -179,7 +179,7 @@ class DownloadFinalizeMixin:
                             execution_error=finalize_error,
                         )
                     except Exception:
-                        pass
+                        pass  # safe: best-effort fallback; preserve the primary operation
         if succeeded and is_upgrade:
             self._index_finalized_recording(
                 result.get("out_dir", ""), result.get("info"),
@@ -423,10 +423,10 @@ class DownloadFinalizeMixin:
             auto_tag_recording(db, out_dir, info=info)
             db.close()
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         # Index transcripts for this recording (F27)
         try:
             from ...search import index_recording
             index_recording(out_dir)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation

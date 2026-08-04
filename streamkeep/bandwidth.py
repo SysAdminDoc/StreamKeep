@@ -11,6 +11,7 @@ Usage::
     print(tracker.today_bytes, tracker.month_bytes)
 """
 
+import logging
 import threading
 from datetime import date
 
@@ -19,6 +20,7 @@ from .sqlite_runtime import connect as sqlite_connect
 
 DB_PATH = CONFIG_DIR / "library.db"
 _lock = threading.Lock()
+_LOGGER = logging.getLogger(__name__)
 
 
 class BandwidthTracker:
@@ -48,8 +50,8 @@ class BandwidthTracker:
                 db.commit()
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[BANDWIDTH] Could not initialize usage storage: %s", error)
 
     def _load_today(self):
         key = date.today().isoformat()
@@ -63,7 +65,8 @@ class BandwidthTracker:
                 self._today_bytes = row[0] if row else 0
             finally:
                 db.close()
-        except Exception:
+        except Exception as error:
+            _LOGGER.warning("[BANDWIDTH] Could not load today's usage: %s", error)
             self._today_bytes = 0
 
     def configure(self, daily_cap_gb=0, monthly_cap_gb=0, action="warn"):
@@ -100,8 +103,8 @@ class BandwidthTracker:
                 db.commit()
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[BANDWIDTH] Could not persist usage totals: %s", error)
 
     @property
     def today_bytes(self):
@@ -122,7 +125,8 @@ class BandwidthTracker:
                 return (row[0] if row else 0) + self._today_bytes
             finally:
                 db.close()
-        except Exception:
+        except Exception as error:
+            _LOGGER.warning("[BANDWIDTH] Could not read monthly usage: %s", error)
             return self._today_bytes
 
     @property
@@ -161,7 +165,8 @@ class BandwidthTracker:
                 return [(r[0], r[1]) for r in reversed(rows)]
             finally:
                 db.close()
-        except Exception:
+        except Exception as error:
+            _LOGGER.warning("[BANDWIDTH] Could not read usage history: %s", error)
             return []
 
 

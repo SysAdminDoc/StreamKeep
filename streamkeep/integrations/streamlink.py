@@ -271,7 +271,7 @@ class StreamlinkCapture:
             try:
                 reader.close()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def close(self):
         self.close_reader()
@@ -280,7 +280,7 @@ class StreamlinkCapture:
             try:
                 http.close()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         if self.proxy is not None:
             self.proxy.stop()
             self.proxy = None
@@ -315,7 +315,7 @@ class StreamlinkEngine:
         try:
             http.trust_env = False
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         original_request = http.request
 
         def guarded_request(method, url, *args, **kwargs):

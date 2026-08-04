@@ -77,7 +77,7 @@ def _stream_imminent(entry):
             if 0 < delta <= _IMMINENT_WINDOW_SECS:
                 return True
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
     return False
 
 

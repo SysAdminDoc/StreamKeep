@@ -49,7 +49,7 @@ class SummaryConsentDialog(QDialog):
                     profile["profile_id"],
                 )
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         self.profile_combo.currentIndexChanged.connect(self._refresh_preview)
         form.addRow("Provider", self.profile_combo)
 

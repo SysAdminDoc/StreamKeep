@@ -8,6 +8,7 @@ predictable file layout and keeps the runtime unchanged.
 
 import json
 import html
+import logging
 import os
 import subprocess
 import uuid
@@ -65,6 +66,39 @@ from .main_window_jobs import MainWindowJobsMixin
 
 # Legacy NATIVE_PROXY compatibility — some UI code below assigns this.
 NATIVE_PROXY = ""
+_LOGGER = logging.getLogger(__name__)
+
+
+def _stop_worker(
+    worker,
+    timeout=1500,
+    *,
+    cancel=False,
+    terminate_timeout=0,
+    label="worker",
+):
+    """Stop one Qt worker and report failures instead of hiding them."""
+    if worker is None:
+        return True
+    try:
+        if not worker.isRunning():
+            return True
+        stop = getattr(worker, "cancel", None) if cancel else None
+        if not callable(stop):
+            stop = getattr(worker, "requestInterruption", None)
+        if callable(stop):
+            stop()
+        if worker.wait(max(0, int(timeout))):
+            return True
+        if terminate_timeout:
+            terminate = getattr(worker, "terminate", None)
+            if callable(terminate):
+                terminate()
+            return bool(worker.wait(max(0, int(terminate_timeout))))
+        return False
+    except Exception as error:
+        _LOGGER.warning("[SHUTDOWN] Could not stop %s: %s", label, error)
+        return False
 
 
 def _chrome_icon(kind, *, active=False):
@@ -225,8 +259,8 @@ class StreamKeep(
         try:
             from streamkeep.i18n import install_translator
             install_translator(self._config.get("language", "en"))
-        except Exception:
-            pass
+        except Exception as error:
+            self._log(f"[I18N] Could not install the configured translator: {error}")
         self._tray_icon = None
         self._folder_template = DEFAULT_FOLDER_TEMPLATE
         self._file_template = DEFAULT_FILE_TEMPLATE
@@ -359,19 +393,19 @@ class StreamKeep(
             self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.history_table.customContextMenuRequested.connect(self._on_history_context_menu)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         try:
             if hasattr(self, "queue_table"):
                 self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                 self.queue_table.customContextMenuRequested.connect(self._on_queue_context_menu)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         try:
             if hasattr(self, "storage_table"):
                 self.storage_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                 self.storage_table.customContextMenuRequested.connect(self._on_storage_context_menu)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         try:
             if hasattr(self, "monitor_table"):
                 self.monitor_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -385,7 +419,7 @@ class StreamKeep(
                 self.monitor_table.customContextMenuRequested.connect(self._on_monitor_context_menu)
                 self.monitor_table.model().rowsMoved.connect(self._on_monitor_rows_moved)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         self._resume_candidates = []
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
@@ -637,7 +671,7 @@ class StreamKeep(
             if sched_limit and sched_limit != YtDlpExtractor.rate_limit:
                 YtDlpExtractor.rate_limit = sched_limit
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     # ── Drag and Drop ─────────────────────────────────────────────────
 
@@ -1263,7 +1297,7 @@ class StreamKeep(
         try:
             self._tray_icon.showMessage(title, message, icon, 5000)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def _validate_webhook_url(self, url):
         """Return a normalized public HTTP(S) webhook URL or refuse it."""
@@ -1394,228 +1428,114 @@ class StreamKeep(
             self._log(f"[WEBHOOK] Send failed: {e}")
 
     def closeEvent(self, event):
-        # Stop active download worker cleanly
-        dw = getattr(self, "download_worker", None)
-        if dw is not None and dw.isRunning():
-            try:
-                dw.cancel()
-                if not dw.wait(3000):
-                    dw.terminate()
-                    dw.wait(1000)
-            except Exception:
-                pass
-        fw = getattr(self, "_fetch_worker", None)
-        if fw is not None and fw.isRunning():
-            try:
-                fw.requestInterruption()
-                fw.wait(1500)
-            except Exception:
-                pass
-        vpw = getattr(self, "_vod_page_worker", None)
-        if vpw is not None and vpw.isRunning():
-            try:
-                vpw.requestInterruption()
-                vpw.wait(1500)
-            except Exception:
-                pass
-        bfw = getattr(self, "_batch_fetch_worker", None)
-        if bfw is not None and bfw.isRunning():
-            try:
-                bfw.requestInterruption()
-                bfw.wait(1500)
-            except Exception:
-                pass
-        storage_worker = getattr(self, "_storage_scan_worker", None)
-        if storage_worker is not None and storage_worker.isRunning():
-            try:
-                storage_worker.requestInterruption()
-                storage_worker.wait(1500)
-            except Exception:
-                pass
-        integrity_worker = getattr(self, "_integrity_worker", None)
-        if integrity_worker is not None and integrity_worker.isRunning():
-            try:
-                integrity_worker.requestInterruption()
-                integrity_worker.wait(1500)
-            except Exception:
-                pass
-        adoption_worker = getattr(self, "_adoption_worker", None)
-        if adoption_worker is not None and adoption_worker.isRunning():
-            try:
-                adoption_worker.requestInterruption()
-                adoption_worker.wait(1500)
-            except Exception:
-                pass
+        _stop_worker(
+            getattr(self, "download_worker", None), 3000,
+            cancel=True, terminate_timeout=1000, label="active download",
+        )
+        for attr, label in (
+            ("_fetch_worker", "fetch"),
+            ("_vod_page_worker", "VOD page"),
+            ("_batch_fetch_worker", "batch fetch"),
+            ("_storage_scan_worker", "storage scan"),
+            ("_integrity_worker", "integrity"),
+            ("_adoption_worker", "adoption"),
+            ("_auto_record_resolve_worker", "auto-record resolve"),
+            ("_expand_worker", "expansion"),
+            ("_scan_worker", "scan"),
+        ):
+            _stop_worker(getattr(self, attr, None), label=label)
+
         maintenance_worker = getattr(self, "_maintenance_worker", None)
-        if maintenance_worker is not None and maintenance_worker.isRunning():
-            try:
-                maintenance_worker.requestInterruption()
-                if not maintenance_worker.wait(1500):
-                    event.ignore()
-                    if not getattr(self, "_close_after_maintenance", False):
-                        self._close_after_maintenance = True
-                        maintenance_worker.finished.connect(self.close)
-                        if not maintenance_worker.isRunning():
-                            QTimer.singleShot(0, self.close)
-                    return
-            except Exception:
-                pass
-        arw = getattr(self, "_auto_record_resolve_worker", None)
-        if arw is not None and arw.isRunning():
-            try:
-                arw.requestInterruption()
-                arw.wait(1500)
-            except Exception:
-                pass
-        # Tear down every parallel auto-record resolver + worker.
+        if maintenance_worker is not None and not _stop_worker(
+            maintenance_worker, label="maintenance",
+        ):
+            event.ignore()
+            if not getattr(self, "_close_after_maintenance", False):
+                self._close_after_maintenance = True
+                maintenance_worker.finished.connect(self.close)
+                if not maintenance_worker.isRunning():
+                    QTimer.singleShot(0, self.close)
+            return
+
         for key, worker in list(getattr(self, "_autorecord_resolvers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.requestInterruption()
-                    worker.wait(1500)
-            except Exception:
-                pass
+            _stop_worker(worker, label=f"auto-record resolver {key}")
             self._autorecord_resolvers.pop(key, None)
         for key, worker in list(getattr(self, "_autorecord_workers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.cancel()
-                    if not worker.wait(3000):
-                        worker.terminate()
-                        worker.wait(500)
-            except Exception:
-                pass
+            _stop_worker(
+                worker, 3000, cancel=True, terminate_timeout=500,
+                label=f"auto-record worker {key}",
+            )
             self._autorecord_workers.pop(key, None)
-        # Tear down concurrent queue fetch workers.
         for key, worker in list(getattr(self, "_queue_fetch_workers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.requestInterruption()
-                    worker.wait(1500)
-            except Exception:
-                pass
+            _stop_worker(worker, label=f"queue fetch {key}")
             self._queue_fetch_workers.pop(key, None)
-        # Tear down concurrent queue download workers.
         for key, worker in list(getattr(self, "_queue_workers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.cancel()
-                    if not worker.wait(3000):
-                        worker.terminate()
-                        worker.wait(500)
-            except Exception:
-                pass
+            _stop_worker(
+                worker, 3000, cancel=True, terminate_timeout=500,
+                label=f"queue worker {key}",
+            )
             self._queue_workers.pop(key, None)
         self._queue_contexts.clear()
         for key, worker in list(getattr(self, "_chat_workers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.cancel()
-                    worker.wait(2000)
-            except Exception:
-                pass
+            _stop_worker(worker, 2000, cancel=True, label=f"chat worker {key}")
             self._chat_workers.pop(key, None)
-        # Tear down the browser-companion HTTP server.
+
         srv = getattr(self, "_companion_server", None)
         if srv is not None:
             try:
                 srv.stop()
-            except Exception:
-                pass
+            except Exception as error:
+                _LOGGER.warning("[SHUTDOWN] Could not stop companion server: %s", error)
             self._companion_server = None
         for key, worker in list(getattr(self, "_monitor_seed_workers", {}).items()):
-            try:
-                if worker is not None and worker.isRunning():
-                    worker.requestInterruption()
-                    worker.wait(1500)
-            except Exception:
-                pass
+            _stop_worker(worker, label=f"monitor seed {key}")
             self._monitor_seed_workers.pop(key, None)
-        fwk = getattr(self, "_finalize_worker", None)
-        if fwk is not None and fwk.isRunning():
-            try:
-                fwk.cancel()
-                if not fwk.wait(1500):
-                    fwk.terminate()
-                    fwk.wait(500)
-            except Exception:
-                pass
-        ew = getattr(self, "_expand_worker", None)
-        if ew is not None and ew.isRunning():
-            try:
-                ew.requestInterruption()
-                ew.wait(1500)
-            except Exception:
-                pass
-        sw = getattr(self, "_scan_worker", None)
-        if sw is not None and sw.isRunning():
-            try:
-                sw.requestInterruption()
-                sw.wait(1500)
-            except Exception:
-                pass
+        _stop_worker(
+            getattr(self, "_finalize_worker", None),
+            terminate_timeout=500, cancel=True, label="finalizer",
+        )
         self._finalize_tasks = []
-        # Stop convert worker if running (standalone file/folder batch)
-        cw = getattr(self, "_convert_worker", None)
-        if cw is not None and cw.isRunning():
-            try:
-                cw.cancel()
-                if not cw.wait(3000):
-                    cw.terminate()
-                    cw.wait(1000)
-            except Exception:
-                pass
-        # Stop transcribe / chat-render / bundle workers (F27/F22 audit fix)
+        _stop_worker(
+            getattr(self, "_convert_worker", None), 3000,
+            cancel=True, terminate_timeout=1000, label="conversion",
+        )
         for attr in (
             "_transcribe_worker", "_chat_render_worker", "_bundle_worker",
             "_deno_worker",
         ):
-            w = getattr(self, attr, None)
-            if w is not None and w.isRunning():
-                try:
-                    if hasattr(w, "cancel"):
-                        w.cancel()
-                    if not w.wait(2000):
-                        w.terminate()
-                        w.wait(500)
-                except Exception:
-                    pass
-        # Stop monitor timer
-        try:
-            self.monitor._timer.stop()
-        except Exception:
-            pass
-        try:
-            self._scheduler_timer.stop()
-        except Exception:
-            pass
-        try:
-            self._config_save_timer.stop()
-        except Exception:
-            pass
-        try:
-            self._executor_lease_timer.stop()
-        except Exception:
-            pass
-        # Stop clipboard monitor
+            _stop_worker(
+                getattr(self, attr, None), 2000,
+                cancel=True, terminate_timeout=500, label=attr.lstrip("_"),
+            )
+
+        for timer, label in (
+            (getattr(getattr(self, "monitor", None), "_timer", None), "monitor timer"),
+            (getattr(self, "_scheduler_timer", None), "scheduler timer"),
+            (getattr(self, "_config_save_timer", None), "config timer"),
+            (getattr(self, "_executor_lease_timer", None), "executor lease timer"),
+        ):
+            if timer is None:
+                continue
+            try:
+                timer.stop()
+            except Exception as error:
+                _LOGGER.warning("[SHUTDOWN] Could not stop %s: %s", label, error)
         try:
             self.clipboard_monitor.stop()
-        except Exception:
-            pass
-        # Hide + remove tray icon so Windows doesn't leak a dead icon slot
-        # until explorer.exe is restarted.
+        except Exception as error:
+            _LOGGER.warning("[SHUTDOWN] Could not stop clipboard monitor: %s", error)
         try:
             if self._tray_icon is not None:
                 self._tray_icon.hide()
                 self._tray_icon.deleteLater()
                 self._tray_icon = None
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[SHUTDOWN] Could not remove tray icon: %s", error)
         try:
             if getattr(self, "_disk_monitor", None) is not None:
                 self._disk_monitor.stop()
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[SHUTDOWN] Could not stop disk monitor: %s", error)
         try:
             worker = getattr(self, "_backup_worker", None)
             if worker is not None and worker.isRunning():
@@ -1623,8 +1543,8 @@ class StreamKeep(
                 # partial rotation file is left behind.
                 worker.wait(5000)
                 _db.release_backup_claim(self._executor_owner_id)
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[SHUTDOWN] Could not finish backup cleanup: %s", error)
         self._persist_config()
         if self._queue_execution_enabled:
             _db.release_executor_lease(self._executor_owner_id)
@@ -1800,7 +1720,7 @@ class StreamKeep(
                 if button is not None:
                     button.setIcon(_download_icon(kind))
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         self._refresh_runtime_health()
 
     def _refresh_runtime_health(self):
@@ -2369,7 +2289,7 @@ class StreamKeep(
                     cursor.removeSelectedText()
                     cursor.deleteChar()  # drop the now-empty block separator
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         sb = self.log_text.verticalScrollBar()
         sb.setValue(sb.maximum())
         _write_log_line(msg)
@@ -2444,7 +2364,7 @@ class StreamKeep(
                     from PyQt6.QtWidgets import QApplication
                     QApplication.beep()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             if bool(self._config.get("native_notifications", False)):
                 self._fire_native_toast(text, level)
 
@@ -2497,13 +2417,13 @@ class StreamKeep(
                 try:
                     self._disk_monitor.stop()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             self._disk_monitor = None
             self._disk_pause_active = False
             try:
                 self.disk_status.setVisible(False)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             if hasattr(self, "archive_storage_detail"):
                 self.archive_storage_detail.setText(tr("Storage monitoring off"))
                 self.archive_storage_state.setText("—")
@@ -2558,7 +2478,7 @@ class StreamKeep(
                     ),
                 )
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         # Recovery: release an auto-pause once space climbs back above critical.
         if self._disk_pause_active and free_bytes >= self._disk_critical_bytes:
             self._disk_pause_active = False
@@ -2566,7 +2486,7 @@ class StreamKeep(
             try:
                 self._advance_queue()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def _on_disk_space_warning(self, path, free_bytes):
         free_gb = free_bytes / 1024 ** 3
@@ -2586,7 +2506,7 @@ class StreamKeep(
             try:
                 self._on_stop()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def _fire_native_toast(self, text, level="info"):
         """Raise a native OS notification (Windows Toast / macOS / Linux) for a
@@ -2604,7 +2524,7 @@ class StreamKeep(
                 tray_icon=self._tray_icon,
             )
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def _refresh_notif_badge(self):
         if not hasattr(self, "notif_button"):
@@ -2765,8 +2685,8 @@ class StreamKeep(
                 )
                 item.setData(Qt.ItemDataRole.UserRole, ("transcript", hit))
                 items.append(item)
-        except Exception:
-            pass
+        except Exception as error:
+            self._log(f"[SEARCH] Transcript search unavailable: {error}")
 
         if items:
             for it in items:

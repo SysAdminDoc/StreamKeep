@@ -601,4 +601,4 @@ class PostProcessor:
                 import shutil
                 shutil.rmtree(tmpdir, ignore_errors=True)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation

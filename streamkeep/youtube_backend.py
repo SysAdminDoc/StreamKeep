@@ -132,7 +132,7 @@ def _backend_handles(plugin_id: str = ""):
                 try:
                     load_all_plugins()
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
         handles = [
             handle for handle in registered_adapters(plugin_id=plugin_id)
             if handle.spec.adapter_type == REMOTE_BACKEND_ADAPTER_TYPE
@@ -190,7 +190,7 @@ def _log_failure(log_fn: Callable[[str], None] | None, message: str) -> None:
         try:
             log_fn(message)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def resolve_extractor_args(

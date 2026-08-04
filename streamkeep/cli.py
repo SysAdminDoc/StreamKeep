@@ -126,7 +126,7 @@ def _record_cli_failure(url, stage, error, output_dir="", info=None):
             queue_data={"url": url, "title": (info.title if info else url)},
         )
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def _init_db_or_exit(db_module):

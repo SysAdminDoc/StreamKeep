@@ -293,7 +293,7 @@ class SyncViewer(TranslatableDialog):
                 try:
                     slot.widget._mpv.pause = self._paused
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
         self._play_btn.setText(">" if self._paused else "||")
         self._refresh_chrome()
 

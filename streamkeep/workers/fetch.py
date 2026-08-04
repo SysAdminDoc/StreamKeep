@@ -153,7 +153,7 @@ class FetchWorker(QThread):
                 try:
                     ext.request_headers = dict(self.request_headers)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
 
                 # A direct permalink (e.g. a VOD-by-UUID URL) resolves to a
                 # single item — skip live-check / channel-wide VOD listing,

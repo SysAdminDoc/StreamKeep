@@ -194,8 +194,8 @@ class HeadlessJobService(QObject):
         for worker in list(self._probe_reapers):
             try:
                 worker.requestInterruption()
-            except Exception:
-                pass
+            except Exception as error:
+                write_log_line(f"[SERVICE] Could not interrupt probe reaper: {error}")
         workers = [
             *self._fetchers.values(), *self._downloads.values(),
             *self._finalizers.values(),
@@ -207,8 +207,8 @@ class HeadlessJobService(QObject):
             try:
                 if not self._probe_worker_finished(worker):
                     worker.wait(max(0, int(wait_ms)))
-            except Exception:
-                pass
+            except Exception as error:
+                write_log_line(f"[SERVICE] Could not settle probe reaper: {error}")
         self._reap_probe_workers()
         unfinished = [
             worker for worker in workers
@@ -294,8 +294,8 @@ class HeadlessJobService(QObject):
             for worker in unfinished:
                 try:
                     worker.wait(250)
-                except Exception:
-                    pass
+                except Exception as error:
+                    write_log_line(f"[SERVICE] Worker drain wait failed: {error}")
             threading.Event().wait(0.05)
         with self._draining_workers_lock:
             self._draining_workers.clear()
@@ -326,8 +326,8 @@ class HeadlessJobService(QObject):
         while not self._probe_worker_finished(worker):
             try:
                 worker.wait(250)
-            except Exception:
-                pass
+            except Exception as error:
+                write_log_line(f"[SERVICE] Probe reaper wait failed: {error}")
             if not self._probe_worker_finished(worker):
                 threading.Event().wait(0.05)
         self._reap_probe_workers()
@@ -847,8 +847,10 @@ class HeadlessJobService(QObject):
                         channel=str(getattr(info, "channel", "") or ""),
                         profile=job.get("upgrade_profile", {}),
                     )
-                except Exception:
-                    pass
+                except Exception as error:
+                    write_log_line(
+                        f"[SERVICE] Could not record rejected upgrade decision: {error}"
+                    )
                 self._fail_job(
                     job_id,
                     "fetch",
@@ -881,8 +883,10 @@ class HeadlessJobService(QObject):
                         channel=str(getattr(info, "channel", "") or ""),
                         profile=job.get("upgrade_profile", {}),
                     )
-                except Exception:
-                    pass
+                except Exception as error:
+                    write_log_line(
+                        f"[SERVICE] Could not record missing-recording decision: {error}"
+                    )
                 self._fail_job(
                     job_id,
                     "fetch",

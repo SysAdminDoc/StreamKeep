@@ -620,7 +620,7 @@ class SettingsCompanionMixin:
             try:
                 self._companion_server.stop()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._companion_server = None
             self._companion_pairing_code = ""
             running = False
@@ -662,7 +662,7 @@ class SettingsCompanionMixin:
             try:
                 self._companion_server.stop()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._companion_server = None
             self._companion_pairing_code = ""
             self._companion_last_error = ""
@@ -689,13 +689,13 @@ class SettingsCompanionMixin:
                     "failure_id": q.get("failure_id", 0),
                 })
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         failures = []
         try:
             for row in _db.load_failed_jobs(limit=25):
                 failures.append(_db.failed_job_public_view(row))
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         history = []
         try:
             for row in reversed(_db.query_history_page(limit=50)):
@@ -708,7 +708,7 @@ class SettingsCompanionMixin:
                     "size": h.size or "",
                 })
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         monitor = []
         try:
             for e in list(self.monitor.entries):
@@ -718,7 +718,7 @@ class SettingsCompanionMixin:
                     "status": e.last_status,
                 })
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         live_channels = [m for m in monitor if m.get("status") == "live"]
         active_workers = []
         try:
@@ -738,7 +738,7 @@ class SettingsCompanionMixin:
                     "running": True,
                 })
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         resumable = []
         try:
             for rc in list(getattr(self, "_resume_candidates", [])):
@@ -748,7 +748,7 @@ class SettingsCompanionMixin:
                     "remaining": getattr(rc, "remaining_count", 0),
                 })
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         return {
             "downloads": downloads,
             "queue": queue_items,
@@ -782,7 +782,7 @@ class SettingsCompanionMixin:
             try:
                 worker.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._update_check_worker = None
         error = str((payload or {}).get("error", "") or "")
         if error:

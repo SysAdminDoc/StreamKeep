@@ -321,11 +321,11 @@ class RecoverDialog(TranslatableDialog):
             try:
                 self._worker.progress.disconnect()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             try:
                 self._worker.done.disconnect()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._worker.quit()
             self._worker.wait(2000)
         super().reject()

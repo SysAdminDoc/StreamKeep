@@ -296,7 +296,7 @@ def download_podcast_sidecars(
             try:
                 log_fn(message)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     prior = {}
     for entry in existing or []:

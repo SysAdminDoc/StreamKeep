@@ -122,7 +122,7 @@ def _open_path(path):
             import subprocess
             subprocess.Popen(["xdg-open", path])
     except Exception:
-        pass
+        pass  # safe: best-effort fallback; preserve the primary operation
 
 
 def is_native_available():

@@ -789,6 +789,7 @@ def write_log_line(msg):
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(f"[{ts}] {safe_message}\n")
         except Exception:
+            # safe: logging is a last-resort diagnostic and must never break the caller.
             pass
 
 
@@ -857,6 +858,7 @@ class GuiLogHandler(logging.Handler):
             self._invoke_on_main_thread(formatted)
             write_log_line(formatted)
         except Exception:
+            # safe: logging handlers must not recurse or raise into the application.
             pass
 
 
@@ -870,6 +872,7 @@ class FileLogHandler(logging.Handler):
             level = _LEVEL_LABELS.get(record.levelno, str(record.levelno))
             write_log_line(f"[{module}] {level}: {msg}")
         except Exception:
+            # safe: a file-log failure must not replace the operation being logged.
             pass
 
 

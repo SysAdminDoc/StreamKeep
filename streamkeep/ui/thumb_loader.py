@@ -69,7 +69,7 @@ class ThumbLoader(QObject):
             try:
                 worker.cancel()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def _pump(self):
         while self._pending and len(self._in_flight) < self._max:
@@ -99,7 +99,7 @@ class ThumbLoader(QObject):
             try:
                 w.wait(100)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._pump()
 
 
@@ -212,7 +212,7 @@ class PreviewLoader(QObject):
             try:
                 self._worker.requestInterruption()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._worker = None
 
     def _next_frame(self):

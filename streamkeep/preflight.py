@@ -10,6 +10,7 @@ validation id refers to a private, expiring server-side result instead.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import threading
@@ -28,6 +29,7 @@ MAX_TEXT_LENGTH = 512
 MAX_ID_LENGTH = 128
 PROBE_TTL_SECONDS = 5 * 60
 _SELECTION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$")
+_LOGGER = logging.getLogger(__name__)
 
 
 class PreflightError(ValueError):
@@ -724,19 +726,24 @@ def collect_probe_result(
     if not completed:
         try:
             worker.requestInterruption()
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[PREFLIGHT] Could not interrupt timed-out probe: %s", error)
         stopped = False
         try:
             stopped = bool(worker.wait(2000))
-        except Exception:
-            pass
+        except Exception as error:
+            _LOGGER.warning("[PREFLIGHT] Could not wait for timed-out probe: %s", error)
         try:
             finished = bool(worker.isFinished())
-        except Exception:
+        except Exception as error:
+            _LOGGER.warning("[PREFLIGHT] Could not inspect probe completion: %s", error)
             try:
                 finished = not bool(worker.isRunning())
-            except Exception:
+            except Exception as fallback_error:
+                _LOGGER.warning(
+                    "[PREFLIGHT] Could not inspect probe running state: %s",
+                    fallback_error,
+                )
                 finished = stopped
         if not finished and on_timeout is not None:
             on_timeout(worker)
@@ -744,8 +751,8 @@ def collect_probe_result(
     try:
         if worker.isRunning():
             worker.wait(2000)
-    except Exception:
-        pass
+    except Exception as error:
+        _LOGGER.warning("[PREFLIGHT] Could not settle completed probe: %s", error)
     if result.get("kind") == "error":
         raise PreflightError(result.get("value") or "Probe failed")
     return str(result.get("kind") or "error"), result.get("value")

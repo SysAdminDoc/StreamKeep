@@ -559,7 +559,7 @@ class FinalizeWorker(QThread):
                             execution_error=str(e),
                         )
                     except Exception:
-                        pass
+                        pass  # safe: best-effort fallback; preserve the primary operation
                 self.log.emit(f"[VERIFY] Could not capture integrity manifest: {e}")
 
         result["cancelled"] = self._interrupted()

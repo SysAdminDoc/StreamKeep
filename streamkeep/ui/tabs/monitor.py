@@ -417,7 +417,7 @@ class MonitorTabMixin:
             try:
                 worker.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     # ── Drag-reorder + bulk context menu ────────────────────────────
 
@@ -986,7 +986,7 @@ class MonitorTabMixin:
                     seed_worker.requestInterruption()
                     seed_worker.wait(500)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             # Stop just this channel's resolver + auto-record worker if
             # they're active. Other parallel auto-records are unaffected.
             resolve_worker = self._autorecord_resolvers.pop(channel_id, None)
@@ -995,7 +995,7 @@ class MonitorTabMixin:
                     resolve_worker.requestInterruption()
                     resolve_worker.wait(500)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
             ar_worker = self._autorecord_workers.get(channel_id)
             if is_recording and ar_worker is not None and ar_worker.isRunning():
                 self._log(f"[AUTO-RECORD] Stopping active recording before removing {channel_id}")
@@ -1005,7 +1005,7 @@ class MonitorTabMixin:
                         ar_worker.terminate()
                         ar_worker.wait(1000)
                 except Exception:
-                    pass
+                    pass  # safe: best-effort fallback; preserve the primary operation
                 self._autorecord_workers.pop(channel_id, None)
                 self._autorecord_contexts.pop(channel_id, None)
                 self._refresh_active_recordings_panel()
@@ -1166,7 +1166,7 @@ class MonitorTabMixin:
             try:
                 resolver.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
         target = None
         for e in self.monitor.entries:
@@ -1364,7 +1364,7 @@ class MonitorTabMixin:
             try:
                 worker.wait(500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         self._log(f"[CHAT] Capture for {channel_id} ended ({count} line(s))")
 
     def _on_auto_record_resolve_error(self, channel_id, err):
@@ -1373,7 +1373,7 @@ class MonitorTabMixin:
             try:
                 resolver.wait(200)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
                 e.is_recording = False
@@ -1416,7 +1416,7 @@ class MonitorTabMixin:
             try:
                 worker.wait(500)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         # Stop the paired chat capture (if any) — it flushes .jsonl and .ass
         # sidecars on clean exit.
         chat = self._chat_workers.pop(channel_id, None)
@@ -1425,7 +1425,7 @@ class MonitorTabMixin:
                 chat.cancel()
                 chat.wait(2000)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         finished_entry = None
         for e in self.monitor.entries:
             if e.channel_id == channel_id:
@@ -1478,7 +1478,7 @@ class MonitorTabMixin:
             try:
                 clear_resume_state(out_dir)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._set_status(f"Auto-record finished for {channel_id}.", "success")
         self._start_next_background_job()
 

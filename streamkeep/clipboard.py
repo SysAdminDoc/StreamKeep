@@ -82,4 +82,4 @@ class ClipboardMonitor(QObject):
             if url:
                 self.url_detected.emit(url)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation

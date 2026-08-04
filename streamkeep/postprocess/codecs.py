@@ -126,7 +126,7 @@ def available_video_codec_keys():
                             if fut.result(timeout=12):
                                 runnable.add(enc)
                         except Exception:
-                            pass
+                            pass  # safe: best-effort fallback; preserve the primary operation
             except Exception:
                 runnable = set(hw_to_probe)
         _HW_RUNNABLE_CACHE = runnable

@@ -425,7 +425,7 @@ def record_mse_page(
                     "{ v.play().catch(() => {}); });"
                 )
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             while time.monotonic() < deadline:
                 if _cancelled(should_cancel):
                     break
@@ -445,7 +445,7 @@ def record_mse_page(
             try:
                 resource.close()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     if writer.refused_eme:
         reason = writer.refusal_reason or "encrypted media"

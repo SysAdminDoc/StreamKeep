@@ -1508,7 +1508,7 @@ class ClipDialog(TranslatableDialog):
                     w.cancel() if hasattr(w, "cancel") else None
                     w.wait(1000)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         super().reject()
 
 

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Made broad exception fallbacks distinguishable: diagnostic paths now report
+  through the structured log bridge, all intentional swallows carry safety
+  reasons, and the main-window worker shutdown path uses one escalation helper.
+
 - Hardened ordered rules: site criteria now honor host boundaries, malformed
   duration bounds fail closed, legacy `filename_template` actions migrate to
   `arg_template`, and rules can override folder and filename templates.

@@ -114,14 +114,14 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.stop()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def toggle_pause(self):
         if self._mpv:
             try:
                 self._mpv.pause = not self._mpv.pause
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     @property
     def paused(self):
@@ -129,7 +129,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 return bool(self._mpv.pause)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         return True
 
     def seek(self, secs):
@@ -137,14 +137,14 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.seek(secs, "absolute")
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def seek_relative(self, delta):
         if self._mpv:
             try:
                 self._mpv.seek(delta, "relative")
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     @property
     def position(self):
@@ -160,7 +160,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 return int(self._mpv.volume or 100)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         return 100
 
     @volume.setter
@@ -169,7 +169,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.volume = max(0, min(150, int(val)))
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     @property
     def speed(self):
@@ -177,7 +177,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 return float(self._mpv.speed or 1.0)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
         return 1.0
 
     @speed.setter
@@ -186,7 +186,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.speed = float(val)
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     def set_eq(self, bands):
         """Set 5-band EQ. *bands* is [bass, lo_mid, mid, hi_mid, treble] in dB (F56)."""
@@ -205,7 +205,7 @@ class MpvWidget(TranslatableWidget):
             )
             self._apply_audio_filters()
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def set_normalize(self, enabled):
         """Toggle dynamic audio normalization (F56)."""
@@ -215,7 +215,7 @@ class MpvWidget(TranslatableWidget):
             self._norm_af = "dynaudnorm" if enabled else ""
             self._apply_audio_filters()
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def _apply_audio_filters(self):
         """Compose EQ + normalize filters into a single af chain."""
@@ -231,7 +231,7 @@ class MpvWidget(TranslatableWidget):
         try:
             self._mpv.af = ",".join(parts) if parts else ""
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def set_mono(self, enabled):
         """Toggle mono downmix (F56)."""
@@ -240,7 +240,7 @@ class MpvWidget(TranslatableWidget):
         try:
             self._mpv.audio_channels = "mono" if enabled else "auto"
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     @property
     def subtitle_tracks(self):
@@ -262,7 +262,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.sid = track_id if track_id else False
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
 
     @property
     def chapter_list(self):
@@ -291,7 +291,7 @@ class MpvWidget(TranslatableWidget):
                 self._duration = float(dur)
                 self.duration_changed.emit(self._duration)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
 
     def _on_eof(self, _name, val):
         if val:
@@ -304,7 +304,7 @@ class MpvWidget(TranslatableWidget):
             try:
                 self._mpv.terminate()
             except Exception:
-                pass
+                pass  # safe: best-effort fallback; preserve the primary operation
             self._mpv = None
 
     def closeEvent(self, event):

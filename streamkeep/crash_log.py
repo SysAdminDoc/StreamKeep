@@ -36,7 +36,7 @@ def setup_crash_logging():
                 )
                 f.write(tb_str)
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         # Show MessageBox if a QApplication already exists
         try:
             from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -49,7 +49,7 @@ def setup_crash_logging():
                     f"Details logged to:\n{CRASH_LOG}",
                 )
         except Exception:
-            pass
+            pass  # safe: best-effort fallback; preserve the primary operation
         sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     sys.excepthook = handler
