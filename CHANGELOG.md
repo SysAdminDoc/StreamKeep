@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added opt-in local semantic moment search. A bounded, cancellable,
+  dependency-free index combines timestamped transcript, scene, OCR, audio,
+  and comment sidecars with confidence and provenance; exact FTS remains
+  available, and the separate semantic index is excluded from portable
+  backups by default.
+
 - Added opt-in YouTube VOD comment archival (V100). Jobs and monitor profiles
   can request bounded public comments; finalize writes versioned
   `*.comments.json` sidecars with published author names and text, logs source

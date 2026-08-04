@@ -527,6 +527,16 @@ def search_comments(query, limit=100):
 def index_all_async(history, log_fn=None):
     """Index all recordings in history in a background thread."""
     def _run():
+        semantic_enabled = False
+        semantic_total = 0
+        semantic_truncated = 0
+        if semantic_enabled is False:
+            try:
+                from . import semantic
+
+                semantic_enabled = semantic.is_enabled()
+            except Exception:
+                semantic_enabled = False
         if history is None:
             from . import db as library_db
             from .models import HistoryEntry
@@ -544,9 +554,26 @@ def index_all_async(history, log_fn=None):
             if path and os.path.isdir(path):
                 n = index_recording(path)
                 total += n
+                if semantic_enabled:
+                    try:
+                        result = semantic.index_recording(path)
+                        count, truncated = (
+                            result if isinstance(result, tuple) else (result, False)
+                        )
+                        semantic_total += int(count or 0)
+                        semantic_truncated += int(bool(truncated))
+                    except Exception as error:
+                        if log_fn:
+                            log_fn(f"[SEMANTIC] Skipped {path}: {error}")
         if log_fn:
             log_fn(
                 f"[SEARCH] Indexed {total} transcript segments across "
                 f"{history_count} recordings."
             )
+            if semantic_enabled:
+                suffix = (
+                    f" {semantic_total} local semantic moments indexed; "
+                    f"{semantic_truncated} recording bound(s) reached."
+                )
+                log_fn(f"[SEMANTIC] Rebuilt optional index.{suffix}")
     threading.Thread(target=_run, daemon=True).start()

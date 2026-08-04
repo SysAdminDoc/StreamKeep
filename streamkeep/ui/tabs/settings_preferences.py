@@ -96,6 +96,67 @@ class SettingsPreferencesMixin:
         if d:
             line_edit.setText(d)
 
+    def _semantic_recording_paths(self):
+        from ... import db
+
+        paths = []
+        for row in db.iter_history(page_size=1000):
+            path = row.get("path", "") if isinstance(row, dict) else getattr(row, "path", "")
+            if path and path not in paths:
+                paths.append(str(path))
+        return paths
+
+    def _on_semantic_rebuild_clicked(self):
+        worker = getattr(self, "_semantic_index_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        if not self.semantic_search_check.isChecked():
+            self.semantic_index_status_label.setText(
+                "Enable local semantic moment search before rebuilding."
+            )
+            return
+        from ...semantic import SemanticIndexWorker
+
+        worker = SemanticIndexWorker(
+            self._semantic_recording_paths(),
+            max_moments=self.semantic_max_moments_spin.value(),
+            max_bytes=self.semantic_max_index_bytes_spin.value(),
+            parent=self,
+        )
+        worker.progress.connect(self._on_semantic_index_progress)
+        worker.log.connect(self._log)
+        worker.done.connect(self._on_semantic_index_done)
+        self._semantic_index_worker = worker
+        self.semantic_rebuild_btn.setEnabled(False)
+        self.semantic_cancel_btn.setEnabled(True)
+        self.semantic_index_status_label.setText("Preparing local semantic index…")
+        worker.start()
+
+    def _on_semantic_cancel_clicked(self):
+        worker = getattr(self, "_semantic_index_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            self.semantic_index_status_label.setText("Cancelling semantic index rebuild…")
+
+    def _on_semantic_index_progress(self, percent, message):
+        if hasattr(self, "semantic_index_status_label"):
+            self.semantic_index_status_label.setText(f"{message} ({percent}%)")
+
+    def _on_semantic_index_done(self, summary):
+        if summary.get("cancelled"):
+            status = "Semantic index rebuild cancelled. Existing completed rows were preserved per recording."
+        else:
+            status = (
+                f"Indexed {summary.get('moments', 0)} local moment(s) across "
+                f"{summary.get('recordings', 0)} recording(s)."
+            )
+            if summary.get("truncated"):
+                status += " One or more per-recording bounds were reached."
+        self.semantic_index_status_label.setText(status)
+        self.semantic_rebuild_btn.setEnabled(True)
+        self.semantic_cancel_btn.setEnabled(False)
+        self._semantic_index_worker = None
+
     def _refresh_pot_status(self):
         """Show whether the PO-token provider is installed and answering."""
         from ...pot_provider import cached_status
@@ -1022,6 +1083,18 @@ class SettingsPreferencesMixin:
             self._config["capture_live_chat"] = bool(self.capture_chat_check.isChecked())
         if hasattr(self, "render_chat_ass_check"):
             self._config["render_chat_ass"] = bool(self.render_chat_ass_check.isChecked())
+        if hasattr(self, "semantic_search_check"):
+            self._config["semantic_search_enabled"] = bool(
+                self.semantic_search_check.isChecked()
+            )
+        if hasattr(self, "semantic_max_moments_spin"):
+            self._config["semantic_max_moments"] = int(
+                self.semantic_max_moments_spin.value()
+            )
+        if hasattr(self, "semantic_max_index_bytes_spin"):
+            self._config["semantic_max_index_bytes"] = int(
+                self.semantic_max_index_bytes_spin.value()
+            )
         if hasattr(self, "quality_defaults_combos"):
             self._config["quality_defaults"] = {
                 plat: (combo.currentData() or "")

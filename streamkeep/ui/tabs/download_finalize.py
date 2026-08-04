@@ -445,3 +445,11 @@ class DownloadFinalizeMixin:
             index_recording(out_dir)
         except Exception:
             pass  # safe: best-effort fallback; preserve the primary operation
+        # The optional semantic index is local-only and bounded. Keep it
+        # best-effort so a missing/corrupt sidecar never fails finalization.
+        try:
+            from ... import semantic
+            if semantic.is_enabled():
+                semantic.index_recording(out_dir)
+        except Exception:
+            pass  # safe: best-effort fallback; preserve the primary operation

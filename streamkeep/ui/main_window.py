@@ -3001,7 +3001,7 @@ class StreamKeep(
 
         # Transcript and platform-comment FTS search (F27/V100)
         try:
-            from ..search import search_comments, search_transcripts
+            from ..search import search_comments, search_moments, search_transcripts
             hits = search_transcripts(query, limit=cap)
             for hit in hits:
                 snippet = (hit.get("text", "") or "")[:80]
@@ -3019,8 +3019,17 @@ class StreamKeep(
                 )
                 item.setData(Qt.ItemDataRole.UserRole, ("comment", hit))
                 items.append(item)
+            for hit in search_moments(query, limit=cap):
+                snippet = (hit.get("text", "") or "")[:80]
+                modality = hit.get("modality", "moment") or "moment"
+                item = QListWidgetItem(
+                    f"[Moment:{modality}] {snippet}... "
+                    f"({hit.get('recording_path', '')[-40:]})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, ("semantic", hit))
+                items.append(item)
         except Exception as error:
-            self._log(f"[SEARCH] Transcript/comment search unavailable: {error}")
+            self._log(f"[SEARCH] Transcript/comment/moment search unavailable: {error}")
 
         if items:
             for it in items:
@@ -3062,6 +3071,13 @@ class StreamKeep(
             self._switch_tab(2)
             if hasattr(self, "history_search") and hasattr(self, "comment_search_check"):
                 self.comment_search_check.setChecked(True)
+                self.history_search.setText(
+                    self._global_search.text().strip()[:30]
+                )
+        elif source == "semantic":
+            self._switch_tab(2)
+            if hasattr(self, "history_search") and hasattr(self, "semantic_search_check"):
+                self.semantic_search_check.setChecked(True)
                 self.history_search.setText(
                     self._global_search.text().strip()[:30]
                 )

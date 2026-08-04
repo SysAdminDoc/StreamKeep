@@ -165,7 +165,7 @@ def build_history_tab(win):
     search_title = QLabel("Find a Download")
     search_title.setObjectName("fieldLabel")
     search_title.setVisible(False)
-    search_hint = QLabel("Search metadata, transcript text, or comments.")
+    search_hint = QLabel("Search metadata, transcript text, comments, or local moments.")
     search_hint.setObjectName("subtleText")
     search_hint.setWordWrap(True)
     search_hint.setVisible(False)
@@ -202,7 +202,32 @@ def build_history_tab(win):
         win.comment_search_check.setChecked(False) if checked else None
     ))
     search_row.addWidget(win.comment_search_check)
+    win.semantic_search_check = QCheckBox("Search Local Moments")
+    win.semantic_search_check.setToolTip(
+        "When checked, queries search the opt-in local semantic index across "
+        "transcript, scene, OCR, audio, and comment moments."
+    )
+    win.semantic_search_check.toggled.connect(lambda checked: (
+        win.transcript_search_check.setChecked(False)
+        if checked else None
+    ))
+    win.semantic_search_check.toggled.connect(lambda checked: (
+        win.comment_search_check.setChecked(False)
+        if checked else None
+    ))
+    win.semantic_search_check.toggled.connect(lambda _: win._on_history_search(""))
+    win.transcript_search_check.toggled.connect(lambda checked: (
+        win.semantic_search_check.setChecked(False) if checked else None
+    ))
+    win.comment_search_check.toggled.connect(lambda checked: (
+        win.semantic_search_check.setChecked(False) if checked else None
+    ))
     search_wrap.addLayout(search_row)
+    semantic_mode_row = QHBoxLayout()
+    semantic_mode_row.setSpacing(8)
+    semantic_mode_row.addWidget(win.semantic_search_check)
+    semantic_mode_row.addStretch(1)
+    search_wrap.addLayout(semantic_mode_row)
     card_lay.addWidget(search_card)
 
     win.history_table = QTableView()
@@ -320,6 +345,10 @@ class HistoryTabMixin:
             hasattr(self, "comment_search_check")
             and self.comment_search_check.isChecked()
         )
+        semantic_mode = (
+            hasattr(self, "semantic_search_check")
+            and self.semantic_search_check.isChecked()
+        )
         transcript_hits = sum(
             len(items) for items in getattr(self, "_transcript_hits", {}).values()
         )
@@ -396,6 +425,19 @@ class HistoryTabMixin:
                 else:
                     self.history_summary_label.setText(
                         "No indexed transcript text matched that phrase. Clear the query or switch back to metadata search."
+                    )
+            elif query and semantic_mode:
+                if hasattr(self, "history_filter_summary"):
+                    self.history_filter_summary.setText(
+                        f"{visible} matching download(s) • {transcript_hits} local moment hit(s)"
+                    )
+                if visible:
+                    self.history_summary_label.setText(
+                        "Local moment search combines bounded transcript, scene, OCR, audio, and comment features with provenance."
+                    )
+                else:
+                    self.history_summary_label.setText(
+                        "No local moments matched that phrase. Enable indexing in Settings or broaden the query."
                     )
             elif query:
                 if hasattr(self, "history_filter_summary"):
@@ -492,15 +534,22 @@ class HistoryTabMixin:
             hasattr(self, "comment_search_check")
             and self.comment_search_check.isChecked()
         )
-        search_mode = transcript_mode or comment_mode
+        semantic_mode = (
+            hasattr(self, "semantic_search_check")
+            and self.semantic_search_check.isChecked()
+        )
+        search_mode = transcript_mode or comment_mode or semantic_mode
         self._transcript_hits = {}  # path -> list of {text, start_sec, end_sec}
         recording_paths = ()
         if query and search_mode:
-            from ...search import search_comments, search_transcripts
+            from ...search import search_comments, search_moments, search_transcripts
             try:
                 hits = (
                     search_comments(query, limit=200)
-                    if comment_mode else search_transcripts(query, limit=200)
+                    if comment_mode else (
+                        search_moments(query, limit=200)
+                        if semantic_mode else search_transcripts(query, limit=200)
+                    )
                 )
             except Exception:
                 hits = []
@@ -512,6 +561,12 @@ class HistoryTabMixin:
                     h["text"] = (
                         f"{h.get('author', '') or 'anonymous'}: "
                         f"{h.get('text', '')}"
+                    )
+                elif semantic_mode:
+                    h = dict(h)
+                    h["text"] = (
+                        f"[{h.get('modality', 'moment')}] {h.get('text', '')} "
+                        f"(confidence {float(h.get('confidence', 0) or 0):.2f})"
                     )
                 hit_paths.add(rp)
                 self._transcript_hits.setdefault(rp, []).append(h)

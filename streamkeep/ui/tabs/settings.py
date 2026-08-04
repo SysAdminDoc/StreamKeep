@@ -2460,6 +2460,67 @@ def build_settings_tab(win):
     win.chat_check = QCheckBox("Download Twitch VOD chat replay (JSON + plain text)")
     win.chat_check.setChecked(TwitchExtractor.download_chat_enabled)
     lib_lay.addWidget(win.chat_check)
+    semantic_block, semantic_lay = make_field_block(
+        "Local semantic moments",
+        "Optional local-only search across timestamped transcript, scene, OCR, audio, "
+        "and comment sidecars. The rebuildable index stays outside portable backups.",
+    )
+    win.semantic_search_check = QCheckBox(
+        "Enable local semantic moment search (opt-in)"
+    )
+    win.semantic_search_check.setChecked(
+        bool(win._config.get("semantic_search_enabled", False))
+    )
+    win.semantic_search_check.setToolTip(
+        "No cloud model or network request is used. Exact transcript/comment FTS "
+        "remains available when this is disabled."
+    )
+    semantic_lay.addWidget(win.semantic_search_check)
+    semantic_limits = QHBoxLayout()
+    semantic_limits.setSpacing(8)
+    semantic_limits.addWidget(QLabel("Per-recording bound:"))
+    from ...semantic import DEFAULT_MAX_MOMENTS, DEFAULT_MAX_INDEX_BYTES
+    win.semantic_max_moments_spin = QSpinBox()
+    win.semantic_max_moments_spin.setRange(1, 100000)
+    win.semantic_max_moments_spin.setValue(int(win._config.get(
+        "semantic_max_moments", DEFAULT_MAX_MOMENTS
+    ) or DEFAULT_MAX_MOMENTS))
+    win.semantic_max_moments_spin.setSuffix(" moments")
+    win.semantic_max_moments_spin.setToolTip(
+        "Maximum indexed moments per recording."
+    )
+    semantic_limits.addWidget(win.semantic_max_moments_spin)
+    win.semantic_max_index_bytes_spin = QSpinBox()
+    win.semantic_max_index_bytes_spin.setRange(1, 64 * 1024 * 1024)
+    win.semantic_max_index_bytes_spin.setSingleStep(1024 * 1024)
+    win.semantic_max_index_bytes_spin.setValue(int(win._config.get(
+        "semantic_max_index_bytes", DEFAULT_MAX_INDEX_BYTES
+    ) or DEFAULT_MAX_INDEX_BYTES))
+    win.semantic_max_index_bytes_spin.setSuffix(" bytes")
+    win.semantic_max_index_bytes_spin.setToolTip(
+        "Maximum local feature payload per recording."
+    )
+    semantic_limits.addWidget(win.semantic_max_index_bytes_spin)
+    semantic_limits.addStretch(1)
+    semantic_lay.addLayout(semantic_limits)
+    win.semantic_index_status_label = QLabel("Not indexed")
+    win.semantic_index_status_label.setObjectName("hintLabel")
+    win.semantic_index_status_label.setWordWrap(True)
+    semantic_lay.addWidget(win.semantic_index_status_label)
+    semantic_actions = QHBoxLayout()
+    semantic_actions.setSpacing(8)
+    win.semantic_rebuild_btn = QPushButton("Rebuild local moment index")
+    win.semantic_rebuild_btn.setObjectName("secondary")
+    win.semantic_rebuild_btn.clicked.connect(win._on_semantic_rebuild_clicked)
+    semantic_actions.addWidget(win.semantic_rebuild_btn)
+    win.semantic_cancel_btn = QPushButton("Cancel rebuild")
+    win.semantic_cancel_btn.setObjectName("secondary")
+    win.semantic_cancel_btn.setEnabled(False)
+    win.semantic_cancel_btn.clicked.connect(win._on_semantic_cancel_clicked)
+    semantic_actions.addWidget(win.semantic_cancel_btn)
+    semantic_actions.addStretch(1)
+    semantic_lay.addLayout(semantic_actions)
+    card_lay.addWidget(semantic_block)
     card_lay.addWidget(lib_block)
 
     # ── Media Server Auto-Import (F33) ────────────────────────────
