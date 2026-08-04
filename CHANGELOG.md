@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Narrowed Flatpak archive access by removing broad home filesystem permission.
+  Native Qt folder choosers now use the XDG FileChooser and persistent
+  Document Portals, with an explicit-path fallback when a portal is absent.
+
 - Added category-specific remediation guidance for failed jobs. The queue and
   operations surfaces show the next safe step, the CLI and authenticated API
   expose the same URL/path-free guidance, and available actions jump to the

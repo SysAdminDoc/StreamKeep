@@ -378,6 +378,8 @@ class MonitorEntryDialog(TranslatableDialog):
             return QTime(default_h, default_m)
 
     def _on_browse(self):
+        # The native Qt dialog is portal-backed in Flatpak, so channel output
+        # overrides receive the same persisted Document Portal grant.
         path = QFileDialog.getExistingDirectory(
             self,
             "Channel output folder",

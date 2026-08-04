@@ -7,6 +7,25 @@ import sys
 import string
 from pathlib import Path
 
+FLATPAK_PORTAL_MINIMUM = "1.22.1"
+
+
+def is_flatpak_sandbox():
+    """Return whether this process is running inside a Flatpak sandbox."""
+    return bool(os.environ.get("FLATPAK_ID")) or Path("/.flatpak-info").is_file()
+
+
+def flatpak_archive_guidance():
+    """Describe the archive-folder access contract for the current runtime."""
+    if is_flatpak_sandbox():
+        return (
+            "Flatpak uses the native XDG FileChooser and Document Portal; "
+            f"the folder grant persists across restarts (xdg-desktop-portal "
+            f">= {FLATPAK_PORTAL_MINIMUM}). If no portal is available, enter "
+            "an explicitly configured path."
+        )
+    return "Choose a local archive folder; the setting is saved for future downloads."
+
 
 def sanitize_xml_text(value):
     """Remove characters that XML 1.0 cannot represent.

@@ -749,6 +749,8 @@ class DownloadSingleMixin:
             self.table.setItem(i, 4, sz)
 
     def _on_browse(self):
+        # Keep the native dialog: Qt routes it through FileChooser/Document
+        # Portal inside Flatpak and grants the selected archive root.
         d = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.output_input.text())
         if d:
             self.output_input.setText(d)

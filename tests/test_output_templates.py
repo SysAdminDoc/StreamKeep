@@ -26,6 +26,17 @@ def _info(title="A Stream", channel="SomeChannel", platform="Twitch"):
 
 
 class TemplateResolverTests(unittest.TestCase):
+    def test_flatpak_archive_guidance_identifies_the_portal_contract(self):
+        from streamkeep.utils import flatpak_archive_guidance, is_flatpak_sandbox
+
+        with mock.patch.dict(os.environ, {"FLATPAK_ID": "com.example.Test"}):
+            self.assertTrue(is_flatpak_sandbox())
+            guidance = flatpak_archive_guidance()
+        self.assertIn("FileChooser", guidance)
+        self.assertIn("Document Portal", guidance)
+        self.assertIn("1.22.1", guidance)
+        self.assertIn("explicitly configured path", guidance)
+
     def test_strict_renderer_refuses_lossy_values(self):
         with self.assertRaises(TemplateRenderError) as reserved:
             render_template_strict("{title}", {"title": "CON"})

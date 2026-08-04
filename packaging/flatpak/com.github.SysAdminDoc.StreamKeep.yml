@@ -11,7 +11,9 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --socket=pulseaudio
-  - --filesystem=home
+  # Native Qt file dialogs use FileChooser and persistent Document Portal
+  # grants. Tested minimum: xdg-desktop-portal >= 1.22.1.
+  - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.kde.StatusNotifierWatcher
 

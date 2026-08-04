@@ -12,6 +12,7 @@ from ...postprocess import PostProcessor
 from ...utils import (
     DEFAULT_FILE_TEMPLATE,
     DEFAULT_FOLDER_TEMPLATE,
+    is_flatpak_sandbox,
     scan_browser_cookies as _scan_browser_cookies,
 )
 from ..widgets import ask_premium_confirmation, show_premium_message
@@ -86,7 +87,12 @@ class SettingsPreferencesMixin:
     """Persisted preferences plus credential and network control handlers."""
 
     def _settings_browse(self, line_edit):
-        d = QFileDialog.getExistingDirectory(self, "Select Folder", line_edit.text())
+        # Qt's native QFileDialog delegates to the XDG FileChooser portal in
+        # Flatpak. The resulting Document Portal grant is persistent, while
+        # leaving a manually entered path untouched keeps the portal-less
+        # fallback usable for explicitly configured locations.
+        title = "Select archive folder" if is_flatpak_sandbox() else "Select Folder"
+        d = QFileDialog.getExistingDirectory(self, title, line_edit.text())
         if d:
             line_edit.setText(d)
 

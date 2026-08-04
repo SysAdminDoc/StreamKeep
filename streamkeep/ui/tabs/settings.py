@@ -31,6 +31,7 @@ from ...theme import ACCENT_PRESETS
 from ...utils import (
     DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE,
     default_output_dir as _default_output_dir,
+    flatpak_archive_guidance,
     render_template as _render_template,
 )
 from ..widgets import (
@@ -475,6 +476,10 @@ def build_settings_tab(win):
     browse.clicked.connect(lambda: win._settings_browse(win.settings_output))
     output_row.addWidget(browse)
     general_lay.addLayout(output_row)
+    output_hint = QLabel(flatpak_archive_guidance())
+    output_hint.setObjectName("fieldHint")
+    output_hint.setWordWrap(True)
+    general_lay.addWidget(output_hint)
     sections_top.addWidget(general_block, 1)
 
     tools_block, tools_lay = make_field_block(

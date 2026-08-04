@@ -9,7 +9,7 @@ from ..capabilities import format_capability_problem, get_runtime_capabilities
 from ..i18n import TranslatableDialog
 from ..extractors.ytdlp import ytdlp_runtime_status
 from ..theme import apply_theme
-from ..utils import default_output_dir
+from ..utils import default_output_dir, flatpak_archive_guidance
 from .widgets import (
     make_dialog_hero,
     make_dialog_section,
@@ -155,7 +155,8 @@ class OnboardingWizard(TranslatableDialog):
 
         note = QLabel(
             "Tip: keeping recordings under one root makes storage cleanup, "
-            "history, and auto-record profiles much easier to manage."
+            "history, and auto-record profiles much easier to manage. "
+            + flatpak_archive_guidance()
         )
         note.setObjectName("fieldHint")
         note.setWordWrap(True)

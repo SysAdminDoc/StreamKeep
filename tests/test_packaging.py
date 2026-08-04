@@ -85,6 +85,9 @@ def test_flatpak_manifest_uses_locked_linux_modules_and_current_base():
     assert "Exec=streamkeep %u" in desktop
     assert "MimeType=x-scheme-handler/streamkeep;" in desktop
     assert "base-version: '6.10'" in manifest
+    assert "--filesystem=home" not in manifest
+    assert "--talk-name=org.freedesktop.portal.Desktop" in manifest
+    assert "xdg-desktop-portal >= 1.22.1" in manifest
     assert "python3-requirements.json" in manifest
     assert "pip3 install --no-index --find-links=." not in manifest
     assert "commit: 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee" in manifest
