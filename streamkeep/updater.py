@@ -132,20 +132,14 @@ def _public_release_payload(release, current_version):
     if remote <= current:
         return payload
 
-    selected = None
-    for name, asset_format in (
-        ("StreamKeep.exe", "portable-exe"),
-        ("StreamKeep.msix", "msix"),
+    name = "StreamKeep.exe"
+    if not any(
+        isinstance(row, dict) and row.get("name") == name
+        for row in (release.get("assets") or [])
     ):
-        if any(
-            isinstance(row, dict) and row.get("name") == name
-            for row in (release.get("assets") or [])
-        ):
-            selected = (_find_release_asset(release, name), asset_format)
-            break
-    if selected is None:
         raise UpdateSecurityError("Release has no supported downloadable Windows asset.")
-    api_asset, asset_format = selected
+    api_asset = _find_release_asset(release, name)
+    asset_format = "portable-exe"
     size = api_asset.get("size")
     if isinstance(size, bool) or not isinstance(size, int) or size < 1:
         raise UpdateSecurityError("Release asset size is invalid.")

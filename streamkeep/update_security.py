@@ -2,7 +2,7 @@
 
 The installed executable is the trust anchor: its valid Authenticode signer
 certificate verifies both the detached release manifest and every installable
-asset.  This keeps update verification offline and prevents a compromised
+asset. This keeps update verification offline and prevents a compromised
 release feed from substituting a different, merely "validly signed" binary.
 
 The startup checker deliberately has a separate public-metadata path.  It may
@@ -35,7 +35,6 @@ _SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _ASSET_NAMES = {
     "portable-exe": "StreamKeep.exe",
-    "msix": "StreamKeep.msix",
 }
 
 
@@ -114,7 +113,7 @@ def _powershell_path():
 def get_authenticode_info(path):
     """Return the Windows trust verdict and signer certificate for *path*.
 
-    PowerShell delegates the actual PE/MSIX validation to Windows' trust
+    PowerShell delegates the actual PE validation to Windows' trust
     provider.  The process is always non-interactive and console-hidden.
     """
     path = Path(path).resolve()
@@ -185,7 +184,9 @@ def get_authenticode_info(path):
 def require_authenticode(path, *, expected_certificate_sha256="", asset_format=""):
     """Require the operator's publisher signature for an installable asset."""
     path = Path(path)
-    expected_suffix = {"portable-exe": ".exe", "msix": ".msix"}.get(asset_format)
+    expected_suffix = {"portable-exe": ".exe"}.get(asset_format)
+    if asset_format and expected_suffix is None:
+        raise UpdateSecurityError("Update asset format is unsupported.")
     if expected_suffix and path.suffix.lower() != expected_suffix:
         raise UpdateSecurityError("Update asset format did not match its signed manifest.")
     info = get_authenticode_info(path)

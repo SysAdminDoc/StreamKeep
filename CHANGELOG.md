@@ -4,6 +4,17 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Retired the unsupported MSIX packaging lane and removed its blocked roadmap
+  entry. The shipped matrix is now the unsigned Inno installer, portable
+  onedir zip, Flatpak manifest, and WinGet manifest because MSIX requires
+  signing.
+
+- Raised the cryptography runtime floor and all platform lock pins to 50.0.0,
+  clearing the current pip-audit advisory against the previously locked 49.0.0.
+  The advisory is not reachable in StreamKeep: the app uses x509, AESGCM,
+  pkcs12, and signature verification, never `pkcs7_decrypt_*`; this is gate
+  hygiene, not an incident.
+
 - Sanitized XML 1.0-forbidden characters from feed and gallery metadata before
   escaping, preserving existing entity escaping while keeping strict podcast
   clients parseable when scraped titles contain C0 controls.

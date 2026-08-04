@@ -36,11 +36,6 @@ def _targets(version: str, root: Path) -> tuple[tuple[Path, re.Pattern[str], str
             rf"\g<1>{version}\g<2>",
         ),
         (
-            root / "packaging" / "msix" / "AppxManifest.xml",
-            re.compile(r"(?s)(<Identity\b.*?\bVersion=\")[0-9.]+(\")"),
-            rf"\g<1>{version}.0\g<2>",
-        ),
-        (
             root / "packaging" / "flatpak" / "com.github.SysAdminDoc.StreamKeep.metainfo.xml",
             re.compile(r"(<release\s+version=\")[0-9.]+(\")"),
             rf"\g<1>{version}\g<2>",

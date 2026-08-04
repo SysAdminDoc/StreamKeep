@@ -23,7 +23,6 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
     files = {
         "streamkeep/__init__.py": 'VERSION = "5.2.1"\n',
         "README.md": "![Version](https://img.shields.io/badge/version-0.0.0-blue)\n",
-        "packaging/msix/AppxManifest.xml": '<Identity Name="StreamKeep" Version="0.0.0.0" />\n',
         "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml": (
             '<releases><release version="0.0.0" date="2026-01-01" /></releases>\n'
         ),
@@ -40,12 +39,9 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
 
-    assert len(stamp_versions(tmp_path)) == 5
+    assert len(stamp_versions(tmp_path)) == 4
     assert version_drift(tmp_path) == []
     assert "version-5.2.1-blue" in (tmp_path / "README.md").read_text(encoding="utf-8")
-    assert 'Version="5.2.1.0"' in (
-        tmp_path / "packaging/msix/AppxManifest.xml"
-    ).read_text(encoding="utf-8")
     assert '<release version="5.2.1"' in (
         tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
     ).read_text(encoding="utf-8")
@@ -101,22 +97,6 @@ def test_flatpak_manifest_uses_locked_linux_modules_and_current_base():
     assert len(sources["modules"]) == len(packages)
 
 
-def test_msix_builder_supports_configured_signing():
-    script = (ROOT / "packaging" / "msix" / "build_msix.py").read_text(
-        encoding="utf-8"
-    )
-    for required in (
-        "STREAMKEEP_SIGNTOOL",
-        "STREAMKEEP_SIGN_PFX",
-        "STREAMKEEP_SIGN_CERT_SUBJECT",
-        "STREAMKEEP_SIGN=1",
-        "signtool.exe",
-        "packaged_exe",
-        '_sign_windows_artifact(packaged_exe, "packaged executable")',
-    ):
-        assert required in script
-
-
 def test_update_manifest_binds_assets_and_metadata_to_one_publisher_key():
     script = (ROOT / "packaging" / "update_manifest.py").read_text(
         encoding="utf-8"
@@ -127,10 +107,20 @@ def test_update_manifest_binds_assets_and_metadata_to_one_publisher_key():
         "sign_manifest_bytes",
         "certificate_sha256",
         "StreamKeep.exe",
-        "StreamKeep.msix",
         "--sequence",
     ):
         assert required in script
+
+
+def test_msix_lane_is_not_shipped():
+    assert not (ROOT / "packaging" / "msix").exists()
+    for path in (
+        ROOT / "packaging" / "versioning.py",
+        ROOT / "packaging" / "update_manifest.py",
+        ROOT / "streamkeep" / "updater.py",
+        ROOT / "streamkeep" / "update_security.py",
+    ):
+        assert "msix" not in path.read_text(encoding="utf-8").casefold()
 
 
 def test_launcher_marks_update_healthy_only_after_full_window_initialization():
@@ -240,7 +230,7 @@ def test_source_requirement_floors_match_the_runtime_lock():
     lock = ROOT / "requirements.lock"
     floors = source_requirement_floors(requirements)
     assert validate_source_floors(requirements, lock) == []
-    assert floors["cryptography"] == "49.0.0"
+    assert floors["cryptography"] == "50.0.0"
     assert floors["paramiko"] == "5.0.0"
     assert floors["pyqt6-qt6"] == "6.11.1"
     assert floors["urllib3"] == "2.7.0"

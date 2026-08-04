@@ -122,12 +122,9 @@ def build_release_documents(version, sequence, assets, *, sign_assets=True, outp
         path = Path(raw_path).resolve()
         if not path.is_file():
             raise RuntimeError(f"Release asset was not found: {path}")
-        if path.name == "StreamKeep.exe":
-            asset_format = "portable-exe"
-        elif path.name == "StreamKeep.msix":
-            asset_format = "msix"
-        else:
+        if path.name != "StreamKeep.exe":
             raise RuntimeError(f"Unsupported release asset name: {path.name}")
+        asset_format = "portable-exe"
         if asset_format in seen_formats:
             raise RuntimeError(f"Duplicate {asset_format} release asset.")
         if sign_assets:
@@ -172,7 +169,7 @@ def main(argv=None):
     )
     parser.add_argument("--version", required=True, help="Stable semantic version, for example 4.32.0")
     parser.add_argument("--sequence", required=True, type=int, help="Strictly increasing release sequence")
-    parser.add_argument("--asset", action="append", required=True, help="StreamKeep.exe or StreamKeep.msix")
+    parser.add_argument("--asset", action="append", required=True, help="StreamKeep.exe")
     parser.add_argument("--output-dir", help="Metadata output directory (defaults to first asset directory)")
     parser.add_argument(
         "--already-signed",

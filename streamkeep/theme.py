@@ -160,7 +160,6 @@ def _resolve_system_theme(app=None):
 
 def _apply_system_accessibility_theme(app):
     """Apply a changed OS contrast preference only in System mode."""
-    global CAT
     if app is None or _active_theme != "system":
         return False
     resolved_theme = _resolve_system_theme(app)

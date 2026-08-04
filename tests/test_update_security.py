@@ -1,10 +1,7 @@
 import base64
 import json
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -17,7 +14,6 @@ from streamkeep.update_security import (
     certificate_sha256,
     parse_published_sha256,
     sign_manifest_bytes,
-    require_authenticode,
 )
 from streamkeep.updater import verify_release_document
 
@@ -175,28 +171,6 @@ class UpdateSecurityTests(unittest.TestCase):
             verify_release_document(
                 release, noncanonical, signature, self.signer, "4.31.7", {}
             )
-
-    def test_msix_requires_the_same_valid_publisher_certificate(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            package = Path(tmpdir) / "StreamKeep.msix"
-            package.write_bytes(b"signed-package-placeholder")
-            with mock.patch(
-                "streamkeep.update_security.get_authenticode_info",
-                return_value=self.signer,
-            ):
-                accepted = require_authenticode(
-                    package,
-                    expected_certificate_sha256=self.signer["certificate_sha256"],
-                    asset_format="msix",
-                )
-                self.assertTrue(accepted["valid"])
-                with self.assertRaisesRegex(UpdateSecurityError, "different publisher"):
-                    require_authenticode(
-                        package,
-                        expected_certificate_sha256="f" * 64,
-                        asset_format="msix",
-                    )
-
 
 if __name__ == "__main__":
     unittest.main()

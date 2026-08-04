@@ -232,7 +232,6 @@ STAGES = (
 # policy, so documentation must not describe signing as a required step.
 _SIGNING_CLAIMS = (
     "requires `STREAMKEEP_SIGN_PFX`",
-    "MSIX signing is automatic",
     "signs each asset by default",
     "notarization is required",
 )
