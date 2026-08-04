@@ -551,6 +551,281 @@ def scrub_public_data(value, *, _depth=0):
     return scrub_public_text(value)
 
 
+def _podcast_text(value, limit=4096):
+    return scrub_public_text(str(value or ""))[:limit]
+
+
+def _podcast_url(value):
+    text = _podcast_text(value, 2048)
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return text
+
+
+def _podcast_int(value):
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def normalize_podcast_metadata(value):
+    """Keep the bounded, public Podcasting 2.0 item contract.
+
+    ``podcast:value`` is deliberately retained as declaration data, including
+    its raw XML, but no StreamKeep code interprets it as a payment instruction.
+    """
+    raw = value if isinstance(value, dict) else {}
+    payload = {}
+    for key in ("guid", "podcast_guid", "medium"):
+        text = _podcast_text(raw.get(key, ""), 512)
+        if text:
+            payload[key] = text
+
+    for key in ("season", "episode"):
+        row = raw.get(key)
+        if isinstance(row, dict):
+            clean = {}
+            for field in ("number", "display", "name"):
+                if field in row and row.get(field) not in (None, ""):
+                    item = row.get(field)
+                    clean[field] = (
+                        _podcast_text(item, 256)
+                        if field in {"display", "name"}
+                        else item
+                    )
+            if clean:
+                payload[key] = clean
+
+    people = []
+    for row in raw.get("person", []) if isinstance(raw.get("person", []), list) else []:
+        if not isinstance(row, dict):
+            continue
+        name = _podcast_text(row.get("name", ""), 256)
+        if not name:
+            continue
+        people.append({
+            "name": name,
+            **{
+                field: _podcast_text(row.get(field, ""), 512)
+                for field in ("role", "group")
+                if row.get(field) not in (None, "")
+            },
+            **{
+                field: _podcast_url(row.get(field, ""))
+                for field in ("img", "href")
+                if row.get(field)
+            },
+        })
+    if people:
+        payload["person"] = people[:256]
+
+    soundbites = []
+    raw_soundbites = raw.get("soundbite", [])
+    if isinstance(raw_soundbites, list):
+        for row in raw_soundbites[:256]:
+            if not isinstance(row, dict):
+                continue
+            try:
+                start = max(0.0, float(row.get("start_time", 0) or 0))
+                duration = max(0.0, float(row.get("duration", 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(start) or not math.isfinite(duration):
+                continue
+            soundbites.append({
+                "title": _podcast_text(row.get("title", ""), 256),
+                "start_time": start,
+                "duration": duration,
+            })
+    if soundbites:
+        payload["soundbite"] = soundbites
+
+    funding = []
+    raw_funding = raw.get("funding", [])
+    if isinstance(raw_funding, list):
+        for row in raw_funding[:256]:
+            if not isinstance(row, dict):
+                continue
+            url = _podcast_url(row.get("url", ""))
+            if url:
+                funding.append({
+                    "text": _podcast_text(row.get("text", ""), 256),
+                    "url": url,
+                })
+    if funding:
+        payload["funding"] = funding
+
+    license_row = raw.get("license")
+    if isinstance(license_row, dict):
+        payload["license"] = {
+            "name": _podcast_text(license_row.get("name", ""), 256),
+            "url": _podcast_url(license_row.get("url", "")),
+        }
+
+    locations = []
+    raw_locations = raw.get("location", [])
+    if isinstance(raw_locations, list):
+        for row in raw_locations[:256]:
+            if not isinstance(row, dict):
+                continue
+            name = _podcast_text(row.get("name", ""), 256)
+            if not name:
+                continue
+            locations.append({
+                "name": name,
+                **{
+                    field: _podcast_text(row.get(field, ""), 512)
+                    for field in ("rel", "geo", "osm", "country")
+                    if row.get(field) not in (None, "")
+                },
+            })
+    if locations:
+        payload["location"] = locations
+
+    txt_rows = []
+    raw_txt = raw.get("txt", [])
+    if isinstance(raw_txt, list):
+        for row in raw_txt[:256]:
+            if not isinstance(row, dict):
+                continue
+            text = _podcast_text(row.get("value", ""), 4096)
+            if text:
+                txt_rows.append({
+                    "value": text,
+                    "purpose": _podcast_text(row.get("purpose", ""), 256),
+                })
+    if txt_rows:
+        payload["txt"] = txt_rows
+
+    values = []
+    raw_values = raw.get("value", [])
+    if isinstance(raw_values, (dict, str)):
+        raw_values = [raw_values]
+    if isinstance(raw_values, list):
+        for row in raw_values[:64]:
+            if isinstance(row, str):
+                values.append({"raw_xml": row[:65536]})
+                continue
+            if not isinstance(row, dict):
+                continue
+            clean = {
+                field: _podcast_text(row.get(field, ""), 512)
+                for field in ("type", "method", "suggested")
+                if row.get(field) not in (None, "")
+            }
+            recipients = []
+            for recipient in row.get("recipients", []) if isinstance(row.get("recipients", []), list) else []:
+                if not isinstance(recipient, dict):
+                    continue
+                recipients.append({
+                    field: _podcast_text(recipient.get(field, ""), 1024)
+                    for field in (
+                        "name", "address", "type", "split", "fee",
+                        "custom_key", "custom_value",
+                    )
+                    if recipient.get(field) not in (None, "")
+                })
+            if recipients:
+                clean["recipients"] = recipients[:256]
+            if row.get("raw_xml"):
+                # Keep this exact public declaration text; it is data only.
+                clean["raw_xml"] = str(row.get("raw_xml"))[:65536]
+            if clean:
+                values.append(clean)
+    if values:
+        payload["value"] = values
+
+    alternates = []
+    raw_alternates = raw.get("alternate_enclosures", [])
+    if isinstance(raw_alternates, list):
+        for row in raw_alternates[:256]:
+            if not isinstance(row, dict):
+                continue
+            sources = []
+            for source in row.get("sources", []) if isinstance(row.get("sources", []), list) else []:
+                if not isinstance(source, dict):
+                    continue
+                uri = _podcast_url(source.get("uri", ""))
+                if uri:
+                    sources.append({
+                        "uri": uri,
+                        "content_type": _podcast_text(source.get("content_type", ""), 256),
+                    })
+            if not sources:
+                continue
+            clean = {
+                "type": _podcast_text(row.get("type", ""), 256),
+                "length": _podcast_int(row.get("length", 0)),
+                "bitrate": _podcast_int(row.get("bitrate", 0)),
+                "height": _podcast_int(row.get("height", 0)),
+                "lang": _podcast_text(row.get("lang", ""), 64),
+                "title": _podcast_text(row.get("title", ""), 256),
+                "rel": _podcast_text(row.get("rel", ""), 256),
+                "codecs": _podcast_text(row.get("codecs", ""), 256),
+                "default": bool(row.get("default", False)),
+                "sources": sources,
+            }
+            integrity = row.get("integrity")
+            if isinstance(integrity, dict):
+                clean["integrity"] = {
+                    "type": _podcast_text(integrity.get("type", ""), 64),
+                    "value": _podcast_text(integrity.get("value", ""), 4096),
+                }
+            alternates.append(clean)
+    if alternates:
+        payload["alternate_enclosures"] = alternates
+
+    artwork = []
+    raw_artwork = raw.get("artwork", [])
+    if isinstance(raw_artwork, list):
+        for row in raw_artwork[:256]:
+            if not isinstance(row, dict):
+                continue
+            href = _podcast_url(row.get("href", ""))
+            if not href:
+                continue
+            artwork.append({
+                "href": href,
+                "alt": _podcast_text(row.get("alt", ""), 512),
+                "aspect_ratio": _podcast_text(row.get("aspect_ratio", ""), 64),
+                "width": _podcast_int(row.get("width", 0)),
+                "height": _podcast_int(row.get("height", 0)),
+                "type": _podcast_text(row.get("type", ""), 256),
+                "purpose": _podcast_text(row.get("purpose", ""), 256),
+            })
+    if artwork:
+        payload["artwork"] = artwork
+
+    sidecars = []
+    raw_sidecars = raw.get("sidecars", [])
+    if isinstance(raw_sidecars, list):
+        for row in raw_sidecars[:256]:
+            if not isinstance(row, dict):
+                continue
+            url = _podcast_url(row.get("url", ""))
+            if not url:
+                continue
+            sidecars.append({
+                "kind": _podcast_text(row.get("kind", ""), 32),
+                "url": url,
+                "type": _podcast_text(row.get("type", ""), 256),
+                "language": _podcast_text(row.get("language", ""), 64),
+                "rel": _podcast_text(row.get("rel", ""), 64),
+            })
+    if sidecars:
+        payload["sidecars"] = sidecars
+
+    verification = raw.get("integrity_verification")
+    if isinstance(verification, list):
+        payload["integrity_verification"] = scrub_public_data(verification[:256])
+    return payload
+
+
 def _safe_quality_rows(value):
     rows = []
     for item in list(value or [])[:500]:
@@ -648,6 +923,11 @@ def normalize_metadata_payload(data):
     thumbnail = str(raw.get("thumbnail", "") or "")
     if thumbnail == "thumbnail.jpg":
         payload["thumbnail"] = thumbnail
+    podcast = normalize_podcast_metadata(
+        raw.get("podcast", raw.get("podcast_metadata", {}))
+    )
+    if podcast:
+        payload["podcast"] = podcast
     return payload
 
 
@@ -788,6 +1068,9 @@ class MetadataSaver:
             raw["vod_date"] = getattr(vod_info, "date", "") or ""
             raw["vod_channel"] = getattr(vod_info, "channel", "") or ""
             raw["vod_viewers"] = getattr(vod_info, "viewers", 0) or 0
+        podcast_metadata = getattr(stream_info, "podcast_metadata", None)
+        if podcast_metadata:
+            raw["podcast"] = podcast_metadata
         payload = normalize_metadata_payload(raw)
         metadata_path = _atomic_write_text(
             os.path.join(output_dir, "metadata.json"),
@@ -798,6 +1081,26 @@ class MetadataSaver:
             "thumbnail_path": thumbnail_path,
             "provenance": provenance,
         }
+
+    @staticmethod
+    def update_podcast_integrity(output_dir, verification):
+        """Persist publisher-hash verification into the library sidecar."""
+        path = Path(output_dir or "") / "metadata.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return ""
+        payload = normalize_metadata_payload(raw)
+        podcast = dict(payload.get("podcast") or {})
+        if not podcast:
+            return ""
+        podcast["integrity_verification"] = scrub_public_data(
+            list(verification or [])[:256]
+        )
+        payload["podcast"] = podcast
+        return _atomic_write_text(
+            str(path), json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        )
 
     @staticmethod
     def write_chapters(output_dir, stream_info, file_base=""):

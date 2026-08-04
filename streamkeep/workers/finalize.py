@@ -2,6 +2,7 @@
 
 import os
 import re
+import hashlib
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -32,6 +33,7 @@ class FinalizeWorker(QThread):
         super().__init__()
         self.task = dict(task or {})
         self._cancel = False
+        self._podcast_feed_body = ""
 
     def cancel(self):
         self._cancel = True
@@ -84,6 +86,98 @@ class FinalizeWorker(QThread):
             return ""
         return str(task.get("feed_url", "") or getattr(info, "feed_url", "") or "")
 
+    def _enrich_podcast_info(self, task, info):
+        """Refresh the episode's public RSS metadata before saving metadata.json."""
+        feed_url = self._podcast_feed_url(task, info)
+        enclosure = str(getattr(info, "url", "") or task.get("history_url", "") or "")
+        if not feed_url or not enclosure or getattr(info, "podcast_metadata", None):
+            return
+        try:
+            from ..image_fetch import fetch_url_bytes
+            feed_bytes = fetch_url_bytes(
+                feed_url, max_bytes=16 * 1024 * 1024,
+                accept="application/rss+xml, application/xml, text/xml, */*",
+            )
+            body = feed_bytes.decode("utf-8", errors="replace")
+            from ..extractors.podcast import find_podcast_episode
+            episode = find_podcast_episode(body, enclosure, feed_url=feed_url)
+        except Exception as error:
+            self.log.emit(f"[PODCAST] Metadata refresh skipped: {error}")
+            return
+        self._podcast_feed_body = body
+        if not episode:
+            return
+        metadata = episode.get("metadata") or {}
+        if metadata:
+            info.podcast_metadata = metadata
+        if episode.get("artwork_url") and not getattr(info, "thumbnail_url", ""):
+            info.thumbnail_url = episode["artwork_url"]
+        if not getattr(info, "source_id", ""):
+            identity = str(
+                episode.get("guid") or episode.get("enclosure", {}).get("url") or ""
+            )
+            if identity:
+                info.source_id = "episode:" + hashlib.sha256(
+                    identity.encode("utf-8", errors="replace")
+                ).hexdigest()
+
+    def _podcast_integrity_media_path(self, out_dir):
+        media_suffixes = (
+            ".mp4", ".mkv", ".ts", ".webm", ".mov", ".avi", ".m4v",
+            ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".wav", ".aac",
+        )
+        try:
+            for name in sorted(os.listdir(out_dir or "")):
+                if name.lower().endswith(media_suffixes) and not name.startswith("."):
+                    candidate = os.path.join(out_dir, name)
+                    if os.path.isfile(candidate):
+                        return candidate
+        except OSError:
+            pass
+        return ""
+
+    def _run_podcast_integrity(self, task, info, out_dir):
+        metadata = getattr(info, "podcast_metadata", None) or {}
+        alternates = metadata.get("alternate_enclosures", [])
+        if not isinstance(alternates, list) or not any(
+            isinstance(row, dict) and isinstance(row.get("integrity"), dict)
+            for row in alternates
+        ):
+            return ""
+        try:
+            from ..podcast_sidecars import verify_podcast_integrity
+            urls = [
+                getattr(info, "url", ""),
+                task.get("history_url", ""),
+                task.get("vod_source", ""),
+            ]
+            verification = verify_podcast_integrity(
+                self._podcast_integrity_media_path(out_dir),
+                alternates,
+                downloaded_urls=urls,
+            )
+            MetadataSaver.update_podcast_integrity(out_dir, verification)
+        except Exception as error:
+            self.log.emit(f"[PODCAST] Integrity verification failed: {error}")
+            return f"Podcast integrity verification failed: {error}"
+        failures = [
+            row for row in verification
+            if row.get("status") in {
+                "mismatch", "invalid", "unsupported", "media_missing",
+                "media_unreadable",
+            }
+        ]
+        for row in failures:
+            self.log.emit(
+                "[PODCAST] Publisher integrity not accepted: "
+                f"{row.get('status', 'unknown')} for {row.get('source', '')}"
+            )
+        if failures:
+            return "Podcast publisher integrity verification did not pass"
+        if any(row.get("status") == "verified" for row in verification):
+            self.log.emit("[PODCAST] Publisher integrity verified")
+        return ""
+
     def _planned_steps(self, task, info, snapshot):
         steps = [("Saving metadata", "metadata")]
         if task.get("write_nfo"):
@@ -96,6 +190,12 @@ class FinalizeWorker(QThread):
             steps.append(("Downloading chat", "chat"))
         if self._podcast_feed_url(task, info):
             steps.append(("Fetching podcast sidecars", "sidecars"))
+        podcast_metadata = getattr(info, "podcast_metadata", None) or {}
+        if any(
+            isinstance(row, dict) and isinstance(row.get("integrity"), dict)
+            for row in podcast_metadata.get("alternate_enclosures", [])
+        ):
+            steps.append(("Verifying podcast integrity", "podcast_integrity"))
         if self._music_tag_targets(task, info):
             steps.append(("Filling music tags", "music_tags"))
         if self._has_postprocess_work(snapshot):
@@ -117,16 +217,19 @@ class FinalizeWorker(QThread):
         try:
             from ..image_fetch import fetch_url_bytes
             from ..podcast_sidecars import sync_podcast_sidecars
-            feed_bytes = fetch_url_bytes(
-                feed_url, max_bytes=16 * 1024 * 1024,
-                accept="application/rss+xml, application/xml, text/xml, */*",
-            )
+            feed_body = self.__dict__.get("_podcast_feed_body", "")
+            if not feed_body:
+                feed_bytes = fetch_url_bytes(
+                    feed_url, max_bytes=16 * 1024 * 1024,
+                    accept="application/rss+xml, application/xml, text/xml, */*",
+                )
+                feed_body = feed_bytes.decode("utf-8", errors="replace")
         except Exception as e:
             self.log.emit(f"[SIDECARS] Could not fetch feed: {e}")
             return
         try:
             manifest = sync_podcast_sidecars(
-                feed_bytes.decode("utf-8", errors="replace"),
+                feed_body,
                 enclosure, out_dir, file_base or "episode",
                 log_fn=self.log.emit,
             )
@@ -232,6 +335,13 @@ class FinalizeWorker(QThread):
         orig = {k: getattr(PostProcessor, k) for k in snapshot if hasattr(PostProcessor, k)}
         try:
             if info and out_dir:
+                self._enrich_podcast_info(task, info)
+                result["source_id"] = str(
+                    getattr(info, "source_id", "") or result.get("source_id", "")
+                )
+                result["webpage_url"] = str(
+                    getattr(info, "webpage_url", "") or result.get("webpage_url", "")
+                )
                 steps = self._planned_steps(task, info, snapshot)
                 total_steps = len(steps)
 
@@ -312,6 +422,11 @@ class FinalizeWorker(QThread):
                     step_no += 1
                     self._emit_progress("Fetching podcast sidecars", step_no, total_steps)
                     self._run_podcast_sidecars(task, info, out_dir, file_base)
+                if not self._interrupted():
+                    integrity_error = self._run_podcast_integrity(task, info, out_dir)
+                    if integrity_error:
+                        result["podcast_integrity_error"] = integrity_error
+                        result["finalize_error"] = integrity_error
                 music_targets = self._music_tag_targets(task, info)
                 if music_targets and not self._interrupted():
                     step_no += 1

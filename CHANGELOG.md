@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added Podcasting 2.0-fidelity archiving. Podcast feeds now retain stable
+  GUID-first episode identity, paged-feed traversal, namespace metadata,
+  per-episode artwork, alternate enclosure/source declarations, and raw
+  `podcast:value` declarations. Publisher integrity hashes are verified during
+  finalization, and chapter references produce ffmetadata and WebVTT sidecars.
+
 - Closed the WCAG 2.2 accessibility gaps in custom desktop controls. Clip
   handles, waveform/timeline scrubbers, and schedule blocks now meet the
   24px target contract and offer keyboard plus single-pointer alternatives;

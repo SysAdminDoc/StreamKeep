@@ -19,6 +19,7 @@ import json
 import os
 import re
 import urllib.parse
+import base64
 
 from .image_fetch import ImageFetchError, fetch_url_bytes
 
@@ -42,12 +43,14 @@ _TYPE_EXTENSIONS = {
 
 _ATTR_RE = re.compile(r'([\w:-]+)\s*=\s*"([^"]*)"|([\w:-]+)\s*=\s*\'([^\']*)\'')
 _TRANSCRIPT_RE = re.compile(
-    r"<podcast:transcript\b([^>]*?)/?>", re.IGNORECASE | re.DOTALL
+    r"<(?:[A-Za-z_][\w.-]*:)?transcript\b([^>]*?)/?>",
+    re.IGNORECASE | re.DOTALL,
 )
 _CHAPTERS_RE = re.compile(
-    r"<podcast:chapters\b([^>]*?)/?>", re.IGNORECASE | re.DOTALL
+    r"<(?:[A-Za-z_][\w.-]*:)?chapters\b([^>]*?)/?>",
+    re.IGNORECASE | re.DOTALL,
 )
-_ITEM_RE = re.compile(r"<item\b.*?</item>", re.IGNORECASE | re.DOTALL)
+_ITEM_RE = re.compile(r"<item\b[^>]*>.*?</item\s*>", re.IGNORECASE | re.DOTALL)
 _ENCLOSURE_RE = re.compile(
     r"""<enclosure\b[^>]*?\burl\s*=\s*["']([^"']+)["']""", re.IGNORECASE
 )
@@ -108,6 +111,7 @@ def parse_podcast_sidecar_refs(item_xml):
                 "url": url,
                 "type": (attrs.get("type") or "").strip(),
                 "language": (attrs.get("language") or attrs.get("lang") or "").strip(),
+                "rel": (attrs.get("rel") or "").strip(),
             })
     return refs
 
@@ -149,6 +153,100 @@ def _sidecar_filename(base_name, ref):
     if lang:
         return f"{base_name}.{lang}.{ext}"
     return f"{base_name}.transcript.{ext}"
+
+
+def _atomic_write_bytes(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _chapter_timestamp(seconds):
+    total_ms = max(0, int(round(float(seconds or 0) * 1000)))
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+
+def _ffmetadata_escape(value):
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace("=", "\\=")
+        .replace(";", "\\;")
+        .replace("#", "\\#")
+        .replace("\r", "")
+        .replace("\n", "\\n")
+    )
+
+
+def _convert_chapter_sidecars(out_dir, base_name, source_entry, data):
+    """Write ffmetadata and WebVTT forms beside a JSON chapters file."""
+    try:
+        from .extractors.podcast import parse_podcast_chapters_json
+        chapters = parse_podcast_chapters_json(
+            data.decode("utf-8", errors="replace")
+        )
+    except Exception:
+        return []
+    if not chapters:
+        return []
+    ff_lines = [";FFMETADATA1"]
+    vtt_lines = ["WEBVTT", ""]
+    for index, chapter in enumerate(chapters):
+        start = max(0.0, float(chapter.get("start", 0) or 0))
+        end = float(chapter.get("end", 0) or 0)
+        if end <= start:
+            end = (
+                float(chapters[index + 1].get("start", 0) or 0)
+                if index + 1 < len(chapters) else start + 1.0
+            )
+        end = max(start + 0.001, end)
+        title = chapter.get("title", "Chapter") or "Chapter"
+        ff_lines.extend([
+            "[CHAPTER]",
+            "TIMEBASE=1/1000",
+            f"START={int(round(start * 1000))}",
+            f"END={int(round(end * 1000))}",
+            f"title={_ffmetadata_escape(title)}",
+        ])
+        vtt_lines.extend([
+            f"{_chapter_timestamp(start)} --> {_chapter_timestamp(end)}",
+            str(title).replace("\r", "").replace("\n", " "),
+            "",
+        ])
+    derived = []
+    for suffix, content in (
+        ("ffmetadata", "\n".join(ff_lines) + "\n"),
+        ("vtt", "\n".join(vtt_lines) + "\n"),
+    ):
+        filename = f"{base_name}.chapters.{suffix}"
+        path = os.path.join(out_dir, filename)
+        encoded = content.encode("utf-8")
+        try:
+            _atomic_write_bytes(path, encoded)
+        except OSError:
+            continue
+        derived.append({
+            "kind": "chapters",
+            "format": suffix,
+            "derived_from": source_entry.get("file", ""),
+            "file": filename,
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "bytes": len(encoded),
+        })
+    return derived
 
 
 def manifest_path(out_dir, base_name):
@@ -232,6 +330,14 @@ def download_podcast_sidecars(
         ):
             _log(f"[SIDECAR] Unchanged, kept {filename}")
             manifest.append(previous)
+            for derived in existing or []:
+                if (
+                    isinstance(derived, dict)
+                    and derived.get("derived_from") == filename
+                    and derived.get("file")
+                    and os.path.isfile(os.path.join(out_dir, derived["file"]))
+                ):
+                    manifest.append(derived)
             seen_files.add(filename)
             continue
         try:
@@ -248,12 +354,155 @@ def download_podcast_sidecars(
             "url": ref["url"],
             "type": ref.get("type", ""),
             "language": ref.get("language", ""),
+            "rel": ref.get("rel", ""),
             "file": filename,
             "sha256": digest,
             "bytes": len(data),
         })
+        if ref["kind"] == "chapters":
+            manifest.extend(_convert_chapter_sidecars(
+                out_dir, base_name, manifest[-1], data,
+            ))
         seen_files.add(filename)
     return manifest
+
+
+def _integrity_candidates(integrity):
+    if not isinstance(integrity, dict):
+        return []
+    declared_type = str(integrity.get("type", "") or "").strip().casefold()
+    value = str(integrity.get("value", "") or "").strip()
+    if not value:
+        return []
+    candidates = []
+    if declared_type in {"sri", ""}:
+        for token in value.split():
+            match = re.fullmatch(r"(sha256|sha384|sha512)-(.+)", token, re.I)
+            if not match:
+                continue
+            algorithm, encoded = match.groups()
+            try:
+                decoded = base64.b64decode(
+                    encoded + "=" * (-len(encoded) % 4), validate=False,
+                )
+            except (ValueError, TypeError):
+                continue
+            if decoded:
+                candidates.append((algorithm.casefold(), decoded))
+    elif declared_type in {"sha256", "sha384", "sha512"}:
+        algorithm = declared_type
+        try:
+            if re.fullmatch(r"[0-9a-fA-F]+", value) and len(value) == int(algorithm[3:]) // 4:
+                decoded = bytes.fromhex(value)
+            else:
+                decoded = base64.b64decode(
+                    value + "=" * (-len(value) % 4), validate=False,
+                )
+        except (ValueError, TypeError):
+            decoded = b""
+        if decoded:
+            candidates.append((algorithm, decoded))
+    return candidates
+
+
+def _urls_match(candidate, downloaded_url):
+    candidate = str(candidate or "").strip()
+    downloaded_url = str(downloaded_url or "").strip()
+    if not candidate or not downloaded_url:
+        return False
+    if candidate == downloaded_url:
+        return True
+    try:
+        left = urllib.parse.urlsplit(candidate)
+        right = urllib.parse.urlsplit(downloaded_url)
+    except ValueError:
+        return False
+    return (
+        left.scheme.casefold() == right.scheme.casefold()
+        and left.netloc.casefold() == right.netloc.casefold()
+        and left.path == right.path
+    )
+
+
+def verify_podcast_integrity(media_path, alternate_enclosures, downloaded_urls=()):
+    """Verify matching Podcasting 2.0 alternate-enclosure hashes.
+
+    A declaration for a different alternate source remains ``not_downloaded``;
+    only a hash whose source matches the downloaded delivery is checked. PGP
+    signatures and malformed algorithms are retained as ``unsupported`` or
+    ``invalid`` so they cannot be mistaken for a successful verification.
+    """
+    if isinstance(downloaded_urls, str):
+        urls = [downloaded_urls.strip()]
+    else:
+        urls = [str(url or "").strip() for url in (downloaded_urls or ()) if url]
+    results = []
+    digest_cache = {}
+    for enclosure in alternate_enclosures or []:
+        if not isinstance(enclosure, dict):
+            continue
+        integrity = enclosure.get("integrity")
+        if not isinstance(integrity, dict):
+            continue
+        sources = [
+            str(row.get("uri", "") or "")
+            for row in enclosure.get("sources", [])
+            if isinstance(row, dict) and row.get("uri")
+        ]
+        matched = next(
+            (source for source in sources if any(_urls_match(source, url) for url in urls)),
+            "",
+        )
+        result = {
+            "source": matched or (sources[0] if sources else ""),
+            "type": str(integrity.get("type", "") or ""),
+            "expected": str(integrity.get("value", "") or ""),
+            "status": "not_downloaded",
+        }
+        if not matched:
+            results.append(result)
+            continue
+        candidates = _integrity_candidates(integrity)
+        if not candidates:
+            result["status"] = "unsupported" if result["type"].casefold() == "pgp-signature" else "invalid"
+            results.append(result)
+            continue
+        if not media_path or not os.path.isfile(media_path):
+            result["status"] = "media_missing"
+            results.append(result)
+            continue
+        verified = False
+        actual = ""
+        for algorithm, expected in candidates:
+            if algorithm not in digest_cache:
+                digest = hashlib.new(algorithm)
+                try:
+                    with open(media_path, "rb") as handle:
+                        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    digest_cache[algorithm] = digest.digest()
+                except OSError:
+                    digest_cache[algorithm] = None
+            actual_bytes = digest_cache[algorithm]
+            if actual_bytes is None:
+                result["status"] = "media_unreadable"
+                break
+            actual = actual_bytes.hex()
+            if actual_bytes == expected:
+                verified = True
+                result["algorithm"] = algorithm
+                break
+        else:
+            result["algorithm"] = candidates[0][0]
+        if result["status"] == "media_unreadable":
+            pass
+        elif verified:
+            result["status"] = "verified"
+        else:
+            result["status"] = "mismatch"
+            result["actual"] = actual
+        results.append(result)
+    return results
 
 
 def sync_podcast_sidecars(

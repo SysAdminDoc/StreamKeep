@@ -165,6 +165,12 @@ python StreamKeep.py backup secrets-export C:\Backups\StreamKeep-secrets.sksback
 python StreamKeep.py backup secrets-import C:\Backups\StreamKeep-secrets.sksbackup
 ```
 
+Podcast archiving preserves Podcasting 2.0 episode metadata, GUID-first
+identity, paged RSS feeds, per-episode artwork, alternate enclosure integrity
+declarations, and raw value declarations. Chapter references are materialized
+as ffmetadata and WebVTT sidecars; a publisher hash mismatch fails finalization
+instead of being silently accepted.
+
 Archive Maintenance also provides a preview-first **re-template archive**
 workflow. It renders the current history against a new folder and filename
 template, shows destinations and conflicts, then applies only checked actions

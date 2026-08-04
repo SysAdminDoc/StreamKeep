@@ -107,7 +107,10 @@ def test_download_writes_hashed_sidecars_and_names(tmp_path):
     with mock.patch.object(podcast_sidecars, "fetch_url_bytes", _fake_fetch):
         manifest = download_podcast_sidecars(refs, str(tmp_path), "ep1")
     files = {e["file"] for e in manifest}
-    assert files == {"ep1.en.vtt", "ep1.es.vtt", "ep1.chapters.json"}
+    assert files == {
+        "ep1.en.vtt", "ep1.es.vtt", "ep1.chapters.json",
+        "ep1.chapters.ffmetadata", "ep1.chapters.vtt",
+    }
     for entry in manifest:
         assert (tmp_path / entry["file"]).is_file()
         assert len(entry["sha256"]) == 64
@@ -165,7 +168,10 @@ def test_download_is_non_fatal_on_fetch_failure(tmp_path):
             refs, str(tmp_path), "ep1", log_fn=logs.append
         )
     files = {e["file"] for e in manifest}
-    assert files == {"ep1.en.vtt", "ep1.chapters.json"}
+    assert files == {
+        "ep1.en.vtt", "ep1.chapters.json",
+        "ep1.chapters.ffmetadata", "ep1.chapters.vtt",
+    }
     assert any("Skipped" in line for line in logs)
 
 
@@ -174,9 +180,9 @@ def test_sync_writes_manifest_and_is_idempotent(tmp_path):
         manifest = sync_podcast_sidecars(
             FEED_XML, "https://cdn.example.com/ep1.mp3", str(tmp_path), "ep1"
         )
-    assert len(manifest) == 3
+    assert len(manifest) == 5
     on_disk = read_manifest(str(tmp_path), "ep1")
-    assert len(on_disk) == 3
+    assert len(on_disk) == 5
 
     # A second sync with identical remote content reuses every entry.
     with mock.patch.object(podcast_sidecars, "fetch_url_bytes", _fake_fetch):

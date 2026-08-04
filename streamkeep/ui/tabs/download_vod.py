@@ -57,6 +57,7 @@ class DownloadVodMixin:
                         vod_platform=vod.platform or platform_name,
                         vod_title=vod.title,
                         vod_channel=vod.channel,
+                        feed_url=getattr(vod, "feed_url", ""),
                         source_id=getattr(vod, "source_id", ""),
                         webpage_url=getattr(vod, "webpage_url", "")):
                     added += 1

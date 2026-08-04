@@ -1,5 +1,7 @@
 """Fetch worker — resolves URLs via the extractor system."""
 
+import copy
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..extractors import Extractor
@@ -231,7 +233,7 @@ class FetchWorker(QThread):
 
     def _apply_vod_metadata(
         self, info, platform="", title="", channel="", source_id="",
-        webpage_url="",
+        webpage_url="", feed_url="", thumbnail_url="", podcast_metadata=None,
     ):
         if info is None:
             return None
@@ -241,10 +243,22 @@ class FetchWorker(QThread):
             info.title = title
         if channel and not getattr(info, "channel", ""):
             info.channel = channel
-        if source_id and not getattr(info, "source_id", ""):
+        if source_id and (
+            not getattr(info, "source_id", "")
+            or str(platform or "").casefold() == "podcast"
+        ):
             info.source_id = source_id
-        if webpage_url and not getattr(info, "webpage_url", ""):
+        if webpage_url and (
+            not getattr(info, "webpage_url", "")
+            or str(platform or "").casefold() == "podcast"
+        ):
             info.webpage_url = webpage_url
+        if feed_url and not getattr(info, "feed_url", ""):
+            info.feed_url = feed_url
+        if thumbnail_url and not getattr(info, "thumbnail_url", ""):
+            info.thumbnail_url = thumbnail_url
+        if podcast_metadata and not getattr(info, "podcast_metadata", None):
+            info.podcast_metadata = copy.deepcopy(podcast_metadata)
         from ..metadata import build_archival_provenance
         provenance = build_archival_provenance(
             info,
@@ -305,6 +319,9 @@ class FetchWorker(QThread):
             channel=getattr(vod, "channel", ""),
             source_id=getattr(vod, "source_id", ""),
             webpage_url=getattr(vod, "webpage_url", ""),
+            feed_url=getattr(vod, "feed_url", ""),
+            thumbnail_url=getattr(vod, "thumbnail_url", ""),
+            podcast_metadata=getattr(vod, "podcast_metadata", None),
         )
 
 

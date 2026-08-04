@@ -144,6 +144,9 @@ class StreamInfo:
     # endpoint used by the downloader; these fields are safe for sidecars.
     source_id: str = ""
     webpage_url: str = ""
+    # Parsed Podcasting 2.0 item metadata. Kept separate from the delivery
+    # fields so a queue/finalizer can preserve the publisher's public tags.
+    podcast_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -162,6 +165,8 @@ class VODInfo:
     webpage_url: str = ""
     media_type: str = "video"  # video, audio, photo, or gif
     background_audio: list[dict[str, str]] = field(default_factory=list)
+    thumbnail_url: str = ""
+    podcast_metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

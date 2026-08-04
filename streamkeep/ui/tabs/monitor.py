@@ -1668,6 +1668,7 @@ class MonitorTabMixin:
                 vod_platform=v.platform,
                 vod_title=v.title,
                 vod_channel=v.channel,
+                feed_url=getattr(v, "feed_url", ""),
                 source_id=getattr(v, "source_id", ""),
                 webpage_url=getattr(v, "webpage_url", ""),
                 download_archive="" if is_upgrade else archive_path,

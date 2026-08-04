@@ -7,6 +7,7 @@ so a slow response on one timer fire can't stack up duplicate requests
 on the next tick.
 """
 
+import hashlib
 import threading
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,15 @@ def vod_archive_key(vod):
     """Return a stable subscription key, falling back to the legacy source."""
     platform = str(getattr(vod, "platform", "") or "").strip().casefold()
     source_id = str(getattr(vod, "source_id", "") or "").strip()
+    if not source_id:
+        podcast = getattr(vod, "podcast_metadata", None) or {}
+        guid = str(
+            podcast.get("guid", "") if isinstance(podcast, dict) else ""
+        ).strip()
+        if guid:
+            source_id = "episode:" + hashlib.sha256(
+                guid.encode("utf-8", errors="replace")
+            ).hexdigest()
     if platform and source_id:
         return f"{platform}::{source_id}"
     return str(getattr(vod, "source", "") or "")
