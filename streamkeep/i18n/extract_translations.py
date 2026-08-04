@@ -14,7 +14,7 @@ import ast
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as _xml_escape
 
 ROOT = Path(__file__).resolve().parents[2]
 I18N_DIR = Path(__file__).parent
@@ -423,45 +423,74 @@ def extract_messages() -> tuple[set[Message], dict[Message, set[tuple[str, int]]
     return messages, locations
 
 
+def _xml_text(value: object) -> str:
+    return _xml_escape(str(value))
+
+
+def _xml_attribute(value: object) -> str:
+    return _xml_escape(str(value), {"\"": "&quot;"})
+
+
+def _xml_leaf(level: int, tag: str, text: object = None, attrs: str = "") -> str:
+    indent = " " * (level * 4)
+    if text is None or text == "":
+        return f"{indent}<{tag}{attrs} />"
+    return f"{indent}<{tag}{attrs}>{_xml_text(text)}</{tag}>"
+
+
 def _catalog_bytes(language: str) -> bytes:
     messages, locations = extract_messages()
-    root = ET.Element("TS", {"version": "2.1", "language": language})
     by_context: dict[str, list[Message]] = defaultdict(list)
     for message in messages:
         by_context[message.context].append(message)
+    lines = [
+        "<?xml version='1.0' encoding=\"utf-8\"?>",
+        (
+            f'<TS version="2.1" language="{_xml_attribute(language)}">'
+        ),
+    ]
     for context_name in sorted(by_context):
-        context = ET.SubElement(root, "context")
-        ET.SubElement(context, "name").text = context_name
+        lines.append("    <context>")
+        lines.append(_xml_leaf(2, "name", context_name))
         for message in sorted(
             by_context[context_name],
             key=lambda item: (item.source.casefold(), item.source, item.numerus),
         ):
-            attrs = {"numerus": "yes"} if message.numerus else {}
-            element = ET.SubElement(context, "message", attrs)
+            message_attrs = ' numerus="yes"' if message.numerus else ""
+            lines.append(f"        <message{message_attrs}>")
             for filename, line in sorted(locations[message]):
-                ET.SubElement(
-                    element, "location", {"filename": filename, "line": str(line)}
+                lines.append(
+                    _xml_leaf(
+                        3, "location", attrs=(
+                            f' filename="{_xml_attribute(filename)}"'
+                            f' line="{_xml_attribute(line)}"'
+                        ),
+                    )
                 )
-            ET.SubElement(element, "source").text = message.source
+            lines.append(_xml_leaf(3, "source", message.source))
             translation = SPANISH_CORE.get((message.context, message.source))
             if language == "en":
                 translation = (message.source, message.source) if message.numerus else message.source
             if message.numerus:
-                target = ET.SubElement(
-                    element, "translation", {} if translation else {"type": "unfinished"}
-                )
+                translation_attrs = "" if translation else ' type="unfinished"'
                 forms = translation if isinstance(translation, tuple) else ()
-                for form in forms:
-                    ET.SubElement(target, "numerusform").text = form
+                if forms:
+                    lines.append(f"            <translation{translation_attrs}>")
+                    lines.extend(_xml_leaf(4, "numerusform", form) for form in forms)
+                    lines.append("            </translation>")
+                else:
+                    lines.append(_xml_leaf(3, "translation", attrs=translation_attrs))
             else:
-                target = ET.SubElement(
-                    element, "translation", {} if translation else {"type": "unfinished"}
-                )
                 if isinstance(translation, str):
-                    target.text = translation
-    ET.indent(root, space="    ")
-    body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-    return body.replace(b"'utf-8'", b'"utf-8"') + b"\n"
+                    lines.append(_xml_leaf(3, "translation", translation))
+                else:
+                    lines.append(
+                        _xml_leaf(3, "translation", attrs=' type="unfinished"')
+                    )
+            lines.append("        </message>")
+        lines.append("    </context>")
+    lines.append("</TS>")
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def update_catalogs(*, check: bool = False) -> bool:

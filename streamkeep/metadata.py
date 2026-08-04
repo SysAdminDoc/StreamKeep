@@ -7,9 +7,11 @@ import math
 import os
 import re
 import urllib.parse
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from .models import ArchivalProvenance
 
@@ -17,6 +19,7 @@ METADATA_SCHEMA = "streamkeep.metadata"
 METADATA_SCHEMA_VERSION = 3
 MAX_METADATA_BYTES = 4 * 1024 * 1024
 MAX_IMPORT_SIDECAR_BYTES = 32 * 1024 * 1024
+NFO_PARSE_ERROR = "nfo_parse_error"
 
 _PUBLIC_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 _TWITCH_VOD_RE = re.compile(r"/(?:vod/|videos/)(\d+)(?:\.m3u8)?", re.I)
@@ -971,17 +974,44 @@ def load_ytdlp_info_sidecar(path_or_dir):
     }
 
 
-def load_nfo_sidecar(path_or_dir):
-    """Read safe identity/title fields from a Kodi/Jellyfin NFO sidecar."""
+def _report_nfo_issue(issue_fn, path, kind, reason):
+    if issue_fn:
+        issue_fn({
+            "path": str(path),
+            "kind": kind,
+            "reason": reason,
+        })
+
+
+def load_nfo_sidecar(path_or_dir, *, issue_fn=None):
+    """Read safe identity/title fields from a Kodi/Jellyfin NFO sidecar.
+
+    Invalid or hostile sidecars are reported to ``issue_fn`` when supplied and
+    return an empty payload so preview workers can continue through a library.
+    """
     path = Path(path_or_dir)
     if path.is_dir():
         return {}
     try:
         raw = path.read_bytes()
         if len(raw) > MAX_IMPORT_SIDECAR_BYTES:
+            _report_nfo_issue(
+                issue_fn, path, "nfo_size_limit",
+                f"NFO sidecar exceeds {MAX_IMPORT_SIDECAR_BYTES} bytes",
+            )
             return {}
         root = ET.fromstring(raw)
-    except (OSError, ValueError, ET.ParseError):
+    except (ET.ParseError, DefusedXmlException) as error:
+        _report_nfo_issue(
+            issue_fn, path, NFO_PARSE_ERROR,
+            f"NFO sidecar parse error: {error}",
+        )
+        return {}
+    except (OSError, ValueError) as error:
+        _report_nfo_issue(
+            issue_fn, path, "nfo_read_error",
+            f"NFO sidecar is unreadable: {error}",
+        )
         return {}
     values = {}
     for element in root.iter():

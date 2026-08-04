@@ -20,10 +20,12 @@ import shutil
 import threading
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Iterable
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 
 # Supported server types. Kodi is file-based: NFO files and M3U playlists are
@@ -514,11 +516,22 @@ def _request_bytes(
         return response.read()
 
 
+def _is_xml_element(value: object) -> bool:
+    return (
+        hasattr(value, "tag")
+        and hasattr(value, "attrib")
+        and callable(getattr(value, "findall", None))
+    )
+
+
 def _json_or_xml(payload: bytes) -> object:
     try:
         return json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return ET.fromstring(payload)
+        try:
+            return ET.fromstring(payload)
+        except (ET.ParseError, DefusedXmlException):
+            return None
 
 
 def fetch_media_server_users(config: dict[str, Any]) -> list[dict[str, str]]:
@@ -531,7 +544,7 @@ def fetch_media_server_users(config: dict[str, Any]) -> list[dict[str, str]]:
         payload = _json_or_xml(
             _request_bytes(f"{cfg['url'].rstrip('/')}/users", token=cfg["token"], server_type=server_type)
         )
-        if not isinstance(payload, ET.Element):
+        if not _is_xml_element(payload):
             return []
         return [
             {"id": str(node.attrib.get("id", "") or node.attrib.get("key", "")),
@@ -551,7 +564,7 @@ def fetch_media_server_users(config: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _plex_items(payload: ET.Element) -> list[dict[str, Any]]:
+def _plex_items(payload: Any) -> list[dict[str, Any]]:
     items = []
     for node in payload:
         rating_key = str(node.attrib.get("ratingKey", "") or "")
@@ -622,7 +635,7 @@ def fetch_watched_items(config: dict[str, Any], user_id: str) -> list[dict[str, 
         section = cfg["library_id"] or "1"
         url = f"{base}/library/sections/{urllib.parse.quote(section, safe='')}/all?type=1"
         payload = _json_or_xml(_request_bytes(url, token=cfg["token"], server_type="plex"))
-        return _plex_items(payload) if isinstance(payload, ET.Element) else []
+        return _plex_items(payload) if _is_xml_element(payload) else []
     query = urllib.parse.urlencode({
         "UserId": selected_user,
         "Recursive": "true",
@@ -805,7 +818,7 @@ def _server_search_item(config: dict[str, Any], plan: MediaImportPlan) -> str:
             f"{base}/library/sections/{urllib.parse.quote(section, safe='')}/all?{query}",
             token=cfg["token"], server_type=server_type,
         ))
-        if not isinstance(payload, ET.Element):
+        if not _is_xml_element(payload):
             return ""
         target = _path_key(plan.destination)
         for node in payload:
@@ -865,7 +878,7 @@ def sync_native_playlist(
                 f"{base}/playlists", token=cfg["token"], server_type="plex"
             ))
             playlist_id = ""
-            if isinstance(playlists, ET.Element):
+            if _is_xml_element(playlists):
                 for playlist in playlists:
                     if str(playlist.attrib.get("title", "")) == name:
                         playlist_id = str(playlist.attrib.get("ratingKey", "") or "")

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Hardened NFO sidecar parsing with `defusedxml`, named parser issues in adopt
+  and rebuild previews, and removed every direct stdlib `ElementTree` import
+  from `streamkeep/`.
+
 - Refused to open databases written by a newer schema version before any
   migration or FTS configuration, with a blocking GUI message and a clear
   non-zero CLI error naming both schema versions.

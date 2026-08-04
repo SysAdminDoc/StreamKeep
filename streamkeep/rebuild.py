@@ -245,12 +245,12 @@ def _info_payloads(directory):
     return values
 
 
-def _nfo_payloads(directory):
+def _nfo_payloads(directory, issue_fn=None):
     values = []
     for path in _sidecar_paths(directory):
         if path.suffix.casefold() != ".nfo":
             continue
-        value = load_nfo_sidecar(path)
+        value = load_nfo_sidecar(path, issue_fn=issue_fn)
         if value:
             values.append((path, value))
     return values
@@ -286,7 +286,7 @@ def _record_from_directory(directory, media_paths):
             else:
                 metadata = normalize_metadata_payload(raw)
     info_values = _info_payloads(directory)
-    nfo_values = _nfo_payloads(directory)
+    nfo_values = _nfo_payloads(directory, issue_fn=issues.append)
     valid_info_paths = {path for path, _value in info_values}
     valid_nfo_paths = {path for path, _value in nfo_values}
     for path in sidecars:
@@ -297,7 +297,11 @@ def _record_from_directory(directory, media_paths):
                 "kind": "sidecar",
                 "reason": "yt-dlp info sidecar is unreadable or unsupported",
             })
-        elif path.suffix.casefold() == ".nfo" and path not in valid_nfo_paths:
+        elif (
+            path.suffix.casefold() == ".nfo"
+            and path not in valid_nfo_paths
+            and not any(issue.get("path") == str(path) for issue in issues)
+        ):
             issues.append({
                 "path": str(path),
                 "kind": "sidecar",

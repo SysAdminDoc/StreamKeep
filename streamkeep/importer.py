@@ -228,6 +228,7 @@ def _load_sidecars(directory, media_paths):
     infos = []
     nfos = []
     unreadable = []
+    sidecar_issues = []
     metadata_path = Path(directory) / "metadata.json"
     if metadata_path in paths:
         metadata = load_metadata_sidecar(metadata_path)
@@ -243,12 +244,15 @@ def _load_sidecars(directory, media_paths):
             else:
                 unreadable.append(path.name)
         elif path.suffix.casefold() == ".nfo":
-            value = load_nfo_sidecar(path)
+            value = load_nfo_sidecar(path, issue_fn=sidecar_issues.append)
             if value:
                 nfos.append((path, value))
             else:
                 unreadable.append(path.name)
-    return metadata, infos, nfos, unreadable, [path.name for path in paths]
+    return (
+        metadata, infos, nfos, unreadable,
+        [path.name for path in paths], sidecar_issues,
+    )
 
 
 def _as_text(value):
@@ -426,7 +430,7 @@ def _classify_directory(
         (Path(path) for path in (media_paths or ())),
         key=lambda path: path.name.casefold(),
     )
-    metadata, infos, nfos, unreadable, sidecars = _load_sidecars(
+    metadata, infos, nfos, unreadable, sidecars, sidecar_issues = _load_sidecars(
         directory, media_paths,
     )
     payloads = []
@@ -445,6 +449,7 @@ def _classify_directory(
             "reason": "sidecars disagree on the canonical identity",
             "media_files": [str(path) for path in media_paths],
             "sidecars": sidecars,
+            "issues": sidecar_issues,
             "file_fingerprint": _tree_fingerprint(directory, sidecars),
         }
     source = dict(sources[0]) if sources else {}
@@ -464,6 +469,7 @@ def _classify_directory(
             "path": str(directory), "action": "conflict", "reason": reason,
             "media_files": [str(path) for path in media_paths],
             "sidecars": sidecars,
+            "issues": sidecar_issues,
             "file_fingerprint": _tree_fingerprint(directory, sidecars),
         }
     if not source.get("source_id") and not source.get("webpage_url"):
@@ -472,6 +478,7 @@ def _classify_directory(
             "reason": "sidecar has no recoverable canonical identity",
             "media_files": [str(path) for path in media_paths],
             "sidecars": sidecars,
+            "issues": sidecar_issues,
             "file_fingerprint": _tree_fingerprint(directory, sidecars),
         }
     try:
@@ -509,6 +516,7 @@ def _classify_directory(
         "record": record, "identity_key": list(identity),
         "media_files": [str(path) for path in media_paths],
         "sidecars": sidecars,
+        "issues": sidecar_issues,
         "file_fingerprint": _tree_fingerprint(directory, sidecars),
     }
 
