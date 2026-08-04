@@ -11,6 +11,8 @@ import streamkeep.native_notify as nn
 
 def _reset_backend():
     nn._BACKEND = None
+    nn._PROGRESS_BACKEND = None
+    nn._PROGRESS_NOTIFICATION = None
 
 
 def teardown_function(_):
@@ -139,3 +141,55 @@ def test_a_focused_window_suppresses_the_native_toast(qt_application, monkeypatc
     )
     window._fire_native_toast("Download complete")
     assert calls == []
+
+
+def test_progress_notification_shows_once_then_updates(monkeypatch):
+    class _Data:
+        def __init__(self):
+            self.values = {}
+            self.sequence_number = 0
+
+    class _Document:
+        def load_xml(self, value):
+            self.xml = value
+
+    class _Toast:
+        def __init__(self, document):
+            self.document = document
+            self.data = None
+            self.tag = ""
+
+    class _Notifier:
+        def __init__(self):
+            self.shown = []
+            self.updates = []
+
+        def show(self, toast):
+            self.shown.append(toast)
+
+        def update(self, data, tag):
+            self.updates.append((data, tag))
+            return 0
+
+    notifier = _Notifier()
+    backend = {
+        "XmlDocument": _Document,
+        "NotificationData": _Data,
+        "ToastNotification": _Toast,
+        "create_notifier": lambda: notifier,
+    }
+    monkeypatch.setattr(nn.sys, "platform", "win32")
+    monkeypatch.setattr(nn, "_load_progress_backend", lambda: backend)
+
+    assert nn.notify_progress(
+        "Queue", "1 of 2", completed=100, total=200,
+    ) is True
+    assert len(notifier.shown) == 1
+    assert notifier.shown[0].tag == "streamkeep-queue-progress"
+    assert nn.notify_progress(
+        "Queue", "1 of 2", completed=125, total=200,
+    ) is True
+    assert len(notifier.shown) == 1
+    assert len(notifier.updates) == 1
+    assert notifier.updates[0][1] == "streamkeep-queue-progress"
+    assert nn.clear_progress_notification() is True

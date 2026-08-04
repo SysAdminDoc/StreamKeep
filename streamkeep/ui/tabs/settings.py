@@ -1568,6 +1568,35 @@ def build_settings_tab(win):
     native_notif_row.addStretch(1)
     network_lay.addLayout(native_notif_row)
 
+    # Windows shell integration (V135).  These controls are harmless on other
+    # platforms and the adapters degrade silently when the OS surface is not
+    # available.
+    win.taskbar_progress_check = QCheckBox(
+        "Show aggregate queue progress on the Windows taskbar"
+    )
+    win.taskbar_progress_check.setChecked(
+        bool(win._config.get("taskbar_progress", True))
+    )
+    win.taskbar_progress_check.setToolTip(
+        "Use the top-level window's taskbar button for aggregate queue "
+        "progress, paused state, and failed-job state. No package identity or "
+        "signing is required; unsupported systems are ignored."
+    )
+    network_lay.addWidget(win.taskbar_progress_check)
+
+    win.windows_progress_notifications_check = QCheckBox(
+        "Use one updating Windows progress notification for long queues"
+    )
+    win.windows_progress_notifications_check.setChecked(
+        bool(win._config.get("windows_progress_notifications", False))
+    )
+    win.windows_progress_notifications_check.setToolTip(
+        "When native notifications are enabled, update one progress-bound "
+        "notification for queues of two or more items. The optional Windows "
+        "notification bridge may be unavailable in unsigned builds."
+    )
+    network_lay.addWidget(win.windows_progress_notifications_check)
+
     # Storage health monitor (F67)
     win.disk_monitor_check = QCheckBox("Monitor free space on the download drive")
     win.disk_monitor_check.setChecked(bool(win._config.get("disk_monitor_enabled", True)))
@@ -1601,6 +1630,19 @@ def build_settings_tab(win):
         "the critical threshold. The queue resumes automatically once space recovers."
     )
     network_lay.addWidget(win.disk_auto_pause_check)
+
+    win.pause_queue_power_check = QCheckBox(
+        "Pause new queue jobs on battery or Energy Saver"
+    )
+    win.pause_queue_power_check.setChecked(
+        bool(win._config.get("pause_queue_on_power", False))
+    )
+    win.pause_queue_power_check.setToolTip(
+        "Hold pending queue jobs while Windows reports battery power or Energy "
+        "Saver. Active downloads finish, the decision is logged, and the queue "
+        "resumes automatically when AC power returns."
+    )
+    network_lay.addWidget(win.pause_queue_power_check)
 
     # Queue-complete power action (V24)
     from ...power import POWER_ACTIONS

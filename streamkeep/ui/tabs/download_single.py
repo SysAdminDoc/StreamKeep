@@ -1322,6 +1322,28 @@ class DownloadSingleMixin:
             )
         # Parse speed from the status text (F16 speed dashboard)
         self._update_speed_from_status(status)
+        queue_item = getattr(self, "_queue_active_item", None)
+        total_segments = int(getattr(self, "_total_segments", 0) or 0)
+        if queue_item is not None and total_segments:
+            try:
+                segment_pct = max(0, min(100, int(pct or 0)))
+                queue_item["progress"] = max(
+                    0,
+                    min(
+                        100,
+                        int(
+                            ((int(getattr(self, "_completed_segments", 0)) * 100)
+                             + segment_pct)
+                            / total_segments
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _on_segment_done(self, idx, size_str):
         if idx < len(self._segment_progress):
@@ -1339,6 +1361,16 @@ class DownloadSingleMixin:
             f"Downloaded {self._completed_segments} of {self._total_segments} segment(s).",
             "working",
         )
+        queue_item = getattr(self, "_queue_active_item", None)
+        if queue_item is not None and self._total_segments:
+            queue_item["progress"] = max(
+                0,
+                min(100, int(self._completed_segments * 100 / self._total_segments)),
+            )
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _on_dl_error(self, idx, err):
         self._download_had_errors = True
@@ -1357,6 +1389,10 @@ class DownloadSingleMixin:
         fail_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setItem(idx, 4, fail_item)
         self._set_status(f"Segment {idx + 1} failed: {err}", "error")
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _on_all_done(self):
         self.download_btn.setEnabled(True)
@@ -1431,6 +1467,10 @@ class DownloadSingleMixin:
         self._update_tray_badge()
         self._reset_speed_dashboard()
         self._start_next_background_job()
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _on_stop(self):
         worker = self.download_worker
@@ -1532,6 +1572,10 @@ class DownloadSingleMixin:
             self._set_status("Download cancelled. You can adjust the selection and try again.", "warning")
         if resume_background_jobs:
             self._start_next_background_job()
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _on_open_folder(self):
         out_dir = self._active_output_dir or self.output_input.text().strip()

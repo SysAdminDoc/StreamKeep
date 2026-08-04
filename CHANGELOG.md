@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Added unsigned Windows shell integration: aggregate queue progress, paused
+  and failed states on the taskbar, an opt-in battery/Energy Saver queue hold
+  that resumes on AC, and one optional progress-bound notification for long
+  queues when the host already provides the WinRT bridge. No package identity,
+  signing step, or required WinRT dependency was added.
+
 - Narrowed Flatpak archive access by removing broad home filesystem permission.
   Native Qt folder choosers now use the XDG FileChooser and persistent
   Document Portals, with an explicit-path fallback when a portal is absent.

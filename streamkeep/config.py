@@ -110,6 +110,8 @@ _BOOL_CONFIG_KEYS = frozenset({
     "companion_allow_private_network",
     "check_for_updates", "capture_live_chat", "render_chat_ass",
     "enable_diarization", "notif_sound", "native_notifications",
+    "taskbar_progress", "windows_progress_notifications",
+    "pause_queue_on_power",
     "download_subs", "subtitle_auto",
     "subtitle_embed", "sponsorblock", "capture_youtube_chat",
     "ytdlp_live_from_start", "live_engine_fallback", "streamlink_live_engine",

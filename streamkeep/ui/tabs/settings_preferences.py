@@ -1044,11 +1044,23 @@ class SettingsPreferencesMixin:
             self._config["notif_sound"] = bool(self.notif_sound_check.isChecked())
         if hasattr(self, "native_notif_check"):
             self._config["native_notifications"] = bool(self.native_notif_check.isChecked())
+        if hasattr(self, "taskbar_progress_check"):
+            self._config["taskbar_progress"] = bool(
+                self.taskbar_progress_check.isChecked()
+            )
+        if hasattr(self, "windows_progress_notifications_check"):
+            self._config["windows_progress_notifications"] = bool(
+                self.windows_progress_notifications_check.isChecked()
+            )
         if hasattr(self, "disk_monitor_check"):
             self._config["disk_monitor_enabled"] = bool(self.disk_monitor_check.isChecked())
             self._config["disk_warning_gb"] = int(self.disk_warning_spin.value())
             self._config["disk_critical_gb"] = int(self.disk_critical_spin.value())
             self._config["disk_auto_pause"] = bool(self.disk_auto_pause_check.isChecked())
+            if hasattr(self, "pause_queue_power_check"):
+                self._config["pause_queue_on_power"] = bool(
+                    self.pause_queue_power_check.isChecked()
+                )
             self._apply_disk_monitor_settings()
         if hasattr(self, "queue_complete_action_combo"):
             from ...power import normalize_power_action

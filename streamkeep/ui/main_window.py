@@ -62,6 +62,10 @@ from streamkeep.monitor import ChannelMonitor
 from streamkeep.clipboard import ClipboardMonitor
 from streamkeep import db as _db
 from streamkeep.workers import ScheduledBackupWorker
+from streamkeep.windows_integration import (
+    TaskbarProgress,
+    aggregate_queue_progress,
+)
 from .main_window_jobs import MainWindowJobsMixin
 
 # Legacy NATIVE_PROXY compatibility — some UI code below assigns this.
@@ -315,6 +319,9 @@ class StreamKeep(
         self._companion_server = None        # LocalCompanionServer instance
         self._companion_last_error = ""
         self._notifications = NotificationCenter(capacity=50)
+        self._taskbar_progress = None
+        self._power_pause_active = False
+        self._power_state = None
         self._parallel_autorecords = 2      # cap; overridden from config below
         self._chunk_long_captures = False
         self._chunk_length_secs = 7200      # 2 hours default
@@ -382,6 +389,7 @@ class StreamKeep(
         self._refresh_companion_ui()
         self._init_tray_icon()
         self._init_disk_monitor()
+        self._init_windows_integration()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
@@ -1537,6 +1545,19 @@ class StreamKeep(
         except Exception as error:
             _LOGGER.warning("[SHUTDOWN] Could not stop disk monitor: %s", error)
         try:
+            from ..native_notify import clear_progress_notification
+            clear_progress_notification()
+        except Exception as error:
+            _LOGGER.debug("[SHUTDOWN] Could not clear progress notification: %s", error)
+        try:
+            taskbar = getattr(self, "_taskbar_progress", None)
+            if taskbar is not None:
+                taskbar.clear(int(self.winId()))
+                taskbar.close()
+                self._taskbar_progress = None
+        except Exception as error:
+            _LOGGER.debug("[SHUTDOWN] Could not clear taskbar progress: %s", error)
+        try:
             worker = getattr(self, "_backup_worker", None)
             if worker is not None and worker.isRunning():
                 # Let the archive finish so the claim is released and no
@@ -2368,6 +2389,73 @@ class StreamKeep(
             if bool(self._config.get("native_notifications", False)):
                 self._fire_native_toast(text, level)
 
+    def _init_windows_integration(self):
+        """Start optional taskbar and progress-notification surfaces (V135)."""
+        self._taskbar_progress = None
+        try:
+            self._taskbar_progress = TaskbarProgress(log_fn=self._log)
+        except Exception as error:
+            _LOGGER.debug("[WINDOWS] Taskbar integration unavailable: %s", error)
+        # A top-level HWND is stable after Qt has completed construction.  The
+        # callback is still harmless when a test or embedding host suppresses
+        # the event loop.
+        QTimer.singleShot(0, self._update_windows_queue_surfaces)
+
+    def _update_windows_queue_surfaces(self):
+        """Reflect aggregate queue state in optional Windows shell surfaces."""
+        try:
+            snapshot = aggregate_queue_progress(
+                getattr(self, "_download_queue", ()),
+                paused=bool(
+                    getattr(self, "_disk_pause_active", False)
+                    or getattr(self, "_power_pause_active", False)
+                ),
+                error=bool(
+                    getattr(self, "_download_had_errors", False)
+                    and getattr(self, "_queue_active_item", None) is not None
+                ),
+            )
+            taskbar = getattr(self, "_taskbar_progress", None)
+            if taskbar is not None:
+                try:
+                    hwnd = int(self.winId())
+                except Exception:
+                    hwnd = 0
+                if bool(getattr(self, "_config", {}).get("taskbar_progress", True)):
+                    taskbar.update(hwnd, snapshot)
+                elif hwnd:
+                    taskbar.clear(hwnd)
+
+            long_queue = int(snapshot.get("total", 0) or 0) >= 200
+            progress_enabled = bool(
+                getattr(self, "_config", {}).get(
+                    "native_notifications", False,
+                )
+                and getattr(self, "_config", {}).get(
+                    "windows_progress_notifications", False,
+                )
+                and long_queue
+                and snapshot.get("state") != "none"
+            )
+            from ..native_notify import (
+                clear_progress_notification,
+                notify_progress,
+            )
+            if progress_enabled:
+                total_jobs = max(1, int(snapshot.get("total", 0)) // 100)
+                completed_jobs = int(snapshot.get("completed", 0)) // 100
+                notify_progress(
+                    "StreamKeep queue",
+                    f"{completed_jobs} of {total_jobs} queue item(s)",
+                    completed=snapshot.get("completed", 0),
+                    total=snapshot.get("total", 0),
+                    state=snapshot.get("state", "normal"),
+                )
+            else:
+                clear_progress_notification()
+        except Exception as error:
+            _LOGGER.debug("[WINDOWS] Could not update queue shell surfaces: %s", error)
+
     def _init_disk_monitor(self):
         """Instantiate and start the storage-health monitor (F67).
 
@@ -2377,8 +2465,12 @@ class StreamKeep(
         """
         self._disk_monitor = None
         self._disk_pause_active = False
+        self._power_pause_active = False
+        self._power_state = None
         self._disk_critical_bytes = 5 * 1024 ** 3
-        if not bool(self._config.get("disk_monitor_enabled", True)):
+        disk_enabled = bool(self._config.get("disk_monitor_enabled", True))
+        power_enabled = bool(self._config.get("pause_queue_on_power", False))
+        if not disk_enabled and not power_enabled:
             return
         try:
             from ..disk_monitor import DiskMonitor
@@ -2386,6 +2478,7 @@ class StreamKeep(
             self._disk_monitor.space_changed.connect(self._on_disk_space_changed)
             self._disk_monitor.space_warning.connect(self._on_disk_space_warning)
             self._disk_monitor.space_critical.connect(self._on_disk_space_critical)
+            self._disk_monitor.power_changed.connect(self._on_power_changed)
             self._configure_disk_monitor()
         except Exception:
             self._disk_monitor = None
@@ -2402,17 +2495,38 @@ class StreamKeep(
         if critical_gb >= warning_gb:
             warning_gb = critical_gb + 1
         auto_pause = bool(self._config.get("disk_auto_pause", False))
+        disk_enabled = bool(self._config.get("disk_monitor_enabled", True))
+        pause_on_power = bool(self._config.get("pause_queue_on_power", False))
         self._disk_critical_bytes = int(critical_gb * 1024 ** 3)
         self._disk_monitor.configure(
-            warning_gb=warning_gb, critical_gb=critical_gb, auto_pause=auto_pause,
+            warning_gb=warning_gb,
+            critical_gb=critical_gb,
+            auto_pause=auto_pause,
+            pause_on_power=pause_on_power,
         )
-        self._refresh_disk_monitor_paths()
+        if disk_enabled:
+            self._refresh_disk_monitor_paths()
+        else:
+            self._disk_monitor.set_paths([])
+        resume_power_queue = False
+        if not pause_on_power and self._power_pause_active:
+            self._power_pause_active = False
+            resume_power_queue = True
+            self._log("[POWER] Queue power policy disabled — resuming pending work.")
         self._disk_monitor.start()
+        if resume_power_queue:
+            try:
+                self._advance_queue()
+            except Exception:
+                pass  # safe: settings changes must not break the window
+        self._update_windows_queue_surfaces()
 
     def _apply_disk_monitor_settings(self):
         """Reconcile the live monitor with Settings changes (enable/disable/thresholds)."""
         enabled = bool(self._config.get("disk_monitor_enabled", True))
-        if not enabled:
+        power_enabled = bool(self._config.get("pause_queue_on_power", False))
+        if not enabled and not power_enabled:
+            resume_power_queue = bool(self._power_pause_active)
             if getattr(self, "_disk_monitor", None) is not None:
                 try:
                     self._disk_monitor.stop()
@@ -2430,11 +2544,29 @@ class StreamKeep(
                 self.archive_storage_state.setStyleSheet(
                     f"color: {CAT['muted']};"
                 )
+            self._power_pause_active = False
+            if resume_power_queue:
+                try:
+                    self._advance_queue()
+                except Exception:
+                    pass  # safe: settings changes must not break the window
+            self._update_windows_queue_surfaces()
             return
         if getattr(self, "_disk_monitor", None) is None:
             self._init_disk_monitor()
         else:
             self._configure_disk_monitor()
+        if not enabled:
+            try:
+                self.disk_status.setVisible(False)
+            except Exception:
+                pass  # safe: the optional storage status widget may be absent
+            if hasattr(self, "archive_storage_detail"):
+                self.archive_storage_detail.setText(tr("Storage monitoring off"))
+                self.archive_storage_state.setText("—")
+                self.archive_storage_state.setStyleSheet(
+                    f"color: {CAT['muted']};"
+                )
 
     def _refresh_disk_monitor_paths(self):
         """Point the monitor at the current output drive."""
@@ -2487,6 +2619,7 @@ class StreamKeep(
                 self._advance_queue()
             except Exception:
                 pass  # safe: best-effort fallback; preserve the primary operation
+            self._update_windows_queue_surfaces()
 
     def _on_disk_space_warning(self, path, free_bytes):
         free_gb = free_bytes / 1024 ** 3
@@ -2507,6 +2640,37 @@ class StreamKeep(
                 self._on_stop()
             except Exception:
                 pass  # safe: best-effort fallback; preserve the primary operation
+            self._update_windows_queue_surfaces()
+
+    def _on_power_changed(self, state):
+        """Hold new queue work on battery/Energy Saver when opted in (V135)."""
+        self._power_state = state
+        if not getattr(state, "available", False):
+            return
+        from ..power import power_pause_reason, should_pause_for_power
+        should_pause = should_pause_for_power(state)
+        if should_pause and not self._power_pause_active:
+            self._power_pause_active = True
+            reason = power_pause_reason(state) or "battery or Energy Saver"
+            self._log(
+                f"[POWER] Queue paused on {reason}; active downloads continue "
+                "and pending work will resume when power recovers."
+            )
+            self._notify_center(
+                "Queue paused to save power — active downloads continue.",
+                "warning",
+            )
+        elif not should_pause and self._power_pause_active:
+            self._power_pause_active = False
+            self._log(
+                "[POWER] Queue resumed on AC with Energy Saver inactive."
+            )
+            self._notify_center("Queue resumed on AC.", "success")
+            try:
+                self._advance_queue()
+            except Exception:
+                pass  # safe: best-effort fallback; preserve the primary operation
+        self._update_windows_queue_surfaces()
 
     def _fire_native_toast(self, text, level="info"):
         """Raise a native OS notification (Windows Toast / macOS / Linux) for a

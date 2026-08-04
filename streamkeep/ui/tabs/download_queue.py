@@ -691,6 +691,9 @@ class DownloadQueueMixin:
         # Hold the queue while the storage monitor has auto-paused for low disk.
         if getattr(self, "_disk_pause_active", False):
             return
+        # Power-aware policy holds pending work while active downloads finish.
+        if getattr(self, "_power_pause_active", False):
+            return
         # Legacy foreground worker blocks legacy queue path
         worker = getattr(self, "download_worker", None)
         fg_busy = worker is not None and worker.isRunning()
@@ -751,6 +754,10 @@ class DownloadQueueMixin:
     def _maybe_fire_queue_complete_power_action(self):
         """Fire the configured power action once when the queue drains (V24)."""
         if not getattr(self, "_power_action_armed", False):
+            return
+        if getattr(self, "_disk_pause_active", False) or getattr(
+            self, "_power_pause_active", False
+        ):
             return
         if self._active_queue_download_count() > 0:
             return
@@ -1672,6 +1679,10 @@ class DownloadQueueMixin:
                 item["speed"] = piece
             elif any(unit in piece.upper() for unit in ("KB", "MB", "GB", "KIB", "MIB", "GIB")):
                 item["size"] = piece.split("/")[0].strip()
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
         row = getattr(self, "_queue_row_by_id", {}).get(id(item))
         if row is None:
             return
@@ -2168,6 +2179,10 @@ class DownloadQueueMixin:
         self._persist_config()
         if hasattr(self, "queue_table"):
             self._refresh_queue_table()
+        try:
+            self._update_windows_queue_surfaces()
+        except Exception:
+            pass  # safe: optional Windows shell integration
 
     def _set_queue_item_status(self, item, status, note="", **changes):
         if item is None:

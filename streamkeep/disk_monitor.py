@@ -15,6 +15,8 @@ import shutil
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from .power import read_windows_power_state
+
 
 class DiskMonitor(QObject):
     """Periodic disk space monitor with configurable thresholds."""
@@ -22,6 +24,7 @@ class DiskMonitor(QObject):
     space_changed = pyqtSignal(str, int, int)   # path, free_bytes, total_bytes
     space_critical = pyqtSignal(str, int)        # path, free_bytes
     space_warning = pyqtSignal(str, int)         # path, free_bytes
+    power_changed = pyqtSignal(object)            # PowerState
 
     def __init__(self, parent=None, *, interval_ms=30000):
         super().__init__(parent)
@@ -29,17 +32,28 @@ class DiskMonitor(QObject):
         self._warning_bytes = 20 * 1024 ** 3   # 20 GB default
         self._critical_bytes = 5 * 1024 ** 3    # 5 GB default
         self._auto_pause = False
+        self._pause_on_power = False
         self._last_state = {}   # path -> "ok" | "warning" | "critical"
+        self._last_power_state = None
 
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
         self._timer.timeout.connect(self._poll)
+        self._power_timer = QTimer(self)
+        self._power_timer.setInterval(interval_ms)
+        self._power_timer.timeout.connect(self._poll_power)
 
-    def configure(self, *, warning_gb=20, critical_gb=5, auto_pause=False):
-        """Set thresholds in GB."""
+    def configure(
+        self, *, warning_gb=20, critical_gb=5, auto_pause=False,
+        pause_on_power=False,
+    ):
+        """Set disk thresholds and the optional battery/Energy Saver policy."""
         self._warning_bytes = int(warning_gb * 1024 ** 3)
         self._critical_bytes = int(critical_gb * 1024 ** 3)
-        self._auto_pause = auto_pause
+        self._auto_pause = bool(auto_pause)
+        self._pause_on_power = bool(pause_on_power)
+        if not self._pause_on_power:
+            self._last_power_state = None
 
     def set_paths(self, paths):
         """Set the output directories to monitor."""
@@ -49,13 +63,25 @@ class DiskMonitor(QObject):
         if self._paths:
             self._poll()
             self._timer.start()
+        else:
+            self._timer.stop()
+        if self._pause_on_power:
+            self._poll_power()
+            self._power_timer.start()
+        else:
+            self._power_timer.stop()
 
     def stop(self):
         self._timer.stop()
+        self._power_timer.stop()
 
     @property
     def auto_pause(self):
         return self._auto_pause
+
+    @property
+    def pause_on_power(self):
+        return self._pause_on_power
 
     def _poll(self):
         for path in self._paths:
@@ -80,6 +106,18 @@ class DiskMonitor(QObject):
                     self._last_state[path] = "warning"
             else:
                 self._last_state[path] = "ok"
+
+    def _poll_power(self):
+        if not self._pause_on_power:
+            return
+        try:
+            state = read_windows_power_state()
+        except Exception:
+            return
+        if state == self._last_power_state:
+            return
+        self._last_power_state = state
+        self.power_changed.emit(state)
 
     def format_status(self):
         """Return a summary string for the status bar."""

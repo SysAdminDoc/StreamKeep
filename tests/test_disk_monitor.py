@@ -99,8 +99,38 @@ def test_configure_reads_auto_pause(_app):
     assert mon.auto_pause is True
 
 
+def test_power_poll_emits_only_when_the_decision_state_changes(_app):
+    from streamkeep.power import PowerState
+
+    mon = DiskMonitor()
+    mon.configure(pause_on_power=True)
+    states = []
+    mon.power_changed.connect(states.append)
+    battery = PowerState(True, True, False, "balanced")
+    with mock.patch(
+        "streamkeep.disk_monitor.read_windows_power_state",
+        return_value=battery,
+    ):
+        mon._poll_power()
+        mon._poll_power()
+    assert states == [battery]
+    assert mon.pause_on_power is True
+
+
+def test_power_poll_is_disabled_with_the_policy(_app):
+    mon = DiskMonitor()
+    mon.configure(pause_on_power=False)
+    with mock.patch(
+        "streamkeep.disk_monitor.read_windows_power_state",
+    ) as read_state:
+        mon._poll_power()
+    read_state.assert_not_called()
+
+
 def test_config_keys_are_import_validated():
     from streamkeep.config import _BOOL_CONFIG_KEYS, _INT_CONFIG_KEYS
 
-    assert {"disk_monitor_enabled", "disk_auto_pause"} <= _BOOL_CONFIG_KEYS
+    assert {
+        "disk_monitor_enabled", "disk_auto_pause", "pause_queue_on_power",
+    } <= _BOOL_CONFIG_KEYS
     assert {"disk_warning_gb", "disk_critical_gb"} <= _INT_CONFIG_KEYS
