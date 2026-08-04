@@ -171,7 +171,8 @@ def main():
 
     from PyQt6.QtGui import QIcon
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from streamkeep import db as _db
     from streamkeep.paths import CONFIG_DIR
     from streamkeep.single_instance import acquire_gui_instance_lock
     from streamkeep.theme import apply_visual_system
@@ -208,7 +209,14 @@ def main():
         saved_theme, saved_density, saved_accent, app=app
     )
 
-    win = StreamKeep()
+    try:
+        win = StreamKeep()
+    except _db.DatabaseSchemaError as error:
+        QMessageBox.critical(
+            None, "A newer StreamKeep build is required", str(error),
+        )
+        instance_lock.unlock()
+        return
     win.show()
 
     def _finish_startup():

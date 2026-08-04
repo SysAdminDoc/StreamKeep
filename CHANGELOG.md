@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Refused to open databases written by a newer schema version before any
+  migration or FTS configuration, with a blocking GUI message and a clear
+  non-zero CLI error naming both schema versions.
+
 - Kept sync-viewer cards owned by their stream slots and reused them across
   grid relayouts, preventing live mpv widgets from being destroyed during
   third-stream or audio-slot changes.

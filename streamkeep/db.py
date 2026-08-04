@@ -24,6 +24,7 @@ import time
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .paths import CONFIG_DIR
@@ -42,7 +43,40 @@ _PUBLISHING_TEXT_LIMIT = 256
 _write_lock = threading.Lock()
 
 
+class DatabaseSchemaError(RuntimeError):
+    """Raised when a database was written by a newer StreamKeep build."""
+
+    def __init__(self, database_version: int, supported_version: int):
+        self.database_version = int(database_version)
+        self.supported_version = int(supported_version)
+        super().__init__(
+            f"Database schema version {self.database_version} is newer than "
+            f"this build supports ({self.supported_version}). Run a newer "
+            "StreamKeep build to open this library."
+        )
+
+
 # ── Connection management ───────────────────────────────────────────
+
+
+def _check_schema_version(path=None):
+    """Read the schema version without opening a writable database handle."""
+    database_path = Path(path or DB_PATH).expanduser().resolve(strict=False)
+    if not database_path.is_file():
+        return 0
+    probe = sqlite_connect(
+        f"{database_path.as_uri()}?mode=ro",
+        uri=True,
+        readonly=True,
+        configure_journal=False,
+    )
+    try:
+        version = int(probe.execute("PRAGMA user_version").fetchone()[0] or 0)
+    finally:
+        probe.close()
+    if version > SCHEMA_VERSION:
+        raise DatabaseSchemaError(version, SCHEMA_VERSION)
+    return version
 
 def _connect(readonly=False):
     """Return a connection.  Caller is responsible for closing."""
@@ -58,6 +92,7 @@ def _connect(readonly=False):
 
 def init_db() -> None:
     """Create tables if they don't exist.  Idempotent."""
+    _check_schema_version()
     # Repair a config directory left mixed by a restore that died mid-swap
     # before opening the database. Lazy import avoids a backup<->db cycle.
     try:
@@ -65,10 +100,13 @@ def init_db() -> None:
         finalize_interrupted_restore()
     except Exception:
         pass
+    _check_schema_version()
     db = _connect()
     try:
-        db.execute("BEGIN IMMEDIATE")
         v = db.execute("PRAGMA user_version").fetchone()[0]
+        if v > SCHEMA_VERSION:
+            raise DatabaseSchemaError(v, SCHEMA_VERSION)
+        db.execute("BEGIN IMMEDIATE")
         if v < SCHEMA_VERSION:
             if v >= 1 and v < 4:
                 _migrate_queue_v4(db)

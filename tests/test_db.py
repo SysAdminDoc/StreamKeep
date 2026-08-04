@@ -89,6 +89,39 @@ class DbMigrationTests(unittest.TestCase):
             self.assertIn("auth_profile_id", columns)
             self.assertEqual(version, db.SCHEMA_VERSION)
 
+    def test_newer_schema_is_refused_before_schema_or_fts_writes(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
+            conn.commit()
+            conn.close()
+            original_bytes = db_path.read_bytes()
+
+            with mock.patch.object(db, "DB_PATH", db_path), mock.patch.object(
+                db, "_configure_history_fts"
+            ) as configure_fts:
+                with self.assertRaises(db.DatabaseSchemaError) as error:
+                    db.init_db()
+
+            self.assertEqual(error.exception.database_version, db.SCHEMA_VERSION + 1)
+            self.assertEqual(error.exception.supported_version, db.SCHEMA_VERSION)
+            self.assertIn(str(db.SCHEMA_VERSION + 1), str(error.exception))
+            self.assertIn(str(db.SCHEMA_VERSION), str(error.exception))
+            self.assertIn("newer StreamKeep build", str(error.exception))
+            self.assertEqual(db_path.read_bytes(), original_bytes)
+            configure_fts.assert_not_called()
+            conn = sqlite3.connect(str(db_path))
+            try:
+                tables = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(tables, [])
+
     def test_v8_history_identity_is_backfilled_and_exactly_queryable(self):
         import sqlite3
         with tempfile.TemporaryDirectory() as tmpdir:

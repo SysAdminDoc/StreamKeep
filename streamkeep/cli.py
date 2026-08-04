@@ -129,6 +129,15 @@ def _record_cli_failure(url, stage, error, output_dir="", info=None):
         pass
 
 
+def _init_db_or_exit(db_module):
+    """Initialize the library or report a newer-schema stop to the CLI."""
+    try:
+        db_module.init_db()
+    except db_module.DatabaseSchemaError as error:
+        _print_line(f"Error: {error}")
+        raise SystemExit(2) from None
+
+
 # ── --url handler ───────────────────────────────────────────────────
 
 def _run_download(args):
@@ -247,7 +256,7 @@ def _run_download(args):
     from .config import install_file_logging, load_config, write_log_line
 
     app = QCoreApplication(sys.argv)
-    db.init_db()
+    _init_db_or_exit(db)
     install_file_logging()
 
     from .workers import FetchWorker, DownloadWorker
@@ -849,7 +858,7 @@ def _run_server(args):
 
     from . import db
     app = QCoreApplication(sys.argv)
-    db.init_db()
+    _init_db_or_exit(db)
     from .config import install_file_logging
     install_file_logging()
 
@@ -1131,7 +1140,7 @@ def _run_db_maintenance(args):
     """Run a database maintenance action."""
     import json as _json
     from . import db
-    db.init_db()
+    _init_db_or_exit(db)
     action = getattr(args, "action", "info")
     if action == "info":
         diag = db.db_diagnostics()
@@ -1300,7 +1309,7 @@ def _run_library_import(args):
     )
     from .importer import load_adoption_plan, save_adoption_plan
 
-    db.init_db()
+    _init_db_or_exit(db)
     default_plan = (
         Path(db.DB_PATH).parent / "maintenance" / "adoption-plan.json"
     )
@@ -1370,7 +1379,7 @@ def _run_retemplate(args):
         save_retemplate_plan,
     )
 
-    db.init_db()
+    _init_db_or_exit(db)
     default_plan = Path(db.DB_PATH).parent / "maintenance" / "retemplate-plan.json"
     plan_path = Path(getattr(args, "plan", "") or default_plan).expanduser()
     action = str(getattr(args, "retemplate_action", "preview") or "preview")

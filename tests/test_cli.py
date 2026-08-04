@@ -142,6 +142,30 @@ def test_db_command_dispatches_headlessly_and_binds_config_root(tmp_path):
     assert not (tmp_path / "ambient-appdata" / "StreamKeep").exists()
 
 
+def test_db_command_refuses_newer_schema_version(tmp_path):
+    import sqlite3
+
+    from streamkeep import db
+
+    config_dir = tmp_path / "isolated"
+    config_dir.mkdir()
+    database = config_dir / "library.db"
+    connection = sqlite3.connect(str(database))
+    connection.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
+    connection.commit()
+    connection.close()
+
+    result = _run_launcher(
+        "db", "info", "--config-dir", config_dir,
+        appdata=tmp_path / "ambient-appdata",
+    )
+    assert result.returncode == 2
+    assert "schema version" in result.stdout.lower()
+    assert str(db.SCHEMA_VERSION + 1) in result.stdout
+    assert str(db.SCHEMA_VERSION) in result.stdout
+    assert "newer streamkeep build" in result.stdout.lower()
+
+
 def test_db_rebuild_parser_supports_preview_and_apply(tmp_path):
     parser = cli.build_parser()
     preview = parser.parse_args([
