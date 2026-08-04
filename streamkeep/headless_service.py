@@ -228,6 +228,7 @@ class HeadlessJobService(QObject):
         self._integrity_worker = None
         if not unfinished:
             self._release_executor_lease()
+            db.close_connections()
         self._fetchers.clear()
         self._downloads.clear()
         self._finalizers.clear()

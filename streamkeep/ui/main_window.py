@@ -1570,6 +1570,7 @@ class StreamKeep(
         if self._queue_execution_enabled:
             _db.release_executor_lease(self._executor_owner_id)
             self._queue_execution_enabled = False
+        _db.close_connections()
         super().closeEvent(event)
 
     # Widget builders are thin forwarders to streamkeep.ui.widgets so the

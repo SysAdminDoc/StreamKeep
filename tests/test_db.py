@@ -28,6 +28,31 @@ def _claim_queue_job_process(
 
 
 class DbMigrationTests(unittest.TestCase):
+    def test_profile_connections_are_reused_per_thread_and_close_explicitly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "profile"
+            profile_dir.mkdir()
+            db_path = profile_dir / "library.db"
+            with mock.patch.object(db, "CONFIG_DIR", profile_dir), mock.patch.object(
+                db, "DB_PATH", db_path
+            ), mock.patch.object(
+                db, "sqlite_connect", wraps=db.sqlite_connect
+            ) as connect:
+                db.close_connections()
+                first = db._connect()
+                first.close()
+                second = db._connect()
+                self.assertIs(first._connection, second._connection)
+                second.close()
+                self.assertEqual(connect.call_count, 1)
+
+                db.close_connections()
+                third = db._connect()
+                self.assertIsNot(first._connection, third._connection)
+                third.close()
+                self.assertEqual(connect.call_count, 2)
+                db.close_connections()
+
     def test_concurrent_v10_initialization_serializes_schema_migration(self):
         import sqlite3
 

@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Reused configured profile SQLite connections per thread, applying the
+  runtime and journal policy once per physical handle while keeping temporary
+  migration databases one-shot. GUI and headless shutdown now close cached
+  handles explicitly, and profile switches invalidate stale connections.
+
 - Added explicit plugin contract review in Settings and the CLI. Permissions,
   dependencies, compatibility ranges, and entry points are shown before an
   adapter is enabled; a changed manifest contract, including a new permission,
