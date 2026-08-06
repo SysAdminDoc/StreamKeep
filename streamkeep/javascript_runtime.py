@@ -420,6 +420,12 @@ def install_managed_deno(archive_path=None, *, config_dir=None, timeout=180):
         staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=str(parent)))
         target = parent / descriptor["target"]
         backup = parent / f".backup-{uuid.uuid4().hex}"
+        # Set only once the existing install has actually been moved aside.
+        # Everything before that point — extraction, the version probe, the
+        # metadata write — fails with the previous runtime still in place, and
+        # a rollback that deletes ``target`` there would destroy a working
+        # install to recover from a failed upgrade.
+        moved_existing = False
         try:
             staged_executable = staging / descriptor["executable"]
             _extract_executable(archive, staged_executable, descriptor["executable"])
@@ -440,6 +446,7 @@ def install_managed_deno(archive_path=None, *, config_dir=None, timeout=180):
             _write_json_atomic(staging / "runtime.json", metadata)
             if target.exists():
                 os.replace(target, backup)
+                moved_existing = True
             os.replace(staging, target)
             shutil.rmtree(backup, ignore_errors=True)
             return {
@@ -454,10 +461,13 @@ def install_managed_deno(archive_path=None, *, config_dir=None, timeout=180):
                 "detail": f"Installed Deno {version} from {source}.",
             }
         except Exception:
-            if target.exists() and not backup.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            if backup.exists() and not target.exists():
-                os.replace(backup, target)
+            if moved_existing:
+                # The swap started. Remove whatever half-published tree is at
+                # ``target`` and put the previous install back.
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                if backup.exists() and not target.exists():
+                    os.replace(backup, target)
             raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)

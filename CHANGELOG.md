@@ -4,6 +4,14 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Fixed a failed managed-Deno re-install deleting the working runtime. The
+  rollback guard tested for the absence of a backup directory, which is also
+  true for every failure raised *before* the existing install is moved aside
+  — extraction, the version probe, the metadata write — so a probe that timed
+  out while anti-virus scanned the freshly written binary removed a perfectly
+  good runtime and reported an error that never mentioned it. The rollback now
+  only runs once the swap has actually started.
+
 - Fixed the test suite writing into the operator's real configuration
   directory. Stateful modules capture their paths from `streamkeep.paths` at
   import time, and `tests/conftest.py` never rebound them, so running the

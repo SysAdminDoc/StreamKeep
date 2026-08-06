@@ -85,3 +85,69 @@ def test_offline_install_rejects_zip_traversal(tmp_path, monkeypatch):
 
     with pytest.raises(runtime.DenoRuntimeError, match="expected deno.exe"):
         runtime.install_managed_deno(archive, config_dir=tmp_path / "config")
+
+
+def _install(tmp_path, monkeypatch, config_dir, payload=b"deno"):
+    archive = _archive(tmp_path, name=f"deno-{payload.decode()}.zip", payload=payload)
+    _pin_archive(monkeypatch, archive)
+    monkeypatch.setattr(runtime, "_probe_executable", lambda _path: runtime.DENO_VERSION)
+    return runtime.install_managed_deno(archive, config_dir=config_dir)
+
+
+def test_failed_extraction_leaves_the_previous_install_intact(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    first = _install(tmp_path, monkeypatch, config_dir, payload=b"original")
+    original = Path(first["path"])
+    assert original.read_bytes() == b"original"
+
+    archive = _archive(tmp_path, name="replacement.zip", payload=b"replacement")
+    _pin_archive(monkeypatch, archive)
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("extraction failed")
+
+    monkeypatch.setattr(runtime, "_extract_executable", _boom)
+
+    with pytest.raises(runtime.DenoRuntimeError):
+        runtime.install_managed_deno(archive, config_dir=config_dir)
+
+    assert original.is_file()
+    assert original.read_bytes() == b"original"
+    info = runtime.get_managed_deno_info(config_dir=config_dir)
+    assert info["available"] is True
+
+
+def test_failed_version_probe_leaves_the_previous_install_intact(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    first = _install(tmp_path, monkeypatch, config_dir, payload=b"original")
+    original = Path(first["path"])
+
+    archive = _archive(tmp_path, name="probe-fail.zip", payload=b"replacement")
+    _pin_archive(monkeypatch, archive)
+
+    def _timeout(*_args, **_kwargs):
+        raise runtime.DenoRuntimeError("probe timed out")
+
+    monkeypatch.setattr(runtime, "_probe_executable", _timeout)
+
+    with pytest.raises(runtime.DenoRuntimeError, match="probe timed out"):
+        runtime.install_managed_deno(archive, config_dir=config_dir)
+
+    assert original.is_file()
+    assert original.read_bytes() == b"original"
+    assert runtime.get_managed_deno_info(config_dir=config_dir)["available"] is True
+
+
+def test_failed_first_install_leaves_no_partial_runtime(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    archive = _archive(tmp_path, name="first.zip", payload=b"first")
+    _pin_archive(monkeypatch, archive)
+    monkeypatch.setattr(
+        runtime, "_probe_executable",
+        lambda _path: (_ for _ in ()).throw(runtime.DenoRuntimeError("bad binary")),
+    )
+
+    with pytest.raises(runtime.DenoRuntimeError, match="bad binary"):
+        runtime.install_managed_deno(archive, config_dir=config_dir)
+
+    assert runtime.get_managed_deno_info(config_dir=config_dir)["available"] is False
