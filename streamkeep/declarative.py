@@ -102,6 +102,117 @@ class DeclarativeAdapterError(ValueError):
     """Raised when a YAML source adapter violates the data-only contract."""
 
 
+# Adapter patterns are matched on whatever thread handed us a URL — on the
+# desktop that is the GUI thread, once per keystroke — and Python's ``re`` has
+# no timeout and cannot be interrupted. A pattern is therefore rejected at
+# validation time when its *shape* permits catastrophic backtracking, rather
+# than being accepted and hoped about at match time.
+MAX_REGEX_REPEATS = 32
+MAX_REGEX_GROUP_DEPTH = 8
+MAX_MATCH_PATH_CHARS = 4096
+
+
+def _regex_parse_tree(pattern):
+    """Return the parsed pattern, or ``None`` when the parser is unavailable."""
+    try:
+        import re._parser as parser
+    except ImportError:  # pragma: no cover - CPython 3.11+ always provides it
+        return None
+    try:
+        return parser.parse(pattern)
+    except re.error:
+        return None
+
+
+def _describe_unsafe_regex(pattern):
+    """Return why *pattern* may backtrack catastrophically, or ``""``.
+
+    Rejected shapes: a backreference, and an unbounded repeat whose body holds
+    another unbounded repeat or an alternation. Those are the constructs that
+    turn a URL path into exponential work — ``(a+)+``, ``(a|aa)*``. Ordinary
+    path patterns (character classes, named groups, single quantifiers) are
+    unaffected.
+    """
+    tree = _regex_parse_tree(pattern)
+    if tree is None:
+        # Fall back to refusing the two textual markers we can recognise
+        # without a parser rather than silently accepting everything.
+        if re.search(r"\\[1-9]", pattern) or "(?P=" in pattern:
+            return "backreferences are not allowed"
+        if re.search(r"[+*}]\s*\)\s*[+*]", pattern):
+            return "nested quantifiers are not allowed"
+        return ""
+
+    repeats = 0
+
+    def unbounded(arg):
+        _minimum, maximum, _body = arg
+        return maximum >= _MAXREPEAT_SENTINEL
+
+    def walk(subpattern, depth, inside_unbounded_repeat):
+        nonlocal repeats
+        if depth > MAX_REGEX_GROUP_DEPTH:
+            return "the pattern nests groups too deeply"
+        for op, arg in subpattern:
+            name = str(op)
+            if name in {"GROUPREF", "GROUPREF_EXISTS", "GROUPREF_IGNORE"}:
+                return "backreferences are not allowed"
+            if name in {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}:
+                repeats += 1
+                if repeats > MAX_REGEX_REPEATS:
+                    return "the pattern uses too many quantifiers"
+                is_unbounded = unbounded(arg)
+                if inside_unbounded_repeat and is_unbounded:
+                    return "nested unbounded quantifiers are not allowed"
+                problem = walk(
+                    arg[2], depth + 1,
+                    inside_unbounded_repeat or is_unbounded,
+                )
+                if problem:
+                    return problem
+                continue
+            if name == "BRANCH":
+                if inside_unbounded_repeat:
+                    return "an alternation inside an unbounded quantifier is not allowed"
+                for branch in arg[1]:
+                    problem = walk(branch, depth + 1, inside_unbounded_repeat)
+                    if problem:
+                        return problem
+                continue
+            if name == "SUBPATTERN":
+                problem = walk(arg[3], depth + 1, inside_unbounded_repeat)
+                if problem:
+                    return problem
+                continue
+            if name in {"ASSERT", "ASSERT_NOT"}:
+                problem = walk(arg[1], depth + 1, inside_unbounded_repeat)
+                if problem:
+                    return problem
+                continue
+            if name == "ATOMIC_GROUP":
+                problem = walk(arg, depth + 1, inside_unbounded_repeat)
+                if problem:
+                    return problem
+        return ""
+
+    try:
+        return walk(tree, 0, False)
+    except (TypeError, ValueError, IndexError):
+        # An unrecognised node shape must not be treated as proven safe.
+        return "the pattern uses an unsupported construct"
+
+
+def _max_repeat_sentinel():
+    try:
+        import re._constants as constants
+        return int(constants.MAXREPEAT)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return 4294967295
+
+
+_MAXREPEAT_SENTINEL = _max_repeat_sentinel()
+
+
 @dataclass(frozen=True)
 class DeclarativeDefinition:
     """Compiled, immutable source adapter definition."""
@@ -130,7 +241,12 @@ class DeclarativeDefinition:
         host = parsed.hostname.rstrip(".").lower()
         if not any(_host_matches(host, pattern) for pattern in self.hosts):
             return None
-        match = self.path_pattern.fullmatch(parsed.path or "/")
+        path = parsed.path or "/"
+        if len(path) > MAX_MATCH_PATH_CHARS:
+            # Defence in depth behind the shape check: no adapter needs a path
+            # this long, and a linear-time pattern over one is wasted work.
+            return None
+        match = self.path_pattern.fullmatch(path)
         if match is None:
             return None
         values = {key: str(value or "") for key, value in match.groupdict().items()}
@@ -824,6 +940,9 @@ def validate_definition(raw: Mapping[str, Any], source: str = "") -> list[str]:
         else:
             try:
                 compiled_path = re.compile(path_regex)
+                unsafe = _describe_unsafe_regex(path_regex)
+                if unsafe:
+                    errors.append(f"match.path_regex is unsafe: {unsafe}")
                 channel_group = match.get("channel_group", "")
                 if (
                     isinstance(channel_group, str)
@@ -875,7 +994,13 @@ def parse_definition(raw: Mapping[str, Any], source: str = "") -> DeclarativeDef
             "request": raw.get("request", {}),
             "response": raw.get("response", {}),
         }
-    path_pattern = re.compile(str(match.get("path_regex", r".*")))
+    path_regex = str(match.get("path_regex", r".*"))
+    unsafe = _describe_unsafe_regex(path_regex)
+    if unsafe:
+        # validate_definition already reports this; refuse here too so a
+        # definition can never reach the registry through another entry point.
+        raise DeclarativeAdapterError(f"match.path_regex is unsafe: {unsafe}")
+    path_pattern = re.compile(path_regex)
     return DeclarativeDefinition(
         adapter_id=str(raw["id"]),
         name=str(raw["name"]),

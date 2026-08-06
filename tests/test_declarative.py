@@ -291,3 +291,80 @@ def test_cached_definitions_are_not_shared_mutably(tmp_path, monkeypatch):
     again, again_errors = declarative.discover_source_adapters()
     assert len(again) == 1
     assert again_errors == []
+
+
+CATASTROPHIC = DEFINITION.replace(
+    "path_regex: '^/watch/(?P<id>[A-Za-z0-9_-]+)$'",
+    "path_regex: '^/watch/(?P<id>(a+)+)$'",
+)
+
+
+@pytest.mark.parametrize("pattern", [
+    r"^/watch/(?P<id>[A-Za-z0-9_-]+)$",
+    r"^/(?:videos|watch)/(?P<id>[\w-]+)$",
+    r"^/v/(?P<id>\d{1,12})(?:/[a-z]+)?$",
+    r"^(?:[a-z]+/){1,10}$",
+    r".*",
+])
+def test_ordinary_path_patterns_are_accepted(pattern):
+    assert declarative._describe_unsafe_regex(pattern) == ""
+
+
+@pytest.mark.parametrize("pattern,reason", [
+    (r"^(a+)+b$", "nested unbounded"),
+    (r"^(a*)*$", "nested unbounded"),
+    (r"^(\w+\s?)*$", "nested unbounded"),
+    (r"^(a|aa)+$", "alternation inside"),
+    (r"^(a)\1$", "backreferences"),
+    (r"^(?P<x>a)(?P=x)$", "backreferences"),
+])
+def test_backtracking_prone_patterns_are_rejected(pattern, reason):
+    assert reason in declarative._describe_unsafe_regex(pattern)
+
+
+def test_definition_with_a_catastrophic_pattern_is_refused(tmp_path, monkeypatch):
+    """A shared adapter pack must not be able to wedge the URL field."""
+    raw = declarative._parse_yaml(CATASTROPHIC, "test")
+    errors = declarative.validate_definition(raw, "test")
+    assert any("path_regex is unsafe" in error for error in errors), errors
+
+    with pytest.raises(declarative.DeclarativeAdapterError, match="unsafe"):
+        declarative.parse_definition_text(CATASTROPHIC, "test")
+
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "evil.yaml").write_text(CATASTROPHIC, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    definitions, discovery_errors = declarative.discover_source_adapters()
+    assert definitions == []
+    assert any("unsafe" in error["error"] for error in discovery_errors)
+    assert declarative.detect_declarative_extractor(
+        "https://example.com/watch/" + "a" * 40
+    ) is None
+
+
+def test_config_supplied_catastrophic_pattern_is_refused():
+    config_payload = {"source_adapters": [{"id": "evil", "content": CATASTROPHIC}]}
+    declarative.invalidate_registry_cache()
+    definitions, errors = declarative.discover_source_adapters(config=config_payload)
+    assert definitions == []
+    assert any("unsafe" in error["error"] for error in errors)
+
+    with pytest.raises(declarative.DeclarativeAdapterError):
+        declarative.validate_config_source_adapters(config_payload["source_adapters"])
+
+
+def test_match_refuses_absurdly_long_paths(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    definition, _errors = declarative.discover_source_adapters()
+    definition = definition[0]
+    assert definition.match("https://example.com/watch/abc") is not None
+    huge = "a" * (declarative.MAX_MATCH_PATH_CHARS + 1)
+    assert definition.match(f"https://example.com/watch/{huge}") is None

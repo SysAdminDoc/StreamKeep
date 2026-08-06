@@ -4,6 +4,19 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Declarative source adapters can no longer supply a regular expression that
+  wedges the interface. Adapter `path_regex` values were compiled from YAML
+  with only a length check and then matched against the pasted URL on the
+  calling thread — the GUI thread, once per keystroke — and Python's `re` has
+  no timeout and cannot be interrupted. A shared adapter pack containing
+  `(a+)+` therefore turned a 26-character path into 1.4 seconds of
+  unstoppable backtracking. Patterns are now rejected at validation time when
+  their shape permits catastrophic backtracking: backreferences, an unbounded
+  quantifier nested inside another, and an alternation inside an unbounded
+  quantifier. Ordinary path patterns — character classes, named groups, single
+  and bounded quantifiers — are unaffected. Matching additionally refuses
+  absurdly long paths.
+
 - Memoised the declarative source-adapter registry. `Extractor.detect` is
   called for every URL it is handed, which on the desktop means every keystroke
   in the URL field, and the registry was re-read, re-parsed and re-compiled on
