@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Closing the window now joins every worker thread it owns, not only the ones
+  named in the teardown list. Twenty-eight worker attributes were assigned on
+  the main window and twenty-two were stopped, so the semantic index rebuild,
+  scheduled backup, credential probe, highlight, media-server, scene,
+  storyboard, thumbnail and update-check workers were destroyed while running
+  — a `qFatal`, not a catchable exception, and for the semantic index a
+  half-written database. The ordered list remains for the workers that need a
+  specific timeout, cancel hook or deferred close; everything else is now
+  swept by discovering the window's own `QThread` attributes, including those
+  held one level deep in dicts and lists, so a worker added later is covered
+  the day its attribute is assigned.
+
 - Backups now carry the per-source `yt-dlp --download-archive` files. They
   were the one piece of state whose loss silently re-downloads an entire
   library: restoring a profile on a new machine left StreamKeep with no record

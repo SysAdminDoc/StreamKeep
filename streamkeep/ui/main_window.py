@@ -1465,6 +1465,36 @@ class StreamKeep(
         except Exception as e:
             self._log(f"[WEBHOOK] Send failed: {e}")
 
+    def _owned_workers(self):
+        """Yield ``(label, worker)`` for every running QThread this window owns.
+
+        Discovered by inspecting the window's own attributes rather than by
+        registration, so a worker added later is covered the day its attribute
+        is assigned instead of the day someone remembers to add it to a
+        teardown list. Dict and list containers are searched one level deep,
+        which is how the per-job worker maps are held.
+        """
+        seen = set()
+
+        def collect(label, value):
+            if isinstance(value, QThread):
+                if id(value) in seen:
+                    return
+                seen.add(id(value))
+                if value.isRunning():
+                    yield label, value
+                return
+            if isinstance(value, dict):
+                for key, item in list(value.items()):
+                    yield from collect(f"{label}[{key}]", item)
+                return
+            if isinstance(value, (list, tuple, set)):
+                for index, item in enumerate(value):
+                    yield from collect(f"{label}[{index}]", item)
+
+        for name, value in list(vars(self).items()):
+            yield from collect(name.lstrip("_") or name, value)
+
     def closeEvent(self, event):
         _stop_worker(
             getattr(self, "download_worker", None), 3000,
@@ -1548,6 +1578,18 @@ class StreamKeep(
             _stop_worker(
                 getattr(self, attr, None), 2000,
                 cancel=True, terminate_timeout=500, label=attr.lstrip("_"),
+            )
+
+        # Everything above is stopped in a deliberate order because it needs
+        # specific timeouts, a cancel hook, or a deferred close. Whatever is
+        # left is swept generically: a QThread this window owns but that nobody
+        # remembered to name here would otherwise be destroyed while running,
+        # which is a qFatal, not an exception. Three shipped bugs had exactly
+        # that shape, so the sweep is the invariant and the list above is only
+        # an ordering refinement.
+        for label, worker in self._owned_workers():
+            _stop_worker(
+                worker, 2000, cancel=True, terminate_timeout=500, label=label,
             )
 
         for timer, label in (
