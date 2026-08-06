@@ -4,6 +4,23 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- The OpenAI-compatible translation endpoint no longer bypasses the guarded
+  transport. It was the one outbound request in the tree that skipped
+  `net_guard`, and it attaches a bearer API key, so a configured
+  `http://10.0.0.5:8080` handed the operator's credential in cleartext to a
+  host network policy would otherwise have refused. The base URL must now be
+  `https://`, carry no embedded credentials, and pass address validation, and
+  the request routes through the pinned loopback proxy like every other remote
+  call. Configuration validation applies the scheme and shape checks only, so
+  importing a config offline still works while the address policy is enforced
+  where the connection is actually made.
+
+- Bounded every translation provider response. All three backends read the
+  body without a cap, including the unauthenticated local Ollama endpoint, so
+  anything squatting that port could stream an unbounded body into the
+  finalize path. Responses are now capped and an oversized one is refused with
+  a named error instead of being buffered.
+
 - Closing the window now joins every worker thread it owns, not only the ones
   named in the teardown list. Twenty-eight worker attributes were assigned on
   the main window and twenty-two were stopped, so the semantic index rebuild,

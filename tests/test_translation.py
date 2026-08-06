@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from streamkeep import translation
 from streamkeep.models import StreamInfo
 from streamkeep.metadata import MetadataSaver
 from streamkeep.translation import (
@@ -87,3 +88,91 @@ def test_translation_writes_localized_sidecars_and_keeps_originals(tmp_path):
     nfo = Path(result["nfo_path"]).read_text(encoding="utf-8")
     assert "Título traducido" in nfo
     assert "Original title" in nfo
+
+
+def test_provider_url_must_be_https():
+    with pytest.raises(translation.TranslationError, match="https://"):
+        translation.normalize_provider_api_url("http://10.0.0.5:8080")
+    with pytest.raises(translation.TranslationError, match="https://"):
+        translation.normalize_provider_api_url("ftp://example.com")
+
+
+def test_provider_url_is_subject_to_network_policy_at_request_time():
+    with pytest.raises(translation.TranslationError, match="network policy"):
+        translation.normalize_provider_api_url("https://127.0.0.1:8443")
+    with pytest.raises(translation.TranslationError, match="network policy"):
+        translation.normalize_provider_api_url("https://192.168.1.10")
+
+
+def test_shape_only_validation_does_not_need_the_network():
+    """Config import must not fail because the machine is offline."""
+    assert translation.normalize_provider_api_url(
+        "https://api.does-not-resolve.invalid/", resolve=False,
+    ) == "https://api.does-not-resolve.invalid"
+    assert translation.normalize_provider_api_url("", resolve=False) == ""
+    with pytest.raises(translation.TranslationError, match="https://"):
+        translation.normalize_provider_api_url("http://x.invalid", resolve=False)
+    with pytest.raises(translation.TranslationError, match="credentials"):
+        translation.normalize_provider_api_url(
+            "https://user:pw@x.invalid", resolve=False,
+        )
+
+
+def test_openai_backend_refuses_a_plaintext_base_url():
+    with pytest.raises(translation.TranslationError):
+        translation._query_openai("prompt", "http://10.0.0.5:8080", "sk-secret")
+
+
+def test_config_import_rejects_a_plaintext_translation_endpoint():
+    from streamkeep import config as config_module
+
+    with pytest.raises(config_module.ConfigImportError, match="translation_api_url"):
+        config_module._validate_config_schema(
+            {"translation_api_url": "http://10.0.0.5:8080"}
+        )
+    config_module._validate_config_schema({"translation_api_url": ""})
+
+
+class _Response:
+    def __init__(self, payload):
+        self._payload = payload
+        self.closed = False
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            return self._payload
+        return self._payload[:size]
+
+    def close(self):
+        self.closed = True
+
+
+def test_provider_responses_are_bounded():
+    limit = translation.MAX_PROVIDER_RESPONSE_BYTES
+    oversized = _Response(b"x" * (limit + 10))
+    with pytest.raises(translation.TranslationError, match="larger than"):
+        translation._read_bounded(oversized)
+
+    exact = _Response(b"y" * limit)
+    assert len(translation._read_bounded(exact)) == limit
+
+
+def test_local_ollama_response_is_bounded(monkeypatch):
+    payload = b'{"response": "' + b"z" * (
+        translation.MAX_PROVIDER_RESPONSE_BYTES + 64
+    ) + b'"}'
+
+    class _Ctx(_Response):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            self.close()
+            return False
+
+    monkeypatch.setattr(
+        translation.urllib.request, "urlopen",
+        lambda *_args, **_kwargs: _Ctx(payload),
+    )
+    with pytest.raises(translation.TranslationError, match="larger than"):
+        translation._query_ollama("prompt")

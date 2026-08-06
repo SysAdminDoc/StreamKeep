@@ -88,7 +88,7 @@ _STRING_CONFIG_KEYS = frozenset({
     "auth_profile_id", "theme",
     "visual_density", "visual_accent",
     "language", "whisper_model", "whisper_model_path", "hf_token",
-    "translation_provider", "translation_model",
+    "translation_provider", "translation_model", "translation_api_url",
     "dismissed_update_tag",
     "companion_proxy_origin", "companion_extension_origin",
     "subtitle_languages", "subtitle_convert",
@@ -438,6 +438,7 @@ def _validate_config_schema(config):
     _validate_ytdlp_templates_schema(config.get("ytdlp_arg_templates", {}))
     _validate_smart_profiles_schema(config.get("smart_profiles", []))
     _validate_source_adapters_schema(config.get("source_adapters", []))
+    _validate_translation_endpoint(config.get("translation_api_url", ""))
     _reject_imported_secret_handles(config)
 
 
@@ -595,6 +596,26 @@ def _validate_source_adapters_schema(value):
         validate_config_source_adapters(value)
     except DeclarativeAdapterError as error:
         raise ConfigImportError(str(error)) from error
+
+
+def _validate_translation_endpoint(value):
+    """Refuse a translation endpoint that would leak the API key.
+
+    The OpenAI-compatible path attaches a bearer token, so a plain-http or
+    plain-http base URL hands the operator's credential to whatever is
+    listening. Checked at import/validation time so the refusal is visible
+    before a recording is finalized rather than after. Deliberately shape-
+    only: the DNS and address-policy pass happens when the request is made,
+    so importing a config offline does not fail.
+    """
+    if not value:
+        return
+    from .translation import TranslationError, normalize_provider_api_url
+
+    try:
+        normalize_provider_api_url(value, resolve=False)
+    except TranslationError as error:
+        raise ConfigImportError(f"config.translation_api_url: {error}") from error
 
 
 def _quarantine_import_capabilities(config):

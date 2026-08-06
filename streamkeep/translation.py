@@ -2,22 +2,39 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from .metadata import MAX_METADATA_BYTES, MetadataSaver, load_metadata_sidecar
+from .net_guard import (
+    GuardedHTTPProxy,
+    RemoteURLPolicyError,
+    validate_remote_url,
+)
 
 TRANSLATION_SCHEMA = "streamkeep.localized-metadata"
 TRANSLATION_SCHEMA_VERSION = 1
 TRANSLATION_PROVIDER_VERSION = "translation-contract-v1"
 MAX_TRANSLATION_CHARS = 100_000
 MAX_CHAPTERS = 500
+# A provider answer only has to carry a title, a description and chapter
+# titles. Reading without a cap let anything squatting the local Ollama port —
+# or a hostile endpoint reached through a mistyped base URL — stream an
+# unbounded body straight into the finalize path.
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 _CLOUD_PROVIDERS = frozenset({"openai", "anthropic"})
+# The local default. Ollama listens unauthenticated on loopback, so it is
+# addressed directly rather than through the address-validating proxy, which
+# exists to keep *remote* requests off private space.
+OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
+ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 
 class TranslationConsentRequired(RuntimeError):
@@ -26,6 +43,77 @@ class TranslationConsentRequired(RuntimeError):
 
 class TranslationError(RuntimeError):
     """Raised when a translation response cannot satisfy the sidecar shape."""
+
+
+def normalize_provider_api_url(value, *, resolve=True):
+    """Return a validated HTTPS provider base URL.
+
+    Every other outbound request in StreamKeep routes through ``net_guard``.
+    This one attaches a bearer API key, so an unvalidated base URL does not
+    merely fetch from the wrong place — it hands the operator's credential to
+    it, in cleartext if the scheme is ``http``.
+
+    ``resolve=False`` performs the scheme and shape checks without the DNS and
+    address-policy pass, which is what configuration validation wants: an
+    import must not fail because the machine is offline or the provider's host
+    is briefly unresolvable. The full policy check still runs at request time,
+    where the connection is actually made.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not text.lower().startswith("https://"):
+        raise TranslationError(
+            "The translation provider URL must use https:// so the API key is "
+            "not sent in cleartext."
+        )
+    if not resolve:
+        parsed = urllib.parse.urlsplit(text)
+        if not parsed.hostname:
+            raise TranslationError(
+                "The translation provider URL has no host."
+            )
+        if parsed.username or parsed.password:
+            raise TranslationError(
+                "The translation provider URL must not contain credentials."
+            )
+        return text.rstrip("/")
+    try:
+        return validate_remote_url(text).url.rstrip("/")
+    except RemoteURLPolicyError as error:
+        raise TranslationError(
+            f"The translation provider URL was refused by network policy: {error}"
+        ) from error
+
+
+def _read_bounded(response, limit=MAX_PROVIDER_RESPONSE_BYTES):
+    """Return at most *limit* bytes, refusing anything larger."""
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise TranslationError(
+            "The translation provider returned a response larger than "
+            f"{limit} bytes."
+        )
+    return payload
+
+
+def _guarded_json_request(url, *, data, headers, timeout):
+    """POST JSON to a validated remote endpoint through the guarded proxy."""
+    try:
+        target = validate_remote_url(url)
+    except RemoteURLPolicyError as error:
+        raise TranslationError(
+            f"The translation endpoint was refused by network policy: {error}"
+        ) from error
+    with GuardedHTTPProxy(connect_timeout=timeout) as proxy:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy.url, "https": proxy.url})
+        )
+        request = urllib.request.Request(
+            target.url, data=data, headers=headers, method="POST",
+        )
+        with contextlib.closing(opener.open(request, timeout=timeout)) as response:
+            return json.loads(_read_bounded(response).decode("utf-8"))
 
 
 def is_cloud_provider(provider):
@@ -86,12 +174,14 @@ def _query_ollama(prompt, model="", timeout=120):
         "stream": False,
     }).encode("utf-8")
     request = urllib.request.Request(
-        "http://localhost:11434/api/generate",
+        OLLAMA_ENDPOINT,
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = json.loads(response.read().decode("utf-8"))
+    with contextlib.closing(
+        urllib.request.urlopen(request, timeout=timeout)
+    ) as response:
+        data = json.loads(_read_bounded(response).decode("utf-8"))
     return str(data.get("response", "") or "")
 
 
@@ -104,16 +194,20 @@ def _query_openai(prompt, api_url, api_key, model="", timeout=120):
         ],
         "max_tokens": 4000,
     }).encode("utf-8")
-    request = urllib.request.Request(
-        api_url.rstrip("/") + "/v1/chat/completions",
+    base = normalize_provider_api_url(api_url)
+    if not base:
+        raise TranslationError(
+            "An OpenAI-compatible provider needs an https:// base URL."
+        )
+    data = _guarded_json_request(
+        base + "/v1/chat/completions",
         data=body,
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         },
+        timeout=timeout,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = json.loads(response.read().decode("utf-8"))
     return str(data["choices"][0]["message"]["content"] or "")
 
 
@@ -124,17 +218,16 @@ def _query_anthropic(prompt, api_key, model="", timeout=120):
         "system": "Return valid JSON only.",
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+    data = _guarded_json_request(
+        ANTHROPIC_ENDPOINT,
         data=body,
         headers={
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
         },
+        timeout=timeout,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = json.loads(response.read().decode("utf-8"))
     return str(data["content"][0]["text"] or "")
 
 
