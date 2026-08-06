@@ -4,6 +4,16 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Memoised the declarative source-adapter registry. `Extractor.detect` is
+  called for every URL it is handed, which on the desktop means every keystroke
+  in the URL field, and the registry was re-read, re-parsed and re-compiled on
+  each one — including a full config load. With twenty adapters installed,
+  typing a forty-character URL cost 800 YAML parses and about 1.1 seconds of
+  GUI-thread work; it now costs one parse and about 69 ms. The cache is keyed
+  on a signature of the directory listing, each file's size and nanosecond
+  mtime, and the config entries' contents, so editing, adding, removing or
+  disabling a definition still takes effect without a restart.
+
 - Advanced the managed Deno runtime pin from 2.3.1 to 2.9.5. The previous pin
   was affected by 17 published advisories — a critical `node:crypto`
   finalization bug, four Windows command-injection classes, a TLS-retry

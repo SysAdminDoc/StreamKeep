@@ -197,3 +197,97 @@ def test_declarative_diagnostics_reports_invalid_file(tmp_path):
     report = declarative.declarative_adapter_diagnostics(tmp_path, config={})
     assert report["adapters"] == []
     assert report["errors"][0]["source"] == str(path)
+
+
+def test_registry_is_parsed_once_until_the_signature_changes(tmp_path, monkeypatch):
+    """Detection runs per keystroke; it must not reparse the directory each time."""
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    parses = []
+    real_parse = declarative.parse_definition_text
+
+    def counting_parse(text, source):
+        parses.append(source)
+        return real_parse(text, source)
+
+    monkeypatch.setattr(declarative, "parse_definition_text", counting_parse)
+
+    url = "https://example.com/watch/abc123"
+    for _ in range(25):
+        assert declarative.detect_declarative_extractor(url) is not None
+    assert len(parses) == 1, f"registry reparsed {len(parses)} times"
+
+
+def test_registry_cache_reparses_after_a_definition_changes(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "example.yaml"
+    path.write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    assert declarative.declarative_adapter_names() == ["Example Source"]
+    first = declarative.registry_signature()
+
+    # Same byte length, so only the timestamp distinguishes the two revisions.
+    path.write_text(
+        DEFINITION.replace("name: Example Source", "name: Renamed Source"),
+        encoding="utf-8",
+    )
+    assert declarative.registry_signature() != first
+    assert declarative.declarative_adapter_names() == ["Renamed Source"]
+
+    (adapter_dir / "second.yaml").write_text(
+        DEFINITION.replace("id: example-source", "id: second-source")
+                  .replace("name: Example Source", "name: Second Source")
+                  .replace("hosts: [example.com]", "hosts: [second.example]"),
+        encoding="utf-8",
+    )
+    assert sorted(declarative.declarative_adapter_names()) == [
+        "Renamed Source", "Second Source",
+    ]
+
+    path.unlink()
+    assert declarative.declarative_adapter_names() == ["Second Source"]
+
+
+def test_registry_cache_tracks_config_entries(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    empty = {"source_adapters": []}
+    assert declarative.declarative_adapter_names(config=empty) == []
+
+    populated = {"source_adapters": [{"id": "cfg", "content": DEFINITION}]}
+    assert declarative.registry_signature(config=populated) != \
+        declarative.registry_signature(config=empty)
+    assert declarative.declarative_adapter_names(config=populated) == ["Example Source"]
+
+    disabled = {
+        "source_adapters": [
+            {"id": "cfg", "content": DEFINITION, "enabled": False},
+        ]
+    }
+    assert declarative.declarative_adapter_names(config=disabled) == []
+
+
+def test_cached_definitions_are_not_shared_mutably(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    definitions, errors = declarative.discover_source_adapters()
+    definitions.clear()
+    errors.append({"source": "x", "error": "y"})
+
+    again, again_errors = declarative.discover_source_adapters()
+    assert len(again) == 1
+    assert again_errors == []

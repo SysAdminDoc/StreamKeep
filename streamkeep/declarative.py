@@ -10,9 +10,11 @@ changes, so editing a YAML file takes effect without restarting StreamKeep.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,6 +35,12 @@ from .paths import CONFIG_DIR
 logger = logging.getLogger(__name__)
 
 SOURCE_ADAPTERS_DIR = CONFIG_DIR / "source_adapters"
+
+# Registry memoisation. Keyed on ``registry_signature`` so an edited, added or
+# removed definition takes effect without a restart while a URL field that is
+# being typed into does not reparse the whole directory per character.
+_REGISTRY_LOCK = threading.Lock()
+_REGISTRY_CACHE: dict[tuple, tuple] = {}
 DECLARATIVE_SCHEMA_VERSION = 1
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_DEFINITIONS = 128
@@ -969,8 +977,89 @@ def _config_entries(config):
         yield definition, None
 
 
+def registry_signature(directory=None, config=None):
+    """Return a cheap fingerprint of everything the registry is built from.
+
+    Only ``stat`` results and the config entries themselves are read, so this
+    stays orders of magnitude cheaper than parsing the definitions. Any change
+    to a file's size or mtime, to the set of files, or to the config entries
+    produces a different signature and forces a reparse.
+    """
+    directory = Path(directory or SOURCE_ADAPTERS_DIR)
+    entries = []
+    try:
+        if directory.is_dir():
+            for path in sorted(directory.iterdir()):
+                if path.suffix.lower() not in {".yaml", ".yml"}:
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    entries.append((path.name, -1, -1))
+                    continue
+                if not path.is_file():
+                    continue
+                entries.append((path.name, stat.st_size, stat.st_mtime_ns))
+    except OSError as error:
+        entries.append((str(error), -1, -1))
+    if isinstance(config, dict):
+        raw = config.get("source_adapters", [])
+    else:
+        try:
+            from .config import load_config
+            raw = load_config().get("source_adapters", [])
+        except Exception:
+            # safe: an unreadable config yields an empty adapter set below, and
+            # discover_source_adapters records the real error.
+            raw = []
+    config_key = ()
+    if isinstance(raw, list):
+        config_key = tuple(
+            (
+                str(entry.get("id", "")),
+                bool(entry.get("enabled", True)),
+                hashlib.sha256(
+                    str(entry.get("content", "")).encode("utf-8", "replace")
+                ).hexdigest(),
+            )
+            for entry in raw[:MAX_DEFINITIONS]
+            if isinstance(entry, dict)
+        )
+    return (str(directory), tuple(entries), config_key)
+
+
 def discover_source_adapters(directory=None, config=None):
-    """Return ``(definitions, errors)`` from files and config entries."""
+    """Return ``(definitions, errors)`` from files and config entries.
+
+    Results are memoised on :func:`registry_signature`. ``Extractor.detect``
+    calls this for every URL it is handed — which on the desktop means every
+    keystroke in the URL field — so an uncached implementation re-read and
+    re-parsed up to ``MAX_DEFINITIONS`` YAML files, recompiled their regexes,
+    and reloaded the config on each character typed.
+    """
+    signature = registry_signature(directory, config)
+    with _REGISTRY_LOCK:
+        cached = _REGISTRY_CACHE.get(signature)
+    if cached is not None:
+        definitions, errors = cached
+        return list(definitions), [dict(error) for error in errors]
+    definitions, errors = _build_source_adapters(directory, config)
+    with _REGISTRY_LOCK:
+        # Definitions are frozen dataclasses with precompiled patterns, so the
+        # cached tuple is safe to share; callers get fresh list copies.
+        _REGISTRY_CACHE.clear()
+        _REGISTRY_CACHE[signature] = (tuple(definitions), tuple(errors))
+    return definitions, errors
+
+
+def invalidate_registry_cache():
+    """Drop the memoised registry. Intended for tests and explicit reloads."""
+    with _REGISTRY_LOCK:
+        _REGISTRY_CACHE.clear()
+
+
+def _build_source_adapters(directory=None, config=None):
+    """Parse every adapter definition from disk and config."""
     directory = Path(directory or SOURCE_ADAPTERS_DIR)
     definitions: list[DeclarativeDefinition] = []
     errors: list[dict[str, str]] = []
