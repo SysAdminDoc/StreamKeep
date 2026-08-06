@@ -5,6 +5,7 @@ Creates a secret-free ``.skbackup`` file (ZIP) containing:
   - library.db (history, monitor, queue)
   - tags.db (tag associations)
   - notifications.jsonl (notification history)
+  - download-archives/ (per-source yt-dlp download archives)
 
 Authentication state and cookies are deliberately excluded. Use the explicit
 password-protected portable-secret backup for credential transfer.
@@ -40,6 +41,77 @@ BACKUP_FILES = [
     "notifications.jsonl",
 ]
 SQLITE_BACKUP_FILES = {"library.db", "search.db", "tags.db"}
+
+# Directories carried as individual ZIP members under a prefix.
+#
+# ``download-archives`` holds the per-source ``yt-dlp --download-archive``
+# files. Losing them is not cosmetic: a restored profile no longer knows which
+# playlist entries it already has and re-downloads the entire library, which is
+# precisely the failure the archive exists to prevent. The contents are inert
+# newline-delimited extractor ids, so nothing executable or secret travels with
+# them.
+#
+# Deliberately NOT included, each for its own reason:
+#   ``auth``            — authentication state and cookie jars. The module
+#                         contract is a secret-free archive; credentials move
+#                         through the password-protected portable-secret path.
+#   ``plugins``         — executable Python. Restoring an archive would become
+#                         a way to plant code that runs in-process.
+#   ``source_adapters`` — definitions go live on the next URL detection, so
+#                         restoring them would enable third-party request
+#                         descriptions without review.
+#   ``semantic.db``     — a rebuildable derived index, excluded by design.
+BACKUP_DIRECTORIES = ["download-archives"]
+MAX_BACKUP_DIRECTORY_FILES = 5000
+MAX_BACKUP_DIRECTORY_BYTES = 64 * 1024 * 1024
+
+
+def _directory_members(name):
+    """Yield ``(archive_name, path)`` for each regular file in a backed-up dir.
+
+    Bounded on both count and total bytes so a pathological profile cannot make
+    a backup unbounded, and symlinks are skipped so a backup can never capture
+    something from outside the config directory.
+    """
+    root = CONFIG_DIR / name
+    if not root.is_dir():
+        return
+    total = 0
+    emitted = 0
+    for path in sorted(root.iterdir()):
+        if emitted >= MAX_BACKUP_DIRECTORY_FILES:
+            return
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if total + size > MAX_BACKUP_DIRECTORY_BYTES:
+            return
+        total += size
+        emitted += 1
+        yield f"{name}/{path.name}", path
+
+
+def _safe_directory_member(archive_name):
+    """Return the ``(directory, filename)`` for a member, or ``None``.
+
+    Restores accept only a single path segment under a known directory, so a
+    crafted archive cannot traverse out of the config directory or nest.
+    """
+    parts = archive_name.split("/")
+    if len(parts) != 2:
+        return None
+    directory, filename = parts
+    if directory not in BACKUP_DIRECTORIES:
+        return None
+    if not filename or filename in {".", ".."} or "\\" in filename:
+        return None
+    if Path(filename).name != filename:
+        return None
+    return directory, filename
+
 
 # Marker written while the destructive activation phase of a restore is in
 # flight. If the process dies between the first and last atomic file swap the
@@ -90,6 +162,11 @@ def create_backup(output_path, *, include_logs=False):
                         snapshot_paths.append(snap)
                         source_path = snap
                     zf.write(str(source_path), fname)
+                    count += 1
+
+            for dirname in BACKUP_DIRECTORIES:
+                for archive_name, path in _directory_members(dirname):
+                    zf.write(str(path), archive_name)
                     count += 1
 
             # Optionally include logs
@@ -146,6 +223,7 @@ def restore_backup(backup_path):
     from .diagnostics import redact_text
 
     staging_dir = None
+    staged_directories = []
     try:
         with zipfile.ZipFile(backup_path, "r") as zf:
             names = zf.namelist()
@@ -172,6 +250,23 @@ def restore_backup(backup_path):
                 else:
                     dest.write_bytes(data)
                 staged[fname] = dest
+
+
+            for archive_name in names:
+                member = _safe_directory_member(archive_name)
+                if member is None:
+                    continue
+                directory, filename = member
+                dest = staging_dir / directory / filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(archive_name) as handle:
+                    payload = handle.read(MAX_BACKUP_DIRECTORY_BYTES + 1)
+                if len(payload) > MAX_BACKUP_DIRECTORY_BYTES:
+                    raise _RestoreError(
+                        f"{archive_name} exceeds the directory size limit"
+                    )
+                dest.write_bytes(payload)
+                staged_directories.append((directory, filename, dest))
     except _RestoreError as e:
         _cleanup_staging(staging_dir)
         return False, f"Restore aborted: {redact_text(str(e))}"
@@ -202,7 +297,10 @@ def restore_backup(backup_path):
         _clear_restore_marker()
         marker = None
         _remove_pre_restore_copies(current for current, _t, _f in prepared)
-        return True, f"Restored {len(prepared)} files from backup"
+        restored_extras = _activate_directory_members(staged_directories)
+        return True, (
+            f"Restored {len(prepared) + restored_extras} files from backup"
+        )
     except OSError as e:
         for _current, tmp, _fname in prepared:
             try:
@@ -215,6 +313,34 @@ def restore_backup(backup_path):
         return False, f"Restore failed during activation: {redact_text(str(e))}"
     finally:
         _cleanup_staging(staging_dir)
+
+
+def _activate_directory_members(staged_directories):
+    """Write staged directory members into the config directory.
+
+    Merged per file rather than swapped per directory, and deliberately so:
+    these are download-archive files, and deleting one that the backup happens
+    not to contain would make StreamKeep re-download the media that entry
+    represents — the exact harm this backup coverage exists to prevent. Each
+    write is individually atomic, so an interrupted activation leaves whole
+    files rather than truncated ones. Runs only after the crash-consistent file
+    set has already been swapped, so a failure here cannot corrupt the library.
+    """
+    restored = 0
+    for directory, filename, source in staged_directories:
+        target_dir = CONFIG_DIR / directory
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            current = target_dir / filename
+            tmp = current.with_suffix(current.suffix + ".restore-tmp")
+            _write_atomic_tmp(tmp, source.read_bytes())
+            os.replace(tmp, current)
+            restored += 1
+        except OSError:
+            # A single unwritable archive file must not fail a restore whose
+            # library, config and history have already been activated.
+            continue
+    return restored
 
 
 def list_backup_contents(backup_path):

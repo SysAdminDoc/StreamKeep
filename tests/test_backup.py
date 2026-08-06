@@ -498,3 +498,133 @@ class BackupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DownloadArchiveBackupTests(unittest.TestCase):
+    """The archive files are what stop a restored profile re-downloading."""
+
+    def _profile(self, root):
+        config_dir = root / "config"
+        (config_dir / "download-archives").mkdir(parents=True)
+        (config_dir / "config.json").write_text("{}", encoding="utf-8")
+        return config_dir
+
+    def test_round_trip_restores_download_archives(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = self._profile(root)
+            archives = config_dir / "download-archives"
+            (archives / "aaa.txt").write_text("youtube abc123\n", encoding="utf-8")
+            (archives / "bbb.txt").write_text("twitch 999\n", encoding="utf-8")
+            backup_path = root / "profile.skbackup"
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, message = backup.create_backup(backup_path)
+            self.assertTrue(ok, message)
+
+            with zipfile.ZipFile(backup_path) as zf:
+                names = set(zf.namelist())
+            self.assertIn("download-archives/aaa.txt", names)
+            self.assertIn("download-archives/bbb.txt", names)
+
+            restored = root / "restored"
+            restored.mkdir()
+            (restored / "config.json").write_text("{}", encoding="utf-8")
+            with mock.patch.object(backup, "CONFIG_DIR", restored):
+                ok, message = backup.restore_backup(backup_path)
+            self.assertTrue(ok, message)
+            self.assertEqual(
+                (restored / "download-archives" / "aaa.txt").read_text(encoding="utf-8"),
+                "youtube abc123\n",
+            )
+            self.assertEqual(
+                (restored / "download-archives" / "bbb.txt").read_text(encoding="utf-8"),
+                "twitch 999\n",
+            )
+
+    def test_restore_merges_rather_than_deleting_unlisted_archives(self):
+        """Deleting an archive the backup lacks would cause a re-download."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = self._profile(root)
+            (config_dir / "download-archives" / "aaa.txt").write_text(
+                "youtube abc123\n", encoding="utf-8"
+            )
+            backup_path = root / "profile.skbackup"
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, _message = backup.create_backup(backup_path)
+            self.assertTrue(ok)
+
+            restored = root / "restored"
+            (restored / "download-archives").mkdir(parents=True)
+            (restored / "config.json").write_text("{}", encoding="utf-8")
+            (restored / "download-archives" / "newer.txt").write_text(
+                "kick 42\n", encoding="utf-8"
+            )
+            with mock.patch.object(backup, "CONFIG_DIR", restored):
+                ok, _message = backup.restore_backup(backup_path)
+            self.assertTrue(ok)
+            self.assertTrue((restored / "download-archives" / "aaa.txt").is_file())
+            self.assertTrue((restored / "download-archives" / "newer.txt").is_file())
+
+    def test_backup_excludes_credentials_plugins_and_source_adapters(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = self._profile(root)
+            for name, payload in (
+                ("auth", "cookie-jar-secret"),
+                ("plugins", "print('code')"),
+                ("source_adapters", "id: adapter"),
+            ):
+                directory = config_dir / name
+                directory.mkdir()
+                (directory / "entry.txt").write_text(payload, encoding="utf-8")
+            backup_path = root / "profile.skbackup"
+
+            with mock.patch.object(backup, "CONFIG_DIR", config_dir):
+                ok, _message = backup.create_backup(backup_path)
+            self.assertTrue(ok)
+
+            with zipfile.ZipFile(backup_path) as zf:
+                names = zf.namelist()
+                blob = b"".join(zf.read(name) for name in names)
+            for excluded in ("auth/", "plugins/", "source_adapters/"):
+                self.assertFalse(
+                    any(name.startswith(excluded) for name in names),
+                    f"{excluded} must not be in a secret-free backup",
+                )
+            self.assertNotIn(b"cookie-jar-secret", blob)
+
+    def test_restore_refuses_traversing_directory_members(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            backup_path = root / "evil.skbackup"
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("_backup_meta.json", backup._meta_json())
+                zf.writestr("config.json", "{}")
+                zf.writestr("download-archives/../../escaped.txt", "pwned")
+                zf.writestr("download-archives/nested/deep.txt", "pwned")
+                zf.writestr("plugins/evil.py", "import os")
+
+            restored = root / "restored"
+            restored.mkdir()
+            with mock.patch.object(backup, "CONFIG_DIR", restored):
+                ok, message = backup.restore_backup(backup_path)
+            self.assertTrue(ok, message)
+            self.assertFalse((root / "escaped.txt").exists())
+            self.assertFalse((restored.parent / "escaped.txt").exists())
+            self.assertFalse((restored / "plugins").exists())
+            archives = restored / "download-archives"
+            if archives.exists():
+                self.assertEqual(list(archives.rglob("*.txt")), [])
+
+    def test_directory_member_validator_rejects_unsafe_names(self):
+        self.assertIsNone(backup._safe_directory_member("download-archives/../x"))
+        self.assertIsNone(backup._safe_directory_member("download-archives/a/b"))
+        self.assertIsNone(backup._safe_directory_member("plugins/x.py"))
+        self.assertIsNone(backup._safe_directory_member("download-archives/"))
+        self.assertIsNone(backup._safe_directory_member("nope/x.txt"))
+        self.assertEqual(
+            backup._safe_directory_member("download-archives/ok.txt"),
+            ("download-archives", "ok.txt"),
+        )

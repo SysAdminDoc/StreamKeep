@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Backups now carry the per-source `yt-dlp --download-archive` files. They
+  were the one piece of state whose loss silently re-downloads an entire
+  library: restoring a profile on a new machine left StreamKeep with no record
+  of which playlist entries it already had. Members are bounded on count and
+  total size, symlinks are skipped, and restore accepts only a single path
+  segment under a known directory so a crafted archive cannot traverse out of
+  the configuration directory. Archive files are merged rather than swapped
+  per directory — deleting an entry the backup happens not to contain would
+  cause exactly the re-download this is meant to prevent. `auth/`, `plugins/`
+  and `source_adapters/` remain excluded, respectively as credential material,
+  executable code, and definitions that would go live without review.
+
 - Declarative source adapters can no longer supply a regular expression that
   wedges the interface. Adapter `path_regex` values were compiled from YAML
   with only a length check and then matched against the pasted URL on the
