@@ -1082,8 +1082,14 @@ def _decorate_javascript_record(record, runtime):
 
 
 def _probe_javascript_runtime(*, preference="path"):
+    from .javascript_runtime import DENO_MINIMUM_VERSION
+
     candidates = [
-        ("deno", ["deno"], "2.3.0", ""),
+        # The Deno floor tracks the advisory-clean version rather than the
+        # oldest release that merely works: everything below it is affected by
+        # published sandbox-bypass and command-injection advisories, and this
+        # runtime executes untrusted remote player JavaScript.
+        ("deno", ["deno"], DENO_MINIMUM_VERSION, ""),
         ("node", ["node", "nodejs"], "22.0.0", ""),
         ("quickjs", ["qjs"], "2023.12.9", ""),
         ("bun", ["bun"], "1.2.11", "1.3.14"),
@@ -1114,7 +1120,7 @@ def _probe_javascript_runtime(*, preference="path"):
             record = _probe_executable(
                 "javascript", commands, ["--version"], minimum,
                 ["youtube-js-runtime"],
-                "Install Deno 2.3+ (recommended) or Node.js 22+ and add it to PATH.",
+                "Install Deno 2.8.1+ (recommended) or Node.js 22+ and add it to PATH.",
                 display_name=name,
             )
             selected = consider(record, name, maximum)
@@ -1140,9 +1146,9 @@ def _probe_javascript_runtime(*, preference="path"):
     if first_unsafe:
         return first_unsafe
     missing = _base_record(
-        "javascript", "JavaScript runtime", "executable", "Deno 2.3 / Node 22",
+        "javascript", "JavaScript runtime", "executable", "Deno 2.8.1 / Node 22",
         ["youtube-js-runtime"],
-        "Install Deno 2.3+ (recommended) or Node.js 22+ and add it to PATH.",
+        "Install Deno 2.8.1+ (recommended) or Node.js 22+ and add it to PATH.",
     )
     missing["runtime"] = ""
     missing["maximum"] = ""

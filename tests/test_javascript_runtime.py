@@ -24,9 +24,44 @@ def _pin_archive(monkeypatch, archive, target="x86_64-pc-windows-msvc"):
 
 def test_host_target_normalizes_supported_platforms():
     assert runtime.host_target("Windows", "AMD64") == "x86_64-pc-windows-msvc"
+    # Deno publishes a Windows arm64 build from v2.9.0 onward.
+    assert runtime.host_target("Windows", "ARM64") == "aarch64-pc-windows-msvc"
     assert runtime.host_target("Linux", "aarch64") == "aarch64-unknown-linux-gnu"
+    assert runtime.host_target("Darwin", "arm64") == "aarch64-apple-darwin"
     with pytest.raises(runtime.DenoRuntimeError):
-        runtime.host_target("Windows", "arm64")
+        runtime.host_target("Linux", "riscv64")
+    with pytest.raises(runtime.DenoRuntimeError):
+        runtime.host_target("FreeBSD", "x86_64")
+
+
+def test_every_pinned_target_is_reachable_from_a_host_pair():
+    """A target nobody can resolve is a pin that will never be verified."""
+    resolved = {
+        runtime.host_target("Windows", "AMD64"),
+        runtime.host_target("Windows", "ARM64"),
+        runtime.host_target("Linux", "x86_64"),
+        runtime.host_target("Linux", "aarch64"),
+        runtime.host_target("Darwin", "x86_64"),
+        runtime.host_target("Darwin", "arm64"),
+    }
+    assert resolved == set(runtime._ASSETS)
+
+
+def test_pinned_digests_are_lowercase_sha256_and_distinct():
+    digests = [asset["sha256"] for asset in runtime._ASSETS.values()]
+    for digest in digests:
+        assert len(digest) == 64, digest
+        assert digest == digest.lower(), digest
+        int(digest, 16)
+    assert len(set(digests)) == len(digests)
+
+
+def test_minimum_version_rejects_the_published_advisory_range():
+    """2.8.1 is the highest fixed version across the advisories for 2.3.1."""
+    assert runtime.parse_deno_version(runtime.DENO_MINIMUM_VERSION) >= (2, 8, 1)
+    assert runtime.parse_deno_version(runtime.DENO_VERSION) >= runtime.parse_deno_version(
+        runtime.DENO_MINIMUM_VERSION
+    )
 
 
 def test_runtime_preference_is_strict_and_does_not_import_config(tmp_path):

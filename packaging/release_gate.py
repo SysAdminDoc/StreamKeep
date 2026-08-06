@@ -194,6 +194,60 @@ def stage_advisories() -> tuple[bool, str]:
     return ok, detail
 
 
+def stage_pinned_binaries() -> tuple[bool, str]:
+    """Advisory scan for external binaries StreamKeep pins by version.
+
+    ``stage_advisories`` runs pip-audit over ``requirements.lock``, which by
+    construction only sees Python wheels. The managed Deno runtime is a
+    downloaded executable pinned by version and SHA-256, so no lock file
+    mentions it and no advisory feed the gate consults would ever flag it —
+    the runtime sat 17 published advisories behind without a single stage
+    noticing. This closes that blind spot for every version StreamKeep pins
+    rather than merely floors.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    sys.path.insert(0, str(ROOT))
+    from streamkeep.javascript_runtime import DENO_MINIMUM_VERSION, DENO_VERSION
+
+    pinned = (
+        ("deno", "crates.io", DENO_VERSION),
+        ("deno", "crates.io", DENO_MINIMUM_VERSION),
+    )
+    findings: list[str] = []
+    for name, ecosystem, version in pinned:
+        payload = json.dumps({
+            "version": version,
+            "package": {"name": name, "ecosystem": ecosystem},
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            "https://api.osv.dev/v1/query",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as error:
+            # Fail closed. A network problem must not read as "no advisories" —
+            # a check wired to nothing authorises everything.
+            return False, (
+                f"could not reach the OSV advisory feed for {name} {version}: "
+                f"{error}. Re-run with network access, or pass "
+                f"--skip pinned-binaries to acknowledge the gap explicitly."
+            )
+        vulns = body.get("vulns") or []
+        if vulns:
+            ids = ", ".join(sorted(entry.get("id", "?") for entry in vulns))
+            findings.append(f"{name} {version}: {len(vulns)} advisory/ies ({ids})")
+    if findings:
+        return False, "; ".join(findings)
+    checked = ", ".join(f"{name} {version}" for name, _eco, version in pinned)
+    return True, f"no known advisories for {checked}"
+
+
 def stage_reproducible_build() -> tuple[bool, str]:
     return _run(
         [sys.executable, str(ROOT / "packaging" / "reproducible_build.py")],
@@ -249,6 +303,7 @@ STAGES = (
     ("capability-claims", stage_capability_claims),
     ("release-claims", stage_release_claims),
     ("advisories", stage_advisories),
+    ("pinned-binaries", stage_pinned_binaries),
     ("reproducible-build", stage_reproducible_build),
     ("sbom", stage_sbom),
     ("artifact-smoke", stage_artifact_smoke),
@@ -428,12 +483,20 @@ def spanish_coverage(root) -> tuple[int, int]:
 
 # ── Driver ──────────────────────────────────────────────────────────
 
-def run_gate(*, fast=False, only=(), echo=print) -> GateResult:
+def run_gate(*, fast=False, only=(), skip=(), echo=print) -> GateResult:
     """Run the gate and return every stage result, stopping at the first failure."""
     result = GateResult()
     selected = set(only or ())
+    skipped = set(skip or ())
     for name, func in STAGES:
         if selected and name not in selected:
+            continue
+        if name in skipped:
+            result.stages.append(
+                StageResult(name, True, "skipped (--skip)", skipped=True)
+            )
+            if echo:
+                echo(f"  SKIP  {name} (--skip)")
             continue
         if fast and name in BUILD_STAGES:
             result.stages.append(
@@ -466,6 +529,13 @@ def main(argv=None) -> int:
         "--only", action="append", default=[],
         help="Run only the named stage (repeatable)",
     )
+    parser.add_argument(
+        "--skip", action="append", default=[],
+        help=(
+            "Skip the named stage (repeatable). Reported as SKIP so the gap is "
+            "visible rather than silently passing."
+        ),
+    )
     parser.add_argument("--list", action="store_true", help="List stages and exit")
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     args = parser.parse_args(argv)
@@ -476,7 +546,7 @@ def main(argv=None) -> int:
             print(f"{name}{marker}")
         return 0
 
-    unknown = set(args.only) - {name for name, _ in STAGES}
+    unknown = (set(args.only) | set(args.skip)) - {name for name, _ in STAGES}
     if unknown:
         print(f"Unknown stage(s): {', '.join(sorted(unknown))}")
         return 2
@@ -484,7 +554,7 @@ def main(argv=None) -> int:
     echo = None if args.json else print
     if echo:
         echo("StreamKeep release gate (local, unsigned)")
-    result = run_gate(fast=args.fast, only=args.only, echo=echo)
+    result = run_gate(fast=args.fast, only=args.only, skip=args.skip, echo=echo)
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))

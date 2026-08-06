@@ -25,8 +25,14 @@ from . import paths
 from .paths import _CREATE_NO_WINDOW
 
 
-DENO_VERSION = "2.3.1"
-DENO_MINIMUM_VERSION = "2.3.0"
+DENO_VERSION = "2.9.5"
+# Deno 2.3.1 was affected by 17 published advisories, including a critical
+# ``node:crypto`` finalization bug, four Windows command-injection classes and
+# several ``--allow-*``/``--deny-*`` sandbox bypasses. The highest fixed
+# version across that set is 2.8.1, so anything below it is rejected outright
+# rather than reused — this runtime executes untrusted remote player
+# JavaScript, which is exactly the threat model those bypasses describe.
+DENO_MINIMUM_VERSION = "2.8.1"
 DENO_RELEASE_URL = (
     "https://github.com/denoland/deno/releases/download/"
     f"v{DENO_VERSION}"
@@ -35,34 +41,38 @@ DENO_RUNTIME_SCHEMA_VERSION = 1
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 128 * 1024 * 1024
 
-# These are the SHA-256 values published beside the official Deno v2.3.1
-# release assets. The v2.3.0 tag itself was published with an incorrect
-# version and directs users to v2.3.1, so v2.3.1 is the smallest valid pin that
-# satisfies StreamKeep's existing Deno 2.3+ floor.
+# SHA-256 values published beside the official Deno v2.9.5 release assets
+# (each asset's own ``.zip.sha256sum`` file). v2.9.5 also adds the Windows
+# arm64 build, which is why that host no longer has to fail resolution.
 _ASSETS = {
     "x86_64-pc-windows-msvc": {
         "asset": "deno-x86_64-pc-windows-msvc.zip",
-        "sha256": "1b968541d115420ba04f7a5fbb5d0f8d620d9d87d492b66da5c97ca07e269b9b",
+        "sha256": "171efab55ac6b9881fd53ee4c20f8bf3bb1340ffc618483746909014db12216a",
+        "executable": "deno.exe",
+    },
+    "aarch64-pc-windows-msvc": {
+        "asset": "deno-aarch64-pc-windows-msvc.zip",
+        "sha256": "73f20b3566a0a6e3f6912fd7bf5b3a7ccd04d68414baedea3b397437bdec6472",
         "executable": "deno.exe",
     },
     "x86_64-unknown-linux-gnu": {
         "asset": "deno-x86_64-unknown-linux-gnu.zip",
-        "sha256": "b2920265e633215959b09a32b67f46c93362842bbfd27c96e8acc2d24b66f563",
+        "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
         "executable": "deno",
     },
     "aarch64-unknown-linux-gnu": {
         "asset": "deno-aarch64-unknown-linux-gnu.zip",
-        "sha256": "3771ede34037694591846166f6211e7a8ab5cd77a1e7143e637d4457e8708dc7",
+        "sha256": "6b7cae3a8fc4385a59dea3146fcb8bad7fea4230e0ad36a8c692afacbc254be0",
         "executable": "deno",
     },
     "x86_64-apple-darwin": {
         "asset": "deno-x86_64-apple-darwin.zip",
-        "sha256": "ba34eb6ec164a0f89f5431fc1989a31f7896f76d074415f64ea70509de39fc56",
+        "sha256": "c1b8b89a81e91b2a8b3f96def3195d08cfe3a105651da7908d53061f7140510d",
         "executable": "deno",
     },
     "aarch64-apple-darwin": {
         "asset": "deno-aarch64-apple-darwin.zip",
-        "sha256": "e3d3d7b21ce89105d96c316e9370b1f05aa6e87687f40faf37a39a613a477014",
+        "sha256": "b796aadd131f6930560c1ee040cf0d6f53933fbb987464e9ff46bd7ea4830615",
         "executable": "deno",
     },
 }
@@ -105,8 +115,8 @@ def host_target(system=None, machine=None):
         "x64": "x86_64",
         "arm64": "aarch64",
     }.get(machine, machine)
-    if system == "windows" and machine == "x86_64":
-        return "x86_64-pc-windows-msvc"
+    if system == "windows" and machine in {"x86_64", "aarch64"}:
+        return f"{machine}-pc-windows-msvc"
     if system == "linux" and machine in {"x86_64", "aarch64"}:
         return f"{machine}-unknown-linux-gnu"
     if system == "darwin" and machine in {"x86_64", "aarch64"}:

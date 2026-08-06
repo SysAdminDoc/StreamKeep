@@ -4,6 +4,25 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Advanced the managed Deno runtime pin from 2.3.1 to 2.9.5. The previous pin
+  was affected by 17 published advisories — a critical `node:crypto`
+  finalization bug, four Windows command-injection classes, a TLS-retry
+  plaintext risk, and several `--allow-*`/`--deny-*` sandbox bypasses — in the
+  one component that executes untrusted remote player JavaScript. Every asset
+  digest is taken from the release's own published `.zip.sha256sum` files, and
+  the PATH and managed floors both move to 2.8.1, the highest fixed version
+  across that advisory set, so a vulnerable runtime is replaced rather than
+  reused. Deno 2.9.5 also publishes a Windows arm64 build, so that host now
+  resolves a runtime instead of failing.
+
+- Added a `pinned-binaries` release-gate stage. `advisories` runs pip-audit
+  over `requirements.lock` and by construction only sees Python wheels, so a
+  downloaded executable pinned by version and hash was invisible to every
+  stage — which is how the Deno runtime fell 17 advisories behind unnoticed.
+  The new stage queries the OSV feed for each pinned external binary and fails
+  closed when the feed is unreachable. `--skip <stage>` is now available and
+  reports the omission as a visible SKIP rather than a pass.
+
 - Fixed a failed managed-Deno re-install deleting the working runtime. The
   rollback guard tested for the absence of a backup directory, which is also
   true for every failure raised *before* the existing install is moved aside

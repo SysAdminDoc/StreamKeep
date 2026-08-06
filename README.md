@@ -280,7 +280,7 @@ it after a successful remux.
 - FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
 - curl 8.21.0 or newer in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` 50.0.0 or newer for authenticated portable-secret backups. Optional SFTP delivery requires Paramiko 5.0.0 or newer and rejects older runtimes through the capability registry.
-- The pinned Python security floors are yt-dlp 2026.07.04, Pillow 12.3.0, urllib3 2.7.0, and the Qt 6.11.1 runtime component. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.3+ or Node.js 22+ in `PATH`; alternatively, the explicit Settings/CLI action manages the pinned Deno 2.3.1 release and accepts its verified ZIP offline. The installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
+- The pinned Python security floors are yt-dlp 2026.07.04, Pillow 12.3.0, urllib3 2.7.0, and the Qt 6.11.1 runtime component. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.8.1+ or Node.js 22+ in `PATH`; alternatively, the explicit Settings/CLI action manages the pinned Deno 2.9.5 release and accepts its verified ZIP offline. The installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.
 - StreamKeep records the exact path, version, provenance, and enabled capabilities for each runtime dependency. Settings, onboarding, and diagnostic snapshots expose that registry; missing or below-floor tools block only the dependent operation and include repair guidance. Startup never installs packages implicitly.
 - Optional: `python-mpv>=1.0.8` plus a platform-managed `libmpv>=0.41.0` runtime for embedded playback, and `boto3>=1.43.0` for S3-compatible uploads. These three declarations are intentionally out of the reproducible Python locks and are recorded as optional components in the generated SBOM. Browser cookies libraries are also optional; Streamlink 8.4+ (`py -m pip install "streamlink>=8.4,<9"`) enables guarded Twitch/Kick live capture, `gallery-dl` (`pip install -U gallery-dl`) enables the `gallery` subcommand (image galleries, image-set ingest, optional CBZ/ZIP packaging, and social-media posts — Twitter/X, Instagram, Pixiv, boorus, and more), and `lux` (`go install github.com/iawia002/lux@latest`) enables the `lux` subcommand (Chinese platforms — Bilibili, Douyin, Youku, and more). Optional engines are never bundled or installed at startup; Streamlink is used only after enabling its live-capture toggle and sharing StreamKeep's guarded proxy.
 
@@ -358,6 +358,9 @@ has a reachable, tested path and a matching README token), `release-claims`
 (documentation must not promise a signing story this project does not have,
 and must label partial translations), `advisories` (pip-audit over the
 project's own hash-pinned `requirements.lock`, not the ambient environment),
+`pinned-binaries` (OSV advisory scan for external binaries pinned by version,
+which no Python lock file covers — it fails closed when the feed is
+unreachable, and `--skip pinned-binaries` records the gap as a visible SKIP),
 `reproducible-build`, `sbom`, and `artifact-smoke`.
 
 The individual commands behind those stages remain available:
