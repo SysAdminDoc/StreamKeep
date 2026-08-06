@@ -2,6 +2,19 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
+## [Unreleased]
+
+- Fixed the test suite writing into the operator's real configuration
+  directory. Stateful modules capture their paths from `streamkeep.paths` at
+  import time, and `tests/conftest.py` never rebound them, so running the
+  suite created `library.db`, appended to `notifications.jsonl` and
+  `security-events.jsonl`, and routed the crash handler's output into the
+  operator's own `crash.log` — the release gate's `tests` stage included.
+  The bind now happens before the first StreamKeep import, and
+  `tests/test_config_isolation.py` fails if any module-level path addresses
+  the real profile, if a test leaves a path rebound, or if a state file under
+  the real directory is modified during a run.
+
 ## [4.45.0] - 2026-08-03
 
 - Added opt-in gallery-dl image-set ingest. `--ingest` registers new image

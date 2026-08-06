@@ -5,8 +5,18 @@ from pathlib import Path
 
 class ChannelStatsTests(unittest.TestCase):
     def _make_stats_module(self, tmpdir):
-        """Import channel_stats with DB redirected to a temp directory."""
+        """Import channel_stats with DB redirected to a temp directory.
+
+        The rebinding is restored on teardown: leaving it in place leaks a
+        module-level path into every test that runs afterwards.
+        """
         from streamkeep import channel_stats
+        previous = (channel_stats.DB_PATH, channel_stats.CONFIG_DIR)
+
+        def restore():
+            channel_stats.DB_PATH, channel_stats.CONFIG_DIR = previous
+
+        self.addCleanup(restore)
         channel_stats.DB_PATH = Path(tmpdir) / "library.db"
         channel_stats.CONFIG_DIR = Path(tmpdir)
         return channel_stats
