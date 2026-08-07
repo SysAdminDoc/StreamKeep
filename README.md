@@ -4,7 +4,7 @@
 
 # StreamKeep
 
-![Version](https://img.shields.io/badge/version-4.46.0-blue)
+![Version](https://img.shields.io/badge/version-4.47.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
@@ -277,7 +277,14 @@ it after a successful remux.
 - Python 3.11 or newer.
 - The shipped Windows release lane and local release gate are built and tested
   on Python 3.14.6 (3.14.x); source installs retain the Python 3.11+ floor.
-- FFmpeg and ffprobe 8.1.2 or newer in `PATH`.
+- FFmpeg and ffprobe in `PATH`, 8.1.2 or newer and from the 8.x or 9.0 line.
+  Support is decided on the reported `libavcodec` ABI major (62 for 8.x, 63 for
+  9.0) rather than the marketing version, so a build from an untested ABI is
+  refused with a named reason instead of being accepted by a version
+  comparison. Certificate verification for remote inputs is stated explicitly
+  on both — FFmpeg 8.x would otherwise default it off and 9.0 hardcode it on —
+  and the only way to reach an unverified origin is the per-source
+  self-signed opt-in on an RTSPS or RTMPS raw capture.
 - curl 8.21.0 or newer in `PATH`.
 - Python dependencies from `requirements.txt`, including `keyring`/Windows DPAPI for secure credential storage plus `argon2-cffi` and `cryptography` 50.0.0 or newer for authenticated portable-secret backups. Optional SFTP delivery requires Paramiko 5.0.0 or newer and rejects older runtimes through the capability registry.
 - The pinned Python security floors are yt-dlp 2026.07.04, Pillow 12.3.0, urllib3 2.7.0, and the Qt 6.11.1 runtime component. For full YouTube fallback support, install the default yt-dlp extras (`pip install -U "yt-dlp[default]"`) and provide Deno 2.8.1+ or Node.js 22+ in `PATH`; alternatively, the explicit Settings/CLI action manages the pinned Deno 2.9.5 release and accepts its verified ZIP offline. The installed `yt-dlp-ejs` version must exactly match yt-dlp's package requirement. StreamKeep also rejects raw argument templates that create shortcut/link files or delegate to executable command boundaries.

@@ -35,6 +35,24 @@ MINIMUM_VERSIONS = {
 
 LIBMPV_ADVISORY = "GHSA-546v-22c3-7927"
 
+# FFmpeg's marketing version is not what determines behaviour — the library
+# ABI major is. 62 is the FFmpeg 8.x line; 63 is 9.0, which hardcodes
+# ``tls_verify`` on (StreamKeep now states it explicitly on both, see
+# ``paths.FFMPEG_REMOTE_INPUT_SAFETY``) and drops pre-11.1 NVENC SDK support.
+# The NVENC change is absorbed by ``postprocess.codecs._probe_hw_encoder``,
+# which runs a real one-frame encode rather than trusting the encoder listing,
+# so a driver too old for 9.0's NVENC simply fails the probe and is hidden.
+# Both majors are supported; a major outside this set is refused by name
+# instead of being silently accepted on a version-string comparison.
+FFMPEG_SUPPORTED_LIBAVCODEC_MAJORS = (62, 63)
+_LIBAVCODEC_PATTERN = re.compile(r"^\s*libavcodec\s+(\d+)\.", re.MULTILINE)
+
+
+def parse_libavcodec_major(version_output):
+    """Return the ``libavcodec`` ABI major from ``ffmpeg -version`` output."""
+    match = _LIBAVCODEC_PATTERN.search(str(version_output or ""))
+    return int(match.group(1)) if match else 0
+
 
 @dataclass(frozen=True)
 class ReachableProductPath:
@@ -504,13 +522,15 @@ def _probe_registry(*, preference="path", whisper_model_path=""):
     ffmpeg = _probe_executable(
         "ffmpeg", ["ffmpeg"], ["-version"], MINIMUM_VERSIONS["ffmpeg"],
         ["media-download", "decode", "transcode", "mux"],
-        "Install FFmpeg 8.1.2 or newer and ensure that executable is first in PATH.",
+        "Install FFmpeg 8.1.2 or 9.0 and ensure that executable is first in PATH.",
+        annotate=_annotate_ffmpeg_abi,
     )
     ffmpeg_whisper = _probe_ffmpeg_whisper(ffmpeg, whisper_model_path)
     ffprobe = _probe_executable(
         "ffprobe", ["ffprobe"], ["-version"], MINIMUM_VERSIONS["ffprobe"],
         ["media-inspection", "duration-probe"],
-        "Install the ffprobe 8.1.2 companion binary from the same FFmpeg build.",
+        "Install the ffprobe companion binary from the same FFmpeg build.",
+        annotate=_annotate_ffmpeg_abi,
     )
     ejs = _probe_ejs(yt_dlp)
     javascript = _probe_javascript_runtime(preference=preference)
@@ -892,7 +912,7 @@ def _version_matches_specifier(version, specifier):
 
 def _probe_executable(
     name, candidates, version_args, minimum, capabilities, repair,
-    *, display_name=None,
+    *, display_name=None, annotate=None,
 ):
     for candidate in candidates:
         path = shutil.which(candidate)
@@ -902,16 +922,53 @@ def _probe_executable(
         output, returncode = _run_version_command(path, version_args)
         version = ".".join(str(part) for part in parse_version(output))
         available = returncode == 0 and bool(version)
-        return _base_record(
+        record = _base_record(
             name, display_name or name, "executable", minimum, capabilities, repair,
             path=path, version=version, available=available,
             supported=available and version_at_least(version, minimum),
             command=[path], provenance=_path_provenance(path),
             detail=output.splitlines()[0][:240] if output else "",
         )
+        # The caller gets the full version banner, not just its first line, so
+        # a probe can branch on something more precise than the marketing
+        # version — see ``_annotate_ffmpeg_abi``.
+        return annotate(record, output) if annotate else record
     return _base_record(
         name, display_name or name, "executable", minimum, capabilities, repair,
     )
+
+
+def _annotate_ffmpeg_abi(record, version_output):
+    """Record the FFmpeg ABI major and gate support on it, not the version.
+
+    A build whose ``libavcodec`` major is outside the supported set is refused
+    with a named reason. Previously any version at or above the ``8.1.2`` floor
+    was accepted with no ceiling, so FFmpeg 9.0 — a different ABI with
+    different TLS and NVENC behaviour — was already being accepted silently.
+    """
+    major = parse_libavcodec_major(version_output)
+    record["libavcodec_major"] = major
+    record["supported_libavcodec_majors"] = list(FFMPEG_SUPPORTED_LIBAVCODEC_MAJORS)
+    if not record.get("available"):
+        return record
+    if not major:
+        # An unreadable banner is not grounds for refusing a build that met the
+        # version floor; the floor stays authoritative and the gap is stated.
+        record["detail"] = (
+            f"{record.get('detail', '')} (libavcodec ABI major not reported; "
+            "falling back to the version floor)"
+        ).strip()
+        return record
+    if major not in FFMPEG_SUPPORTED_LIBAVCODEC_MAJORS:
+        supported = ", ".join(str(item) for item in FFMPEG_SUPPORTED_LIBAVCODEC_MAJORS)
+        record["supported"] = False
+        record["detail"] = (
+            f"{record.get('display_name') or 'FFmpeg'} "
+            f"{record.get('version') or 'unknown'} reports libavcodec ABI major "
+            f"{major}; StreamKeep is tested against {supported} and refuses an "
+            "untested ABI rather than accepting it silently."
+        )
+    return record
 
 
 def _probe_ffmpeg_whisper(ffmpeg, model_path):

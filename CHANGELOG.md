@@ -2,6 +2,31 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
+## [4.47.0] - 2026-08-06
+
+- Took an explicit position on FFmpeg 9.0 instead of inheriting one. The
+  capability floor was `8.1.2` with no ceiling, so FFmpeg 9.0 — released
+  2026-08-04, a different library ABI — was already being accepted on any
+  user's PATH by a version-string comparison. Support is now decided on the
+  reported `libavcodec` ABI major (62 for the 8.x line, 63 for 9.0); both are
+  supported, and a build from an untested ABI is refused with a named reason
+  rather than accepted silently. A build whose banner cannot be parsed still
+  falls back to the version floor, because refusing it would be worse than the
+  gap being reported.
+
+- Certificate verification for remote FFmpeg inputs is now stated rather than
+  inherited. FFmpeg 8.x defaults `tls_verify` to 0 and 9.0 hardcodes it to 1,
+  so which build happened to be first in `PATH` silently decided whether
+  remote certificates were checked at all — and on the documented 8.1.2 floor
+  they were not. Every remote and filtered-HLS input now passes
+  `-tls_verify 1`. The same omission made the raw-capture
+  `allow_self_signed` opt-in a no-op on 8.x, where a self-signed origin
+  already worked without it; a raw capture now verifies unless the opt-in is
+  set, and the opt-in remains restricted to RTSPS and RTMPS endpoints.
+  Hardware-encoder results are unaffected by the 9.0 removal of pre-11.1 NVENC
+  SDK support: the probe runs a real one-frame encode, so an encoder the
+  installed driver cannot actually use fails the probe and is hidden.
+
 ## [4.46.0] - 2026-08-06
 
 - A declarative source adapter is now inert until its request contract is

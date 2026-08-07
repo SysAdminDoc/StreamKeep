@@ -31,7 +31,14 @@ FFMPEG_SAFETY = FFMPEG_LOCAL_SAFETY
 # Remote manifests are untrusted documents. They may reference only network
 # transports, and every connection is additionally forced through the
 # address-validating proxy in ``net_guard.GuardedHTTPProxy``.
+# ``-tls_verify 1`` is stated rather than inherited. FFmpeg 8.x defaults it to
+# 0 (`TLS_VERIFY_DEFAULT 0` in n8.1.2's libavformat/tls.h) and FFmpeg 9.0
+# hardcodes it to 1, so a build swap on the user's PATH would otherwise decide
+# silently whether remote certificates are checked at all. Stating it means
+# both majors verify, and the only way to skip verification is the explicit
+# per-source opt-in on a raw capture.
 FFMPEG_REMOTE_INPUT_SAFETY = [
+    "-tls_verify", "1",
     "-protocol_whitelist", "http,https,httpproxy,tcp,tls,crypto",
     "-protocol_blacklist", "file,pipe,concat,concatf,subfile,unix,data",
 ]
@@ -42,6 +49,7 @@ FFMPEG_REMOTE_SAFETY = ["-nostdin", *FFMPEG_REMOTE_INPUT_SAFETY]
 # child environment. Only the generated file protocol is added to the remote
 # allow-list; shell-like and local discovery protocols remain blocked.
 FFMPEG_FILTERED_HLS_INPUT_SAFETY = [
+    "-tls_verify", "1",
     "-protocol_whitelist", "file,http,https,httpproxy,tcp,tls,crypto",
     "-protocol_blacklist", "pipe,concat,concatf,subfile,unix,data",
 ]

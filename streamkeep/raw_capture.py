@@ -369,12 +369,19 @@ def build_ffmpeg_command(
         ])
         if proxy_url:
             command.extend(["-http_proxy", proxy_url])
+    # Stated in both directions, never inherited: FFmpeg 8.x defaults
+    # tls_verify to 0 and 9.0 hardcodes it to 1, so leaving it unset made
+    # ``allow_self_signed`` a no-op on 8.x (self-signed origins already worked
+    # without the opt-in) and a hard requirement on 9.0 — the same spec
+    # behaving differently on the two supported majors.
     if validated.spec.allow_self_signed:
         if not version_at_least(version, "8.0.0"):
             raise RawCaptureError(
                 "allow-self-signed capture requires FFmpeg 8 or newer"
             )
         command.extend(["-tls_verify", "0"])
+    else:
+        command.extend(["-tls_verify", "1"])
     command.extend(["-i", endpoint, "-map", "0", "-c", "copy"])
     command.extend(["-t", str(validated.spec.effective_duration_secs)])
     command.extend(["-y", validated.spec.output_path])

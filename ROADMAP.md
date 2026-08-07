@@ -9,7 +9,7 @@ StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live str
 
 ## Current Baseline
 
-- Current package version: v4.46.0.
+- Current package version: v4.47.0.
 - Current architecture is modular: extractors, declarative YAML source adapters, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
 - History, monitor channels, and queue state live in SQLite (schema v21); user preferences remain in JSON config.
 - The release lane and local release gate require Python 3.14.6 or newer (`packaging/release_gate.py`); source installs retain the 3.11+ floor.
@@ -61,13 +61,6 @@ The modules added on 2026-08-04 received their first audit on 2026-08-06 and the
 Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0): release gate **GREEN** on Python 3.14.6, 1,712 tests, coverage floor 64.0, pyflakes clean, 47 ruff findings (all `E402`). The whole 2026-08-04 finding set is verified closed in source — do not re-open it; `RESEARCH.md` "Rejected Ideas" also lists what was audited and found clean this pass. New IDs continue the V-scheme (highest prior = V137).
 
 #### P1 — Next
-
-- [ ] P1 — V173 — Take an explicit position on FFmpeg 9.0
-  Why: the capability floor is `8.1.2` with no ceiling, so FFmpeg 9.0 (released 2026-08-04) is already accepted on any user's PATH, silently changing two behaviours: `tls_verify` now defaults on, and pre-11.1 NVENC SDK support was removed, which changes what the hardware-encoder probe reports on older drivers. "Keep the 8.1.2 floor" is not a decision the project can make unilaterally without a ceiling or a detection path.
-  Evidence: `streamkeep/capabilities.py:32` (`"ffmpeg": "8.1.2"`, no upper bound), `:505`, `:919`; `postprocess/codecs.py:82 _probe_hw_encoder` and `:145-163 video_codec_extra_args` (arguments are already modern — `-preset p5 -rc vbr` — so this is runtime compatibility, not arg strings); https://github.com/FFmpeg/FFmpeg/blob/n9.0/Changelog ("Remove deprecated NVENC options and support for pre-11.1 SDK versions"); `n9.0/libavformat/tls.h` hardcodes `tls_verify` to 1 versus `TLS_VERIFY_DEFAULT 0` in `n8.1.2`. Unblocks the stale `Roadmap_Blocked.md` V29 entry, whose premise ("nothing consumes a TLS-verify toggle") no longer holds.
-  Touches: `streamkeep/capabilities.py`, `streamkeep/postprocess/codecs.py`, `streamkeep/workers/download.py` command builders, `README.md` requirements, tests.
-  Acceptance: the capability registry records the detected `libavcodec` major (62 for 8.1.2, 63 for 9.0) and branches on it rather than a version string; a 9.0 runtime is either supported or refused with a named reason instead of silently accepted; a documented per-source insecure-TLS opt-in exists for self-signed and inspected origins; hardware-probe results are unchanged on 8.1.2 and correct on 9.0.
-  Complexity: M
 
 - [ ] P1 — V174 — Ship the reworked Kick extraction path while upstream is broken
   Why: Kick VOD metadata has been returning 404 upstream since the site's URL rework, the fix PR is open and unmerged, and Kick is StreamKeep's defensible ground (Ganymede has declined it). The replacement endpoints are documented in the issue, so this is buildable now — and it is the clearest demonstration of why owning a native extractor is worth its maintenance cost.
