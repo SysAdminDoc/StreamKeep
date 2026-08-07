@@ -49,6 +49,86 @@ def cookies_file_age_secs():
         return -1
 
 
+_BROWSER_LABELS = {
+    "chrome": "Google Chrome",
+    "chromium": "Chromium",
+    "edge": "Microsoft Edge",
+    "brave": "Brave",
+    "vivaldi": "Vivaldi",
+    "opera": "Opera",
+    "opera_gx": "Opera GX",
+    "firefox": "Firefox",
+    "librewolf": "LibreWolf",
+    "safari": "Safari",
+}
+
+# Chromium bound its cookie encryption key to the browser process in 127, so a
+# third-party reader gets a decryption failure rather than a permission error.
+# The wording differs per loader, hence matching on substrings.
+_APP_BOUND_MARKERS = (
+    "app-bound", "app bound", "dpapi", "decrypt", "cryptunprotect",
+    "v20", "elevation service",
+)
+_LOCKED_MARKERS = (
+    "being used by another process", "locked", "database is locked",
+    "permission denied", "access is denied", "sharing violation",
+)
+_MISSING_MARKERS = (
+    "no such file", "cannot find the file", "does not exist",
+    "no cookies file", "could not find",
+)
+
+
+def _browser_label(browser_name):
+    key = str(browser_name or "").strip().lower()
+    return _BROWSER_LABELS.get(key, key or "the selected browser")
+
+
+def describe_cookie_read_failure(browser_name, error):
+    """Return a sentence naming the browser, the file, and the remedy.
+
+    The loader exception used to be discarded, so a locked or app-bound
+    encrypted cookie store produced "No cookie loader found" — a diagnosis
+    that was both wrong and unactionable, and the single highest-reaction
+    open complaint of this kind upstream (yt-dlp #7271).
+    """
+    label = _browser_label(browser_name)
+    text = f"{type(error).__name__}: {error}".lower()
+    path = getattr(error, "filename", "") or ""
+    where = f" ({path})" if path else ""
+    detail = str(error).strip()
+
+    if isinstance(error, PermissionError) or any(
+        marker in text for marker in _LOCKED_MARKERS
+    ):
+        return (
+            f"{label}'s cookie store{where} could not be read because it is "
+            f"locked. Close {label} completely (check the tray/background "
+            "processes) and import again, or export a cookies.txt from the "
+            f"browser and import the file instead. [{detail}]"
+        )
+    if any(marker in text for marker in _APP_BOUND_MARKERS):
+        return (
+            f"{label}'s cookies{where} are encrypted with a key bound to the "
+            "browser itself, so StreamKeep cannot decrypt them. Export a "
+            "cookies.txt from the browser (a cookie-export extension writes "
+            f"one) and import the file instead. [{detail}]"
+        )
+    if isinstance(error, FileNotFoundError) or any(
+        marker in text for marker in _MISSING_MARKERS
+    ):
+        return (
+            f"No {label} cookie store was found{where}. Check that {label} is "
+            "installed and that you have signed in with the default profile, "
+            f"or import an exported cookies.txt instead. [{detail}]"
+        )
+    return (
+        f"Could not read {label}'s cookies{where}: {detail}. Close {label} and "
+        "try again, or export a cookies.txt from the browser and import the "
+        "file instead."
+    )
+
+
 def import_from_browser(browser_name, *, domains=None, target=None):
     """Extract cookies from *browser_name* and write a Netscape jar.
 
@@ -62,43 +142,78 @@ def import_from_browser(browser_name, *, domains=None, target=None):
     """
     wanted = set(domains) if domains else set(PLATFORM_DOMAINS)
     cj = None
+    failures = []
+    loader_available = False
 
     # Prefer rookiepy — lighter, better maintained
     try:
         import rookiepy
+    except Exception as error:
+        failures.append(("rookiepy", error, True))
+    else:
         load_fn = getattr(rookiepy, browser_name, None)
-        if load_fn is not None:
-            cj = load_fn(domains=list(wanted))
-    except Exception:
-        cj = None
+        if load_fn is None:
+            failures.append(("rookiepy", None, True))
+        else:
+            loader_available = True
+            try:
+                cj = load_fn(domains=list(wanted))
+            except Exception as error:
+                failures.append(("rookiepy", error, False))
+                cj = None
 
     # Fallback to browser_cookie3
     if cj is None:
         try:
             import browser_cookie3 as bc3
+        except Exception as error:
+            failures.append(("browser_cookie3", error, True))
+        else:
             load_fn = getattr(bc3, browser_name, None)
-            if load_fn is not None:
-                jar = load_fn()
-                cj = [
-                    {
-                        "domain": c.domain,
-                        "name": c.name,
-                        "value": c.value,
-                        "path": c.path or "/",
-                        "expires": int(c.expires or 0),
-                        "secure": bool(c.secure),
-                        "http_only": c.has_nonstandard_attr("httponly") if hasattr(c, "has_nonstandard_attr") else False,
-                    }
-                    for c in jar
-                    if any(c.domain.endswith(d) or d.endswith(c.domain) for d in wanted)
-                ]
-        except Exception as e:
-            return False, f"Failed to load cookies from {browser_name}: {e}"
+            if load_fn is None:
+                failures.append(("browser_cookie3", None, True))
+            else:
+                loader_available = True
+                try:
+                    jar = load_fn()
+                    cj = [
+                        {
+                            "domain": c.domain,
+                            "name": c.name,
+                            "value": c.value,
+                            "path": c.path or "/",
+                            "expires": int(c.expires or 0),
+                            "secure": bool(c.secure),
+                            "http_only": c.has_nonstandard_attr("httponly") if hasattr(c, "has_nonstandard_attr") else False,
+                        }
+                        for c in jar
+                        if any(c.domain.endswith(d) or d.endswith(c.domain) for d in wanted)
+                    ]
+                except Exception as error:
+                    failures.append(("browser_cookie3", error, False))
+                    cj = None
 
     if cj is None:
+        # "No loader found" is only true when no loader could even be asked.
+        # Reporting it for a locked or encrypted store told the user to install
+        # a package they already have, and hid the actual remedy.
+        read_errors = [
+            (loader, error) for loader, error, unavailable in failures
+            if not unavailable and error is not None
+        ]
+        if read_errors:
+            return False, describe_cookie_read_failure(
+                browser_name, read_errors[0][1],
+            )
+        if not loader_available:
+            return False, (
+                f"No cookie loader found for '{browser_name}'. "
+                "Install rookiepy (`pip install rookiepy`) or browser_cookie3."
+            )
         return False, (
-            f"No cookie loader found for '{browser_name}'. "
-            "Install rookiepy (`pip install rookiepy`) or browser_cookie3."
+            f"{_browser_label(browser_name)} returned no cookies. Sign in to "
+            "the site in that browser, then import again — or export a "
+            "cookies.txt and import the file."
         )
 
     return _write_cookies(cj, browser_name, target=target)
