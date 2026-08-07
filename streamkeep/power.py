@@ -271,7 +271,10 @@ def run_queue_complete_action(
             try:
                 log_fn(message)
             except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
+                # The caller's own log sink failed. Reporting a power action
+                # must never be the thing that prevents it, and there is no
+                # second sink to report this one to.
+                pass
 
     if action == "none":
         return result

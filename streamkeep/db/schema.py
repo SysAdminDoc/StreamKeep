@@ -70,7 +70,11 @@ def migrate_database(connection, version: int, target_version: int) -> None:
             "ON download_queue(status)"
         )
     except Exception:
-        pass  # safe: best-effort fallback; preserve the primary operation
+        # A query-speed index only. The unique index and the user_version
+        # bump below carry the correctness of the migration and are
+        # deliberately left unguarded, so a genuinely broken or locked
+        # database still fails loudly on the next statement.
+        pass
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id "
         "ON download_queue(job_id) WHERE job_id <> ''"

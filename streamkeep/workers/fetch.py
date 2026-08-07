@@ -152,8 +152,15 @@ class FetchWorker(QThread):
                 self.log.emit(f"Detected platform: {ext.NAME}")
                 try:
                     ext.request_headers = dict(self.request_headers)
-                except Exception:
-                    pass  # safe: best-effort fallback; preserve the primary operation
+                except Exception as error:
+                    # Not cosmetic: without the captured replay headers the
+                    # extractor resolves as an anonymous client and the
+                    # download fails later for a reason that points nowhere
+                    # near here. Say so at the point it happens.
+                    self.log.emit(
+                        f"[WARN] Could not apply captured request headers to "
+                        f"{ext.NAME}: {error}"
+                    )
 
                 # A direct permalink (e.g. a VOD-by-UUID URL) resolves to a
                 # single item — skip live-check / channel-wide VOD listing,

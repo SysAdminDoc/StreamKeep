@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- The broad-exception guardrail now measures error visibility rather than
+  annotation compliance. It was satisfied by any `#` on or above the `pass`,
+  and 150 of the 174 sites had converged on one identical sentence — a reason
+  repeated 150 times says nothing about any of them. Rewriting all of them in
+  bulk would only have produced 150 plausible sentences nobody verified, so the
+  boilerplate is frozen instead: a per-file budget that may only fall, and any
+  new or moved site must state a reason of its own and of real length. Three
+  sites were converted as the first draw-down, including one in the fetch
+  worker that was hiding a logic failure — a failure to apply captured replay
+  headers left the extractor resolving as an anonymous client, and the download
+  then failed somewhere that pointed nowhere near the cause.
+
 - A broken extractor now reads as a broken source rather than a broken app.
   A platform that fails repeatedly raises a standing health condition naming
   the platform *and* the engine that failed, and offering only the alternate
