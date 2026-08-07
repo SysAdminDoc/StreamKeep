@@ -45,6 +45,15 @@ _OWNED_BY = {
         "generate_bearer_token", "valid_bearer_token",
         "TokenGrant", "TokenStore", "PairingStore", "ReplayStore",
     ),
+    "streamkeep.server.origins": (
+        "_canonical_host", "_normalize_host_header", "_build_allowed_hosts",
+        "_format_url_host", "_normalize_origin", "_normalize_extension_origin",
+        "_validate_external_origin",
+    ),
+    "streamkeep.server.static_assets": (
+        "load_web_ui", "_render_web_ui", "_select_web_language",
+        "_normalize_web_language", "_web_text",
+    ),
 }
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
@@ -211,7 +220,7 @@ def test_a_forwarding_shim_is_not_given_a_binding_of_its_own():
 
 
 #: ``server/_legacy.py`` may only shrink, same ratchet as the db monolith.
-_SERVER_LEGACY_LINE_CEILING = 2548
+_SERVER_LEGACY_LINE_CEILING = 2340
 
 
 def test_the_server_legacy_module_only_ever_shrinks():
@@ -232,22 +241,47 @@ def test_the_server_legacy_module_only_ever_shrinks():
     )
 
 
-def test_the_server_auth_module_does_not_import_the_monolith():
-    """The constraint that lets it own its statements at all."""
+def test_the_server_siblings_do_not_import_the_monolith():
+    """The constraint that lets them own their statements at all."""
     import ast
     from pathlib import Path
 
     from streamkeep.server import _legacy as server_legacy
 
-    source = (Path(server_legacy.__file__).parent / "auth.py").read_text(
-        encoding="utf-8",
-    )
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.ImportFrom) and node.level and node.module:
-            assert node.module != "_legacy", "server/auth.py imports _legacy"
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not alias.name.endswith("_legacy")
+    root = Path(server_legacy.__file__).parent
+    for name in ("auth", "origins", "static_assets"):
+        tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level and node.module:
+                assert node.module != "_legacy", (
+                    f"server/{name}.py imports _legacy at module scope"
+                )
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.endswith("_legacy"), name
+
+
+def test_every_module_holding_server_surface_is_composed_by_the_facade():
+    """A name that moves out of the monolith must not stop resolving.
+
+    ``_WEB_UI_HTML`` caught this: moving the remote-UI rendering into
+    ``static_assets`` made it unreachable through ``local_server`` until the
+    module was added to ``_DOMAINS``, because the facade only forwards to
+    modules it composes.
+    """
+    from streamkeep.server import _legacy as server_legacy
+    from streamkeep.server import auth, origins, static_assets
+
+    for module in (server_legacy, auth, origins, static_assets):
+        assert module in local_server._DOMAINS, (
+            f"{module.__name__} holds part of the surface but the facade "
+            "does not compose it"
+        )
+
+    # And a representative name from each is reachable through the facade.
+    assert local_server.TokenStore is auth.TokenStore
+    assert local_server._normalize_origin is origins._normalize_origin
+    assert local_server._WEB_UI_HTML == static_assets._WEB_UI_HTML
 
 
 def test_patching_the_server_facade_reaches_the_module_that_defines_the_name():

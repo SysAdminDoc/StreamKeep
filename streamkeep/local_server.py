@@ -12,12 +12,15 @@ from types import ModuleType
 
 from .server import _legacy as _implementation
 from .server import auth as _auth
+from .server import origins as _origins
+from .server import static_assets as _static_assets
 
 # V163: the facade composes the domain modules rather than requiring every name
 # to be re-exported through the legacy one. ``_implementation`` stays first so a
 # patched attribute there still wins, which is the contract existing tests rely
-# on.
-_DOMAINS = (_implementation, _auth)
+# on. Every module holding part of the surface must be listed here, or a name
+# that moves out of the legacy module stops resolving through the facade.
+_DOMAINS = (_implementation, _auth, _origins, _static_assets)
 
 
 def _owner(name):
