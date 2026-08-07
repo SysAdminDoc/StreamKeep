@@ -628,3 +628,81 @@ class DownloadArchiveBackupTests(unittest.TestCase):
             backup._safe_directory_member("download-archives/ok.txt"),
             ("download-archives", "ok.txt"),
         )
+
+
+# ── V148: the semantic index is reconciled against the restored library ──
+
+def test_semantic_index_drops_hits_for_recordings_the_library_lost(tmp_path, monkeypatch):
+    """semantic.db is outside the backup set, so restoring an older library.db
+    used to leave semantic search answering for recordings that are gone."""
+    from streamkeep import semantic
+
+    monkeypatch.setattr(semantic, "DB_PATH", tmp_path / "semantic.db")
+    connection = semantic._connect()
+    try:
+        for path in ("C:/rec/kept", "C:/rec/orphan"):
+            connection.execute(
+                "INSERT INTO semantic_moments(recording_path, start_sec, end_sec,"
+                " modality, provenance, text, confidence, vector)"
+                " VALUES (?, 0, 1, 'transcript', 'p', 'hello', 1, ?)",
+                (path, semantic._pack_vector(semantic.local_embedding("hello"))),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    # The restored library knows about one of them, plus one never indexed.
+    result = semantic.reconcile_with_library(["C:/rec/kept", "C:/rec/fresh"])
+    assert result == {"pruned": 1, "kept": 1, "unindexed": 1, "ran": True}
+
+    hits = semantic.search_moments("hello")
+    assert {hit["recording_path"] for hit in hits} == {"C:/rec/kept"}
+
+
+def test_reconcile_is_a_no_op_when_the_index_already_matches(tmp_path, monkeypatch):
+    from streamkeep import semantic
+
+    monkeypatch.setattr(semantic, "DB_PATH", tmp_path / "semantic.db")
+    connection = semantic._connect()
+    try:
+        connection.execute(
+            "INSERT INTO semantic_moments(recording_path, start_sec, end_sec,"
+            " modality, provenance, text, confidence, vector)"
+            " VALUES ('C:/rec/one', 0, 1, 'transcript', 'p', 'hi', 1, ?)",
+            (semantic._pack_vector(semantic.local_embedding("hi")),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    assert semantic.reconcile_with_library(["C:/rec/one"]) == {
+        "pruned": 0, "kept": 1, "unindexed": 0, "ran": True,
+    }
+
+
+def test_reconcile_without_an_index_file_is_not_an_error(tmp_path, monkeypatch):
+    from streamkeep import semantic
+
+    monkeypatch.setattr(semantic, "DB_PATH", tmp_path / "missing.db")
+    assert semantic.reconcile_with_library(["C:/rec/one"])["ran"] is False
+
+
+def test_a_restore_reports_what_it_did_to_the_semantic_index(monkeypatch):
+    from streamkeep import backup as backup_module, semantic
+
+    monkeypatch.setattr(
+        semantic, "reconcile_with_library",
+        lambda *_a, **_k: {"pruned": 2, "kept": 5, "unindexed": 3, "ran": True},
+    )
+    note = backup_module.reconcile_derived_indexes()
+    assert "dropped 2 semantic index entries" in note
+    assert "3 restored recording(s) are not in the semantic index yet" in note
+
+
+def test_a_failing_reconcile_never_fails_the_restore(monkeypatch):
+    from streamkeep import backup as backup_module, semantic
+
+    def boom(*_args, **_kwargs):
+        raise sqlite3.DatabaseError("index is corrupt")
+
+    monkeypatch.setattr(semantic, "reconcile_with_library", boom)
+    assert backup_module.reconcile_derived_indexes() == ""

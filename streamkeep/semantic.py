@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -21,6 +22,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from .paths import CONFIG_DIR
 from .sqlite_runtime import connect as sqlite_connect
+
+_LOGGER = logging.getLogger(__name__)
 
 DB_FILENAME = "semantic.db"
 DB_PATH = CONFIG_DIR / DB_FILENAME
@@ -475,6 +478,55 @@ def _prune_paths(paths):
         db.commit()
     finally:
         db.close()
+
+
+def reconcile_with_library(recording_paths=None):
+    """Drop index rows for recordings the current library does not have.
+
+    ``semantic.db`` is deliberately outside the backup set — it is a derived,
+    rebuildable artifact — but that means restoring an older ``library.db``
+    used to leave semantic search returning hits for recordings the restored
+    library no longer knows about. Pruning ran only inside a full rebuild, so
+    nothing reconciled the two on the restore path (V148).
+
+    Reconciling rather than discarding keeps the index useful for everything
+    the restored library still holds; anything it is missing is filled in by
+    the next indexing pass. Returns a summary dict for the caller to surface.
+    """
+    if not DB_PATH.exists():
+        return {"pruned": 0, "kept": 0, "unindexed": 0, "ran": False}
+    if recording_paths is None:
+        try:
+            from . import db as _db
+            recording_paths = [
+                str(row.get("path") or "") if isinstance(row, dict)
+                else str(getattr(row, "path", "") or "")
+                for row in _db.iter_history(page_size=1000)
+            ]
+        except Exception as error:
+            _LOGGER.warning(
+                "[SEMANTIC] Could not read the library to reconcile: %s", error,
+            )
+            return {"pruned": 0, "kept": 0, "unindexed": 0, "ran": False}
+    known = {str(path) for path in recording_paths if path}
+    connection = _connect()
+    try:
+        indexed = {
+            str(row[0]) for row in connection.execute(
+                "SELECT DISTINCT recording_path FROM semantic_moments"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+    orphans = indexed - known
+    if orphans:
+        _prune_paths(known)
+    return {
+        "pruned": len(orphans),
+        "kept": len(indexed & known),
+        "unindexed": len(known - indexed),
+        "ran": True,
+    }
 
 
 def search_moments(query, limit=100, *, threshold=0.08):

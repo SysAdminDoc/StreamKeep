@@ -20,6 +20,7 @@ rotation write and may also be called directly.
 """
 
 import json
+import logging
 import os
 import shutil
 import sqlite3
@@ -31,6 +32,8 @@ from pathlib import Path
 
 from .paths import CONFIG_DIR
 from .sqlite_runtime import connect as sqlite_connect
+
+_LOGGER = logging.getLogger(__name__)
 
 # Files to include in backup (relative to CONFIG_DIR)
 BACKUP_FILES = [
@@ -298,9 +301,11 @@ def restore_backup(backup_path):
         marker = None
         _remove_pre_restore_copies(current for current, _t, _f in prepared)
         restored_extras = _activate_directory_members(staged_directories)
-        return True, (
-            f"Restored {len(prepared) + restored_extras} files from backup"
-        )
+        message = f"Restored {len(prepared) + restored_extras} files from backup"
+        note = reconcile_derived_indexes()
+        if note:
+            message += f". {note}"
+        return True, message
     except OSError as e:
         for _current, tmp, _fname in prepared:
             try:
@@ -668,7 +673,43 @@ def finalize_interrupted_restore():
             except OSError:
                 pass
     _clear_restore_marker()
+    # The library the semantic index was built against has just been swapped
+    # out from under it, exactly as on the completed-restore path.
+    reconcile_derived_indexes()
     return True
+
+
+def reconcile_derived_indexes():
+    """Bring rebuildable indexes back in line with the library just restored.
+
+    ``semantic.db`` is deliberately not in the backup set — it is derived and
+    rebuildable — but nothing reconciled it afterwards, so restoring an older
+    ``library.db`` left semantic search returning hits for recordings the
+    restored library does not have (V148). Returns a short human note, or an
+    empty string when there was nothing to say.
+    """
+    try:
+        from . import semantic
+        result = semantic.reconcile_with_library()
+    except Exception as error:
+        # The optional index must never be able to fail a restore.
+        _LOGGER.warning("[RESTORE] Semantic index reconcile failed: %s", error)
+        return ""
+    if not result.get("ran") or not (result.get("pruned") or result.get("unindexed")):
+        return ""
+    parts = []
+    if result.get("pruned"):
+        parts.append(
+            f"dropped {result['pruned']} semantic index entr"
+            f"{'y' if result['pruned'] == 1 else 'ies'} for recordings the "
+            "restored library does not have"
+        )
+    if result.get("unindexed"):
+        parts.append(
+            f"{result['unindexed']} restored recording(s) are not in the "
+            "semantic index yet — rebuild it from Settings to include them"
+        )
+    return "Semantic search: " + "; ".join(parts) + "."
 
 
 def _remove_sqlite_sidecars(path):
