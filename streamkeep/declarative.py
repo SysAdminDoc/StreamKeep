@@ -53,6 +53,15 @@ DECLARATIVE_SCHEMA_VERSION = 1
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_DEFINITIONS = 128
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+# Nesting depth a response document may reach before further elements are
+# recorded without being descended into. Real pages sit far below this; the
+# cap exists so a hostile or broken body cannot build a tree deep enough to
+# exhaust the stack or make selector matching quadratic.
+MAX_HTML_DEPTH = 256
+_VOID_HTML_TAGS = frozenset({
+    "area", "base", "br", "embed", "hr", "img", "input", "link", "meta",
+    "param", "source", "track", "wbr",
+})
 DEFAULT_RESPONSE_BYTES = 2 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 8.0
 MAX_TIMEOUT_SECONDS = 30.0
@@ -810,9 +819,15 @@ class _HTMLNode:
     text_parts: list[str]
 
     def text(self):
-        chunks = list(self.text_parts)
-        for child in self.children:
-            chunks.append(child.text())
+        # Iterative pre-order: a recursive walk here raises RecursionError on
+        # a deeply nested document, and RecursionError is not in the exception
+        # set the request path handles, so it escaped as a crash.
+        chunks = []
+        stack = [self]
+        while stack:
+            node = stack.pop()
+            chunks.extend(node.text_parts)
+            stack.extend(reversed(node.children))
         return " ".join(item for item in chunks if item).strip()
 
 
@@ -836,7 +851,13 @@ class _HTMLDocumentParser(HTMLParser):
             [], [],
         )
         self.stack[-1].children.append(node)
-        if tag.lower() not in {"area", "base", "br", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+        if tag.lower() in _VOID_HTML_TAGS:
+            return
+        # Past the depth cap the element is still recorded as a child, so no
+        # text or attribute is lost, but it is not descended into. An 8 MB
+        # body of nothing but opening tags would otherwise build a tree as
+        # deep as it is long.
+        if len(self.stack) < MAX_HTML_DEPTH:
             self.stack.append(node)
 
     def handle_startendtag(self, tag, attrs):
@@ -858,9 +879,12 @@ class _HTMLDocumentParser(HTMLParser):
 
 
 def _walk_html(root):
-    for child in root.children:
-        yield child
-        yield from _walk_html(child)
+    """Yield every descendant in pre-order, without recursing."""
+    stack = list(reversed(root.children))
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(reversed(node.children))
 
 
 def _selector_matches(node: _HTMLNode, token: str) -> bool:
@@ -893,11 +917,22 @@ def _select_html_nodes(root: _HTMLNode, selector: str):
     candidates = [root]
     for token in tokens:
         found = []
+        # Descendant combinators overlap: a node nested under two matched
+        # ancestors was collected once per ancestor, so each token could
+        # multiply the candidate set and the next token re-walked the same
+        # subtree that many times again. Dedupe by identity per token, which
+        # keeps the result set correct and the cost linear in the document.
+        seen = set()
         for candidate in candidates:
             for node in _walk_html(candidate):
+                if id(node) in seen:
+                    continue
                 if _selector_matches(node, token):
+                    seen.add(id(node))
                     found.append(node)
         candidates = found
+        if not candidates:
+            break
     return candidates
 
 

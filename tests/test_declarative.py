@@ -804,3 +804,87 @@ def test_an_imported_config_cannot_pre_approve_an_adapter():
     assert quarantined["reviewed_source_adapters"] == {}
     assert quarantined["source_adapters"] == []
     assert "declarative_adapters" in held
+
+
+# ── V155: bounded HTML parsing depth and selector cost ───────────────
+
+def test_a_deeply_nested_document_does_not_exhaust_the_stack():
+    """The walker and ``text()`` both recursed, so a nested body raised
+    RecursionError — which is not in the exception set the request path
+    handles, so it escaped the adapter as a crash."""
+    depth = declarative.MAX_HTML_DEPTH * 20
+    body = ("<div>" * depth) + "payload" + ("</div>" * depth)
+    root = declarative._HTMLDocumentParser.parse(body.encode("utf-8"))
+
+    assert root.text() == "payload"
+    assert sum(1 for _ in declarative._walk_html(root)) == depth
+
+
+def test_parse_depth_is_capped_but_no_content_is_dropped():
+    depth = declarative.MAX_HTML_DEPTH + 50
+    body = ("<div>" * depth) + "deep" + ("</div>" * depth)
+    root = declarative._HTMLDocumentParser.parse(body.encode("utf-8"))
+
+    # Every element is still recorded...
+    assert sum(1 for _ in declarative._walk_html(root)) == depth
+    # ...and the text past the cap is still reachable.
+    assert "deep" in root.text()
+
+    def measure(node, level=0):
+        if not node.children:
+            return level
+        return max(measure(child, level + 1) for child in node.children)
+
+    assert measure(root) <= declarative.MAX_HTML_DEPTH + 1
+
+
+def test_a_selector_does_not_return_the_same_node_more_than_once():
+    """Descendant combinators overlap: a node under two matched ancestors was
+    collected once per ancestor, so each token multiplied the candidate set."""
+    body = (
+        "<div class='a'><div class='a'><div class='a'>"
+        "<span class='t'>x</span>"
+        "</div></div></div>"
+    ).encode("utf-8")
+    root = declarative._HTMLDocumentParser.parse(body)
+
+    nodes = declarative._select_html_nodes(root, ".a .t")
+    assert len(nodes) == 1
+    assert nodes[0].tag == "span"
+
+
+def test_a_wide_nested_document_matches_in_bounded_time():
+    import time
+
+    body = "<div class='a'>" * 200 + "<span class='t'>x</span>" + "</div>" * 200
+    root = declarative._HTMLDocumentParser.parse(body.encode("utf-8"))
+
+    started = time.monotonic()
+    nodes = declarative._select_html_nodes(root, ".a .a .a .t")
+    elapsed = time.monotonic() - started
+
+    assert len(nodes) == 1
+    # Without per-token dedupe this is combinatorial in the token count.
+    assert elapsed < 2.0, f"selector matching took {elapsed:.1f}s"
+
+
+def test_selector_matching_stops_once_nothing_matches():
+    body = b"<div class='a'><span class='t'>x</span></div>"
+    root = declarative._HTMLDocumentParser.parse(body)
+    assert declarative._select_html_nodes(root, ".a .missing .t") == []
+
+
+def test_the_iterative_walk_reproduces_the_recursive_text_order_exactly():
+    """A node's own text has always come before any child's, so mixed content
+    does not read in document order — `<p>one<b>two</b>three</p>` yields
+    "one three two". That is pre-existing behaviour which adapters may map
+    against, and making the walk iterative deliberately does not change it."""
+    body = b"<p>one<b>two</b>three<i>four</i></p>"
+    root = declarative._HTMLDocumentParser.parse(body)
+    assert root.text() == "one three two four"
+
+
+def test_nested_text_is_still_gathered_depth_first():
+    body = b"<div><section><h1>title</h1><p>body</p></section></div>"
+    root = declarative._HTMLDocumentParser.parse(body)
+    assert root.text() == "title body"

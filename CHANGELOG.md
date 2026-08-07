@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Declarative adapters survive a hostile or malformed HTML response. The
+  walker and the text extractor both recursed, so a deeply nested body raised
+  `RecursionError` — a type the request path does not handle, so it escaped
+  the adapter as a crash rather than a refused response. Both are now
+  iterative, parsing stops descending past a depth cap (elements past it are
+  still recorded, so no text or attribute is lost), and selector matching
+  dedupes candidates per token. That last one mattered most: descendant
+  combinators overlap, so a node beneath two matched ancestors was collected
+  once per ancestor and every additional token multiplied both the result set
+  and the work the next token had to redo. Text-extraction order is
+  deliberately unchanged.
+
 - The translation sidecar writer no longer closes its temporary file twice.
   `os.fdopen` takes ownership of the descriptor, so a failure after the write
   — a denied `os.replace` being the realistic one — ran `os.close` on a number

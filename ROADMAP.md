@@ -71,13 +71,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Acceptance: the crash is reproduced under `-p no:randomly` with a narrowed test set and either fixed or pinned to a named upstream issue; a full suite run repeated ten times shows no access violation.
   Complexity: M
 
-- [ ] P2 — V155 — Bound declarative HTML parsing depth and selector cost
-  Why: the HTML walker is recursive against only an 8 MB body cap and selector matching re-walks each candidate's whole subtree per token with no dedupe, so a deeply nested response either raises an uncaught `RecursionError` or burns minutes of CPU in a worker.
-  Evidence: `streamkeep/declarative.py:593-596` (`_walk_html`), `:545-549` (`_HTMLNode.text`), `:622-634` (`_select_html_nodes`), `MAX_RESPONSE_BYTES` at `:39`, except clause at `:1100-1103`.
-  Touches: `streamkeep/declarative.py`, tests.
-  Acceptance: parse depth is capped in `handle_starttag`, walking and text extraction are iterative, candidates are deduped per token, and a nested-`div` fixture completes within a bounded time without escaping an exception type the caller does not handle.
-  Complexity: M
-
 - [ ] P2 — V158 — Guard capability probing on unsupported host architectures
   Why: `host_target()` raises for anything outside five pinned triples and the capability probe has no guard, so Windows-on-ARM64 with no PATH JavaScript runtime raises out of `get_runtime_capabilities` instead of reporting a missing runtime.
   Evidence: `streamkeep/javascript_runtime.py:99-116`, `:182-186`; `streamkeep/capabilities.py:400-403`, `:1010-1019`.
