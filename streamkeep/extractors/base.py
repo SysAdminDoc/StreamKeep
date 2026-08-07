@@ -46,14 +46,23 @@ class Extractor:
                 except Exception:
                     continue
         try:
-            from ..declarative import detect_declarative_extractor
+            from ..declarative import (
+                detect_declarative_extractor,
+                report_adapter_load_errors,
+            )
+            # A definition that fails to load used to fall through here in
+            # silence, so a typo looked identical to "this site has no
+            # adapter". Reported once per registry change, not per keystroke.
+            report_adapter_load_errors()
             declarative = detect_declarative_extractor(url)
             if declarative is not None:
                 return declarative
-        except Exception:
+        except Exception as error:
             # A malformed optional YAML definition must not disable the
             # built-in extractor registry or turn URL detection into a crash.
-            pass
+            logger.warning(
+                "[ADAPTERS] Declarative detection failed for this URL: %s", error,
+            )
         for ext_cls in fallback_classes:
             for pattern in ext_cls.URL_PATTERNS:
                 try:

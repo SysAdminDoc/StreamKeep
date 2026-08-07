@@ -360,6 +360,41 @@ def _extractor_conditions(config, retry_circuits, now, now_epoch) -> list[dict]:
     return conditions
 
 
+def _source_adapter_conditions(now, diagnostics=None) -> list[dict]:
+    """Raise one standing condition per source adapter that will not load.
+
+    A malformed adapter otherwise falls through to the yt-dlp catch-all with
+    no visible sign, so the site simply stops behaving as the operator
+    configured it. The condition is derived from the current on-disk state
+    every run, so fixing the file clears it (V151).
+    """
+    if diagnostics is None:
+        try:
+            from .declarative import declarative_adapter_diagnostics
+            diagnostics = declarative_adapter_diagnostics()
+        except Exception:
+            # Adapters are optional; an unavailable registry is not a health
+            # finding of its own.
+            return []
+    errors = (diagnostics or {}).get("errors") or []
+    conditions = []
+    for entry in errors:
+        if not isinstance(entry, dict):
+            continue
+        source = _safe_text(entry.get("source") or "source adapter", 240)
+        label = Path(source).name or source
+        conditions.append(_condition(
+            f"source_adapter:{source}", "extractor", "warning",
+            f"Source adapter could not be loaded: {label}",
+            _safe_text(entry.get("error") or "the definition is invalid", 240),
+            "Fix or remove the definition in the source_adapters folder; "
+            "until then this site falls back to the yt-dlp extractor.",
+            target=label, target_path=source,
+            event=HEALTH_EVENT_BY_CATEGORY["extractor"], now=now,
+        ))
+    return conditions
+
+
 def _snapshot_status(conditions) -> tuple[str, dict]:
     summary = {name: 0 for name in SEVERITY_ORDER}
     for condition in conditions:
@@ -456,6 +491,7 @@ def run_health_check(
     archive_roots=None,
     retry_circuits=None,
     disk_usage=None,
+    adapter_diagnostics=None,
     now=None,
     credential_timeout=8,
     storage_path=None,
@@ -490,6 +526,7 @@ def run_health_check(
     conditions.extend(archive)
     conditions.extend(_disk_conditions(config, roots, disk_usage, now_iso))
     conditions.extend(_extractor_conditions(config, retry_circuits, now_iso, now_epoch))
+    conditions.extend(_source_adapter_conditions(now_iso, adapter_diagnostics))
     conditions.sort(key=lambda item: (
         _SEVERITY_RANK.get(item.get("severity"), len(SEVERITY_ORDER)),
         item.get("title", ""),

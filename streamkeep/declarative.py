@@ -9,7 +9,9 @@ changes, so editing a YAML file takes effect without restarting StreamKeep.
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import functools
 import hashlib
 import json
 import logging
@@ -28,6 +30,7 @@ from .models import QualityInfo, StreamInfo, VODInfo
 from .net_guard import (
     GuardedHTTPProxy,
     RemoteURLPolicyError,
+    normalize_remote_url,
     validate_remote_url,
 )
 from .paths import CONFIG_DIR
@@ -41,6 +44,11 @@ SOURCE_ADAPTERS_DIR = CONFIG_DIR / "source_adapters"
 # being typed into does not reparse the whole directory per character.
 _REGISTRY_LOCK = threading.Lock()
 _REGISTRY_CACHE: dict[tuple, tuple] = {}
+# Load errors are announced once per registry signature rather than once per
+# detection call, so a broken definition produces one log line when it changes
+# instead of one per keystroke in the URL field.
+_ERROR_REPORT_LOCK = threading.Lock()
+_LAST_REPORTED_SIGNATURE = None
 DECLARATIVE_SCHEMA_VERSION = 1
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_DEFINITIONS = 128
@@ -53,6 +61,10 @@ MAX_HEADERS = 32
 MAX_FIELDS = 64
 MAX_QUALITIES = 32
 MAX_ITEMS = 500
+# Distinct hosts one adapter operation may make StreamKeep resolve. A single
+# site legitimately spreads media across a handful of CDN names; a response
+# naming hundreds is using the app as a DNS oracle.
+MAX_HOST_RESOLUTIONS = 8
 
 _SAFE_HEADER_NAMES = frozenset({
     "accept", "accept-language", "cache-control", "if-modified-since",
@@ -100,6 +112,76 @@ _HTML_TOKEN_ATTR_RE = re.compile(
 
 class DeclarativeAdapterError(ValueError):
     """Raised when a YAML source adapter violates the data-only contract."""
+
+
+_VALIDATION_STATE = threading.local()
+
+
+@contextlib.contextmanager
+def bounded_url_validation(limit=MAX_HOST_RESOLUTIONS):
+    """Bound the DNS a single adapter response can make StreamKeep perform.
+
+    A list response may carry ``MAX_ITEMS`` entries with several URLs each, and
+    the address policy resolves synchronously. Validating each URL separately
+    therefore meant up to ``MAX_ITEMS * 4`` serialized ``getaddrinfo`` calls
+    per operation: hours of stalled fetch worker, and StreamKeep acting as a
+    DNS oracle for whatever names the remote site chose to return.
+
+    Inside this scope every URL is still normalized and every distinct host is
+    still resolved and address-checked — but each host only once, and at most
+    ``limit`` distinct hosts. The per-host decision is scoped to the one
+    operation, and anything that actually opens a socket re-validates at
+    connect time, so this narrows work rather than trust.
+    """
+    previous = getattr(_VALIDATION_STATE, "budget", None)
+    _VALIDATION_STATE.budget = {"limit": max(1, int(limit)), "hosts": {}}
+    try:
+        yield _VALIDATION_STATE.budget
+    finally:
+        _VALIDATION_STATE.budget = previous
+
+
+def _validate_mapped_url(value: Any) -> str:
+    """Return a policy-approved URL that came out of an adapter response.
+
+    Raises :class:`RemoteURLPolicyError` like ``validate_remote_url`` does, so
+    existing callers keep their behaviour; the difference is that repeated
+    hosts cost no extra resolution and an over-wide response is refused by
+    name instead of grinding.
+    """
+    # ``normalize_remote_url`` applies the same syntactic policy as
+    # ``validate_remote_url`` without touching DNS, so every URL is still
+    # screened; the full check (which resolves) is what gets bounded.
+    normalized, host, port = normalize_remote_url(value)
+    budget = getattr(_VALIDATION_STATE, "budget", None)
+    if budget is None:
+        return validate_remote_url(normalized).url
+    key = (host, port)
+    if key not in budget["hosts"]:
+        if len(budget["hosts"]) >= budget["limit"]:
+            raise RemoteURLPolicyError(
+                "adapter response referenced more than "
+                f"{budget['limit']} distinct hosts"
+            )
+        try:
+            validate_remote_url(normalized)
+            budget["hosts"][key] = ""
+        except RemoteURLPolicyError as error:
+            budget["hosts"][key] = str(error) or "address policy refused the host"
+    reason = budget["hosts"][key]
+    if reason:
+        raise RemoteURLPolicyError(reason)
+    return normalized
+
+
+def bounded_operation_urls(method):
+    """Scope one adapter operation's DNS budget across its whole mapping pass."""
+    @functools.wraps(method)
+    def wrapper(*args, **kwargs):
+        with bounded_url_validation():
+            return method(*args, **kwargs)
+    return wrapper
+
 
 
 # Adapter patterns are matched on whatever thread handed us a URL — on the
@@ -342,6 +424,7 @@ class DeclarativeDefinition:
             ) from error
         return payload, response_spec, variables
 
+    @bounded_operation_urls
     def resolve_stream(self, url: str, log_fn=None) -> StreamInfo | None:
         payload, response, variables = self._request(url, "resolve")
         fields = response.get("fields", {})
@@ -376,6 +459,7 @@ class DeclarativeDefinition:
         from .extractors.base import Extractor
         return Extractor._canonicalize_stream_info(info, source_url=url)
 
+    @bounded_operation_urls
     def list_vod_items(self, url: str, log_fn=None, cursor: str | None = None):
         payload, response, variables = self._request(
             url, "list_vods", cursor or "",
@@ -413,7 +497,7 @@ class DeclarativeDefinition:
             if not source:
                 continue
             try:
-                source = validate_remote_url(source).url
+                source = _validate_mapped_url(source)
             except RemoteURLPolicyError:
                 continue
             item = VODInfo(
@@ -443,6 +527,7 @@ class DeclarativeDefinition:
             next_cursor = ""
         return result, str(next_cursor) if next_cursor else None
 
+    @bounded_operation_urls
     def check_live_value(self, url: str) -> bool | None:
         payload, response, _variables = self._request(url, "check_live")
         fields = response.get("fields", {})
@@ -526,7 +611,7 @@ def _safe_remote_url(value: Any) -> str:
     if not text:
         return ""
     try:
-        return validate_remote_url(text).url
+        return _validate_mapped_url(text)
     except RemoteURLPolicyError:
         return ""
 
@@ -625,7 +710,7 @@ def _build_qualities(payload, response, values, fmt):
         if not quality.url:
             continue
         try:
-            quality.url = validate_remote_url(quality.url).url
+            quality.url = _validate_mapped_url(quality.url)
         except RemoteURLPolicyError:
             continue
         quality.audio_url = _safe_remote_url(quality.audio_url)
@@ -782,10 +867,23 @@ def _parse_yaml(text: str, source: str):
 
     class UniqueSafeLoader(yaml.SafeLoader):
         def construct_mapping(self, node, deep=False):
+            # PyYAML's own construct_mapping calls flatten_mapping first (which
+            # expands `<<:` merge keys) and raises ConstructorError on an
+            # unhashable key. Replacing it wholesale dropped both guards, so a
+            # merge key became a literal field named "<<" and a list key
+            # escaped as a bare TypeError.
+            self.flatten_mapping(node)
             mapping = {}
             for key_node, value_node in node.value:
                 key = self.construct_object(key_node, deep=deep)
-                if key in mapping:
+                try:
+                    duplicate = key in mapping
+                except TypeError as error:
+                    raise DeclarativeAdapterError(
+                        f"unhashable YAML key in {source or 'definition'}: "
+                        f"{error}"
+                    ) from error
+                if duplicate:
                     raise DeclarativeAdapterError(
                         f"duplicate YAML key {key!r} in {source or 'definition'}"
                     )
@@ -799,6 +897,12 @@ def _parse_yaml(text: str, source: str):
     except yaml.YAMLError as error:
         raise DeclarativeAdapterError(
             f"invalid YAML in {source or 'definition'}: {error}"
+        ) from error
+    except RecursionError as error:
+        # A deeply self-nesting document is a malformed definition, not a
+        # StreamKeep crash.
+        raise DeclarativeAdapterError(
+            f"definition in {source or 'definition'} is nested too deeply"
         ) from error
     if not isinstance(result, dict):
         raise DeclarativeAdapterError("definition root must be a YAML mapping")
@@ -1194,12 +1298,22 @@ def _build_source_adapters(directory=None, config=None):
         if directory.is_dir():
             paths = sorted(
                 path for path in directory.iterdir()
-                if path.is_file() and path.suffix.lower() in {".yaml", ".yml"}
+                # ``is_file()`` follows symlinks, so a link pointing at a
+                # multi-gigabyte file used to be read whole before the byte cap
+                # was applied to its text. Judge the entry itself.
+                if not path.is_symlink()
+                and path.is_file()
+                and path.suffix.lower() in {".yaml", ".yml"}
             )[:MAX_DEFINITIONS]
     except OSError as error:
         errors.append({"source": str(directory), "error": str(error)})
     for path in paths:
         try:
+            size = path.stat(follow_symlinks=False).st_size
+            if size > MAX_DEFINITION_BYTES:
+                raise DeclarativeAdapterError(
+                    f"definition is {size} bytes, over the 256 KiB limit"
+                )
             definition = parse_definition_text(
                 path.read_text(encoding="utf-8"), str(path),
             )
@@ -1212,6 +1326,14 @@ def _build_source_adapters(directory=None, config=None):
                 definitions.append(definition)
         except (OSError, UnicodeError, DeclarativeAdapterError) as error:
             errors.append({"source": str(path), "error": str(error)})
+        except Exception as error:
+            # One malformed definition must never take the whole registry
+            # down, and diagnostics must never show a raw traceback. Anything
+            # the parsers did not classify is reported against its own file.
+            errors.append({
+                "source": str(path),
+                "error": f"unhandled {type(error).__name__}: {error}",
+            })
     for definition, error in _config_entries(config):
         if error is not None:
             errors.append(error)
@@ -1256,6 +1378,61 @@ def declarative_adapter_names(directory=None, config=None):
     return [definition.name for definition in definitions]
 
 
+def take_new_adapter_errors(directory=None, config=None):
+    """Return load errors once per changed registry signature.
+
+    URL detection calls into the registry for every URL it is handed — on the
+    desktop, every keystroke in the URL field — so reporting the error list on
+    each call would bury the log. The signature changes exactly when a
+    definition is added, edited or removed, which is when the operator needs
+    to hear about it again.
+
+    Returns ``None`` when nothing has changed since the last report, and a
+    (possibly empty) list otherwise; an empty list means the definitions now
+    load cleanly and any standing notice can be cleared.
+    """
+    global _LAST_REPORTED_SIGNATURE
+    signature = registry_signature(directory, config)
+    with _ERROR_REPORT_LOCK:
+        if signature == _LAST_REPORTED_SIGNATURE:
+            return None
+        _LAST_REPORTED_SIGNATURE = signature
+    _definitions, errors = discover_source_adapters(directory, config)
+    return errors
+
+
+def reset_adapter_error_reporting():
+    """Forget the last reported signature (used by tests and diagnostics)."""
+    global _LAST_REPORTED_SIGNATURE
+    with _ERROR_REPORT_LOCK:
+        _LAST_REPORTED_SIGNATURE = None
+
+
+def report_adapter_load_errors(log_fn=None, directory=None, config=None):
+    """Log one line per newly-broken adapter definition.
+
+    A typo'd adapter used to fall through to the yt-dlp catch-all silently:
+    the error list was discarded here and the caller wrapped the whole call in
+    ``except Exception: pass``. The project's rule is that background failures
+    must be visible.
+    """
+    errors = take_new_adapter_errors(directory, config)
+    if not errors:
+        return errors
+    for entry in errors:
+        message = (
+            f"[ADAPTERS] {entry.get('source', 'source adapter')}: "
+            f"{entry.get('error', 'could not be loaded')}"
+        )
+        logger.warning("%s", message)
+        if log_fn is not None:
+            try:
+                log_fn(message)
+            except Exception as error:
+                logger.debug("[ADAPTERS] Could not forward error line: %s", error)
+    return errors
+
+
 def detect_declarative_extractor(url: str):
     definitions, _errors = discover_source_adapters()
     for definition in definitions:
@@ -1290,27 +1467,32 @@ def _guarded_request(url, *, method, headers, timeout, max_response_bytes):
                     response = opener.open(request, timeout=timeout)
                 except urllib.error.HTTPError as error:
                     response = error
-                status = int(getattr(response, "status", response.getcode()))
-                if status in {301, 302, 303, 307, 308}:
-                    location = response.headers.get("Location", "")
-                    if not location:
-                        raise DeclarativeAdapterError("redirect has no Location")
-                    current = validate_remote_url(
-                        urllib.parse.urljoin(current, location)
-                    ).url
-                    continue
-                if status < 200 or status >= 300:
-                    raise DeclarativeAdapterError(f"request returned HTTP {status}")
-                length = response.headers.get("Content-Length", "")
-                try:
-                    if length and int(length) > max_response_bytes:
+                # Closed on every path — returned body, redirect `continue`,
+                # and raised error alike. Without this the socket to the
+                # guarded proxy was only reclaimed at GC, and a redirect chain
+                # leaked one per hop.
+                with contextlib.closing(response):
+                    status = int(getattr(response, "status", response.getcode()))
+                    if status in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("Location", "")
+                        if not location:
+                            raise DeclarativeAdapterError("redirect has no Location")
+                        current = validate_remote_url(
+                            urllib.parse.urljoin(current, location)
+                        ).url
+                        continue
+                    if status < 200 or status >= 300:
+                        raise DeclarativeAdapterError(f"request returned HTTP {status}")
+                    length = response.headers.get("Content-Length", "")
+                    try:
+                        if length and int(length) > max_response_bytes:
+                            raise DeclarativeAdapterError("response exceeds configured byte limit")
+                    except ValueError:
+                        pass
+                    body = response.read(max_response_bytes + 1)
+                    if len(body) > max_response_bytes:
                         raise DeclarativeAdapterError("response exceeds configured byte limit")
-                except ValueError:
-                    pass
-                body = response.read(max_response_bytes + 1)
-                if len(body) > max_response_bytes:
-                    raise DeclarativeAdapterError("response exceeds configured byte limit")
-                return body, str(response.headers.get("Content-Type", ""))
+                    return body, str(response.headers.get("Content-Type", ""))
         except DeclarativeAdapterError:
             raise
         except (OSError, urllib.error.URLError, RemoteURLPolicyError) as error:

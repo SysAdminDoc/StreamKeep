@@ -91,13 +91,16 @@ def resolve_host_addresses(host, port):
     return (literal,)
 
 
-def validate_remote_url(url, *, base_url="", allow_private_network=False):
-    """Normalize and resolve one HTTP(S) URL or raise on any unsafe target.
+def normalize_remote_url(url, *, base_url=""):
+    """Return ``(normalized_url, host, port)`` after the syntactic checks only.
 
-    Every DNS answer is checked, not just the address selected for a
-    connection.  Callers that open a socket must connect to one of the
-    returned numeric addresses so the validation cannot be bypassed by a
-    second DNS lookup.
+    No name resolution happens here.  It is split out from
+    :func:`validate_remote_url` for callers that map many URLs out of one
+    response: they can normalize every URL cheaply and resolve each distinct
+    host once, instead of paying a ``getaddrinfo`` per URL.
+
+    This is *not* a substitute for :func:`validate_remote_url` — nothing that
+    opens a socket may rely on it alone.
     """
     text = str(url or "").strip()
     if base_url:
@@ -147,6 +150,11 @@ def validate_remote_url(url, *, base_url="", allow_private_network=False):
         parsed.query,
         "",
     ))
+    return normalized, host, port
+
+
+def resolve_allowed_addresses(host, port, *, allow_private_network=False):
+    """Resolve *host* and raise unless every answer is a permitted address."""
     try:
         addresses = resolve_host_addresses(host, port)
     except (OSError, ValueError):
@@ -158,7 +166,22 @@ def validate_remote_url(url, *, base_url="", allow_private_network=False):
             raise RemoteURLPolicyError(
                 f"Address class is not allowed for {host}"
             )
-    return ValidatedRemoteURL(normalized, host, port, tuple(addresses))
+    return tuple(addresses)
+
+
+def validate_remote_url(url, *, base_url="", allow_private_network=False):
+    """Normalize and resolve one HTTP(S) URL or raise on any unsafe target.
+
+    Every DNS answer is checked, not just the address selected for a
+    connection.  Callers that open a socket must connect to one of the
+    returned numeric addresses so the validation cannot be bypassed by a
+    second DNS lookup.
+    """
+    normalized, host, port = normalize_remote_url(url, base_url=base_url)
+    addresses = resolve_allowed_addresses(
+        host, port, allow_private_network=allow_private_network,
+    )
+    return ValidatedRemoteURL(normalized, host, port, addresses)
 
 
 def url_target_allowed(url, *, allow_private_network=False):

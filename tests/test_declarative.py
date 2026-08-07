@@ -368,3 +368,279 @@ def test_match_refuses_absurdly_long_paths(tmp_path, monkeypatch):
     assert definition.match("https://example.com/watch/abc") is not None
     huge = "a" * (declarative.MAX_MATCH_PATH_CHARS + 1)
     assert definition.match(f"https://example.com/watch/{huge}") is None
+
+
+# ── V150: loader hardening ──────────────────────────────────────────
+
+def test_merge_keys_are_flattened_not_stored_literally():
+    """The custom construct_mapping replaced PyYAML's, which dropped
+    flatten_mapping — so `<<:` silently became a field named '<<'."""
+    text = """
+base: &base
+  timeout: 5
+resolve:
+  <<: *base
+  extra: 1
+"""
+    result = declarative._parse_yaml(text, "merge.yaml")
+    assert result["resolve"] == {"timeout": 5, "extra": 1}
+    assert "<<" not in result["resolve"]
+
+
+def test_an_unhashable_key_is_an_adapter_error_not_a_typeerror():
+    """`key in mapping` raised a bare TypeError that escaped every handler."""
+    text = "? [1, 2]\n: value\n"
+    with pytest.raises(declarative.DeclarativeAdapterError, match="unhashable"):
+        declarative._parse_yaml(text, "unhashable.yaml")
+
+
+def test_duplicate_keys_are_still_refused():
+    with pytest.raises(declarative.DeclarativeAdapterError, match="duplicate"):
+        declarative._parse_yaml("id: a\nid: b\n", "dupe.yaml")
+
+
+def test_an_unhashable_key_in_a_file_becomes_a_diagnostic_not_a_traceback():
+    import tempfile
+    from pathlib import Path as _Path
+
+    with tempfile.TemporaryDirectory() as raw_dir:
+        adapter_dir = _Path(raw_dir)
+        (adapter_dir / "bad.yaml").write_text("? [1, 2]\n: value\n", encoding="utf-8")
+        report = declarative.declarative_adapter_diagnostics(adapter_dir, config={})
+    assert report["adapters"] == []
+    assert any("unhashable" in item["error"] for item in report["errors"])
+
+
+def test_an_oversized_definition_is_rejected_before_it_is_read(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "huge.yaml"
+    path.write_text("x" * (declarative.MAX_DEFINITION_BYTES + 1024), encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+
+    reads = []
+    real_read = type(path).read_text
+
+    def counting_read(self, *args, **kwargs):
+        reads.append(str(self))
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(path), "read_text", counting_read)
+    definitions, errors = declarative.discover_source_adapters()
+    assert definitions == []
+    assert any("256 KiB" in item["error"] for item in errors)
+    # The cap is applied from stat(), so the body is never pulled into memory.
+    assert reads == []
+
+
+# ── V151: adapter load errors are visible ───────────────────────────
+
+def test_a_broken_adapter_is_logged_once_per_registry_change(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "broken.yaml"
+    path.write_text("schema_version: 99\n", encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+    declarative.reset_adapter_error_reporting()
+
+    lines = []
+    for _ in range(10):
+        declarative.report_adapter_load_errors(lines.append)
+    assert len(lines) == 1, lines
+    assert str(path) in lines[0]
+
+    # Editing the file is a new registry signature, so it is reported again.
+    path.write_text("schema_version: 98\n", encoding="utf-8")
+    declarative.invalidate_registry_cache()
+    declarative.report_adapter_load_errors(lines.append)
+    assert len(lines) == 2
+
+
+def test_a_fixed_adapter_reports_an_empty_error_list(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "example.yaml"
+    path.write_text("schema_version: 99\n", encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+    declarative.reset_adapter_error_reporting()
+    assert declarative.take_new_adapter_errors()
+    assert declarative.take_new_adapter_errors() is None
+
+    path.write_text(DEFINITION, encoding="utf-8")
+    declarative.invalidate_registry_cache()
+    assert declarative.take_new_adapter_errors() == []
+
+
+def test_url_detection_still_works_when_an_adapter_is_broken(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "broken.yaml").write_text("schema_version: 99\n", encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    declarative.invalidate_registry_cache()
+    declarative.reset_adapter_error_reporting()
+    assert Extractor.detect("https://www.youtube.com/watch?v=abc") is not None
+
+
+def test_health_raises_and_clears_a_condition_for_a_broken_adapter():
+    from streamkeep import health
+
+    conditions = health._source_adapter_conditions("2026-08-06T00:00:00+00:00", {
+        "adapters": [],
+        "errors": [{"source": "C:/adapters/broken.yaml", "error": "schema_version"}],
+    })
+    assert len(conditions) == 1
+    assert conditions[0]["id"] == "source_adapter:C:/adapters/broken.yaml"
+    assert "broken.yaml" in conditions[0]["title"]
+    assert conditions[0]["category"] == "extractor"
+
+    # A registry that loads cleanly raises nothing, which is how the standing
+    # condition clears on the next health run.
+    assert health._source_adapter_conditions(
+        "2026-08-06T00:00:00+00:00", {"adapters": [], "errors": []},
+    ) == []
+
+
+# ── V152: adapter responses cannot drive unbounded DNS ──────────────
+
+def test_a_wide_response_resolves_each_host_once(monkeypatch):
+    """500 items x 4 URLs used to mean up to 2,000 serialized getaddrinfo
+    calls in a fetch worker."""
+    resolved = []
+
+    def guard(url, **_kwargs):
+        from streamkeep.net_guard import normalize_remote_url
+        _normalized, host, port = normalize_remote_url(url)
+        resolved.append(host)
+        return mock.Mock(url=url)
+
+    monkeypatch.setattr(declarative, "validate_remote_url", guard)
+    with declarative.bounded_url_validation():
+        for index in range(500):
+            declarative._validate_mapped_url(
+                f"https://cdn.example.com/video/{index}.mp4"
+            )
+            declarative._safe_remote_url(
+                f"https://cdn.example.com/thumb/{index}.jpg"
+            )
+    assert resolved == ["cdn.example.com"], resolved
+
+
+def test_too_many_distinct_hosts_is_refused_by_name(monkeypatch):
+    monkeypatch.setattr(
+        declarative, "validate_remote_url",
+        lambda url, **_kw: mock.Mock(url=url),
+    )
+    with declarative.bounded_url_validation(limit=3):
+        for index in range(3):
+            declarative._validate_mapped_url(f"https://cdn{index}.example.com/a.mp4")
+        with pytest.raises(
+            declarative.RemoteURLPolicyError, match="more than 3 distinct hosts",
+        ):
+            declarative._validate_mapped_url("https://cdn99.example.com/a.mp4")
+
+
+def test_a_refused_host_stays_refused_without_re_resolving(monkeypatch):
+    calls = []
+
+    def guard(url, **_kwargs):
+        calls.append(url)
+        raise declarative.RemoteURLPolicyError("Address class is not allowed")
+
+    monkeypatch.setattr(declarative, "validate_remote_url", guard)
+    with declarative.bounded_url_validation():
+        for index in range(50):
+            assert declarative._safe_remote_url(
+                f"https://internal.example.com/{index}.mp4"
+            ) == ""
+    assert len(calls) == 1, calls
+
+
+def test_a_syntactically_invalid_url_is_still_refused(monkeypatch):
+    monkeypatch.setattr(
+        declarative, "validate_remote_url",
+        lambda url, **_kw: mock.Mock(url=url),
+    )
+    with declarative.bounded_url_validation():
+        # No DNS involved: the scheme check happens before any resolution.
+        with pytest.raises(declarative.RemoteURLPolicyError):
+            declarative._validate_mapped_url("file:///etc/passwd")
+        assert declarative._safe_remote_url("not a url at all") == ""
+
+
+def test_the_budget_is_scoped_to_one_operation(monkeypatch):
+    monkeypatch.setattr(
+        declarative, "validate_remote_url",
+        lambda url, **_kw: mock.Mock(url=url),
+    )
+    with declarative.bounded_url_validation(limit=1):
+        declarative._validate_mapped_url("https://a.example.com/x.mp4")
+    # A fresh operation starts with a fresh budget rather than inheriting one.
+    with declarative.bounded_url_validation(limit=1):
+        declarative._validate_mapped_url("https://b.example.com/x.mp4")
+
+
+def test_operations_are_wrapped_in_a_budget():
+    for name in ("resolve_stream", "list_vod_items", "check_live_value"):
+        method = getattr(declarative.DeclarativeDefinition, name)
+        assert getattr(method, "__wrapped__", None) is not None, name
+
+
+# ── V156: the declarative HTTP response is closed ───────────────────
+
+def test_the_guarded_response_is_closed_on_every_path(monkeypatch):
+    class _Headers(dict):
+        def get(self, key, default=""):
+            return dict.get(self, key, default)
+
+    class _Response:
+        def __init__(self, status, headers, body=b""):
+            self.status = status
+            self.headers = _Headers(headers)
+            self._body = body
+            self.closed = False
+
+        def getcode(self):
+            return self.status
+
+        def read(self, size=-1):
+            return self._body if size < 0 else self._body[:size]
+
+        def close(self):
+            self.closed = True
+
+    responses = [
+        _Response(302, {"Location": "https://example.com/final"}),
+        _Response(200, {"Content-Type": "application/json"}, b'{"ok": true}'),
+    ]
+    opened = []
+
+    class _Opener:
+        def open(self, _request, timeout=None):
+            response = responses[len(opened)]
+            opened.append(response)
+            return response
+
+    monkeypatch.setattr(
+        declarative, "validate_remote_url",
+        lambda url, **_kw: mock.Mock(url=str(url)),
+    )
+    monkeypatch.setattr(
+        declarative.urllib.request, "build_opener", lambda *_a: _Opener(),
+    )
+    monkeypatch.setattr(
+        declarative, "GuardedHTTPProxy",
+        lambda **_kw: mock.MagicMock(
+            __enter__=lambda self: mock.Mock(url="http://127.0.0.1:1"),
+            __exit__=lambda self, *a: False,
+        ),
+    )
+    body, _content_type = declarative._guarded_request(
+        "https://example.com/start", method="GET", headers={},
+        timeout=1, max_response_bytes=1024,
+    )
+    assert body == b'{"ok": true}'
+    # Both the redirect hop and the final response are closed, not left to GC.
+    assert [response.closed for response in opened] == [True, True]
