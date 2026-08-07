@@ -56,6 +56,8 @@ def migrate_database(connection, version: int, target_version: int) -> None:
         implementation._migrate_history_actions_v20(connection)
     if version < 21:
         implementation._migrate_comments_v21(connection)
+    if version < 22:
+        implementation._migrate_failure_codes_v22(connection)
 
     implementation._apply_schema(connection)
     if version == 0:

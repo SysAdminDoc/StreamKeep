@@ -34,7 +34,7 @@ from ..sqlite_runtime import connect as sqlite_connect
 from ..sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 HISTORY_ACTION_COMPACTION_LIMIT = 10_000
 _HISTORY_ACTION_STATE_FIELDS = (
@@ -489,7 +489,9 @@ def _apply_schema(db):
             last_reason    TEXT    NOT NULL DEFAULT '',
             source_key     TEXT    NOT NULL DEFAULT '',
             source_label   TEXT    NOT NULL DEFAULT '',
-            auto_retry     INTEGER NOT NULL DEFAULT 0
+            auto_retry     INTEGER NOT NULL DEFAULT 0,
+            reason_code    TEXT    NOT NULL DEFAULT 'unknown',
+            terminal       INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_failed_jobs_status
             ON failed_jobs(status, updated_at);
@@ -1141,6 +1143,33 @@ def _migrate_publishing_v13(db):
     _apply_publishing_schema(db)
 
 
+def _migrate_failure_codes_v22(db):
+    """Add the machine-readable failure taxonomy (V154).
+
+    The pre-existing ``category`` stays as the coarse bucket the remediation
+    table is keyed by. ``reason_code`` names the specific condition and
+    ``terminal`` marks the ones no retry or operator action can fix, so a
+    permanently-gone item stops being offered for retry forever.
+    """
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(failed_jobs)").fetchall()
+    }
+    if not existing_cols:
+        return
+    for col_name, col_def in (
+        ("reason_code", "TEXT NOT NULL DEFAULT 'unknown'"),
+        ("terminal", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if col_name not in existing_cols:
+            db.execute(
+                f"ALTER TABLE failed_jobs ADD COLUMN {col_name} {col_def}"
+            )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_failed_jobs_reason_code "
+        "ON failed_jobs(reason_code)"
+    )
+
+
 def _migrate_retry_v10(db):
     """Add persistent error policy, due times, and per-source circuits."""
     existing_cols = {
@@ -1176,6 +1205,12 @@ def _migrate_retry_v10(db):
         )
     """)
 
+    # The backfill below writes the full classification, including the
+    # taxonomy columns a later migration owns. Adding them here first keeps a
+    # v9 database from failing on a column the chain has not reached yet;
+    # both migrations are idempotent, so v22 running twice is a no-op.
+    _migrate_failure_codes_v22(db)
+
     from ..retry import (
         classify_failure,
         retry_delay_seconds,
@@ -1208,13 +1243,18 @@ def _migrate_retry_v10(db):
                 retry_after_seconds=decision.retry_after_seconds,
             )
             next_attempt_at = utc_iso(current_time + delay)
+        elif decision.terminal and status != "resolved":
+            # Permanently gone: distinct from "intervention", which means an
+            # operator could still make it work.
+            status = "terminal"
         elif status == "retryable":
             status = "intervention"
         db.execute("""
             UPDATE failed_jobs
                SET category=?, retryable=?, next_attempt_at=?,
                    retry_after_seconds=?, last_reason=?, source_key=?,
-                   source_label=?, auto_retry=?, status=?, error=?
+                   source_label=?, auto_retry=?, status=?, error=?,
+                   reason_code=?, terminal=?
              WHERE id=?
         """, (
             decision.category,
@@ -1227,6 +1267,8 @@ def _migrate_retry_v10(db):
             auto_retry,
             status,
             decision.reason,
+            decision.code,
+            int(decision.terminal),
             int(row[0]),
         ))
 
@@ -5379,7 +5421,9 @@ def save_failed_job(
             )
             effective_auto_retry = bool(decision.retryable and wants_auto_retry)
             effective_status = (
-                "retryable" if effective_auto_retry else "intervention"
+                "retryable" if effective_auto_retry
+                else "terminal" if decision.terminal
+                else "intervention"
             )
             requested_status = str(status or "").strip()
             if requested_status in {"discarded", "resolved"}:
@@ -5487,8 +5531,8 @@ def save_failed_job(
                      context_json, created_at, updated_at, last_retry_at,
                      category, retryable, next_attempt_at,
                      retry_after_seconds, last_reason, source_key,
-                     source_label, auto_retry)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     source_label, auto_retry, reason_code, terminal)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 url,
                 str(platform or ""),
@@ -5512,6 +5556,8 @@ def save_failed_job(
                 source_key,
                 source_label,
                 int(effective_auto_retry),
+                decision.code,
+                int(decision.terminal),
             ))
             conn.commit()
             return int(cur.lastrowid or 0)
@@ -5521,7 +5567,9 @@ def save_failed_job(
 
 def load_failed_jobs(
     *,
-    statuses: tuple[str, ...] = ("retryable", "retrying", "intervention"),
+    statuses: tuple[str, ...] = (
+        "retryable", "retrying", "intervention", "terminal",
+    ),
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Return failed jobs ordered newest-first."""
@@ -6297,6 +6345,12 @@ def failed_job_public_view(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "stage": str(row.get("stage", "") or ""),
         "category": category,
+        # The stable machine-readable code a client can branch on (V154).
+        # ``category`` remains the coarse bucket the remediation text is keyed
+        # by; ``reason_code`` names the specific condition, and ``terminal``
+        # says the item will never succeed no matter what is done to it.
+        "reason_code": str(row.get("reason_code", "") or "unknown"),
+        "terminal": bool(row.get("terminal", False)),
         "status": str(row.get("status", "") or ""),
         "retryable": bool(row.get("retryable", False)),
         "auto_retry": bool(row.get("auto_retry", False)),
@@ -6331,6 +6385,8 @@ def _row_to_failed_job_dict(row):
     d["retry_after_seconds"] = int(d.get("retry_after_seconds", 0) or 0)
     d["retryable"] = bool(d.get("retryable", 0))
     d["auto_retry"] = bool(d.get("auto_retry", 0))
+    d["reason_code"] = str(d.get("reason_code", "") or "unknown")
+    d["terminal"] = bool(d.get("terminal", 0))
     for key in ("queue_data", "context_json"):
         try:
             d[key] = json.loads(d.get(key, "{}") or "{}")

@@ -62,13 +62,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
 
 #### P1 — Next
 
-- [ ] P1 — V154 — Give failures a typed, machine-readable taxonomy
-  Why: the failure ledger records text, so nothing can distinguish "retry later" (throttled, transient network, scheduled stream not live) from "gone forever" (deleted, geo-blocked, members-only) — which is what drives retry policy, recovery guidance and queue poisoning. yt-dlp has declined this for years, and a frontend owning its own queue is the only place it can exist.
-  Evidence: https://github.com/yt-dlp/yt-dlp/issues/1659 and https://github.com/yt-dlp/yt-dlp/issues/457 (declined/deferred); https://github.com/kieraneglin/pinchflat/issues/648 (members-only videos permanently poison the queue, 16 reactions); Sonarr's ~29 named accept/reject specifications; `streamkeep/db/_legacy.py` `failed_jobs`, `streamkeep/ui/recover_dialog.py`.
-  Touches: a new failure-classification module, `streamkeep/workers/download.py`, `streamkeep/workers/fetch.py`, `streamkeep/db` schema, `streamkeep/headless_service.py`, recovery UI, REST `/api/failures`, tests.
-  Acceptance: every recorded failure carries a stable machine-readable reason code plus a human sentence; retry policy is driven by the code rather than string matching; a permanently-gone item is marked terminal instead of retried forever; the REST failure view exposes the code.
-  Complexity: L
-
 #### P2 — Later
 
 - [ ] P2 — V177 — Track down the intermittent Qt access violation at end of suite

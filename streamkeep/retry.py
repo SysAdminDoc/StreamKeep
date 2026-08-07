@@ -91,6 +91,13 @@ _FAILURE_REMEDIATIONS = {
         "action": "",
         "target": "",
     },
+    "scheduled": {
+        "message": _remediation_text(
+            "The broadcast has not started yet; the job retries itself once it does."
+        ),
+        "action": _remediation_text("Open Monitor"),
+        "target": "monitor",
+    },
     "server": {
         "message": _remediation_text(
             "Wait for the source service to recover, then retry the job."
@@ -154,6 +161,41 @@ def failure_remediation(category: object, *, reason: object = "") -> dict[str, s
     }
 
 
+# Stable machine-readable reason codes (V154). The broad ``category`` drives
+# operator guidance; the code names the specific condition, which is what
+# separates "come back later" from "this will never work". Codes are API
+# surface — the local REST failure view exposes them — so they are appended
+# to, never renamed or repurposed.
+#
+# ``terminal`` marks a condition no amount of retrying or operator action can
+# change for this URL. It is deliberately narrower than "not retryable": a
+# members-only video becomes downloadable once the operator supplies a
+# subscribed session, so that is intervention, not terminal.
+FAILURE_CODES = {
+    # code: (category, retryable, terminal)
+    "disk_full": ("disk", False, False),
+    "permission_denied": ("permission", False, False),
+    "drm_protected": ("drm", False, True),
+    "geo_blocked": ("authentication", False, True),
+    "members_only": ("authentication", False, False),
+    "login_required": ("authentication", False, False),
+    "deleted": ("missing_media", False, True),
+    "not_found": ("missing_media", False, False),
+    "invalid_config": ("invalid_config", False, False),
+    "scheduled_not_live": ("scheduled", True, False),
+    "throttled": ("rate_limit", True, False),
+    "server_error": ("server", True, False),
+    "timeout": ("timeout", True, False),
+    "network_unreachable": ("network", True, False),
+    "unknown": ("unknown", False, False),
+}
+
+
+def failure_code_policy(code: object) -> tuple[str, bool, bool]:
+    """Return ``(category, retryable, terminal)`` for a reason code."""
+    return FAILURE_CODES.get(str(code or "").strip().casefold(), FAILURE_CODES["unknown"])
+
+
 @dataclass(frozen=True)
 class RetryDecision:
     """One normalized failure classification."""
@@ -162,6 +204,11 @@ class RetryDecision:
     retryable: bool
     retry_after_seconds: int
     reason: str
+    # Stable identifier for the specific condition. ``category`` stays as the
+    # coarse bucket the remediation table is keyed by.
+    code: str = "unknown"
+    # True only when no retry and no operator action can make this URL work.
+    terminal: bool = False
 
 
 def sanitize_failure_reason(error: object, *, limit: int = 1000) -> str:
@@ -218,6 +265,60 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
     retry_after = parse_retry_after(raw, now=now)
     statuses = {int(value) for value in _HTTP_STATUS_RE.findall(raw)}
 
+    def decide(code, *, retry_after_seconds=0):
+        category, retryable, terminal = failure_code_policy(code)
+        return RetryDecision(
+            category, retryable,
+            retry_after_seconds if retryable else 0,
+            reason, code, terminal,
+        )
+
+    # Checked ahead of the generic authentication and missing-media buckets:
+    # these read as "forbidden" or "unavailable" but are permanent for this
+    # URL, and retrying them forever is what poisons a queue.
+    if (
+        "not available in your country" in text
+        or "not available in your location" in text
+        or "geo-restricted" in text
+        or "geo restricted" in text
+        or "geoblocked" in text
+        or "geo-blocked" in text
+        or "blocked in your country" in text
+    ):
+        return decide("geo_blocked")
+    if (
+        "members-only" in text
+        or "members only" in text
+        or "subscriber-only" in text
+        or "subscriber only" in text
+        or "requires a channel subscription" in text
+        or "join this channel" in text
+    ):
+        return decide("members_only")
+    if (
+        "has been deleted" in text
+        or "removed by the uploader" in text
+        or "video has been removed" in text
+        or "account has been terminated" in text
+        or "no longer exists" in text
+    ):
+        return decide("deleted")
+    # A scheduled premiere or an announced stream is the canonical "come back
+    # later" case. It previously fell through to ``unknown`` and was therefore
+    # marked non-retryable, so the job stopped instead of waiting.
+    if (
+        "this live event will begin" in text
+        or "premieres in" in text
+        or "premiere will begin" in text
+        or "scheduled to start" in text
+        or "stream has not started" in text
+        or "not started yet" in text
+        or "waiting for the stream" in text
+        or "is offline" in text
+        or "channel is not live" in text
+    ):
+        return decide("scheduled_not_live", retry_after_seconds=retry_after)
+
     if (
         "no space left" in text
         or "disk full" in text
@@ -226,7 +327,7 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "low disk" in text
         or "quota exceeded" in text
     ):
-        return RetryDecision("disk", False, 0, reason)
+        return decide("disk_full")
     if (
         "permission denied" in text
         or "access is denied" in text
@@ -234,7 +335,7 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "operation not permitted" in text
         or "winerror 5" in text
     ):
-        return RetryDecision("permission", False, 0, reason)
+        return decide("permission_denied")
     if (
         "drm" in text
         or "content protection" in text
@@ -243,7 +344,7 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "playready" in text
         or "encrypted media extensions" in text
     ):
-        return RetryDecision("drm", False, 0, reason)
+        return decide("drm_protected")
     if (
         statuses.intersection({401, 403})
         or "unauthorized" in text
@@ -255,7 +356,7 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "members-only" in text
         or "private video" in text
     ):
-        return RetryDecision("authentication", False, 0, reason)
+        return decide("login_required")
     if (
         statuses.intersection({404, 410})
         or "media is unavailable" in text
@@ -268,7 +369,7 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "recording is missing" in text
         or "no longer available" in text
     ):
-        return RetryDecision("missing_media", False, 0, reason)
+        return decide("not_found")
     if (
         "invalid configuration" in text
         or "invalid config" in text
@@ -281,25 +382,25 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "unknown option" in text
         or "unrecognized option" in text
     ):
-        return RetryDecision("invalid_config", False, 0, reason)
+        return decide("invalid_config")
     if 429 in statuses or "too many requests" in text or "rate limit" in text:
-        return RetryDecision("rate_limit", True, retry_after, reason)
+        return decide("throttled", retry_after_seconds=retry_after)
     if any(status in {500, 502, 503, 504} for status in statuses):
-        return RetryDecision("server", True, retry_after, reason)
+        return decide("server_error", retry_after_seconds=retry_after)
     if (
         "internal server error" in text
         or "bad gateway" in text
         or "service unavailable" in text
         or "gateway timeout" in text
     ):
-        return RetryDecision("server", True, retry_after, reason)
+        return decide("server_error", retry_after_seconds=retry_after)
     if (
         "timed out" in text
         or "timeout" in text
         or "deadline exceeded" in text
         or "operation timed out" in text
     ):
-        return RetryDecision("timeout", True, retry_after, reason)
+        return decide("timeout", retry_after_seconds=retry_after)
     if (
         "temporary failure" in text
         or "temporary network failure" in text
@@ -323,8 +424,8 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
         or "curl: (52)" in text
         or "curl: (56)" in text
     ):
-        return RetryDecision("network", True, retry_after, reason)
-    return RetryDecision("unknown", False, 0, reason)
+        return decide("network_unreachable", retry_after_seconds=retry_after)
+    return decide("unknown")
 
 
 def retry_delay_seconds(

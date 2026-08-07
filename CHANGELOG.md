@@ -4,6 +4,24 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Failures now carry a machine-readable reason code, and a permanently-gone
+  item is marked terminal instead of being retried forever. The ledger
+  recorded prose, so nothing could separate "come back later" from "gone
+  for good" — the distinction that drives retry policy and that keeps one
+  dead URL from poisoning a queue. Each failure now records a stable code
+  (`geo_blocked`, `members_only`, `deleted`, `scheduled_not_live`,
+  `throttled`, …) alongside the human sentence, and retry policy is read from
+  a single table keyed by that code rather than re-derived by matching
+  strings at each call site. `terminal` is deliberately narrower than "not
+  retryable": a members-only video becomes downloadable once a subscribed
+  session exists, so that stays operator-intervention, while a geo-block, a
+  deletion, or DRM is terminal. Terminal rows are excluded from the
+  due-for-retry query itself, so nothing can schedule them by forgetting to
+  check. A scheduled broadcast is now retryable — it previously matched
+  nothing, was classified unknown, and so the job gave up on a stream that
+  had simply not started yet. Schema 21 → 22 adds `reason_code` and
+  `terminal`; the local REST failure view exposes both.
+
 - Kick VODs resolve and download again. Kick's site rework moved VOD delivery
   off the endpoint the extractor used, which has returned 404 for anything
   recent since — the same breakage that is still open upstream in yt-dlp

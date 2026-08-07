@@ -11,17 +11,17 @@
     <context>
         <name>FailureRemediation</name>
         <message>
-            <location filename="streamkeep/retry.py" line="102" />
+            <location filename="streamkeep/retry.py" line="109" />
             <source>Check the connection and retry; the source may need more time to respond.</source>
             <translation>Compruebe la conexión y vuelva a intentarlo; el origen puede necesitar más tiempo para responder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="109" />
+            <location filename="streamkeep/retry.py" line="116" />
             <source>Check the network connection or proxy, then retry the job.</source>
             <translation>Compruebe la conexión de red o el proxy y vuelva a intentarlo.</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="144" />
+            <location filename="streamkeep/retry.py" line="151" />
             <source>Check YouTube health and its required runtime, then retry the job.</source>
             <translation>Compruebe el estado de YouTube y su entorno requerido y vuelva a intentarlo.</translation>
         </message>
@@ -41,7 +41,7 @@
             <translation>Libere espacio en el destino del archivo y vuelva a intentarlo.</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="116" />
+            <location filename="streamkeep/retry.py" line="123" />
             <source>No safe remediation is known; inspect the reason before retrying.</source>
             <translation>No se conoce una solución segura; revise el motivo antes de reintentar.</translation>
         </message>
@@ -56,7 +56,12 @@
             <translation>Abrir la configuración de descargas</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="112" />
+            <location filename="streamkeep/retry.py" line="98" />
+            <source>Open Monitor</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/retry.py" line="119" />
             <source>Open Network settings</source>
             <translation>Abrir la configuración de red</translation>
         </message>
@@ -67,7 +72,7 @@
             <translation>Abrir la configuración de almacenamiento</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="147" />
+            <location filename="streamkeep/retry.py" line="154" />
             <source>Open YouTube health in Settings</source>
             <translation>Abrir el estado de YouTube en Configuración</translation>
         </message>
@@ -82,6 +87,11 @@
             <translation>Revise la configuración de descarga y del origen y vuelva a intentarlo.</translation>
         </message>
         <message>
+            <location filename="streamkeep/retry.py" line="95" />
+            <source>The broadcast has not started yet; the job retries itself once it does.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
             <location filename="streamkeep/retry.py" line="60" />
             <source>This source is protected; use an allowed DRM-free source or skip the job.</source>
             <translation>Este origen está protegido; use un origen permitido sin DRM o omita la tarea.</translation>
@@ -92,7 +102,7 @@
             <translation>Espere a que se despeje el límite de solicitudes del servicio y vuelva a intentarlo.</translation>
         </message>
         <message>
-            <location filename="streamkeep/retry.py" line="95" />
+            <location filename="streamkeep/retry.py" line="102" />
             <source>Wait for the source service to recover, then retry the job.</source>
             <translation>Espere a que el servicio de origen se recupere y vuelva a intentarlo.</translation>
         </message>
