@@ -16,11 +16,13 @@ build/
 !StreamKeep.spec
 CLAUDE.md
 CODEX_CHANGELOG.md
-ROADMAP-COMPLETED.md
 
-# Markdown files local-only (except README)
+# Markdown files local-only. README is the project overview and CHANGELOG
+# is user-facing release history; everything else (ROADMAP, RESEARCH,
+# CLAUDE/AGENTS working notes) is planning state that stays on the box.
 *.md
 !README.md
+!CHANGELOG.md
 
 # AI config
 AGENTS.md

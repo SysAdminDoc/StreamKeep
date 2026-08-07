@@ -4,6 +4,15 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Repository hygiene restored. v4.45.0 and v4.46.0 shipped untagged, so the
+  WinGet manifest's installer URL pointed at releases git had no ref for; both
+  are now tagged. The tracked file set also matches the repo's own stated
+  policy again: `README.md` and `CHANGELOG.md` ship with the repo, while
+  `ROADMAP.md` and `RESEARCH.md` are planning state and no longer tracked.
+  Three files the policy bans outright (`COMPLETED.md`, `RESEARCH_REPORT.md`,
+  `ROADMAP-COMPLETED.md`) are gone; their substance is in this file and the
+  repo's working notes.
+
 - A queue-complete "sleep" now sleeps instead of hibernating. The action ran
   `rundll32 powrprof.dll,SetSuspendState 0,1,0`, but that entry point ignores
   its command line entirely — the hibernate flag never arrived, so any machine
