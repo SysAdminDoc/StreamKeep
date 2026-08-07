@@ -122,11 +122,16 @@ class _HealthCheckWorker(QThread):
         if self._cancelled:
             return
         from streamkeep.health import run_health_check
+        # V180: the probe polls this between checks, so cancel() takes effect
+        # part-way through rather than only before and after. Previously the
+        # only way to stop it in flight was terminate(), and terminating a
+        # thread inside subprocess.communicate() is what crashed the process.
         snapshot = run_health_check(
             self._config,
             dispatch_events=False,
+            should_cancel=lambda: self._cancelled,
         )
-        if not self._cancelled:
+        if snapshot is not None and not self._cancelled:
             self.result_ready.emit(snapshot)
 
 

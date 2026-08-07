@@ -3,7 +3,7 @@
     <context>
         <name>Accessibility</name>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1715" />
+            <location filename="streamkeep/ui/main_window.py" line="1720" />
             <source>Application state: {state}</source>
             <translation>Application state: {state}</translation>
         </message>
@@ -528,7 +528,7 @@ Archive workstation</translation>
             <translation>Active</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1282" />
+            <location filename="streamkeep/ui/main_window.py" line="1287" />
             <source>Active Captures</source>
             <translation>Active Captures</translation>
         </message>
@@ -1444,7 +1444,7 @@ Archive workstation</translation>
             <translation>Capture a source</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2001" />
+            <location filename="streamkeep/ui/main_window.py" line="2006" />
             <source>Capture and queue streams, VODs, and media for local archiving.</source>
             <translation>Capture and queue streams, VODs, and media for local archiving.</translation>
         </message>
@@ -1628,7 +1628,7 @@ Archive workstation</translation>
             <translation>Checking platform credentials…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2054" />
+            <location filename="streamkeep/ui/main_window.py" line="2059" />
             <source>Checking systems</source>
             <translation>Checking systems</translation>
         </message>
@@ -1638,7 +1638,7 @@ Archive workstation</translation>
             <translation>Checking tracker data and cached CDN paths for {year}-{month}. This can take a little time.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1855" />
+            <location filename="streamkeep/ui/main_window.py" line="1860" />
             <source>Checking yt-dlp</source>
             <translation>Checking yt-dlp</translation>
         </message>
@@ -1725,7 +1725,7 @@ Archive workstation</translation>
             <translation>Clear</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2931" />
+            <location filename="streamkeep/ui/main_window.py" line="2936" />
             <location filename="streamkeep/ui/tabs/settings.py" line="976" />
             <source>Clear all</source>
             <translation>Clear all</translation>
@@ -2294,7 +2294,7 @@ flac/pcm = lossless</translation>
             <translation>Dependencies</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2071" />
+            <location filename="streamkeep/ui/main_window.py" line="2076" />
             <source>Desktop build v{VERSION}</source>
             <translation>Desktop build v{VERSION}</translation>
         </message>
@@ -2387,7 +2387,7 @@ Produces a .nosilence copy — the original is preserved.</translation>
             <translation>Double-click a row to open the saved folder in Explorer. Use search to filter by title, platform, channel, folder, or source URL.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1999" />
+            <location filename="streamkeep/ui/main_window.py" line="2004" />
             <location filename="streamkeep/ui/recover_dialog.py" line="311" />
             <source>Download</source>
             <translation>Download</translation>
@@ -2548,12 +2548,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Drag the handles or click the waveform to refine your clip visually before export.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="758" />
+            <location filename="streamkeep/ui/main_window.py" line="763" />
             <source>Dropped content is not a valid URL.</source>
             <translation>Dropped content is not a valid URL.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="770" />
+            <location filename="streamkeep/ui/main_window.py" line="775" />
             <source>Dropped file is not a recognized media type ({exts}).</source>
             <translation>Dropped file is not a recognized media type ({exts}).</translation>
         </message>
@@ -3151,7 +3151,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>FFmpeg whisper model:</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1840" />
+            <location filename="streamkeep/ui/main_window.py" line="1845" />
             <source>FFmpeg {version}</source>
             <translation>FFmpeg {version}</translation>
         </message>
@@ -3362,7 +3362,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Free HuggingFace token for pyannote speaker diarization models.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2796" />
+            <location filename="streamkeep/ui/main_window.py" line="2801" />
             <source>Free space on {path}</source>
             <translation>Free space on {path}</translation>
         </message>
@@ -3720,7 +3720,7 @@ https://youtu.be/*</translation>
             <translation>Inspect disk use, integrity, and recoverable cleanup.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2644" />
+            <location filename="streamkeep/ui/main_window.py" line="2649" />
             <source>Inspect Settings</source>
             <translation>Inspect Settings</translation>
         </message>
@@ -3942,7 +3942,7 @@ https://youtu.be/*</translation>
             <translation>Last checked: Never</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2661" />
+            <location filename="streamkeep/ui/main_window.py" line="2666" />
             <source>Last checked: {snapshot.get('checked_at') or 'Never'}</source>
             <translation>Last checked: {snapshot.get('checked_at') or 'Never'}</translation>
         </message>
@@ -4060,7 +4060,7 @@ https://youtu.be/*</translation>
             <translation>Live from start</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1274" />
+            <location filename="streamkeep/ui/main_window.py" line="1279" />
             <location filename="streamkeep/ui/tabs/monitor.py" line="82" />
             <source>Live Now</source>
             <translation>Live Now</translation>
@@ -4149,7 +4149,7 @@ https://youtu.be/*</translation>
             <translation>Loading…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1932" />
+            <location filename="streamkeep/ui/main_window.py" line="1937" />
             <location filename="streamkeep/ui/tabs/history.py" line="284" />
             <source>LOCAL ARCHIVE</source>
             <translation>LOCAL ARCHIVE</translation>
@@ -4195,13 +4195,13 @@ https://youtu.be/*</translation>
             <translation>Local Toolchain</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1976" />
+            <location filename="streamkeep/ui/main_window.py" line="1981" />
             <source>LOCAL-FIRST  •  v{version}</source>
             <translation>LOCAL-FIRST  •  v{version}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1767" />
-            <location filename="streamkeep/ui/main_window.py" line="2074" />
+            <location filename="streamkeep/ui/main_window.py" line="1772" />
+            <location filename="streamkeep/ui/main_window.py" line="2079" />
             <source>Local-only  •  {active_jobs} active  •  {queued} queued</source>
             <translation>Local-only  •  {active_jobs} active  •  {queued} queued</translation>
         </message>
@@ -4653,8 +4653,8 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No entries</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2347" />
-            <location filename="streamkeep/ui/main_window.py" line="2378" />
+            <location filename="streamkeep/ui/main_window.py" line="2352" />
+            <location filename="streamkeep/ui/main_window.py" line="2383" />
             <location filename="streamkeep/ui/tabs/download.py" line="1237" />
             <source>No events yet</source>
             <translation>No events yet</translation>
@@ -4731,7 +4731,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No new salvage files were produced; the raw capture is unchanged.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2918" />
+            <location filename="streamkeep/ui/main_window.py" line="2923" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="95" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="162" />
             <source>No notifications yet</source>
@@ -4989,7 +4989,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>Notification Log</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2038" />
+            <location filename="streamkeep/ui/main_window.py" line="2043" />
             <source>Notifications</source>
             <translation>Notifications</translation>
         </message>
@@ -5111,29 +5111,29 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Open</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1266" />
+            <location filename="streamkeep/ui/main_window.py" line="1271" />
             <source>Open Alert Log</source>
             <translation>Open Alert Log</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1264" />
+            <location filename="streamkeep/ui/main_window.py" line="1269" />
             <source>Open Archive</source>
             <translation>Open Archive</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1260" />
+            <location filename="streamkeep/ui/main_window.py" line="1265" />
             <source>Open Downloads</source>
             <translation>Open Downloads</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2149" />
+            <location filename="streamkeep/ui/main_window.py" line="2154" />
             <location filename="streamkeep/ui/tabs/history.py" line="724" />
             <location filename="streamkeep/ui/tabs/storage.py" line="1317" />
             <source>Open Folder</source>
             <translation>Open Folder</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1262" />
+            <location filename="streamkeep/ui/main_window.py" line="1267" />
             <source>Open Monitor</source>
             <translation>Open Monitor</translation>
         </message>
@@ -5145,8 +5145,8 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Open release page</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2047" />
-            <location filename="streamkeep/ui/main_window.py" line="2048" />
+            <location filename="streamkeep/ui/main_window.py" line="2052" />
+            <location filename="streamkeep/ui/main_window.py" line="2053" />
             <source>Open Settings</source>
             <translation>Open Settings</translation>
         </message>
@@ -5156,7 +5156,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Open Settings and inspect the local toolchain</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2059" />
+            <location filename="streamkeep/ui/main_window.py" line="2064" />
             <source>Open Settings to inspect local runtime and storage health</source>
             <translation>Open Settings to inspect local runtime and storage health</translation>
         </message>
@@ -5166,7 +5166,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Open the loopback URL on this PC, or the configured HTTPS origin from a paired LAN client.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1269" />
+            <location filename="streamkeep/ui/main_window.py" line="1274" />
             <source>Open Web Remote</source>
             <translation>Open Web Remote</translation>
         </message>
@@ -5395,7 +5395,7 @@ On: frame-exact trim using the selected codec — slower.</translation>
             <translation>Paste a URL from the clipboard</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2185" />
+            <location filename="streamkeep/ui/main_window.py" line="2190" />
             <source>Paste a URL to begin.</source>
             <translation>Paste a URL to begin.</translation>
         </message>
@@ -6054,7 +6054,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Quick presets</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1301" />
+            <location filename="streamkeep/ui/main_window.py" line="1306" />
             <source>Quit</source>
             <translation>Quit</translation>
         </message>
@@ -6140,7 +6140,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Read-only adoption decisions before adding existing recordings</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2116" />
+            <location filename="streamkeep/ui/main_window.py" line="2121" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="253" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="270" />
             <source>Ready</source>
@@ -6152,7 +6152,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Ready for a side-by-side session</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2069" />
+            <location filename="streamkeep/ui/main_window.py" line="2074" />
             <source>Ready to capture</source>
             <translation>Ready to capture</translation>
         </message>
@@ -6188,7 +6188,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Rebuild local moment index</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1290" />
+            <location filename="streamkeep/ui/main_window.py" line="1295" />
             <source>Recent Alerts</source>
             <translation>Recent Alerts</translation>
         </message>
@@ -6198,13 +6198,13 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Recent failures</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2039" />
-            <location filename="streamkeep/ui/main_window.py" line="2909" />
+            <location filename="streamkeep/ui/main_window.py" line="2044" />
+            <location filename="streamkeep/ui/main_window.py" line="2914" />
             <source>Recent notifications</source>
             <translation>Recent notifications</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2905" />
+            <location filename="streamkeep/ui/main_window.py" line="2910" />
             <source>Recent notifications ({unread} unread)</source>
             <translation>Recent notifications ({unread} unread)</translation>
         </message>
@@ -6524,7 +6524,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Resolve source</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="518" />
+            <location filename="streamkeep/ui/main_window.py" line="523" />
             <source>Resolve stream info  (Enter)</source>
             <translation>Resolve stream info  (Enter)</translation>
         </message>
@@ -6995,12 +6995,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Search downloads, URLs, channels, or podcasts…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2011" />
+            <location filename="streamkeep/ui/main_window.py" line="2016" />
             <source>Search downloads…</source>
             <translation>Search downloads…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="524" />
+            <location filename="streamkeep/ui/main_window.py" line="529" />
             <source>Search history  (Ctrl+F)</source>
             <translation>Search history  (Ctrl+F)</translation>
         </message>
@@ -7364,7 +7364,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Show chat highlights</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1299" />
+            <location filename="streamkeep/ui/main_window.py" line="1304" />
             <source>Show StreamKeep</source>
             <translation>Show StreamKeep</translation>
         </message>
@@ -7374,7 +7374,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Showing all downloads</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2377" />
+            <location filename="streamkeep/ui/main_window.py" line="2382" />
             <source>Showing latest {count} event(s)</source>
             <translation>Showing latest {count} event(s)</translation>
         </message>
@@ -7561,7 +7561,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Source URL</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="526" />
+            <location filename="streamkeep/ui/main_window.py" line="531" />
             <source>Source URL  (Ctrl+L)</source>
             <translation>Source URL  (Ctrl+L)</translation>
         </message>
@@ -7656,7 +7656,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Start a prepared download before copying its command.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="520" />
+            <location filename="streamkeep/ui/main_window.py" line="525" />
             <source>Start download  (Enter)</source>
             <translation>Start download  (Enter)</translation>
         </message>
@@ -7710,7 +7710,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Status: Healthy · 0 active condition(s)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2657" />
+            <location filename="streamkeep/ui/main_window.py" line="2662" />
             <source>Status: {status} · {active} active condition(s)</source>
             <translation>Status: {status} · {active} active condition(s)</translation>
         </message>
@@ -7720,12 +7720,12 @@ http://fallback:3128||Global fallback</translation>
             <translation>Step {idx + 1} of {total}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2142" />
+            <location filename="streamkeep/ui/main_window.py" line="2147" />
             <source>Stop</source>
             <translation>Stop</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="522" />
+            <location filename="streamkeep/ui/main_window.py" line="527" />
             <source>Stop  (Esc)</source>
             <translation>Stop  (Esc)</translation>
         </message>
@@ -7765,8 +7765,8 @@ http://fallback:3128||Global fallback</translation>
             <translation>Storage</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2748" />
-            <location filename="streamkeep/ui/main_window.py" line="2771" />
+            <location filename="streamkeep/ui/main_window.py" line="2753" />
+            <location filename="streamkeep/ui/main_window.py" line="2776" />
             <source>Storage monitoring off</source>
             <translation>Storage monitoring off</translation>
         </message>
@@ -7816,7 +7816,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>streamer_name</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1929" />
+            <location filename="streamkeep/ui/main_window.py" line="1934" />
             <location filename="streamkeep/ui/tabs/settings.py" line="2885" />
             <source>StreamKeep</source>
             <translation>StreamKeep</translation>
@@ -7857,9 +7857,9 @@ http://fallback:3128||Global fallback</translation>
             <translation>StreamKeep ships a frozen, version-checked yt-dlp. Point at your own build to track nightly, which carries extractor fixes days before a stable release. The build you name is version-probed like any other tool and refused if it is below the supported floor.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="272" />
-            <location filename="streamkeep/ui/main_window.py" line="1181" />
-            <location filename="streamkeep/ui/main_window.py" line="1252" />
+            <location filename="streamkeep/ui/main_window.py" line="277" />
+            <location filename="streamkeep/ui/main_window.py" line="1186" />
+            <location filename="streamkeep/ui/main_window.py" line="1257" />
             <source>StreamKeep v{VERSION}</source>
             <translation>StreamKeep v{VERSION}</translation>
         </message>
@@ -8389,7 +8389,7 @@ Download again?</translation>
             <translation>Trim, package, and export moments cleanly</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2155" />
+            <location filename="streamkeep/ui/main_window.py" line="2160" />
             <source>Trim...</source>
             <translation>Trim...</translation>
         </message>
@@ -8645,7 +8645,7 @@ Download again?</translation>
             <translation>View diagnostics</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2934" />
+            <location filename="streamkeep/ui/main_window.py" line="2939" />
             <source>View full log…</source>
             <translation>View full log…</translation>
         </message>
@@ -8973,7 +8973,7 @@ Download again?</translation>
             <translation>yt-dlp match filter, e.g. duration &gt; 60 &amp; !is_live</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1859" />
+            <location filename="streamkeep/ui/main_window.py" line="1864" />
             <source>yt-dlp ready</source>
             <translation>yt-dlp ready</translation>
         </message>
@@ -8998,12 +8998,12 @@ Download again?</translation>
             <translation>yt-dlp update channel</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1857" />
+            <location filename="streamkeep/ui/main_window.py" line="1862" />
             <source>yt-dlp {version} ready</source>
             <translation>yt-dlp {version} ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2234" />
+            <location filename="streamkeep/ui/main_window.py" line="2239" />
             <source>{'Current tab' if i == idx else 'Switch to ' + self._tab_names[i]}; keyboard shortcut Ctrl+{i + 1}</source>
             <translation>{'Current tab' if i == idx else 'Switch to ' + self._tab_names[i]}; keyboard shortcut Ctrl+{i + 1}</translation>
         </message>
@@ -9093,7 +9093,7 @@ Download again?</translation>
             <translation>{done}/{total} segments done</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1277" />
+            <location filename="streamkeep/ui/main_window.py" line="1282" />
             <source>{e.channel_id} | {e.platform}</source>
             <translation>{e.channel_id} | {e.platform}</translation>
         </message>
@@ -9103,17 +9103,17 @@ Download again?</translation>
             <translation>{e.interval_secs}s  ⏰ {e.schedule_start_hhmm}-{e.schedule_end_hhmm}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="516" />
+            <location filename="streamkeep/ui/main_window.py" line="521" />
             <source>{existing}  (Ctrl+{i + 1})</source>
             <translation>{existing}  (Ctrl+{i + 1})</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2803" />
+            <location filename="streamkeep/ui/main_window.py" line="2808" />
             <source>{free_gb:.0f} GB free</source>
             <translation>{free_gb:.0f} GB free</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2795" />
+            <location filename="streamkeep/ui/main_window.py" line="2800" />
             <source>{free_gb} GB free</source>
             <translation>{free_gb} GB free</translation>
         </message>
@@ -9200,7 +9200,7 @@ Download again?</translation>
             <translation>{len(entries)} selected</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1254" />
+            <location filename="streamkeep/ui/main_window.py" line="1259" />
             <source>{len(live_entries)} live | {len(dl_lines)} active | {unread} unread</source>
             <translation>{len(live_entries)} live | {len(dl_lines)} active | {unread} unread</translation>
         </message>
@@ -9270,7 +9270,7 @@ Download again?</translation>
             <translation>{message} ({percent}%)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="2928" />
+            <location filename="streamkeep/ui/main_window.py" line="2933" />
             <source>{n.ts}  {prefix}  {n.text}</source>
             <translation>{n.ts}  {prefix}  {n.text}</translation>
         </message>
@@ -9375,7 +9375,7 @@ Download again?</translation>
             <translation>{total} VOD(s) loaded. {len(new_vods)} new from this page.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="1295" />
+            <location filename="streamkeep/ui/main_window.py" line="1300" />
             <source>{ts} | {text}</source>
             <translation>{ts} | {text}</translation>
         </message>
@@ -9404,8 +9404,8 @@ Download again?</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/clip_dialog.py" line="682" />
-            <location filename="streamkeep/ui/main_window.py" line="2749" />
-            <location filename="streamkeep/ui/main_window.py" line="2772" />
+            <location filename="streamkeep/ui/main_window.py" line="2754" />
+            <location filename="streamkeep/ui/main_window.py" line="2777" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1606" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1609" />
             <location filename="streamkeep/ui/tabs/download_single.py" line="1660" />

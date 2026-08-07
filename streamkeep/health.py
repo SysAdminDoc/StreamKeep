@@ -533,19 +533,39 @@ def run_health_check(
     dispatch_events=True,
     event_sink=None,
     log_fn=None,
+    should_cancel=None,
 ) -> dict:
-    """Run all bounded health probes and persist the resulting snapshot."""
+    """Run all bounded health probes and persist the resulting snapshot.
+
+    ``should_cancel`` is polled between probe groups and inside the runtime
+    registry, and returns ``None`` without persisting anything when it says
+    stop (V180). Being able to stop this work cooperatively is what keeps a
+    caller from having to terminate the thread it runs on, which is undefined
+    behaviour while a probe sits in ``subprocess.communicate()``.
+    """
     config = dict(config or {})
     now_iso = _now_iso(now)
     now_epoch = _now_epoch(now)
+
+    def cancelled():
+        return should_cancel is not None and should_cancel()
+
+    if cancelled():
+        return None
     if runtime is None:
         try:
             from .capabilities import get_runtime_capabilities
-            runtime = get_runtime_capabilities(refresh=True, config=config)
+            runtime = get_runtime_capabilities(
+                refresh=True, config=config, should_cancel=should_cancel,
+            )
+            if runtime is None:  # the registry stopped part-way on request
+                return None
         except Exception as error:
             runtime = {}
             if log_fn:
                 log_fn(f"[HEALTH] Runtime probe failed: {error}")
+    if cancelled():
+        return None
     if credential_results is None:
         try:
             from .credential_check import probe_all
@@ -554,6 +574,8 @@ def run_health_check(
             credential_results = []
             if log_fn:
                 log_fn(f"[HEALTH] Credential probe failed: {error}")
+    if cancelled():
+        return None
 
     conditions = _runtime_conditions(runtime, now_iso)
     conditions.extend(_credential_conditions(credential_results, now_iso))

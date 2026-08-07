@@ -378,6 +378,15 @@ _CACHE_KEY = None
 _CACHE_LOCK = threading.Lock()
 
 
+class ProbeCancelled(Exception):
+    """Raised inside the registry when the caller asked it to stop (V180).
+
+    Internal to the probe path: ``get_runtime_capabilities`` turns it into a
+    ``None`` return rather than letting it escape to callers who never asked
+    for cancellation.
+    """
+
+
 class CapabilityUnavailableError(RuntimeError):
     """Raised before an unavailable or unsafe dependency can execute."""
 
@@ -445,8 +454,12 @@ def _read_config_value(config, key, default=""):
     return raw.get(key, default) if isinstance(raw, dict) else default
 
 
-def get_runtime_capabilities(*, refresh=False, config=None):
-    """Return exact runtime identities, versions, provenance, and readiness."""
+def get_runtime_capabilities(*, refresh=False, config=None, should_cancel=None):
+    """Return exact runtime identities, versions, provenance, and readiness.
+
+    ``should_cancel`` is polled between probes; when it says stop, this
+    returns ``None`` rather than a half-built registry (V180).
+    """
     global _CACHE, _CACHE_KEY
     from .javascript_runtime import read_runtime_preference
 
@@ -462,10 +475,18 @@ def get_runtime_capabilities(*, refresh=False, config=None):
     )
     with _CACHE_LOCK:
         if _CACHE is None or refresh or _CACHE_KEY != cache_key:
-            _CACHE = _probe_registry(
-                preference=cache_key[0], whisper_model_path=cache_key[1],
-                ytdlp_channel=cache_key[2], ytdlp_external_command=cache_key[3],
-            )
+            try:
+                probed = _probe_registry(
+                    preference=cache_key[0], whisper_model_path=cache_key[1],
+                    ytdlp_channel=cache_key[2],
+                    ytdlp_external_command=cache_key[3],
+                    should_cancel=should_cancel,
+                )
+            except ProbeCancelled:
+                # A partial registry must never be cached as the real one, and
+                # a caller that asked to stop wants to know it stopped.
+                return None
+            _CACHE = probed
             _CACHE_KEY = cache_key
         return copy.deepcopy(_CACHE)
 
@@ -538,11 +559,23 @@ def capability_state(record):
 def _probe_registry(
     *, preference="path", whisper_model_path="",
     ytdlp_channel="bundled", ytdlp_external_command="",
+    should_cancel=None,
 ):
+    # V180: the registry is the long pole -- roughly ten executable probes at a
+    # 5s timeout each -- so cancellation is checked between them. Without this
+    # the only way to stop a probe in flight was to terminate its thread, and
+    # terminating a thread inside subprocess.communicate() is the undefined
+    # behaviour that produced V179's access violation.
+    def checkpoint():
+        if should_cancel is not None and should_cancel():
+            raise ProbeCancelled()
+
     sqlite = _probe_sqlite_runtime()
+    checkpoint()
     yt_dlp = _probe_yt_dlp(
         channel=ytdlp_channel, external_command=ytdlp_external_command,
     )
+    checkpoint()
     pillow = _probe_module(
         "pillow", "Pillow", "PIL", MINIMUM_VERSIONS["pillow"],
         ["thumbnail-decode", "chat-render", "image-export"],
@@ -558,6 +591,7 @@ def _probe_registry(
         ["embedded-playback"],
         "Install the optional python-mpv 1.0.8 or newer extra.",
     )
+    checkpoint()
     libmpv = _probe_libmpv()
     mpv = _aggregate_mpv(python_mpv, libmpv)
     boto3 = _probe_module(
@@ -565,18 +599,22 @@ def _probe_registry(
         ["s3-upload"],
         "Install the optional boto3 1.43.0 or newer extra for S3 uploads.",
     )
+    checkpoint()
     curl = _probe_executable(
         "curl", ["curl"], ["--version"], MINIMUM_VERSIONS["curl"],
         ["https-fetch", "range-download", "webhook"],
         "Install curl 8.21.0 or newer and ensure that executable is first in PATH.",
     )
+    checkpoint()
     ffmpeg = _probe_executable(
         "ffmpeg", ["ffmpeg"], ["-version"], MINIMUM_VERSIONS["ffmpeg"],
         ["media-download", "decode", "transcode", "mux"],
         "Install FFmpeg 8.1.2 or 9.0 and ensure that executable is first in PATH.",
         annotate=_annotate_ffmpeg_abi,
     )
+    checkpoint()
     ffmpeg_whisper = _probe_ffmpeg_whisper(ffmpeg, whisper_model_path)
+    checkpoint()
     ffprobe = _probe_executable(
         "ffprobe", ["ffprobe"], ["-version"], MINIMUM_VERSIONS["ffprobe"],
         ["media-inspection", "duration-probe"],
@@ -584,6 +622,7 @@ def _probe_registry(
         annotate=_annotate_ffmpeg_abi,
     )
     ejs = _probe_ejs(yt_dlp)
+    checkpoint()
     javascript = _probe_javascript_runtime(preference=preference)
     youtube = _aggregate_youtube(yt_dlp, ejs, javascript)
     return {
