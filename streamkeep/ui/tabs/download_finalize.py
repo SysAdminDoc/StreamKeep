@@ -9,7 +9,7 @@ from ... import db as _db
 from ...extractors import Extractor, TwitchExtractor
 from ...models import HistoryEntry
 from ...utils import safe_filename as _safe_filename
-from ...workers import FinalizeWorker
+from ...workers import FinalizeWorker, RecordingIndexWorker
 
 
 class DownloadFinalizeMixin:
@@ -440,26 +440,44 @@ class DownloadFinalizeMixin:
         self._index_finalized_recording(out_dir, info_copy)
 
     def _index_finalized_recording(self, out_dir, info=None):
-        """Run local indexes only after a recording path is final."""
-        # Auto-tag recording (F35)
-        try:
-            from ...tags import _connect, auto_tag_recording
-            db = _connect()
-            auto_tag_recording(db, out_dir, info=info)
-            db.close()
-        except Exception:
-            pass  # safe: best-effort fallback; preserve the primary operation
-        # Index transcripts for this recording (F27)
-        try:
-            from ...search import index_recording
-            index_recording(out_dir)
-        except Exception:
-            pass  # safe: best-effort fallback; preserve the primary operation
-        # The optional semantic index is local-only and bounded. Keep it
-        # best-effort so a missing/corrupt sidecar never fails finalization.
-        try:
-            from ... import semantic
-            if semantic.is_enabled():
-                semantic.index_recording(out_dir)
-        except Exception:
-            pass  # safe: best-effort fallback; preserve the primary operation
+        """Queue local indexing for a recording whose path is final.
+
+        Sidecar reads, vector computation and SQLite writes all used to run
+        here on the GUI thread, in the slot that fires the moment the user is
+        told the download finished. They run on a worker now, one recording at
+        a time so concurrent finalizations do not contend for the same
+        databases (V146).
+        """
+        out_dir = str(out_dir or "")
+        if not out_dir:
+            return
+        tasks = getattr(self, "_index_tasks", None)
+        if tasks is None:
+            tasks = self._index_tasks = []
+        tasks.append((out_dir, info))
+        self._start_index_worker()
+
+    def _start_index_worker(self):
+        worker = getattr(self, "_index_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        tasks = getattr(self, "_index_tasks", None)
+        if not tasks:
+            self._index_worker = None
+            return
+        out_dir, info = tasks.pop(0)
+        worker = RecordingIndexWorker(out_dir, info)
+        worker.log.connect(self._log)
+        worker.done.connect(self._on_recording_indexed)
+        self._index_worker = worker
+        worker.start()
+
+    def _on_recording_indexed(self, result):
+        """Drain the next queued recording once one finishes indexing."""
+        self._index_worker = None
+        if not (result or {}).get("cancelled"):
+            self._start_index_worker()
+        else:
+            # A cancelled worker means the window is closing; drop the rest
+            # rather than starting a thread nobody will join.
+            self._index_tasks = []

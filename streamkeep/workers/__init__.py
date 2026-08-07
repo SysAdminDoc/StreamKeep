@@ -8,6 +8,7 @@ from .page_scrape import PageScrapeWorker
 from .monitor_ops import SeedArchiveWorker, AutoRecordResolveWorker
 from .backup import ScheduledBackupWorker
 from .raw_capture import RawCaptureWorker
+from .index import RecordingIndexWorker
 
 __all__ = [
     "FetchWorker",
@@ -20,4 +21,5 @@ __all__ = [
     "AutoRecordResolveWorker",
     "ScheduledBackupWorker",
     "RawCaptureWorker",
+    "RecordingIndexWorker",
 ]
