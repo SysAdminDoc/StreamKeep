@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.49.0" date="2026-08-07">
+      <description><p>A live capture ended by a crash or a power loss now leaves a playable recording instead of an unreadable file, and the final repack can no longer cost the capture it was meant to tidy up. Bulk archiving backs off on its own when a host throttles, per host, so one strict site no longer slows the rest of the queue. The database split began actually moving behaviour out of its legacy module rather than forwarding it.</p></description>
+    </release>
     <release version="4.48.0" date="2026-08-07">
       <description><p>AI-upscaled video is no longer selectable by accident, so an archive keeps the real rendition rather than a synthesised one that merely reports a taller resolution. A platform whose extractor keeps failing now raises a health condition naming the platform and the engine that failed, and its engine can be switched for that platform alone. An adapter edit that leaves the file the same size is no longer missed, and the intermittent native crash at the end of a test run is fixed.</p></description>
     </release>

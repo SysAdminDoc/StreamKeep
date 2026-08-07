@@ -2,7 +2,7 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [Unreleased]
+## [4.49.0] - 2026-08-07
 
 - The database "split" started actually splitting. The 2026-08-04 change
   created facades over an unchanged 6,700-line module, and the boundary test
