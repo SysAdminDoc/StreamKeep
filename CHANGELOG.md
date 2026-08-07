@@ -4,6 +4,15 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- A queue-complete "sleep" now sleeps instead of hibernating. The action ran
+  `rundll32 powrprof.dll,SetSuspendState 0,1,0`, but that entry point ignores
+  its command line entirely — the hibernate flag never arrived, so any machine
+  with hibernation enabled hibernated when the user asked for sleep, with the
+  slow resume and full-memory disk write that implies. Windows sleep is now a
+  direct `SetSuspendState` call with the flag actually passed, leaving
+  applications their veto and scheduled wake intact. Every other action, and
+  every other platform, still builds a plain command line.
+
 - Asking what runtimes are installed no longer crashes on an unsupported
   architecture. A pinned Deno asset exists for five host triples, and on
   anything else `host_target` raised straight out of `get_runtime_capabilities`

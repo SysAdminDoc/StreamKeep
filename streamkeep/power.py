@@ -185,8 +185,12 @@ def build_power_command(action, *, windows=None, delay_secs=DEFAULT_SHUTDOWN_DEL
         if action == "lock":
             return ["rundll32.exe", "user32.dll,LockWorkStation"]
         if action == "sleep":
-            # SetSuspendState hibernate-flag 0 → sleep (honours system policy).
-            return ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"]
+            # Deliberately no command: rundll32's SetSuspendState entry point
+            # ignores its command line entirely, so "0,1,0" never reached the
+            # hibernate flag and any machine with hibernation enabled
+            # hibernated when the user asked for sleep. Windows sleep is
+            # dispatched in-process instead — see ``suspend_windows``.
+            return []
         if action == "hibernate":
             return ["shutdown", "/h"]
         if action == "shutdown":
@@ -201,6 +205,44 @@ def build_power_command(action, *, windows=None, delay_secs=DEFAULT_SHUTDOWN_DEL
         if action == "shutdown":
             return ["shutdown", "-h", f"+{max(1, delay // 60)}"]
     return []
+
+
+def uses_in_process_suspend(action, *, windows=None):
+    """Return whether *action* is dispatched in-process rather than as argv.
+
+    Only Windows sleep is: there is no built-in command line that reliably
+    sleeps a machine with hibernation enabled.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    return bool(windows) and normalize_power_action(action) == "sleep"
+
+
+def suspend_windows(*, hibernate=False):
+    """Sleep (or hibernate) this machine through the documented Win32 call.
+
+    ``SetSuspendState`` honours its ``bHibernate`` argument; the rundll32
+    entry point of the same name does not read its command line at all, which
+    is why the old ``0,1,0`` had no effect and hibernation-enabled machines
+    hibernated on a sleep request.
+
+    ``bForce`` is left FALSE so applications still get their veto, and
+    ``bWakeupEventsDisabled`` FALSE so scheduled wake continues to work.
+    """
+    try:
+        powrprof = ctypes.WinDLL("powrprof")
+    except (AttributeError, OSError) as error:
+        raise OSError(f"powrprof is unavailable: {error}") from error
+    powrprof.SetSuspendState.argtypes = [
+        ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_ubyte,
+    ]
+    powrprof.SetSuspendState.restype = ctypes.c_ubyte
+    if not powrprof.SetSuspendState(1 if hibernate else 0, 0, 0):
+        raise OSError(
+            "SetSuspendState was refused: "
+            f"{ctypes.WinError(ctypes.get_last_error())}"
+        )
+    return True
 
 
 def run_queue_complete_action(
@@ -248,6 +290,20 @@ def run_queue_complete_action(
                 result["executed"] = True
             except Exception as error:
                 result["error"] = str(error)
+        return result
+
+    if uses_in_process_suspend(action, windows=windows):
+        # No argv to preview: this one is a direct Win32 call, because no
+        # built-in command line reliably sleeps a hibernation-enabled machine.
+        _log("[POWER] Queue complete — sleep requested (SetSuspendState)")
+        if not execute:
+            return result
+        try:
+            suspend_windows()
+            result["executed"] = True
+        except OSError as error:
+            result["error"] = str(error)
+            _log(f"[POWER] Could not sleep: {error}")
         return result
 
     command = build_power_command(action, windows=windows, delay_secs=delay_secs)

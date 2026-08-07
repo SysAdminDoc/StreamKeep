@@ -71,13 +71,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Acceptance: the crash is reproduced under `-p no:randomly` with a narrowed test set and either fixed or pinned to a named upstream issue; a full suite run repeated ten times shows no access violation.
   Complexity: M
 
-- [ ] P2 — V159 — Make the power policy sleep instead of hibernate
-  Why: `rundll32 powrprof.dll,SetSuspendState 0,1,0` ignores its first argument, so any machine with hibernation enabled hibernates when the user asked for sleep.
-  Evidence: `streamkeep/power.py:189`.
-  Touches: `streamkeep/power.py`, tests.
-  Acceptance: the suspend path calls `SetSuspendState` through ctypes with an explicit hibernate/sleep intent, or documents and surfaces that hibernation is what will happen.
-  Complexity: S
-
 - [ ] P2 — V161 — Incremental mux and periodic flush for multi-hour live captures
   Why: a crash or power loss late in a long capture still costs the tail, and the final single mux is the fragile step. This is the most consistent live-capture complaint across the dead tools whose users are shopping.
   Evidence: https://github.com/Kethsar/ytarchive/issues/112 and https://github.com/Kethsar/ytarchive/issues/116 (no incremental mux; one giant final pass), https://github.com/Kethsar/ytarchive/issues/213 (silent stop, no resume), https://github.com/yt-dlp/yt-dlp/issues/9094 (no periodic flush); existing `chunk_long_captures` splitting and `streamkeep/resume.py` sidecars are the foundation.
