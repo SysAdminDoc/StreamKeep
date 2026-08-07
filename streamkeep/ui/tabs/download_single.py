@@ -887,6 +887,9 @@ class DownloadSingleMixin:
                 audio_quality=_dl_overrides.get("audio_quality", ""),
                 dub_lang=_dl_overrides.get("dub_lang", ""),
                 mute=_dl_overrides.get("mute", False),
+                allow_synthesised_tracks=_dl_overrides.get(
+                    "allow_synthesised_tracks", False
+                ),
             )
             subtitle_mode = _dl_overrides.get("subtitle_mode", "")
             if subtitle_mode == "disabled":
@@ -1168,6 +1171,7 @@ class DownloadSingleMixin:
             ytdlp_audio_quality=ytdlp_options["audio_quality"],
             dub_lang=ytdlp_options["dub_lang"],
             mute=ytdlp_options["mute"],
+            allow_synthesised_tracks=ytdlp_options["allow_synthesised_tracks"],
             request_headers=tuple(
                 _merge_stream_headers(
                     getattr(self, "_companion_request_headers", {}),

@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- AI-upscaled video is no longer selectable by accident. Platforms publish an
+  AI super-resolution rendition alongside the real one, and because it reports
+  a taller resolution it wins any plain "best video" pick — so the archive
+  quietly stored a synthesised copy of the thing it was meant to preserve.
+  There is no format-sort field for it, so the preference is expressed as a
+  format-selection filter applied to the video branches of the expression;
+  audio branches and explicit format ids are left alone. `Allow AI-upscaled
+  video` in the Advanced panel and `--allow-synthesised-tracks` on the CLI opt
+  back in, and the choice travels with the job through the queue, resume
+  sidecar, and restore path. The metadata sidecar now also records the stored
+  track's `language` alongside its `format_note`.
+
 - The intermittent native crash at the end of a test run is fixed. Roughly one
   full run in five died with `Windows fatal exception: access violation` after
   every test had already passed, which on a release gate reads as a code

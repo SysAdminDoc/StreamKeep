@@ -769,6 +769,13 @@ def build_download_tab(win):
         "Strip audio from the output while keeping the video track"
     )
     audio_row.addWidget(win.adv_mute_check)
+    win.adv_allow_synthesised_check = QCheckBox("Allow AI-upscaled video")
+    win.adv_allow_synthesised_check.setToolTip(
+        "Off by default: an AI super-resolution rendition is taller than the "
+        "real one and would otherwise win a best-video pick, storing a "
+        "synthesised copy in the archive"
+    )
+    audio_row.addWidget(win.adv_allow_synthesised_check)
     adv_lay.addLayout(audio_row, 8, 1)
 
     adv_lay.addWidget(QLabel("Subtitles:"), 9, 0)
@@ -1057,6 +1064,9 @@ def build_download_tab(win):
     win.adv_audio_quality_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_dub_lang_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_mute_check.toggled.connect(lambda _: _update_adv_badge())
+    win.adv_allow_synthesised_check.toggled.connect(
+        lambda _: _update_adv_badge()
+    )
     win.adv_hls_key_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_hls_iv_input.textChanged.connect(lambda _: _update_adv_badge())
     win.adv_subtitle_mode_combo.currentIndexChanged.connect(

@@ -301,6 +301,12 @@ def test_non_live_cancel_still_discards_partial(tmp_path, monkeypatch):
 
 
 def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
+    """The spec and sort each stay a single argv element.
+
+    Since V166 the default spec also carries the synthesised-video filter, so
+    the byte-for-byte guarantee is asserted on the opt-in path in the next
+    test, where no policy is applied. The user's own filters survive either way.
+    """
     worker = _make_worker(tmp_path)
     worker.ytdlp_source = "https://example.com/video"
     worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
@@ -314,10 +320,42 @@ def test_ytdlp_cmd_passes_raw_spec_and_sort_verbatim(tmp_path):
         os.path.join(str(tmp_path), "video.%(ext)s")
     )
 
-    assert cmd[cmd.index("-f") + 1] == raw_format
+    spec = cmd[cmd.index("-f") + 1]
+    assert spec == (
+        "bv*[height<=720][format_note!*=?AI-upscaled]"
+        "+ba/b[format_note!*=?AI-upscaled]"
+    )
     assert cmd[cmd.index("-S") + 1] == raw_sort
     assert cmd[cmd.index("--merge-output-format") + 1] == "webm"
     assert cmd[cmd.index("--remux-video") + 1] == "webm"
+
+
+def test_ytdlp_cmd_passes_the_spec_untouched_when_synthesised_is_allowed(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    raw_format = " bv*[height<=720]+ba / b "
+    worker.ytdlp_format = raw_format
+    worker.allow_synthesised_tracks = True
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert cmd[cmd.index("-f") + 1] == raw_format
+
+
+def test_ytdlp_cmd_excludes_ai_upscaled_video_by_default(tmp_path):
+    worker = _make_worker(tmp_path)
+    worker.ytdlp_source = "https://example.com/video"
+    worker.ytdlp_format = "bv*+ba/b"
+    worker._ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+
+    cmd = worker._build_ytdlp_download_cmd(
+        os.path.join(str(tmp_path), "video.%(ext)s")
+    )
+
+    assert "[format_note!*=?AI-upscaled]" in cmd[cmd.index("-f") + 1]
 
 
 def test_ytdlp_cmd_carries_transient_browser_replay_headers(tmp_path):
@@ -648,7 +686,11 @@ def test_ytdlp_cmd_selects_dubbed_audio_language_and_multistreams(tmp_path):
         os.path.join(str(tmp_path), "video.%(ext)s")
     )
 
-    assert cmd[cmd.index("-f") + 1] == "bv*+ba[language^=es]/bv*+ba/b"
+    assert cmd[cmd.index("-f") + 1] == (
+        "bv*[format_note!*=?AI-upscaled]+ba[language^=es]"
+        "/bv*[format_note!*=?AI-upscaled]+ba"
+        "/b[format_note!*=?AI-upscaled]"
+    )
     assert "--audio-multistreams" in cmd
 
 

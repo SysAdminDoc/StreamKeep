@@ -210,6 +210,9 @@ class MainWindowJobsMixin:
                 ytdlp_audio_quality=state.ytdlp_audio_quality or "",
                 dub_lang=getattr(state, "dub_lang", "") or "",
                 mute=bool(getattr(state, "mute", False)),
+                allow_synthesised_tracks=bool(
+                    getattr(state, "allow_synthesised_tracks", False)
+                ),
                 download_subs=bool(state.download_subs),
                 capture_youtube_chat=bool(state.capture_youtube_chat),
                 capture_comments=bool(getattr(state, "capture_comments", False)),

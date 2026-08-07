@@ -34,6 +34,7 @@ def _window_with_advanced_controls():
     win.adv_audio_quality_input = QLineEdit()
     win.adv_dub_lang_input = QLineEdit()
     win.adv_mute_check = QCheckBox()
+    win.adv_allow_synthesised_check = QCheckBox()
     win.adv_subtitle_mode_combo = QComboBox()
     win.adv_subtitle_mode_combo.addItem("global", userData="")
     win.adv_subtitle_mode_combo.addItem("disabled", userData="disabled")
@@ -243,3 +244,12 @@ def test_audio_output_overrides_round_trip_dub_language_and_mute():
     win.adv_dub_lang_input.clear()
     win.adv_mute_check.setChecked(True)
     assert get_adv_overrides(win)["mute"] is True
+
+
+def test_synthesised_track_opt_in_round_trips_through_the_overrides():
+    """Off by default, and only present in the payload when asked for."""
+    win = _window_with_advanced_controls()
+    assert "allow_synthesised_tracks" not in get_adv_overrides(win)
+
+    win.adv_allow_synthesised_check.setChecked(True)
+    assert get_adv_overrides(win)["allow_synthesised_tracks"] is True

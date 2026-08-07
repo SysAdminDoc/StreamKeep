@@ -25,6 +25,27 @@ FORMAT_SORT_PRESETS = {
     "smallest": "lang,+size,+br,+res,+fps",
 }
 
+# ``lang`` above keeps the original audio ahead of a dub, but there is no
+# format-sort field for AI super-resolution video, so the only way to express
+# that half of the preference is a format-selection filter.
+SYNTHESISED_VIDEO_MARKER = "AI-upscaled"
+
+# The trailing ``?`` on the operator is load-bearing. yt-dlp drops any format
+# whose filtered field is absent unless the comparison is marked optional, and
+# ``format_note`` is absent on most non-YouTube extractors — so the unmarked
+# spelling ``[format_note!*=AI-upscaled]`` would select nothing at all on those
+# sites. Verified against yt-dlp 2026.07.04 one format at a time: without the
+# ``?`` a format carrying no note is excluded, with it only the upscaled
+# rendition is.
+SYNTHESISED_VIDEO_FILTER = f"[format_note!*=?{SYNTHESISED_VIDEO_MARKER}]"
+
+# A token is video-capable when its leading selector can resolve to video.
+# The group must be followed by a filter bracket or the end of the token, so
+# ``b`` does not match the ``b`` in ``ba`` and ``best`` does not match inside
+# ``bestaudio``. An explicit format id such as ``137`` is left alone: the
+# operator named the exact rendition they want.
+_VIDEO_TOKEN_RE = re.compile(r"(?:bestvideo|bv|best|b)\*?(?:\[.*\])?")
+
 VIDEO_CONTAINERS = ("mp4", "mkv", "webm", "original")
 AUDIO_FORMATS = ("best", "mp3", "m4a", "opus", "flac", "wav")
 SUBTITLE_CONVERSIONS = ("", "srt", "vtt", "ass")
@@ -506,6 +527,35 @@ def resolve_dubbed_format_spec(*, format_spec="", audio_format="", dub_lang=""):
     )
 
 
+def apply_synthesised_track_policy(format_spec, *, allow=False):
+    """Keep AI-synthesised video out of a format expression by default.
+
+    Platforms now publish AI super-resolution renditions alongside the real
+    ones, and they win a plain "best video" selection by being taller. Storing
+    one means the archive holds a synthesised version of the thing it was meant
+    to preserve, so the filter is applied unless the operator opts in.
+
+    The filter is attached to each video-capable branch of the expression;
+    audio branches and explicit format ids are returned untouched.
+    """
+    expression = str(format_spec or "")
+    if allow or not expression:
+        return expression
+    return "/".join(
+        "+".join(_filter_video_token(part) for part in group.split("+"))
+        for group in expression.split("/")
+    )
+
+
+def _filter_video_token(token):
+    stripped = token.strip()
+    if not _VIDEO_TOKEN_RE.fullmatch(stripped):
+        return stripped
+    if SYNTHESISED_VIDEO_FILTER in stripped:
+        return stripped
+    return stripped + SYNTHESISED_VIDEO_FILTER
+
+
 def validate_download_options(
     *,
     format_spec="",
@@ -516,6 +566,7 @@ def validate_download_options(
     audio_quality="",
     dub_lang="",
     mute=False,
+    allow_synthesised_tracks=False,
 ):
     """Validate and normalize yt-dlp format/output settings.
 
@@ -579,6 +630,7 @@ def validate_download_options(
         "audio_quality": quality,
         "dub_lang": normalized_dub_lang,
         "mute": mute,
+        "allow_synthesised_tracks": bool(allow_synthesised_tracks),
     }
 
 

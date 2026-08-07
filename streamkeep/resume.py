@@ -242,6 +242,9 @@ def _sanitize_resume_payload(data, output_dir):
             data.get("dub_lang", ""), max_len=5
         ),
         "mute": _sanitize_bool(data.get("mute", False)),
+        "allow_synthesised_tracks": _sanitize_bool(
+            data.get("allow_synthesised_tracks", False)
+        ),
         "download_subs": _sanitize_bool(data.get("download_subs", False)),
         "capture_youtube_chat": _sanitize_bool(
             data.get("capture_youtube_chat", False)

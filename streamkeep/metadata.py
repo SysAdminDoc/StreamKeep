@@ -972,7 +972,7 @@ def load_ytdlp_info_sidecar(path_or_dir):
         "id", "display_id", "webpage_url", "original_url", "extractor",
         "extractor_key", "title", "channel", "channel_id", "uploader",
         "uploader_id", "upload_date", "timestamp", "duration",
-        "duration_string", "format_note", "resolution", "height",
+        "duration_string", "format_note", "language", "resolution", "height",
         "webpage_url_domain",
     )
     return {

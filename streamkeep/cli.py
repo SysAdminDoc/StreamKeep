@@ -208,6 +208,9 @@ def _run_download(args):
             audio_quality=getattr(args, "audio_quality", ""),
             dub_lang=getattr(args, "dub_lang", ""),
             mute=getattr(args, "mute", False),
+            allow_synthesised_tracks=getattr(
+                args, "allow_synthesised_tracks", False
+            ),
         )
         subtitle_options = validate_subtitle_options(
             enabled=subtitle_requested,
@@ -479,6 +482,7 @@ def _run_download(args):
             ytdlp_audio_quality=output_options["audio_quality"],
             dub_lang=output_options["dub_lang"],
             mute=output_options["mute"],
+            allow_synthesised_tracks=output_options["allow_synthesised_tracks"],
             download_subs=subtitle_options["enabled"],
             capture_youtube_chat=bool(getattr(args, "youtube_chat", False)),
             capture_comments=bool(getattr(args, "capture_comments", False)),
@@ -2336,6 +2340,13 @@ def build_parser():
         help="Strip audio and write a video-only output",
     )
     dl.add_argument(
+        "--allow-synthesised-tracks", action="store_true",
+        help=(
+            "Allow AI-upscaled video to be selected; excluded by default so "
+            "the archive keeps the real rendition"
+        ),
+    )
+    dl.add_argument(
         "--arg-template", default="",
         help="Named structured yt-dlp argument template from Settings",
     )
@@ -3128,6 +3139,8 @@ def run_cli(argv=None):
             args.auto_subs = False
         if not hasattr(args, "mute"):
             args.mute = False
+        if not hasattr(args, "allow_synthesised_tracks"):
+            args.allow_synthesised_tracks = False
         for name, default in (
             ("concurrent_fragments", 0),
             ("retries", ""),

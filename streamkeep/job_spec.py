@@ -95,6 +95,11 @@ class DownloadJobSpec:
     # yt-dlp video outputs.
     dub_lang: str = ""
     mute: bool = False
+    # V166: platforms publish AI super-resolution video alongside the real
+    # renditions and it wins a plain "best video" pick by being taller.
+    # Storing one would put a synthesised copy in the archive, so it is
+    # excluded unless the operator asks for it.
+    allow_synthesised_tracks: bool = False
     # Browser-captured replay headers live only for the active job.  They are
     # deliberately omitted from serialized specs and resume sidecars.
     request_headers: tuple[tuple[str, str], ...] = ()
@@ -252,6 +257,7 @@ class DownloadJobSpec:
         worker.ytdlp_audio_quality = self.ytdlp_audio_quality
         worker.dub_lang = self.dub_lang
         worker.mute = self.mute
+        worker.allow_synthesised_tracks = self.allow_synthesised_tracks
         worker.request_headers = dict(self.request_headers)
         worker.cookies_browser = self.cookies_browser
         worker.auth_profile_id = self.auth_profile_id
@@ -322,6 +328,9 @@ class DownloadJobSpec:
             ytdlp_audio_quality=worker.ytdlp_audio_quality or "",
             dub_lang=getattr(worker, "dub_lang", "") or "",
             mute=bool(getattr(worker, "mute", False)),
+            allow_synthesised_tracks=bool(
+                getattr(worker, "allow_synthesised_tracks", False)
+            ),
             request_headers=tuple(
                 (str(name), str(value))
                 for name, value in getattr(worker, "request_headers", {}).items()

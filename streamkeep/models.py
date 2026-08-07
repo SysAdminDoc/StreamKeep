@@ -340,6 +340,7 @@ class ResumeState:
     ytdlp_audio_quality: str = ""
     dub_lang: str = ""
     mute: bool = False
+    allow_synthesised_tracks: bool = False
     download_subs: bool = False
     capture_youtube_chat: bool = False
     capture_comments: bool = False

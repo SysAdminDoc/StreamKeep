@@ -66,6 +66,7 @@ def _reset_adv_overrides(win):
     win.adv_audio_quality_input.clear()
     win.adv_dub_lang_input.clear()
     win.adv_mute_check.setChecked(False)
+    win.adv_allow_synthesised_check.setChecked(False)
     win.adv_subtitle_mode_combo.setCurrentIndex(0)
     win.adv_subtitle_list.clearSelection()
     win.adv_subtitle_auto_check.setChecked(True)
@@ -142,6 +143,8 @@ def get_adv_overrides(win):
         overrides["dub_lang"] = dub_lang
     if win.adv_mute_check.isChecked():
         overrides["mute"] = True
+    if win.adv_allow_synthesised_check.isChecked():
+        overrides["allow_synthesised_tracks"] = True
     subtitle_mode = win.adv_subtitle_mode_combo.currentData() or ""
     if subtitle_mode:
         overrides["subtitle_mode"] = subtitle_mode

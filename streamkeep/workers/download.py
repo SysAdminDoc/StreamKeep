@@ -79,6 +79,8 @@ class DownloadWorker(QThread):
         self.selected_tracks = []
         self.ytdlp_source = ""
         self.ytdlp_format = ""
+        # V166: AI super-resolution video is excluded unless opted into.
+        self.allow_synthesised_tracks = False
         self.ytdlp_format_sort = ""
         self.ytdlp_container = "mp4"
         self.ytdlp_audio_format = ""
@@ -262,6 +264,7 @@ class DownloadWorker(QThread):
             state.ytdlp_audio_quality = self.ytdlp_audio_quality or ""
             state.dub_lang = self.dub_lang or ""
             state.mute = bool(self.mute)
+            state.allow_synthesised_tracks = bool(self.allow_synthesised_tracks)
             state.download_subs = bool(self.download_subs)
             state.capture_youtube_chat = bool(self.capture_youtube_chat)
             state.capture_comments = bool(self.capture_comments)
@@ -1070,6 +1073,7 @@ class DownloadWorker(QThread):
         """Assemble the yt-dlp download command for a single segment."""
         from ..download_options import (
             SPONSORBLOCK_LEGACY_REMOVE, validate_download_options,
+            apply_synthesised_track_policy,
             resolve_dubbed_format_spec,
             validate_hls_key_override,
             validate_sponsorblock_options, validate_subtitle_options,
@@ -1088,6 +1092,7 @@ class DownloadWorker(QThread):
             audio_quality=self.ytdlp_audio_quality,
             dub_lang=self.dub_lang,
             mute=self.mute,
+            allow_synthesised_tracks=self.allow_synthesised_tracks,
         )
         subtitle_options = validate_subtitle_options(
             enabled=self.download_subs,
@@ -1140,6 +1145,11 @@ class DownloadWorker(QThread):
             format_spec = "bestvideo/best"
         if not format_spec and not hls_key_options["value"]:
             raise ValueError("yt-dlp format specification is empty")
+        # Applied last, so every branch above — the audio-extract and mute
+        # defaults included — is covered by one policy decision.
+        format_spec = apply_synthesised_track_policy(
+            format_spec, allow=options["allow_synthesised_tracks"],
+        )
 
         cmd = list(["yt-dlp"] if export else ytdlp_command())
         if format_spec:
