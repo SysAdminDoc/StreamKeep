@@ -20,7 +20,7 @@ import shutil
 import threading
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Callable, Iterable
 
@@ -239,6 +239,151 @@ def plan_media_import(
     )
 
 
+#: How a secondary collection home points at the one real file (V168).
+#:
+#: ``hardlink`` is preferred: it is a real directory entry every media server
+#: indexes normally, and it consumes no extra bytes. It cannot cross a
+#: filesystem, so ``strm`` is the fallback -- a one-line text file holding the
+#: primary's path, which Plex/Jellyfin/Emby/Kodi all follow. Copying is
+#: deliberately NOT a fallback: duplicating the bytes is the problem V168
+#: exists to remove, so a home that can be neither linked nor pointed at is
+#: reported as refused instead.
+HOME_STRATEGIES = ("hardlink", "strm")
+
+
+@dataclass(frozen=True)
+class CollectionHome:
+    """One place a recording appears in the library."""
+
+    collection: str
+    destination: str
+    strategy: str          # "primary", "hardlink", "strm", or "refused"
+    reason: str = ""
+
+    @property
+    def is_primary(self) -> bool:
+        return self.strategy == "primary"
+
+
+def _collection_dir(library_path: str, collection: str) -> str:
+    return os.path.join(library_path, "Collections", _safe_name(collection))
+
+
+def plan_collection_homes(
+    plan: "MediaImportPlan",
+    collections: list[str] | tuple[str, ...] = (),
+) -> list[CollectionHome]:
+    """Plan one real file plus a home per collection.
+
+    The primary home is the layout ``plan_media_import`` already chose, so the
+    season-folder library is unchanged and remains a valid single-home layout.
+    Each collection gets an additional entry pointing at that same file, which
+    is what lets a recording belong to N collections with one copy on disk.
+
+    Filesystem-free: the strategy recorded here is the *intended* one, and
+    ``materialize_collection_homes`` records what actually happened, because
+    whether a hardlink is possible is only knowable at the point of making it.
+    """
+    homes = [CollectionHome(
+        collection="", destination=plan.destination, strategy="primary",
+        reason="the single on-disk copy",
+    )]
+    seen = set()
+    filename = os.path.basename(plan.destination)
+    for collection in collections or ():
+        label = str(collection or "").strip()
+        if not label:
+            continue
+        safe = _safe_name(label)
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        target_dir = _collection_dir(plan.library_path, label)
+        homes.append(CollectionHome(
+            collection=label,
+            destination=os.path.abspath(os.path.join(target_dir, filename)),
+            strategy="hardlink",
+            reason="preferred: a real directory entry costing no extra bytes",
+        ))
+    return homes
+
+
+def materialize_collection_homes(
+    homes: list[CollectionHome] | tuple[CollectionHome, ...],
+    *,
+    log_fn=None,
+) -> list[CollectionHome]:
+    """Create each secondary home and report the strategy actually used.
+
+    The primary is assumed to exist already (``materialize_media_import`` wrote
+    it). Every other home is attempted as a hardlink and falls back to a
+    ``.strm`` pointer when the filesystem refuses -- crossing a device is the
+    ordinary reason. Never a copy: duplicating bytes is what V168 removes.
+    """
+    primary = next((home for home in homes if home.is_primary), None)
+    if primary is None:
+        raise ValueError("collection homes must include the primary")
+    results = [primary]
+    for home in homes:
+        if home.is_primary:
+            continue
+        os.makedirs(os.path.dirname(home.destination), exist_ok=True)
+        if os.path.lexists(home.destination):
+            results.append(replace(
+                home, strategy="refused",
+                reason="a file already exists at this collection home",
+            ))
+            continue
+        try:
+            os.link(primary.destination, home.destination)
+            results.append(replace(
+                home, strategy="hardlink",
+                reason="linked to the primary copy",
+            ))
+            if log_fn:
+                log_fn(
+                    f"[COLLECTION] hardlinked {home.collection} -> "
+                    f"{home.destination}"
+                )
+            continue
+        except OSError as error:
+            link_error = error
+        strm_path = os.path.splitext(home.destination)[0] + ".strm"
+        try:
+            with open(strm_path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(primary.destination + "\n")
+        except OSError as error:
+            results.append(replace(
+                home, strategy="refused",
+                reason=(
+                    f"cannot hardlink ({link_error}) and cannot write a .strm "
+                    f"pointer ({error})"
+                ),
+            ))
+            continue
+        results.append(replace(
+            home, destination=os.path.abspath(strm_path), strategy="strm",
+            reason=f"hardlink unavailable ({link_error}); wrote a pointer instead",
+        ))
+        if log_fn:
+            log_fn(
+                f"[COLLECTION] .strm pointer for {home.collection} -> "
+                f"{strm_path}"
+            )
+    return results
+
+
+def describe_collection_homes(
+    homes: list[CollectionHome] | tuple[CollectionHome, ...],
+) -> list[str]:
+    """One line per home, naming the strategy so the export can report it."""
+    lines = []
+    for home in homes:
+        label = home.collection or "primary layout"
+        lines.append(f"{label}: {home.strategy} - {home.reason}")
+    return lines
+
+
 def _sidecar_profile(config: dict[str, Any]) -> str:
     """Choose a deterministic sidecar profile for a media-server export."""
     requested = str(config.get("sidecar_profile", "") or "").strip().lower()
@@ -340,8 +485,15 @@ def materialize_media_import(
     info: object | None = None,
     *,
     log_fn=None,
+    collections: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Commit a previously previewable layout and return generated files."""
+    """Commit a previously previewable layout and return generated files.
+
+    ``collections`` adds a home per collection alongside the single real file
+    (V168). The result carries ``collection_homes`` and ``collection_strategies``
+    so a caller can report which strategy each home used; the log line alone was
+    not something a UI or CLI could render.
+    """
     preview = preview_media_import(config, out_dir, info)
     if not preview.get("ok"):
         return preview
@@ -400,12 +552,21 @@ def materialize_media_import(
                 ).replace(os.sep, "/"),
                 "bytes": os.path.getsize(path),
             })
+    homes = materialize_collection_homes(
+        plan_collection_homes(plan, collections), log_fn=log_fn,
+    ) if collections else []
     return {
         **preview,
         "plan": plan,
         "files": files,
         "total_bytes": sum(int(item["bytes"] or 0) for item in files),
         "sidecars": sidecar_results,
+        # The primary action is reported too: the single copy is either a
+        # hardlink to the recording or a real copy, and which one it was
+        # matters as much as the secondary homes.
+        "primary_strategy": "hardlink" if action == "Hardlinked" else "copy",
+        "collection_homes": homes,
+        "collection_strategies": describe_collection_homes(homes),
     }
 
 

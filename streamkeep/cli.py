@@ -647,6 +647,88 @@ def _run_bagit(args):
         _print_line(f"  {entry['path']}: {entry['sha384_sri']}")
 
 
+def _run_collections(args):
+    """Manage explicit collection membership (V168).
+
+    Membership is many-to-many on purpose: ``add`` never removes the recording
+    from anything else, which is what lets one on-disk copy appear in several
+    collections.
+    """
+    import json as _json
+
+    from . import tags
+
+    command = getattr(args, "collections_command", "")
+    emit_json = bool(getattr(args, "json", False))
+    db = tags._connect()
+    try:
+        if command == "list":
+            rows = tags.get_all_collections(db)
+            if emit_json:
+                print(_json.dumps(
+                    [{"name": name, "members": count} for name, count in rows],
+                    indent=2,
+                ))
+            elif not rows:
+                print("No collections yet.")
+            else:
+                for name, count in rows:
+                    print(f"{count:6d}  {name}")
+            return 0
+        if command == "show":
+            members = tags.get_collection_members(db, args.name)
+            if emit_json:
+                print(_json.dumps(members, indent=2))
+            elif not members:
+                print(f"{args.name!r} has no members (or does not exist).")
+            else:
+                for path in members:
+                    print(path)
+            return 0
+        if command == "of":
+            names = tags.get_collections_for_recording(db, args.path)
+            if emit_json:
+                print(_json.dumps(names, indent=2))
+            elif not names:
+                print("That recording is not in any collection.")
+            else:
+                for name in names:
+                    print(name)
+            return 0
+        if command == "add":
+            tags.add_to_collection(
+                db, args.path, args.name, position=args.position,
+            )
+            others = tags.get_collections_for_recording(db, args.path)
+            print(
+                f"Added to {args.name!r}. Now in {len(others)} collection(s): "
+                + ", ".join(others)
+            )
+            return 0
+        if command == "remove":
+            if tags.remove_from_collection(db, args.path, args.name):
+                remaining = tags.get_collections_for_recording(db, args.path)
+                print(
+                    f"Removed from {args.name!r}. Still in "
+                    f"{len(remaining)} collection(s)."
+                )
+                return 0
+            print(f"That recording is not in {args.name!r}.")
+            return 1
+        if command == "delete":
+            if tags.delete_collection(db, args.name):
+                print(f"Deleted {args.name!r}. The recordings were not touched.")
+                return 0
+            print(f"No collection named {args.name!r}.")
+            return 1
+    except ValueError as error:
+        print(f"Refused: {error}")
+        return 2
+    finally:
+        db.close()
+    return 2
+
+
 def _run_tokens(args):
     """Manage scoped companion tokens through a running local server."""
     import secrets
@@ -2674,6 +2756,39 @@ def build_parser():
                          help="Override the config/database directory")
 
     # -- scoped companion API tokens --
+    coll_p = sub.add_parser(
+        "collections",
+        help="Manage user collections; a recording may belong to several",
+    )
+    coll_sub = coll_p.add_subparsers(dest="collections_command")
+    coll_sub.required = True
+    coll_list = coll_sub.add_parser("list", help="List collections and member counts")
+    coll_list.add_argument("--json", action="store_true", help="Emit JSON")
+    coll_show = coll_sub.add_parser("show", help="List a collection's members in order")
+    coll_show.add_argument("name")
+    coll_show.add_argument("--json", action="store_true", help="Emit JSON")
+    coll_of = coll_sub.add_parser(
+        "of", help="List every collection one recording belongs to",
+    )
+    coll_of.add_argument("path")
+    coll_of.add_argument("--json", action="store_true", help="Emit JSON")
+    coll_add = coll_sub.add_parser("add", help="Add a recording to a collection")
+    coll_add.add_argument("path")
+    coll_add.add_argument("name")
+    coll_add.add_argument(
+        "--position", type=int, default=None,
+        help="Order within this collection (default: append)",
+    )
+    coll_rm = coll_sub.add_parser(
+        "remove", help="Remove one membership, leaving the others intact",
+    )
+    coll_rm.add_argument("path")
+    coll_rm.add_argument("name")
+    coll_del = coll_sub.add_parser(
+        "delete", help="Delete a collection; the recordings are untouched",
+    )
+    coll_del.add_argument("name")
+
     tokens_p = sub.add_parser(
         "tokens", help="List, create, or revoke scoped companion API tokens",
     )
@@ -3188,6 +3303,8 @@ def run_cli(argv=None):
         _run_backup(args)
     elif args.command == "bagit":
         _run_bagit(args)
+    elif args.command == "collections":
+        _run_collections(args)
     elif args.command == "tokens":
         _run_tokens(args)
     elif args.command == "import-har":
@@ -3231,7 +3348,7 @@ def has_cli_args():
         "download", "dl", "capture", "server", "extractors", "plugins", "source-adapters", "operations", "gallery", "lux", "db",
         "snapshot", "backup", "bagit", "tokens", "startup-check", "import-har", "import-library",
         "retemplate",
-        "adopt", "podcast-sidecars",
+        "adopt", "podcast-sidecars", "collections",
         "credentials", "health", "auth", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",

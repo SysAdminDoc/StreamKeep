@@ -42,8 +42,35 @@ def _connect():
         );
         CREATE INDEX IF NOT EXISTS idx_rt_path ON recording_tags(recording_path);
         CREATE INDEX IF NOT EXISTS idx_rt_tag  ON recording_tags(tag_id);
-    """)
+    """ + _COLLECTION_SCHEMA)
     return db
+
+
+# ── User collections (V168) ─────────────────────────────────────────
+#
+# A recording used to have exactly one home: the season folder it was filed
+# into. Something belonging to two playlists had to be duplicated on disk or
+# arbitrarily assigned to one of them. Membership is many-to-many here and the
+# on-disk copy stays single -- see ``media_server.plan_collection_homes``.
+#
+# Separate from smart collections (``evaluate_collection_rules``), which are a
+# rule evaluated over history and own no rows. These are explicit and curated,
+# so they need storage.
+_COLLECTION_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS collections (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS collection_members (
+        collection_id  INTEGER NOT NULL REFERENCES collections(id),
+        recording_path TEXT NOT NULL,
+        position       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (collection_id, recording_path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cm_path ON collection_members(recording_path);
+    CREATE INDEX IF NOT EXISTS idx_cm_coll ON collection_members(collection_id);
+"""
 
 
 def get_or_create_tag(db, name, kind="user"):
@@ -295,7 +322,7 @@ def build_rebuilt_tags_database(target_path, records):
             );
             CREATE INDEX IF NOT EXISTS idx_rt_path ON recording_tags(recording_path);
             CREATE INDEX IF NOT EXISTS idx_rt_tag  ON recording_tags(tag_id);
-        """)
+        """ + _COLLECTION_SCHEMA)
         db.execute("BEGIN IMMEDIATE")
         tag_ids = {}
         for record in records or []:
@@ -339,6 +366,146 @@ def build_rebuilt_tags_database(target_path, records):
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+# ── Explicit collection membership (V168) ───────────────────────────
+
+def _collection_now():
+    """UTC timestamp for a new collection.
+
+    Local rather than reused from ``db.primitives``: this module has no
+    dependency on the library-database package and adding one for a timestamp
+    would risk a cycle for nothing.
+    """
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_or_create_collection(db, name):
+    """Return the collection id for *name*, creating it if needed."""
+    label = str(name or "").strip()
+    if not label:
+        raise ValueError("collection name must not be empty")
+    row = db.execute(
+        "SELECT id FROM collections WHERE name=?", (label,)
+    ).fetchone()
+    if row:
+        return row[0]
+    cur = db.execute(
+        "INSERT INTO collections (name, created_at) VALUES (?, ?)",
+        (label, _collection_now()),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def add_to_collection(db, path, name, *, position=None):
+    """Add a recording to a collection. Idempotent.
+
+    Adding does not remove the recording from any other collection: that is the
+    whole point. ``position`` orders it within this collection only.
+    """
+    collection_id = get_or_create_collection(db, name)
+    key = str(path)
+    if position is None:
+        row = db.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM collection_members "
+            "WHERE collection_id=?",
+            (collection_id,),
+        ).fetchone()
+        position = int(row[0] if row else 0)
+    db.execute(
+        "INSERT OR REPLACE INTO collection_members "
+        "(collection_id, recording_path, position) VALUES (?, ?, ?)",
+        (collection_id, key, int(position)),
+    )
+    db.commit()
+    return collection_id
+
+
+def remove_from_collection(db, path, name):
+    """Remove one membership, leaving every other membership intact."""
+    row = db.execute(
+        "SELECT id FROM collections WHERE name=?", (str(name or "").strip(),)
+    ).fetchone()
+    if not row:
+        return False
+    cur = db.execute(
+        "DELETE FROM collection_members WHERE collection_id=? AND recording_path=?",
+        (row[0], str(path)),
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
+def get_collections_for_recording(db, path):
+    """Every collection this recording belongs to, in name order."""
+    return [
+        row[0] for row in db.execute(
+            "SELECT c.name FROM collections c "
+            "JOIN collection_members m ON m.collection_id = c.id "
+            "WHERE m.recording_path=? ORDER BY c.name",
+            (str(path),),
+        ).fetchall()
+    ]
+
+
+def get_collection_members(db, name):
+    """Recording paths in a collection, in the operator's chosen order."""
+    return [
+        row[0] for row in db.execute(
+            "SELECT m.recording_path FROM collection_members m "
+            "JOIN collections c ON c.id = m.collection_id "
+            "WHERE c.name=? ORDER BY m.position, m.recording_path",
+            (str(name or "").strip(),),
+        ).fetchall()
+    ]
+
+
+def get_all_collections(db):
+    """``[(name, member_count), ...]`` for every collection, name-ordered."""
+    return [
+        (row[0], int(row[1] or 0)) for row in db.execute(
+            "SELECT c.name, COUNT(m.recording_path) FROM collections c "
+            "LEFT JOIN collection_members m ON m.collection_id = c.id "
+            "GROUP BY c.id ORDER BY c.name"
+        ).fetchall()
+    ]
+
+
+def delete_collection(db, name):
+    """Delete a collection and its memberships. Recordings are untouched."""
+    row = db.execute(
+        "SELECT id FROM collections WHERE name=?", (str(name or "").strip(),)
+    ).fetchone()
+    if not row:
+        return False
+    db.execute(
+        "DELETE FROM collection_members WHERE collection_id=?", (row[0],)
+    )
+    db.execute("DELETE FROM collections WHERE id=?", (row[0],))
+    db.commit()
+    return True
+
+
+def relocate_collection_memberships(old_path, new_path):
+    """Follow a recording that moved on disk, keeping every membership.
+
+    Membership is keyed by path, so a re-template or a manual move would
+    otherwise silently drop the recording out of every collection it was in.
+    """
+    db = _connect()
+    try:
+        cur = db.execute(
+            "UPDATE OR REPLACE collection_members SET recording_path=? "
+            "WHERE recording_path=?",
+            (str(new_path), str(old_path)),
+        )
+        db.commit()
+        return cur.rowcount
     finally:
         db.close()
 
