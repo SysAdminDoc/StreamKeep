@@ -1,6 +1,72 @@
 # Changelog
 
-All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
+All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
+
+## [4.52.0] - 2026-08-07
+
+- Fixed a release-metadata bug that had been deleting a release from the Linux
+  package changelog on every version bump. The AppStream release list was
+  stamped by rewriting the newest entry's version number in place, which left
+  the description belonging to it untouched — so the entry began describing the
+  previous release's work and that release vanished from the history. Nothing
+  reported it because the consistency check performed the same rewrite and
+  treated a successful rewrite as agreement. The release list is now verified
+  rather than stamped: a bump fails loudly unless a new entry has been written
+  for it. v4.51.0's entry, lost this way, is restored.
+
+- Stopping a health probe no longer requires killing the thread it runs on. The
+  probe polls for cancellation between its individual checks, so asking it to
+  stop takes effect part-way through instead of only before and after the whole
+  run. Previously the only way to stop one in flight was to terminate its
+  thread, and terminating a thread sitting in a subprocess call is the same
+  undefined behaviour that produced the crash above — just rarer. A cancelled
+  probe now returns nothing and persists nothing, rather than writing a snapshot
+  built from a half-finished scan that would report working dependencies as
+  missing.
+
+- The yt-dlp update channel is now a setting. StreamKeep still ships a frozen,
+  version-checked yt-dlp and that stays the default, but a stable release
+  cadence cannot track YouTube breakage — there was a 12-week gap between
+  2026.03.17 and 2026.06.09 while YouTube broke repeatedly — so an operator can
+  point at their own build and follow nightly. The build you name is
+  version-probed exactly like any other tool rather than trusted, so one below
+  the supported floor is refused by name and can never reach a download path.
+  An external build that cannot be used falls back to the bundled one instead
+  of taking downloads down over a settings typo, and the health panel reports
+  the channel actually **in use** with the reason the request was refused —
+  reporting the request instead would let you believe you were getting nightly
+  extractor fixes you were not. Switching channels takes effect immediately and
+  is reversible.
+
+- Fixed the intermittent test-suite abort tracked as V179, which turned out to
+  be a real threading defect rather than a harness quirk. A background health
+  probe runs about ten executable version checks at a five-second timeout each;
+  its `cancel()` is only observed before and after that work, and `quit()` does
+  nothing to a thread that runs no event loop. On a starved CPU the probe was
+  still inside a subprocess call when the window that owned it went away, and
+  tearing down around a live thread aborted the process with an access
+  violation and no summary. Load was never the bug — only what made the probe
+  slow enough to outlive its parent.
+
+- Fixed a defect the database decomposition introduced silently: patching a
+  value on the `streamkeep.db` facade stopped reaching the code that uses it.
+  While the package was one module a patch rebound the single binding every
+  caller resolved; once definitions moved into domain modules a moved name had
+  several bindings, and the facade wrote to whichever it found first. Reading
+  the patched name back through the facade still returned the patch, so the
+  assertions guarding this passed while the code under test went on calling the
+  real function. A patch now reaches every module holding the name — but never
+  a shim that only forwards, because writing a binding into one would freeze
+  that forward. This matters most for `DB_PATH`, which 175 test sites use to
+  redirect the library away from the operator's own: under the old behaviour
+  that redirect stopped short of the code that opens the file.
+
+- A fourth pass of the database decomposition. The connection layer — which
+  database file is open, the per-thread pooled handle for the active profile,
+  and the refusal to open a database written by a newer build — now lives in
+  `streamkeep/db/connection.py` instead of sharing a module with the ~4,900
+  lines that merely acquire a connection. `_legacy.py` is down to 4,904 lines
+  from 5,107.
 
 ## [4.51.0] - 2026-08-07
 
