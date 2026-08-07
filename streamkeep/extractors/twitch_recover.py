@@ -52,15 +52,69 @@ def _compute_hash(channel, stream_id, timestamp):
     return hashlib.sha1(body.encode()).hexdigest()[:20]
 
 
-def _head_check(url, timeout=8):
-    """Return True if the URL responds with 200 or 206."""
+#: Outcomes a single CDN probe can have. ``forbidden`` is deliberately distinct
+#: from ``missing``: a 401/403 means the platform is refusing unauthenticated
+#: access to those segments, which is an access control and not a rotated
+#: domain. Recovery reconstructs URLs for content the CDN still serves
+#: unauthenticated; when it does not, the answer is to stop, not to keep
+#: probing until something answers.
+PROBE_HIT = "hit"
+PROBE_MISSING = "missing"
+PROBE_FORBIDDEN = "forbidden"
+PROBE_ERROR = "error"
+
+#: Status codes that mean "you are not allowed", as opposed to "not here".
+_GATED_STATUSES = frozenset({401, 403})
+
+
+class RecoveryRefused(Exception):
+    """Raised when the platform gates the segments a recovery would need.
+
+    Carried rather than swallowed so the caller reports *why* it stopped. The
+    recovery path must never respond to an access control by trying another
+    domain or quality — that would be working around it.
+    """
+
+
+def _probe_url(url, timeout=8):
+    """Probe one candidate URL and name the outcome.
+
+    Returns ``(outcome, detail)``. The old boolean told a caller nothing about
+    *why* a candidate failed, so a rotated CDN domain, a VOD that was really
+    deleted, and a segment set the platform refuses to serve unauthenticated all
+    looked identical — and the last of those must stop the attempt.
+    """
     req = urllib.request.Request(url, method="HEAD")
     req.add_header("User-Agent", _UA)
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
-        return resp.status in (200, 206)
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
-        return False
+    except urllib.error.HTTPError as error:
+        status = int(getattr(error, "code", 0) or 0)
+        if status in _GATED_STATUSES:
+            return PROBE_FORBIDDEN, f"HTTP {status} (access is gated)"
+        if status == 404:
+            return PROBE_MISSING, "HTTP 404 (not on this domain)"
+        return PROBE_ERROR, f"HTTP {status}"
+    except urllib.error.URLError as error:
+        return PROBE_ERROR, f"unreachable: {getattr(error, 'reason', error)}"
+    except OSError as error:
+        return PROBE_ERROR, f"probe failed: {error}"
+    status = int(getattr(resp, "status", 0) or 0)
+    if status in (200, 206):
+        return PROBE_HIT, f"HTTP {status}"
+    if status in _GATED_STATUSES:
+        return PROBE_FORBIDDEN, f"HTTP {status} (access is gated)"
+    return PROBE_MISSING, f"HTTP {status}"
+
+
+def _head_check(url, timeout=8):
+    """Return True if the URL responds with 200 or 206.
+
+    Kept as the boolean shape existing callers use; ``_probe_url`` is what
+    carries the reason.
+    """
+    outcome, _detail = _probe_url(url, timeout=timeout)
+    return outcome == PROBE_HIT
 
 
 def _scrape_twitchtracker(channel, year, month, log_fn=None):
@@ -113,38 +167,111 @@ def _unix_timestamp_variants(date_str):
     """
     import datetime
     ts_list = []
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+    text = str(date_str or "").strip()
+    if not text:
+        return ts_list
+    # The TwitchTracker pattern captures minutes, but the sullygnome fallback
+    # takes ``data-date`` verbatim and that arrives with seconds and sometimes an
+    # ISO ``T``. Those formats used to parse as nothing at all, which skipped the
+    # stream with no probe and no explanation -- a silent no-op, not a miss.
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M",
+                "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            dt = datetime.datetime.strptime(date_str, fmt).replace(
+            dt = datetime.datetime.strptime(text.replace("Z", ""), fmt).replace(
                 tzinfo=datetime.timezone.utc
             )
-            base = int(dt.timestamp())
-            # Try the exact time and +/- 1 hour in 10-minute increments
-            for offset in range(-3600, 3600 + 1, 600):
-                ts_list.append(base + offset)
-            return ts_list
         except ValueError:
             continue
+        base = int(dt.timestamp())
+        # Try the exact time and +/- 1 hour in 10-minute increments
+        for offset in range(-3600, 3600 + 1, 600):
+            ts_list.append(base + offset)
+        return ts_list
     return ts_list
 
 
-def recover_vod(channel, stream_id, timestamp, log_fn=None):
-    """Try CDN domains * qualities for a single stream. Returns list of valid M3U8 URLs."""
+def probe_vod(channel, stream_id, timestamp, log_fn=None):
+    """Probe every candidate CDN domain and report what each one said.
+
+    Returns ``(urls, report)`` where ``report`` is one entry per domain:
+    ``{"domain", "outcome", "detail", "quality", "url"}``. Enumerating the
+    domains is the point — Twitch rotates them, so "nothing found" without a
+    per-domain answer cannot distinguish a rotated domain list from a VOD that
+    is genuinely gone.
+
+    Raises ``RecoveryRefused`` the moment a probe comes back gated. Continuing
+    past a 403 to try other domains and qualities is precisely the behaviour
+    this must not have.
+    """
     channel_lower = channel.lower().strip()
-    h = _compute_hash(channel_lower, stream_id, timestamp)
+    digest = _compute_hash(channel_lower, stream_id, timestamp)
     found = []
+    report = []
     for domain in CDN_DOMAINS:
+        entry = {"domain": domain, "outcome": PROBE_MISSING,
+                 "detail": "", "quality": "", "url": ""}
         for quality in QUALITIES:
             url = (
-                f"{domain}/{h}_{channel_lower}_{stream_id}_{timestamp}"
+                f"{domain}/{digest}_{channel_lower}_{stream_id}_{timestamp}"
                 f"/{quality}/index-dvr.m3u8"
             )
-            if _head_check(url):
+            outcome, detail = _probe_url(url)
+            entry["outcome"], entry["detail"] = outcome, detail
+            if outcome == PROBE_FORBIDDEN:
                 if log_fn:
-                    log_fn(f"[RECOVER] HIT: {quality} @ {domain}")
+                    log_fn(
+                        f"[RECOVER] REFUSED at {domain}: {detail}. Recovery "
+                        "reconstructs URLs for content the CDN still serves "
+                        "unauthenticated and will not attempt to bypass an "
+                        "access control."
+                    )
+                report.append(entry)
+                raise RecoveryRefused(
+                    f"{domain} returned {detail}; the platform is gating these "
+                    "segments, so there is nothing to recover without "
+                    "circumventing that"
+                )
+            if outcome == PROBE_HIT:
+                entry["quality"], entry["url"] = quality, url
+                if log_fn:
+                    log_fn(f"[RECOVER] HIT: {quality} @ {domain} ({detail})")
                 found.append(url)
                 break  # Found on this domain, skip lower qualities
-    return found
+        else:
+            if log_fn:
+                log_fn(
+                    f"[RECOVER] miss: {domain} - "
+                    f"{entry['detail'] or 'no quality matched'}"
+                )
+        report.append(entry)
+    return found, report
+
+
+def recover_vod(channel, stream_id, timestamp, log_fn=None):
+    """Try CDN domains * qualities for a single stream.
+
+    Returns the list of valid M3U8 URLs. ``probe_vod`` is the reporting form;
+    this stays the plain list callers already use.
+    """
+    urls, _report = probe_vod(channel, stream_id, timestamp, log_fn=log_fn)
+    return urls
+
+
+def format_recovery_report(report):
+    """One human-readable line per candidate domain."""
+    lines = []
+    for entry in report or []:
+        domain = entry.get("domain", "?")
+        outcome = entry.get("outcome", PROBE_MISSING)
+        detail = entry.get("detail") or ""
+        if outcome == PROBE_HIT:
+            lines.append(
+                f"{domain}: resolved at {entry.get('quality') or 'unknown'} "
+                f"({detail})"
+            )
+        else:
+            lines.append(f"{domain}: {outcome} - {detail or 'no detail'}")
+    return lines
 
 
 def recover_channel_vods(channel, year, month, log_fn=None, progress_fn=None):
@@ -165,8 +292,30 @@ def recover_channel_vods(channel, year, month, log_fn=None, progress_fn=None):
             progress_fn(int((i / total) * 100), f"Testing stream {s['stream_id']}...")
 
         timestamps = _unix_timestamp_variants(s.get("date_str", ""))
+        if not timestamps:
+            # Never silent: without a timestamp there is nothing to hash, so the
+            # stream is unrecoverable for a stated reason rather than skipped.
+            if log_fn:
+                log_fn(
+                    f"[RECOVER] skipped {s.get('stream_id')}: unreadable date "
+                    f"{s.get('date_str', '')!r} - no timestamp to reconstruct from"
+                )
+            continue
         for ts in timestamps:
-            urls = recover_vod(channel, s["stream_id"], ts, log_fn)
+            try:
+                urls, report = probe_vod(channel, s["stream_id"], ts, log_fn)
+            except RecoveryRefused as refusal:
+                # An access control applies to the channel's segments, not to
+                # this one timestamp guess, so trying more of them is both
+                # pointless and the wrong thing to do.
+                if log_fn:
+                    log_fn(f"[RECOVER] Stopping: {refusal}")
+                if progress_fn:
+                    progress_fn(100, f"Refused - {refusal}")
+                return results
+            if not urls and log_fn:
+                for line in format_recovery_report(report):
+                    log_fn(f"[RECOVER]   {line}")
             if urls:
                 # Use the highest quality (first hit)
                 info = StreamInfo(
