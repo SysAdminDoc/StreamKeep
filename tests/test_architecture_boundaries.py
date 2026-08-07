@@ -18,12 +18,20 @@ _OWNED_BY = {
         "_queue_row_to_dict", "_row_to_history_dict", "_row_to_monitor_dict",
         "_canonical_history_entry", "_canonical_tombstone_fields",
     ),
-    "streamkeep.db.schema": ("migrate_database",),
+    "streamkeep.db.schema": (
+        "migrate_database", "_apply_schema", "_migrate_retry_v10",
+        "_migrate_circuit_engine_v23", "_apply_upload_schema",
+    ),
+    "streamkeep.db.history_actions": (
+        "_append_history_action_in_connection", "_history_action_record",
+        "_history_action_identity_key",
+    ),
+    "streamkeep.db.primitives": ("_utc_now_iso", "_sqlite_table_exists"),
 }
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 6461
+_LEGACY_LINE_CEILING = 5477
 
 
 def test_each_domain_module_implements_what_it_exports():
@@ -62,9 +70,36 @@ def test_the_facade_still_serves_the_whole_surface():
     assert history.load_history is db.load_history
     assert queue.enqueue_queue_job is db.enqueue_queue_job
     assert schema.migrate_database is not db.init_db
-    # Moved definitions stay reachable from the facade callers already use.
+    # Moved definitions stay reachable from the facade callers already use,
+    # even though the legacy module no longer re-exports them.
     assert callable(db.failed_job_public_view)
     assert callable(db._circuit_engine)
+    assert callable(db._migrate_retry_v10)
+    assert callable(db._append_history_action_in_connection)
+    assert callable(db._utc_now_iso)
+
+
+def test_the_package_has_no_import_cycle_back_into_the_monolith():
+    """The domain modules must not import the connection-owning module.
+
+    That is the constraint that lets them own their statements at all: the
+    moment one of them imports _legacy at module scope, the extraction has to
+    be undone.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(db._implementation.__file__).parent
+    for name in ("schema", "history_actions", "primitives", "projections"):
+        tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level and node.module:
+                assert node.module != "_legacy", (
+                    f"db/{name}.py imports _legacy at module scope"
+                )
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.endswith("_legacy"), name
 
     original_connect = db._connect
     with mock.patch.object(db, "_connect") as patched:

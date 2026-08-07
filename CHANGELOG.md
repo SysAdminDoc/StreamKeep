@@ -2,6 +2,18 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
+## [Unreleased]
+
+- The database decomposition continued. `schema.py` now owns the migrations it
+  had only been dispatching, so reviewing the schema no longer means walking
+  the legacy module; the history action log and two shared leaf primitives also
+  became modules that implement what they export. `db/_legacy.py` is down from
+  6,461 to 5,477 lines (6,737 before this work started). The facade now
+  composes the domain modules instead of requiring every name to be re-exported
+  through the legacy one, and a new boundary test fails if any domain module
+  imports the connection-owning module at module scope — that acyclic property
+  is what lets them own their statements at all.
+
 ## [4.49.0] - 2026-08-07
 
 - The database "split" started actually splitting. The 2026-08-04 change

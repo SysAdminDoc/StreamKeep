@@ -13,11 +13,10 @@ forwarding shim the way the earlier "split" modules did.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sqlite3
-from typing import Any, Mapping
+from typing import Any
 
 
 def _circuit_engine(queue_data, context) -> str:
