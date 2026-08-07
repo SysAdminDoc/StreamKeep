@@ -1364,10 +1364,11 @@ def revoke_source_adapter(adapter_id, config=None):
 def registry_signature(directory=None, config=None):
     """Return a cheap fingerprint of everything the registry is built from.
 
-    Only ``stat`` results and the config entries themselves are read, so this
-    stays orders of magnitude cheaper than parsing the definitions. Any change
-    to a file's size or mtime, to the set of files, or to the config entries
-    produces a different signature and forces a reparse.
+    Each definition contributes its name, size, and a content digest, so any
+    edit forces a reparse even when it leaves the byte count unchanged. Reading
+    the bytes is still far cheaper than parsing, validating, and fingerprinting
+    them. A change to the set of files or to the config entries also produces a
+    different signature.
     """
     directory = Path(directory or SOURCE_ADAPTERS_DIR)
     entries = []
@@ -1383,7 +1384,19 @@ def registry_signature(directory=None, config=None):
                     continue
                 if not path.is_file():
                     continue
-                entries.append((path.name, stat.st_size, stat.st_mtime_ns))
+                # Size and mtime alone are not a content identity. Windows
+                # file timestamps advance on a coarse tick, so an edit that
+                # keeps the byte count the same — swapping a host for another
+                # of equal length — can land inside one tick and produce a
+                # signature identical to the previous content. The definition
+                # then stays cached and the operator's edit silently does
+                # nothing. Reading the bytes is still far cheaper than the
+                # YAML parse, validation, and fingerprinting this guards.
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    digest = "unreadable"
+                entries.append((path.name, stat.st_size, digest))
     except OSError as error:
         entries.append((str(error), -1, -1))
     if isinstance(config, dict):

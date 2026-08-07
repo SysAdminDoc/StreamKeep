@@ -888,3 +888,32 @@ def test_nested_text_is_still_gathered_depth_first():
     body = b"<div><section><h1>title</h1><p>body</p></section></div>"
     root = declarative._HTMLDocumentParser.parse(body)
     assert root.text() == "title body"
+
+
+def test_an_equal_length_edit_still_invalidates_the_registry(tmp_path, monkeypatch):
+    """Size and mtime alone are not a content identity.
+
+    Windows file timestamps advance on a coarse tick, so an edit that keeps the
+    byte count identical can produce the same (name, size, mtime) signature as
+    the content it replaced. The definition would then stay cached and the
+    operator's edit would silently do nothing. Forcing both files to the same
+    mtime reproduces that collision deterministically.
+    """
+    import os
+
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "example.yaml"
+    path.write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    _approve_adapters(monkeypatch, adapter_dir)
+    assert declarative.declarative_adapter_names() == ["Example Source"]
+
+    stat = path.stat()
+    changed = DEFINITION.replace("name: Example Source", "name: Renamed Source")
+    assert len(changed) == len(DEFINITION), "the edit must not change the size"
+    path.write_text(changed, encoding="utf-8")
+    # Pin the timestamp back so size and mtime are both unchanged.
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+    assert declarative.declarative_adapter_names() == ["Renamed Source"]
