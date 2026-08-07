@@ -2,7 +2,7 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [Unreleased]
+## [4.51.0] - 2026-08-07
 
 - Channel backfill now fetches whatever is closest to being deleted, not
   whatever is newest. Kick keeps a replay 7 days unverified and 30 verified,

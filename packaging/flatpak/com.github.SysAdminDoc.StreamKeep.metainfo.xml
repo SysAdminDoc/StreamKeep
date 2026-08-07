@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.51.0" date="2026-08-07">
+      <description><p>Channel backfill now fetches whatever is closest to being deleted rather than whatever is newest, so a long queue no longer loses the oldest reachable replay on platforms that delete their own VODs, and the queue row says why each item was ordered where it is. Internally the database decomposition continued: the history action log, the tombstone ledger and published-recording identifiers now live in modules that own them.</p></description>
+    </release>
     <release version="4.50.0" date="2026-08-07">
       <description><p>The language selector now states how much of each catalog is actually translated and marks incomplete ones as beta, so switching to a partly-translated language no longer produces a mostly-English interface with no explanation. Internally, the database schema module now owns the migrations it had only been dispatching, and the history action log became a module of its own.</p></description>
     </release>
