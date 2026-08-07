@@ -23,8 +23,16 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
     files = {
         "streamkeep/__init__.py": 'VERSION = "5.2.1"\n',
         "README.md": "![Version](https://img.shields.io/badge/version-0.0.0-blue)\n",
+        # Hand-authored, because the stamper must not touch the release list:
+        # rewriting the newest entry's version leaves the description that
+        # belonged to it and erases the release it described.
         "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml": (
-            '<releases><release version="0.0.0" date="2026-01-01" /></releases>\n'
+            '<releases>\n'
+            '  <release version="5.2.1" date="2026-01-02">'
+            '<description><p>The new one.</p></description></release>\n'
+            '  <release version="0.0.0" date="2026-01-01">'
+            '<description><p>The old one.</p></description></release>\n'
+            '</releases>\n'
         ),
         "ROADMAP.md": "- Current package version: v0.0.0.\n",
         "packaging/winget/SysAdminDoc.StreamKeep.yaml": (
@@ -39,19 +47,81 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
 
-    assert len(stamp_versions(tmp_path)) == 4
+    assert len(stamp_versions(tmp_path)) == 3
     assert version_drift(tmp_path) == []
     assert "version-5.2.1-blue" in (tmp_path / "README.md").read_text(encoding="utf-8")
-    assert '<release version="5.2.1"' in (
+    assert "v5.2.1." in (tmp_path / "ROADMAP.md").read_text(encoding="utf-8")
+    # Stamping left the release list exactly as authored, older entry included.
+    metainfo = (
         tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
     ).read_text(encoding="utf-8")
-    assert "v5.2.1." in (tmp_path / "ROADMAP.md").read_text(encoding="utf-8")
+    assert '<release version="5.2.1"' in metainfo
+    assert '<release version="0.0.0"' in metainfo, "history must survive a bump"
+    assert "The old one." in metainfo
     winget = (
         tmp_path / "packaging/winget/SysAdminDoc.StreamKeep.yaml"
     ).read_text(encoding="utf-8")
     assert "PackageVersion: 5.2.1" in winget
     assert "/v5.2.1/StreamKeep-5.2.1-setup.exe" in winget
     assert stamp_versions(tmp_path) == []
+
+    # Drift must *report* a release list that no longer leads with VERSION,
+    # rather than silently rewriting it into agreement.
+    metainfo_path = (
+        tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
+    )
+    metainfo_path.write_text(
+        metainfo.replace('version="5.2.1"', 'version="5.2.0"', 1), encoding="utf-8",
+    )
+    assert any("metainfo" in item for item in version_drift(tmp_path))
+
+
+def test_a_bump_that_erases_the_previous_release_entry_is_reported(tmp_path):
+    """The defect this guard exists for, reproduced.
+
+    Stamping the release list with a regex used to rewrite the newest
+    ``<release>`` version in place. The description that belonged to it stayed,
+    so the entry began claiming the previous release's work and that release
+    vanished from the AppStream history. A drift check that performed the same
+    rewrite called the result "in sync", so nothing ever reported it — v4.51.0
+    was lost exactly this way.
+    """
+    from versioning import metainfo_release_problem
+
+    (tmp_path / "streamkeep").mkdir()
+    (tmp_path / "streamkeep/__init__.py").write_text(
+        'VERSION = "5.2.1"\n', encoding="utf-8",
+    )
+    metainfo = tmp_path / "packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml"
+    metainfo.parent.mkdir(parents=True)
+
+    # The newest entry still names the previous release: the bump was applied
+    # everywhere else but no release block was authored.
+    metainfo.write_text(
+        '<releases>\n  <release version="5.2.0" date="2026-01-01">'
+        '<description><p>Older.</p></description></release>\n</releases>\n',
+        encoding="utf-8",
+    )
+    problem = metainfo_release_problem(tmp_path)
+    assert "newest <release> is 5.2.0" in problem
+
+    # Two entries claiming one version is the in-place rewrite's other outcome.
+    metainfo.write_text(
+        '<releases>\n  <release version="5.2.1" date="2026-01-02"/>\n'
+        '  <release version="5.2.1" date="2026-01-01"/>\n</releases>\n',
+        encoding="utf-8",
+    )
+    assert "duplicate" in metainfo_release_problem(tmp_path)
+
+    # And a correctly authored list is accepted.
+    metainfo.write_text(
+        '<releases>\n  <release version="5.2.1" date="2026-01-02">'
+        '<description><p>New.</p></description></release>\n'
+        '  <release version="5.2.0" date="2026-01-01">'
+        '<description><p>Older.</p></description></release>\n</releases>\n',
+        encoding="utf-8",
+    )
+    assert metainfo_release_problem(tmp_path) == ""
 
 
 def test_pyinstaller_spec_includes_release_assets():

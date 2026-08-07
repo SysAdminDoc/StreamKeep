@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.52.0" date="2026-08-07">
+      <description><p>The yt-dlp update channel is now a setting: StreamKeep still ships a frozen, version-checked build by default, but you can point it at your own to follow nightly, and a build below the supported floor is refused by name rather than trusted. The health panel reports which channel is actually in use, not the one requested. An intermittent crash at the end of a test run was traced to a background health probe still running when the window that owned it went away; stopping such a probe no longer requires killing the thread it runs on.</p></description>
+    </release>
     <release version="4.51.0" date="2026-08-07">
       <description><p>Channel backfill now fetches whatever is closest to being deleted rather than whatever is newest, so a long queue no longer loses the oldest reachable replay on platforms that delete their own VODs, and the queue row says why each item was ordered where it is. Internally the database decomposition continued: the history action log, the tombstone ledger and published-recording identifiers now live in modules that own them.</p></description>
     </release>

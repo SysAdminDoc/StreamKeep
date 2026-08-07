@@ -35,11 +35,11 @@ def _targets(version: str, root: Path) -> tuple[tuple[Path, re.Pattern[str], str
             re.compile(r"(?m)(!\[Version\]\(https://img\.shields\.io/badge/version-)[0-9.]+(-blue\))"),
             rf"\g<1>{version}\g<2>",
         ),
-        (
-            root / "packaging" / "flatpak" / "com.github.SysAdminDoc.StreamKeep.metainfo.xml",
-            re.compile(r"(<release\s+version=\")[0-9.]+(\")"),
-            rf"\g<1>{version}\g<2>",
-        ),
+        # The AppStream release list is deliberately NOT stamped -- see
+        # ``metainfo_release_problem``. Rewriting its newest ``<release>`` in
+        # place is how v4.51.0's entry was lost: the version changed and the
+        # description it belonged to stayed, so the history silently gained a
+        # release describing the previous one's work.
         (
             root / "packaging" / "winget" / "SysAdminDoc.StreamKeep.yaml",
             re.compile(r"(?m)(^PackageVersion: )[0-9]+(?:\.[0-9]+){2}$"),
@@ -61,10 +61,50 @@ def _targets(version: str, root: Path) -> tuple[tuple[Path, re.Pattern[str], str
     )
 
 
+METAINFO_PATH = (
+    Path("packaging") / "flatpak" / "com.github.SysAdminDoc.StreamKeep.metainfo.xml"
+)
+
+_RELEASE_RE = re.compile(r"<release\s+version=\"([0-9.]+)\"")
+
+
+def metainfo_release_problem(root: Path = ROOT) -> str:
+    """Check the AppStream release list leads with a hand-authored VERSION entry.
+
+    This is verified, never stamped. A regex rewrite of the newest ``<release>``
+    version leaves the description that belonged to it in place, so the entry
+    ends up claiming the *previous* release's work and that release disappears
+    from the history entirely -- and a drift check that rewrites the same entry
+    calls the result "in sync", because rewriting it is exactly what it does.
+    A release note cannot be generated, so the tool refuses instead of guessing.
+    """
+    version = read_version(root)
+    path = root / METAINFO_PATH
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as error:
+        return f"{METAINFO_PATH}: unreadable ({error})"
+    found = _RELEASE_RE.findall(source)
+    if not found:
+        return f"{METAINFO_PATH}: no <release> entries"
+    if found[0] != version:
+        return (
+            f"{METAINFO_PATH}: newest <release> is {found[0]}, not {version}. "
+            "Add a new <release> block with its own description rather than "
+            "editing the existing one, or the previous release is erased."
+        )
+    if len(found) != len(set(found)):
+        return f"{METAINFO_PATH}: duplicate <release> versions {found}"
+    return ""
+
+
 def version_drift(root: Path = ROOT) -> list[str]:
     """Return target files whose embedded version differs from VERSION."""
     version = read_version(root)
     drift: list[str] = []
+    problem = metainfo_release_problem(root)
+    if problem:
+        drift.append(problem)
     for path, pattern, replacement in _targets(version, root):
         source = path.read_text(encoding="utf-8")
         updated, count = pattern.subn(replacement, source, count=1)
