@@ -648,6 +648,61 @@ def build_settings_tab(win):
     card_lay.addWidget(adapter_block)
     win._refresh_source_adapter_ui()
 
+    # ── Per-source download engine (V165) ───────────────────────────
+    engine_block, engine_lay = make_field_block(
+        "Source engines",
+        "Choose which engine handles a platform when its extractor breaks.",
+    )
+    engine_hint = QLabel(
+        "Extractor breakage is routine on some platforms, and it looks like a "
+        "broken app rather than a broken source. A platform that fails "
+        "repeatedly raises a health condition naming the engine that failed; "
+        "switch it here and the choice applies to that platform only, "
+        "overriding the global live-engine switches. Only engines this "
+        "machine can actually run are offered."
+    )
+    engine_hint.setObjectName("subtleText")
+    engine_hint.setWordWrap(True)
+    engine_lay.addWidget(engine_hint)
+    win.source_engine_table = QTableWidget(0, 3)
+    win.source_engine_table.setHorizontalHeaderLabels([
+        "Platform", "Recent failures", "Engine",
+    ])
+    win.source_engine_table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    win.source_engine_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    win.source_engine_table.setMinimumHeight(130)
+    style_table(
+        win.source_engine_table,
+        row_height=42,
+        accessible_name="Per-source download engines",
+    )
+    engine_lay.addWidget(win.source_engine_table)
+    engine_actions = QHBoxLayout()
+    engine_actions.setSpacing(8)
+    win.source_engine_refresh_btn = QPushButton("Refresh sources")
+    win.source_engine_refresh_btn.setObjectName("secondary")
+    win.source_engine_refresh_btn.clicked.connect(
+        win._on_source_engine_refresh_clicked
+    )
+    engine_actions.addWidget(win.source_engine_refresh_btn)
+    engine_actions.addStretch(1)
+    engine_lay.addLayout(engine_actions)
+    win.source_engine_status = QLabel("No source engine overrides.")
+    win.source_engine_status.setObjectName("subtleText")
+    win.source_engine_status.setWordWrap(True)
+    set_accessible(
+        win.source_engine_status,
+        "Source engine status",
+        "Which platforms have a non-automatic download engine",
+    )
+    engine_lay.addWidget(win.source_engine_status)
+    card_lay.addWidget(engine_block)
+    win._refresh_source_engine_ui()
+
     # ── Cookies ─────────────────────────────────────────────────────
     cookies_block, cookies_lay = make_field_block(
         "Browser Cookies",

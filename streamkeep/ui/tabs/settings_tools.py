@@ -350,6 +350,141 @@ class SettingsToolsMixin:
         )
         return report, rows
 
+    # ── Per-source download engine (V165) ───────────────────────────
+
+    def _source_engine_rows(self):
+        """Platforms worth offering a choice for, worst first.
+
+        Every platform with a recorded failure circuit is listed, plus any
+        platform that already carries an override, so a choice can always be
+        undone even after its failures have aged out of the ledger.
+        """
+        from ...capabilities import load_source_engine_overrides
+
+        overrides = load_source_engine_overrides(self._config)
+        rows = {}
+        try:
+            from ... import db
+            circuits = db.load_retry_circuits() or []
+        except Exception:  # a ledger read must not empty the chooser
+            circuits = []
+        for circuit in circuits:
+            if not isinstance(circuit, dict):
+                continue
+            label = str(circuit.get("source_label") or "").strip()
+            if not label:
+                continue
+            key = label.casefold()
+            try:
+                failures = int(circuit.get("failure_count", 0) or 0)
+            except (TypeError, ValueError):
+                failures = 0
+            existing = rows.get(key)
+            if existing is None or failures > existing["failures"]:
+                rows[key] = {
+                    "key": key,
+                    "label": label,
+                    "failures": failures,
+                    "engine": str(circuit.get("engine") or ""),
+                }
+        for key, engine in overrides.items():
+            rows.setdefault(key, {
+                "key": key, "label": key, "failures": 0, "engine": "",
+            })
+        ordered = sorted(
+            rows.values(), key=lambda row: (-row["failures"], row["label"])
+        )
+        for row in ordered:
+            row["override"] = overrides.get(row["key"], "")
+        return ordered
+
+    def _refresh_source_engine_ui(self):
+        from PyQt6.QtWidgets import QComboBox
+
+        from ...capabilities import available_engines
+
+        table = getattr(self, "source_engine_table", None)
+        if table is None:
+            return
+        rows = self._source_engine_rows()
+        engines = available_engines()
+        table.blockSignals(True)
+        table.clearContents()
+        table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            failing = row.get("engine") or ""
+            summary = str(row["failures"])
+            if failing:
+                summary += f" ({failing})"
+            for column, value in enumerate((row["label"], summary)):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(index, column, item)
+            combo = QComboBox()
+            for engine_id, label in engines.items():
+                combo.addItem(label, userData=engine_id)
+            current = combo.findData(row.get("override", ""))
+            combo.setCurrentIndex(current if current >= 0 else 0)
+            combo.currentIndexChanged.connect(
+                lambda _, platform=row["key"], box=combo:
+                self._on_source_engine_changed(platform, box)
+            )
+            table.setCellWidget(index, 2, combo)
+        table.blockSignals(False)
+        self._update_source_engine_status()
+
+    def _update_source_engine_status(self):
+        from ...capabilities import (
+            DOWNLOAD_ENGINES, load_source_engine_overrides,
+        )
+
+        status = getattr(self, "source_engine_status", None)
+        if status is None:
+            return
+        overrides = load_source_engine_overrides(self._config)
+        if not overrides:
+            status.setText(
+                "No source engine overrides; every platform uses the global "
+                "engine settings."
+            )
+            return
+        named = ", ".join(
+            f"{platform} to {DOWNLOAD_ENGINES.get(engine, engine)}"
+            for platform, engine in sorted(overrides.items())
+        )
+        status.setText(f"Overridden: {named}.")
+
+    def _on_source_engine_changed(self, platform, combo):
+        from ...capabilities import DOWNLOAD_ENGINES, set_source_engine
+
+        engine = combo.currentData() or ""
+        try:
+            set_source_engine(self._config, platform, engine)
+        except ValueError as error:
+            self._set_status(str(error), "error")
+            return
+        if not _save_config(self._config):
+            self._set_status(
+                "Could not save the source engine override.", "error",
+            )
+            return
+        self._update_source_engine_status()
+        label = DOWNLOAD_ENGINES.get(engine, engine)
+        self._set_status(
+            f"{platform} now uses {label}." if engine
+            else f"{platform} returned to the global engine settings.",
+            "info",
+        )
+
+    def _on_source_engine_refresh_clicked(self):
+        self._refresh_source_engine_ui()
+        count = len(self._source_engine_rows())
+        self._set_status(
+            f"Source engines rescanned: {count} platform(s) with recorded "
+            "failures or an override.",
+            "info",
+        )
+
     def _refresh_source_adapter_ui(self):
         report, rows = self._source_adapter_rows()
         self._source_adapter_snapshot = report

@@ -348,16 +348,51 @@ def _extractor_conditions(config, retry_circuits, now, now_epoch) -> list[dict]:
             opened_until = 0
         severity = "error" if opened_until > now_epoch else "warning"
         reason = _safe_text(row.get("last_reason") or row.get("last_category"), 240)
+        engine = _safe_text(row.get("engine"), 32)
         detail = f"{count} consecutive extractor failures"
+        if engine:
+            detail += f" using {engine}"
         if reason:
             detail += f": {reason}"
-        conditions.append(_condition(
+        # Naming the engine turns "the app is broken" into "this platform's
+        # engine is broken", and naming the installed alternates makes the
+        # recovery a choice rather than a hunt through Settings.
+        alternates = _alternate_engines(config, engine)
+        if alternates:
+            remediation = (
+                "Settings > Sources can switch "
+                f"{label} to {' or '.join(alternates)} without editing config."
+            )
+        else:
+            remediation = (
+                "Open Operations, inspect the source, and retry after the "
+                "service recovers."
+            )
+        condition = _condition(
             f"extractor:{key}", "extractor", severity,
-            f"Repeated extractor failures: {label}", detail,
-            "Open Operations, inspect the source, and retry after the service recovers.",
+            f"Repeated extractor failures: {label}"
+            + (f" ({engine})" if engine else ""),
+            detail, remediation,
             target=label, event=HEALTH_EVENT_BY_CATEGORY["extractor"], now=now,
-        ))
+        )
+        condition["engine"] = engine
+        condition["alternate_engines"] = alternates
+        conditions.append(condition)
     return conditions
+
+
+def _alternate_engines(config, engine) -> list[str]:
+    """Installed engines other than the one that has been failing."""
+    try:
+        from .capabilities import available_engines
+        installed = available_engines()
+    except Exception:  # a probe failure must not suppress the condition
+        return []
+    failing = str(engine or "").strip().casefold()
+    return [
+        name for name in installed
+        if name and name != failing
+    ]
 
 
 def _source_adapter_conditions(now, diagnostics=None) -> list[dict]:

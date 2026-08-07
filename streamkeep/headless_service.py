@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .capabilities import resolve_source_engine
+
 import os
 import threading
 import time
@@ -1083,6 +1085,9 @@ class HeadlessJobService(QObject):
             ),
             streamlink_live_engine=bool(
                 self.config.get("streamlink_live_engine", False)
+            ),
+            source_engine=resolve_source_engine(
+                self.config, str(getattr(info, "platform", "") or ""),
             ),
             streamlink_hls_start_offset=(
                 self.config.get("streamlink_hls_start_offset", 0) or 0

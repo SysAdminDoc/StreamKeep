@@ -23,7 +23,9 @@ from pathlib import Path
 from PyQt6.QtCore import QCoreApplication
 
 from . import VERSION
-from .capabilities import CapabilityUnavailableError, require_capability
+from .capabilities import (
+    CapabilityUnavailableError, require_capability, resolve_source_engine,
+)
 from .extractors.base import Extractor as _ExtBase
 from .models import default_media_tracks
 
@@ -506,6 +508,9 @@ def _run_download(args):
             ),
             streamlink_live_engine=bool(
                 cfg.get("streamlink_live_engine", False)
+            ),
+            source_engine=resolve_source_engine(
+                cfg, info.platform or "",
             ),
             streamlink_hls_start_offset=(
                 cfg.get("streamlink_hls_start_offset", 0) or 0

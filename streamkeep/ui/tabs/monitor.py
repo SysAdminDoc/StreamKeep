@@ -1,5 +1,6 @@
 """Monitor tab — channel watch list with live detection + auto-record."""
 
+from ...capabilities import resolve_source_engine
 import json
 import os
 import re
@@ -1268,6 +1269,9 @@ class MonitorTabMixin:
             ),
             streamlink_live_engine=bool(
                 self._config.get("streamlink_live_engine", False)
+            ),
+            source_engine=resolve_source_engine(
+                self._config, str(getattr(info, "platform", "") or ""),
             ),
             streamlink_hls_start_offset=(
                 self._config.get("streamlink_hls_start_offset", 0) or 0

@@ -1,5 +1,6 @@
 """Resume discovery and serialized background-job orchestration."""
 
+from ..capabilities import resolve_source_engine
 import os
 
 from ..extractors import Extractor, YtDlpExtractor
@@ -235,6 +236,9 @@ class MainWindowJobsMixin:
                 ytdlp_live_from_start=transfer.get("live_from_start", False),
                 streamlink_live_engine=bool(
                     self._config.get("streamlink_live_engine", False)
+                ),
+                source_engine=resolve_source_engine(
+                    self._config, state.platform or "",
                 ),
                 streamlink_hls_start_offset=(
                     self._config.get("streamlink_hls_start_offset", 0) or 0

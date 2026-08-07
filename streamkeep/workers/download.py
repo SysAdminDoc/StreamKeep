@@ -98,6 +98,8 @@ class DownloadWorker(QThread):
         # Optional Streamlink live transport for Twitch/Kick (V13). It is
         # opt-in and deliberately kept separate from the ytarchive fallback.
         self.streamlink_live_engine = False
+        # V165: per-platform engine override; empty defers to the globals.
+        self.source_engine = ""
         self.streamlink_hls_start_offset = 0.0
         self.streamlink_hls_live_restart = False
         # Optional same-format restoration of Twitch VOD fragments whose audio
@@ -1052,6 +1054,24 @@ class DownloadWorker(QThread):
             self.log.emit("[STOP] Capture ignored terminate; killed process")
         except (AttributeError, OSError):
             pass
+
+    def _engine_enabled(self, engine, global_flag):
+        """Should this optional engine run for this job? (V165)
+
+        A per-source override is the operator's answer for one platform and
+        wins over the global switch in both directions: naming this engine
+        turns it on even when the global switch is off, and naming a different
+        engine turns it off even when the global switch is on. With no
+        override the global switch decides exactly as before.
+        """
+        # Read through __dict__ rather than getattr: this is a QObject, and on
+        # a worker whose __init__ was skipped an undefined attribute reaches
+        # Qt's dynamic property lookup and raises RuntimeError, which a
+        # getattr default does not catch.
+        chosen = str(self.__dict__.get("source_engine", "") or "").strip().casefold()
+        if chosen:
+            return chosen == engine
+        return bool(self.__dict__.get(global_flag, False))
 
     def _stop_active_process(self, process):
         if not self._send_graceful_stop(process):
@@ -2031,7 +2051,7 @@ class DownloadWorker(QThread):
             ytarchive_available,
         )
 
-        if not getattr(self, "live_engine_fallback", False):
+        if not self._engine_enabled("ytarchive", "live_engine_fallback"):
             return False
         source = self._effective_ytdlp_source()
         if not is_youtube_live_url(source):
@@ -2559,7 +2579,7 @@ class DownloadWorker(QThread):
             # for a live native capture when explicitly enabled.
             if (
                 is_live_capture
-                and getattr(self, "streamlink_live_engine", False)
+                and self._engine_enabled("streamlink", "streamlink_live_engine")
                 and str(self.source_platform or "").strip().casefold()
                 in {"twitch", "kick"}
                 and self.chunk_length_secs <= 0

@@ -34,7 +34,7 @@ from ..sqlite_runtime import connect as sqlite_connect
 from ..sqlite_runtime import runtime_status
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 HISTORY_ACTION_COMPACTION_LIMIT = 10_000
 _HISTORY_ACTION_STATE_FIELDS = (
@@ -505,6 +505,7 @@ def _apply_schema(db):
         CREATE TABLE IF NOT EXISTS retry_circuits (
             source_key       TEXT PRIMARY KEY,
             source_label     TEXT    NOT NULL DEFAULT '',
+            engine           TEXT    NOT NULL DEFAULT '',
             failure_count    INTEGER NOT NULL DEFAULT 0,
             window_started_at REAL   NOT NULL DEFAULT 0,
             opened_until     REAL    NOT NULL DEFAULT 0,
@@ -1143,6 +1144,50 @@ def _migrate_publishing_v13(db):
     _apply_publishing_schema(db)
 
 
+def _circuit_engine(queue_data, context) -> str:
+    """Name the engine a failed attempt actually used (V165).
+
+    Jobs carry the engine implicitly: ``format_type`` distinguishes a yt-dlp
+    run from a native FFmpeg capture, and the optional live engines announce
+    themselves in the failure context. An unrecognised shape yields ``""``
+    rather than a guess, because a wrong engine name would send the operator
+    to the wrong switch.
+    """
+    queue_data = queue_data if isinstance(queue_data, dict) else {}
+    context = context if isinstance(context, dict) else {}
+    for source in (context, queue_data):
+        declared = str(source.get("engine", "") or "").strip().casefold()
+        if declared:
+            return declared[:32]
+    format_type = str(
+        queue_data.get("format_type", "") or ""
+    ).strip().casefold()
+    if format_type == "ytdlp_direct":
+        return "yt-dlp"
+    if format_type in {"hls", "direct", "raw"}:
+        return "native"
+    return ""
+
+
+def _migrate_circuit_engine_v23(db):
+    """Record which engine a source's failures came from (V165).
+
+    A standing "repeated extractor failures" condition that does not name the
+    engine leaves the operator guessing which switch recovers the platform,
+    which is why a broken extractor reads as a broken app.
+    """
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(retry_circuits)").fetchall()
+    }
+    if not existing_cols:
+        return
+    if "engine" not in existing_cols:
+        db.execute(
+            "ALTER TABLE retry_circuits ADD COLUMN engine "
+            "TEXT NOT NULL DEFAULT ''"
+        )
+
+
 def _migrate_failure_codes_v22(db):
     """Add the machine-readable failure taxonomy (V154).
 
@@ -1210,6 +1255,7 @@ def _migrate_retry_v10(db):
     # v9 database from failing on a column the chain has not reached yet;
     # both migrations are idempotent, so v22 running twice is a no-op.
     _migrate_failure_codes_v22(db)
+    _migrate_circuit_engine_v23(db)
 
     from ..retry import (
         classify_failure,
@@ -5396,6 +5442,7 @@ def save_failed_job(
         platform,
         queue_dict.get("source_id", ""),
     )
+    circuit_engine = _circuit_engine(queue_dict, context or {})
     with _write_lock:
         conn = _connect()
         try:
@@ -5459,12 +5506,13 @@ def save_failed_job(
                     )
                 conn.execute("""
                     INSERT INTO retry_circuits
-                        (source_key, source_label, failure_count,
+                        (source_key, source_label, engine, failure_count,
                          window_started_at, opened_until, last_category,
                          last_reason, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(source_key) DO UPDATE SET
                         source_label=excluded.source_label,
+                        engine=excluded.engine,
                         failure_count=excluded.failure_count,
                         window_started_at=excluded.window_started_at,
                         opened_until=excluded.opened_until,
@@ -5474,6 +5522,7 @@ def save_failed_job(
                 """, (
                     source_key,
                     source_label,
+                    circuit_engine,
                     failure_count,
                     window_started_at,
                     opened_until,
@@ -6000,8 +6049,8 @@ def load_retry_circuits() -> list[dict[str, Any]]:
     db = _connect(readonly=True)
     try:
         rows = db.execute(
-            "SELECT source_key, source_label, failure_count, opened_until, "
-            "last_category, last_reason, updated_at "
+            "SELECT source_key, source_label, engine, failure_count, "
+            "opened_until, last_category, last_reason, updated_at "
             "FROM retry_circuits ORDER BY updated_at DESC"
         ).fetchall()
         return [dict(row) for row in rows]

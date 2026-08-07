@@ -1,5 +1,6 @@
 """Single fetch/download, segment, playlist, and scan handlers."""
 
+from ...capabilities import resolve_source_engine
 import os
 import re
 import time
@@ -1205,6 +1206,9 @@ class DownloadSingleMixin:
             ),
             streamlink_live_engine=bool(
                 self._config.get("streamlink_live_engine", False)
+            ),
+            source_engine=resolve_source_engine(
+                self._config, str(getattr(self.stream_info, "platform", "") or ""),
             ),
             streamlink_hls_start_offset=(
                 self._config.get("streamlink_hls_start_offset", 0) or 0

@@ -141,6 +141,9 @@ class DownloadJobSpec:
     # Opt-in in-process Streamlink transport for Twitch/Kick live captures
     # (V13). This is a runtime choice and does not add a dependency to jobs.
     streamlink_live_engine: bool = False
+    # V165: the operator's per-platform engine choice. Empty means "whatever
+    # the global switches say"; a value overrides them for this source only.
+    source_engine: str = ""
     streamlink_hls_start_offset: float = 0.0
     streamlink_hls_live_restart: bool = False
     # Opt-in Twitch VOD recovery for copyright-muted fragments (V38).
@@ -285,6 +288,7 @@ class DownloadJobSpec:
         worker.ytdlp_live_from_start = self.ytdlp_live_from_start
         worker.live_engine_fallback = self.live_engine_fallback
         worker.streamlink_live_engine = self.streamlink_live_engine
+        worker.source_engine = self.source_engine
         worker.streamlink_hls_start_offset = self.streamlink_hls_start_offset
         worker.streamlink_hls_live_restart = self.streamlink_hls_live_restart
         worker.twitch_unmute = self.twitch_unmute
@@ -373,6 +377,7 @@ class DownloadJobSpec:
             streamlink_live_engine=bool(
                 getattr(worker, "streamlink_live_engine", False)
             ),
+            source_engine=str(getattr(worker, "source_engine", "") or ""),
             streamlink_hls_start_offset=getattr(
                 worker, "streamlink_hls_start_offset", 0.0
             ),

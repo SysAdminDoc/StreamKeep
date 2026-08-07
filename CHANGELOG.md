@@ -4,6 +4,22 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- A broken extractor now reads as a broken source rather than a broken app.
+  A platform that fails repeatedly raises a standing health condition naming
+  the platform *and* the engine that failed, and offering only the alternate
+  engines this machine can actually run. Settings > Sources switches one
+  platform to a different engine in a click; the choice overrides the global
+  live-engine switches for that platform only and is ignored if it names an
+  engine that is not installed, rather than being honoured into a guaranteed
+  failure. The failure ledger records which engine each circuit's failures came
+  from (schema v23).
+
+- An edit to a source adapter that leaves the file the same size is no longer
+  missed. The registry cache keyed on name, size, and mtime, and Windows file
+  timestamps advance on a coarse tick, so swapping a host for another of equal
+  length could reproduce the previous signature exactly and the edit would
+  silently do nothing. Definitions now contribute a content digest.
+
 - AI-upscaled video is no longer selectable by accident. Platforms publish an
   AI super-resolution rendition alongside the real one, and because it reports
   a taller resolution it wins any plain "best video" pick — so the archive

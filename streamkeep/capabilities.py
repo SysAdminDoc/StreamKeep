@@ -1280,3 +1280,104 @@ def _path_provenance(path, *, module=False):
     if system_root and resolved.startswith(system_root + os.sep):
         return "operating-system"
     return "PATH"
+
+
+# ── Per-source download engines (V165) ──────────────────────────────
+# Extractor breakage is monthly on YouTube and recurring on Kick, and until
+# now a broken platform looked like a broken app: the engine choice lived in
+# global booleans, so recovering meant knowing which switch in Settings
+# corresponded to the platform that had failed. These helpers make the choice
+# per-platform, so a standing health condition can name the engine that failed
+# and hand back the alternates that are actually installed.
+
+#: Engine identifier -> (operator label, availability probe). ``""`` means
+#: "whatever the job would pick on its own" and is always available.
+DOWNLOAD_ENGINES = {
+    "": "Automatic",
+    "yt-dlp": "yt-dlp",
+    "streamlink": "Streamlink",
+    "ytarchive": "ytarchive",
+    "native": "Native FFmpeg",
+}
+
+_ENGINE_OVERRIDE_KEY = "source_engine_overrides"
+_MAX_ENGINE_OVERRIDES = 64
+
+
+def normalize_platform_key(platform) -> str:
+    """Fold a platform name into the key used for engine overrides."""
+    return str(platform or "").strip().casefold()[:64]
+
+
+def normalize_engine(engine) -> str:
+    """Return a known engine identifier, or ``""`` for automatic."""
+    candidate = str(engine or "").strip().casefold()
+    return candidate if candidate in DOWNLOAD_ENGINES else ""
+
+
+def available_engines() -> dict[str, str]:
+    """Engines the host can actually run right now, label-keyed by id.
+
+    An engine that is not installed is deliberately omitted rather than
+    offered and then failing at download time.
+    """
+    engines = {"": DOWNLOAD_ENGINES[""], "yt-dlp": DOWNLOAD_ENGINES["yt-dlp"],
+               "native": DOWNLOAD_ENGINES["native"]}
+    try:
+        from .integrations.streamlink import streamlink_available
+        if streamlink_available():
+            engines["streamlink"] = DOWNLOAD_ENGINES["streamlink"]
+    except Exception:
+        # An optional dependency probe must never break engine resolution.
+        pass
+    try:
+        from .integrations.ytarchive import ytarchive_available
+        if ytarchive_available():
+            engines["ytarchive"] = DOWNLOAD_ENGINES["ytarchive"]
+    except Exception:
+        # An optional dependency probe must never break engine resolution.
+        pass
+    return engines
+
+
+def load_source_engine_overrides(config) -> dict[str, str]:
+    """Read the platform -> engine map out of config, dropping junk."""
+    raw = (config or {}).get(_ENGINE_OVERRIDE_KEY) or {}
+    if not isinstance(raw, dict):
+        return {}
+    overrides = {}
+    for platform, engine in list(raw.items())[:_MAX_ENGINE_OVERRIDES]:
+        key = normalize_platform_key(platform)
+        chosen = normalize_engine(engine)
+        if key and chosen:
+            overrides[key] = chosen
+    return overrides
+
+
+def resolve_source_engine(config, platform) -> str:
+    """Return the operator's engine choice for one platform, if any.
+
+    An override naming an engine this host cannot run is ignored rather than
+    honoured into a guaranteed failure — the platform falls back to automatic.
+    """
+    chosen = load_source_engine_overrides(config).get(
+        normalize_platform_key(platform), ""
+    )
+    return chosen if chosen in available_engines() else ""
+
+
+def set_source_engine(config, platform, engine) -> dict[str, str]:
+    """Write one platform's engine choice and return the resulting map."""
+    key = normalize_platform_key(platform)
+    if not key:
+        raise ValueError("An engine override needs a platform name")
+    chosen = normalize_engine(engine)
+    overrides = load_source_engine_overrides(config)
+    if chosen:
+        if len(overrides) >= _MAX_ENGINE_OVERRIDES and key not in overrides:
+            raise ValueError("Too many per-source engine overrides")
+        overrides[key] = chosen
+    else:
+        overrides.pop(key, None)
+    config[_ENGINE_OVERRIDE_KEY] = overrides
+    return overrides
