@@ -78,13 +78,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Acceptance: parse depth is capped in `handle_starttag`, walking and text extraction are iterative, candidates are deduped per token, and a nested-`div` fixture completes within a bounded time without escaping an exception type the caller does not handle.
   Complexity: M
 
-- [ ] P2 — V157 — Fix the translation temp-file double close
-  Why: `os.fdopen(fd)` inside a `with` closes the descriptor; if the following `os.replace` fails, the handler calls `os.close(fd)` on a number another thread may already hold. The resulting `OSError` is swallowed, so the symptom appears elsewhere.
-  Evidence: `streamkeep/translation.py:253-275`.
-  Touches: `streamkeep/translation.py`, tests.
-  Acceptance: the descriptor is closed exactly once (a `closed` flag or `tempfile.NamedTemporaryFile(delete=False)`); a test forcing `os.replace` to fail does not double-close.
-  Complexity: S
-
 - [ ] P2 — V158 — Guard capability probing on unsupported host architectures
   Why: `host_target()` raises for anything outside five pinned triples and the capability probe has no guard, so Windows-on-ARM64 with no PATH JavaScript runtime raises out of `get_runtime_capabilities` instead of reporting a missing runtime.
   Evidence: `streamkeep/javascript_runtime.py:99-116`, `:182-186`; `streamkeep/capabilities.py:400-403`, `:1010-1019`.
@@ -97,13 +90,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Evidence: `streamkeep/power.py:189`.
   Touches: `streamkeep/power.py`, tests.
   Acceptance: the suspend path calls `SetSuspendState` through ctypes with an explicit hibernate/sleep intent, or documents and surfaces that hibernation is what will happen.
-  Complexity: S
-
-- [ ] P2 — V160 — Stop reporting an unmeasured hash as runtime verification
-  Why: the managed-runtime record copies the pinned archive SHA-256 from its descriptor and never re-hashes the installed binary, so the UI reports a verified hash for an executable it has not measured.
-  Evidence: `streamkeep/javascript_runtime.py:187-193`.
-  Touches: `streamkeep/javascript_runtime.py`, Settings/diagnostics labels, tests.
-  Acceptance: either the executable is hashed on read and compared, or the field is renamed to `pinned_archive_sha256` everywhere it surfaces.
   Complexity: S
 
 - [ ] P2 — V161 — Incremental mux and periodic flush for multi-hour live captures
@@ -153,13 +139,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Evidence: `AGENTS.md` ("README.md is the ONLY .md tracked in git"; "Never create: COMPLETED.md") versus tracked `RESEARCH.md`/`ROADMAP.md` and root-level `COMPLETED.md`, `RESEARCH_REPORT.md` (2026-07-era, duplicates `RESEARCH.md`'s purpose); `git tag` latest is `v4.44.0` against `streamkeep/__init__.py` VERSION 4.45.0; `packaging/winget_hash.py`.
   Touches: `.gitignore`, root `.md` files, `packaging/versioning.py`, tag creation.
   Acceptance: `COMPLETED.md` and `RESEARCH_REPORT.md` are folded into `CHANGELOG.md`/`RESEARCH.md` and removed; tracked-versus-ignored state matches `AGENTS.md`; v4.45.0 is tagged and `packaging/winget_hash.py` resolves.
-  Complexity: S
-
-- [ ] P2 — V175 — Cap the `send2trash` source floor at the locked major
-  Why: `requirements.txt` declares `send2trash>=1.8` while the lock already pins 2.1.0, so a source install is free to resolve a future 3.x whose recycle-bin semantics are unverified — in the one dependency that stands between "delete" and "permanently delete".
-  Evidence: `requirements.txt:8` versus `requirements.lock:798` (`send2trash==2.1.0`, major released 2026-01-14); https://pypi.org/project/Send2Trash/ ; the recycle-bin-only rule enforced at `streamkeep/lifecycle.py`.
-  Touches: `requirements.txt`, `packaging/locked_requirements.py` floor check, tests.
-  Acceptance: the source floor is bounded to the locked major (`>=2.1.0,<3`), the `dependency-floors` stage still passes, and a recycle-bin round-trip test covers the pinned version.
   Complexity: S
 
 #### P3 — Under Consideration

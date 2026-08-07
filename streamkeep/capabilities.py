@@ -1081,7 +1081,7 @@ def _probe_managed_javascript_runtime():
         "provenance": "bundled" if bundled else "",
         "source": "bundled" if bundled else "",
         "asset": "",
-        "sha256": "",
+        "pinned_archive_sha256": "",
         "detail": "No bundled or managed Deno runtime is installed.",
     }
     path = str(info.get("path") or "") if info.get("available") else ""
@@ -1126,7 +1126,9 @@ def _probe_managed_javascript_runtime():
         "managed": True,
         "runtime_source": source,
         "asset": str(info.get("asset") or ""),
-        "sha256": str(info.get("sha256") or ""),
+        "pinned_archive_sha256": str(
+            info.get("pinned_archive_sha256") or ""
+        ),
     })
     return record
 

@@ -210,7 +210,10 @@ def get_managed_deno_info(config_dir=None, *, target=None):
             "provenance": "",
             "source": "",
             "asset": str(metadata.get("asset") or ""),
-            "sha256": str(metadata.get("archive_sha256") or ""),
+            # The archive digest this install was verified against, not a
+            # measurement of the executable on disk. Naming it "sha256" made
+            # the UI report a verified hash for a binary never hashed.
+            "pinned_archive_sha256": str(metadata.get("archive_sha256") or ""),
             "detail": "No verified managed Deno runtime is installed.",
         }
     return {
@@ -221,7 +224,7 @@ def get_managed_deno_info(config_dir=None, *, target=None):
         "provenance": str(metadata.get("provenance") or "managed"),
         "source": str(metadata.get("source") or metadata.get("provenance") or "managed"),
         "asset": str(metadata.get("asset") or ""),
-        "sha256": str(metadata.get("archive_sha256") or ""),
+        "pinned_archive_sha256": str(metadata.get("archive_sha256") or ""),
         "detail": (
             f"Managed Deno {DENO_VERSION} at {executable} "
             f"({metadata.get('source') or 'managed'})."

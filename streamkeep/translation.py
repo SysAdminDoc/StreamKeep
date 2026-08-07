@@ -349,17 +349,25 @@ def _atomic_write(path, payload):
     fd, temporary = tempfile.mkstemp(
         prefix=".streamkeep_translation_", suffix=".tmp", dir=str(target.parent),
     )
+    # `os.fdopen` takes ownership of the descriptor, so leaving `fd` in the
+    # cleanup path meant a failure after the `with` block — an `os.replace`
+    # denial is the realistic one — closed a number the OS had already handed
+    # to another thread. The resulting damage surfaced somewhere unrelated,
+    # and the bare `except OSError` here hid the double close entirely.
+    closed = False
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        closed = True
         os.replace(temporary, target)
     except Exception:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        if not closed:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             os.unlink(temporary)
         except OSError:

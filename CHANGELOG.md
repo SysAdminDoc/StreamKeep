@@ -4,6 +4,24 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- The translation sidecar writer no longer closes its temporary file twice.
+  `os.fdopen` takes ownership of the descriptor, so a failure after the write
+  — a denied `os.replace` being the realistic one — ran `os.close` on a number
+  the OS may already have reissued to another thread, and the bare
+  `except OSError` around it hid that entirely, leaving the damage to surface
+  somewhere unrelated.
+
+- The managed-runtime record no longer reports a hash it never measured. The
+  field carried the pinned archive digest the download was verified against,
+  but sat on a record describing an executable, so the UI stated a verified
+  hash for a binary that had not been hashed. It is now named
+  `pinned_archive_sha256` everywhere it surfaces, which is what it actually is.
+
+- `send2trash` is bounded to the locked major (`>=2.1.0,<3`). The source floor
+  was `>=1.8` while the lock pinned 2.1.0, leaving a source install free to
+  resolve an unverified future major of the one dependency standing between
+  "recycle" and "permanently delete".
+
 - Failures now carry a machine-readable reason code, and a permanently-gone
   item is marked terminal instead of being retried forever. The ledger
   recorded prose, so nothing could separate "come back later" from "gone
