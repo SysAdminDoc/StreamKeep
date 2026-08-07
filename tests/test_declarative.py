@@ -55,11 +55,29 @@ check_live:
 """
 
 
+def _approve_adapters(monkeypatch, directory=None, config=None):
+    """Approve every parseable adapter so it becomes active (V147).
+
+    A definition is inert until its contract is reviewed, so tests that
+    exercise a working adapter have to stand in for that operator decision.
+    """
+    approvals = {}
+    monkeypatch.setattr(
+        declarative, "_reviewed_fingerprints", lambda cfg=None: approvals,
+    )
+    declarative.invalidate_registry_cache()
+    for definition in declarative.pending_source_adapters(directory, config):
+        approvals[definition.adapter_id] = definition.contract_fingerprint
+    declarative.invalidate_registry_cache()
+    return approvals
+
+
 def test_declarative_definition_resolves_and_lists_models(tmp_path, monkeypatch):
     adapter_dir = tmp_path / "source_adapters"
     adapter_dir.mkdir()
     (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    _approve_adapters(monkeypatch, adapter_dir)
 
     def request(url, **_kwargs):
         if "/channels/" in url and url.endswith("/videos"):
@@ -106,6 +124,7 @@ def test_declarative_files_hot_reload_without_restarting(tmp_path, monkeypatch):
     path = adapter_dir / "example.yaml"
     path.write_text(DEFINITION, encoding="utf-8")
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    _approve_adapters(monkeypatch, adapter_dir)
     assert declarative.declarative_adapter_names() == ["Example Source"]
 
     changed = DEFINITION.replace("name: Example Source", "name: Renamed Source")
@@ -205,6 +224,7 @@ def test_registry_is_parsed_once_until_the_signature_changes(tmp_path, monkeypat
     adapter_dir.mkdir()
     (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    _approve_adapters(monkeypatch, adapter_dir)
     declarative.invalidate_registry_cache()
 
     parses = []
@@ -230,6 +250,7 @@ def test_registry_cache_reparses_after_a_definition_changes(tmp_path, monkeypatc
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
     declarative.invalidate_registry_cache()
 
+    approvals = _approve_adapters(monkeypatch, adapter_dir)
     assert declarative.declarative_adapter_names() == ["Example Source"]
     first = declarative.registry_signature()
 
@@ -247,6 +268,9 @@ def test_registry_cache_reparses_after_a_definition_changes(tmp_path, monkeypatc
                   .replace("hosts: [example.com]", "hosts: [second.example]"),
         encoding="utf-8",
     )
+    # The new file is a new contract, so it needs its own approval.
+    for definition in declarative.pending_source_adapters(adapter_dir, None):
+        approvals[definition.adapter_id] = definition.contract_fingerprint
     assert sorted(declarative.declarative_adapter_names()) == [
         "Renamed Source", "Second Source",
     ]
@@ -265,6 +289,7 @@ def test_registry_cache_tracks_config_entries(tmp_path, monkeypatch):
     assert declarative.declarative_adapter_names(config=empty) == []
 
     populated = {"source_adapters": [{"id": "cfg", "content": DEFINITION}]}
+    _approve_adapters(monkeypatch, adapter_dir, populated)
     assert declarative.registry_signature(config=populated) != \
         declarative.registry_signature(config=empty)
     assert declarative.declarative_adapter_names(config=populated) == ["Example Source"]
@@ -282,7 +307,7 @@ def test_cached_definitions_are_not_shared_mutably(tmp_path, monkeypatch):
     adapter_dir.mkdir()
     (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
-    declarative.invalidate_registry_cache()
+    _approve_adapters(monkeypatch, adapter_dir)
 
     definitions, errors = declarative.discover_source_adapters()
     definitions.clear()
@@ -361,7 +386,7 @@ def test_match_refuses_absurdly_long_paths(tmp_path, monkeypatch):
     adapter_dir.mkdir()
     (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
     monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
-    declarative.invalidate_registry_cache()
+    _approve_adapters(monkeypatch, adapter_dir)
 
     definition, _errors = declarative.discover_source_adapters()
     definition = definition[0]
@@ -644,3 +669,138 @@ def test_the_guarded_response_is_closed_on_every_path(monkeypatch):
     assert body == b'{"ok": true}'
     # Both the redirect hop and the final response are closed, not left to GC.
     assert [response.closed for response in opened] == [True, True]
+
+
+# ── V147: an adapter is inert until its contract is reviewed ─────────
+
+def test_a_new_adapter_is_inert_until_reviewed(tmp_path, monkeypatch):
+    """A .yaml dropped in the directory used to go live on the next URL
+    detection despite describing outbound requests."""
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    approvals = {}
+    monkeypatch.setattr(
+        declarative, "_reviewed_fingerprints", lambda cfg=None: approvals,
+    )
+    declarative.invalidate_registry_cache()
+
+    assert declarative.discover_source_adapters()[0] == []
+    assert declarative.detect_declarative_extractor(
+        "https://example.com/watch/vod-1"
+    ) is None
+    pending = declarative.pending_source_adapters()
+    assert [item.adapter_id for item in pending] == ["example-source"]
+
+    approvals["example-source"] = pending[0].contract_fingerprint
+    assert declarative.declarative_adapter_names() == ["Example Source"]
+    assert declarative.detect_declarative_extractor(
+        "https://example.com/watch/vod-1"
+    ) is not None
+
+
+def test_an_unreviewed_adapter_never_issues_a_request(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    monkeypatch.setattr(declarative, "_reviewed_fingerprints", lambda cfg=None: {})
+    declarative.invalidate_registry_cache()
+
+    requests = []
+    monkeypatch.setattr(
+        declarative, "_guarded_request",
+        lambda *a, **k: requests.append(a) or (b"{}", "application/json"),
+    )
+    extractor = Extractor.detect("https://example.com/watch/vod-1")
+    # Falls through to the yt-dlp catch-all rather than the unreviewed adapter.
+    assert extractor is None or extractor.NAME != "Example Source"
+    assert requests == []
+
+
+def test_the_review_contract_names_hosts_methods_urls_and_headers():
+    definition = declarative.parse_definition_text(DEFINITION, "example.yaml")
+    contract = definition.review_contract()
+    assert contract["hosts"] == ["example.com"]
+    operations = {item["operation"]: item for item in contract["operations"]}
+    assert set(operations) == {"resolve", "list_vods", "check_live"}
+    assert operations["list_vods"]["method"] == "GET"
+    assert operations["list_vods"]["url"] == (
+        "https://api.example.com/channels/{channel}/videos"
+    )
+    assert isinstance(operations["resolve"]["headers"], list)
+
+
+def test_editing_the_request_surface_requires_a_fresh_approval(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "example.yaml"
+    path.write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    approvals = _approve_adapters(monkeypatch, adapter_dir)
+    assert declarative.declarative_adapter_names() == ["Example Source"]
+
+    # Repointing the adapter at another host invalidates the approval.
+    path.write_text(
+        DEFINITION.replace("api.example.com", "api.attacker.example"),
+        encoding="utf-8",
+    )
+    assert declarative.declarative_adapter_names() == []
+    assert [item.adapter_id for item in declarative.pending_source_adapters()] == [
+        "example-source"
+    ]
+    assert approvals  # the stale approval is still recorded, just not matching
+
+
+def test_a_cosmetic_edit_keeps_the_approval(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    path = adapter_dir / "example.yaml"
+    path.write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    _approve_adapters(monkeypatch, adapter_dir)
+
+    path.write_text(
+        DEFINITION.replace("name: Example Source", "name: Renamed Source"),
+        encoding="utf-8",
+    )
+    assert declarative.declarative_adapter_names() == ["Renamed Source"]
+
+
+def test_approve_and_revoke_round_trip():
+    config = {}
+    config = declarative.approve_source_adapter("abc", "fingerprint-1", config)
+    assert config[declarative.REVIEW_CONFIG_KEY] == {"abc": "fingerprint-1"}
+    config = declarative.revoke_source_adapter("abc", config)
+    assert config[declarative.REVIEW_CONFIG_KEY] == {}
+
+
+def test_diagnostics_expose_what_needs_review(tmp_path, monkeypatch):
+    adapter_dir = tmp_path / "source_adapters"
+    adapter_dir.mkdir()
+    (adapter_dir / "example.yaml").write_text(DEFINITION, encoding="utf-8")
+    monkeypatch.setattr(declarative, "SOURCE_ADAPTERS_DIR", adapter_dir)
+    monkeypatch.setattr(declarative, "_reviewed_fingerprints", lambda cfg=None: {})
+    declarative.invalidate_registry_cache()
+
+    report = declarative.declarative_adapter_diagnostics(adapter_dir, config={})
+    assert report["adapters"] == []
+    assert len(report["pending_review"]) == 1
+    entry = report["pending_review"][0]
+    assert entry["id"] == "example-source"
+    assert entry["hosts"] == ["example.com"]
+    assert entry["contract_fingerprint"]
+    assert entry["source"].endswith("example.yaml")
+
+
+def test_an_imported_config_cannot_pre_approve_an_adapter():
+    from streamkeep import config as config_module
+
+    quarantined, held = config_module._quarantine_import_capabilities({
+        "source_adapters": [{"id": "cfg", "content": DEFINITION}],
+        "reviewed_source_adapters": {"cfg": "whatever"},
+    })
+    assert quarantined["reviewed_source_adapters"] == {}
+    assert quarantined["source_adapters"] == []
+    assert "declarative_adapters" in held

@@ -138,7 +138,7 @@ class SettingsToolsMixin:
         return "Review required"
 
     def _refresh_plugin_trust_ui(self):
-        self._source_adapter_snapshot = self._source_adapter_reports()
+        self._refresh_source_adapter_ui()
         if not hasattr(self, "plugin_trust_table"):
             return
         reports = self._plugin_reports()
@@ -208,14 +208,15 @@ class SettingsToolsMixin:
         self._refresh_plugin_trust_ui()
         adapter_report = self._source_adapter_snapshot
         adapter_count = len(adapter_report.get("adapters", []))
+        pending_count = len(adapter_report.get("pending_review", []))
         error_count = len(adapter_report.get("errors", []))
         suffix = (
-            f" Declarative source adapters: {adapter_count} loaded, "
-            f"{error_count} error(s)."
+            f" Declarative source adapters: {adapter_count} active, "
+            f"{pending_count} awaiting review, {error_count} error(s)."
         )
         self._set_status(
             "Plugin and source-adapter diagnostics refreshed." + suffix,
-            "warning" if error_count else "info",
+            "warning" if (error_count or pending_count) else "info",
         )
 
     def _on_plugin_enable_clicked(self):
@@ -299,6 +300,246 @@ class SettingsToolsMixin:
         self._log(f"[PLUGIN] Disabled: {plugin_id}")
         self._refresh_plugin_trust_ui()
         self._set_status(f"{report.get('name') or plugin_id} disabled.", "success")
+
+    # ── Declarative source adapter review (V147) ────────────────────
+
+    @staticmethod
+    def _source_adapter_request_summary(adapter):
+        """One-line "what it would call" digest for the table cell."""
+        operations = adapter.get("operations") or []
+        if not operations:
+            return "no requests declared"
+        return "; ".join(
+            f"{operation.get('operation', '?')}: "
+            f"{operation.get('method', 'GET')} {operation.get('url', '')}"
+            for operation in operations
+        )
+
+    @staticmethod
+    def _source_adapter_contract_text(adapter):
+        """Spell the contract out the way the operator has to read it."""
+        hosts = ", ".join(adapter.get("hosts") or []) or "(none declared)"
+        lines = [f"Hosts it may contact: {hosts}", "", "Requests it would issue:"]
+        operations = adapter.get("operations") or []
+        if not operations:
+            lines.append("    (none declared)")
+        for operation in operations:
+            lines.append(
+                f"    {operation.get('operation', '?')} — "
+                f"{operation.get('method', 'GET')} {operation.get('url', '')}"
+            )
+            for header in operation.get("headers") or []:
+                lines.append(f"        header: {header}")
+            params = operation.get("params") or []
+            if params:
+                lines.append(f"        query parameters: {', '.join(params)}")
+        source = str(adapter.get("source") or "")
+        if source:
+            lines.extend(["", f"Definition: {source}"])
+        return "\n".join(lines)
+
+    def _source_adapter_rows(self):
+        """Merge pending and approved adapters into one review list."""
+        report = self._source_adapter_reports()
+        rows = [
+            {**adapter, "reviewed": False}
+            for adapter in report.get("pending_review", [])
+        ]
+        rows.extend(
+            {**adapter, "reviewed": True} for adapter in report.get("adapters", [])
+        )
+        return report, rows
+
+    def _refresh_source_adapter_ui(self):
+        report, rows = self._source_adapter_rows()
+        self._source_adapter_snapshot = report
+        self._source_adapter_rows_snapshot = rows
+        table = getattr(self, "source_adapter_table", None)
+        if table is None:
+            return
+        table.blockSignals(True)
+        table.clearContents()
+        table.setRowCount(len(rows))
+        for row, adapter in enumerate(rows):
+            values = (
+                f"{adapter.get('name') or adapter.get('id') or 'Unknown'} "
+                f"v{adapter.get('version', '?')}",
+                ", ".join(adapter.get("hosts") or []) or "(none)",
+                self._source_adapter_request_summary(adapter),
+                str(adapter.get("source") or "config"),
+                "Approved" if adapter.get("reviewed") else "Review required",
+            )
+            # The request and definition columns are wider than any sane column
+            # width, so the full contract rides along as the row's tooltip.
+            tooltip = self._source_adapter_contract_text(adapter)
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(tooltip)
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, adapter.get("id", ""))
+                table.setItem(row, column, item)
+        table.blockSignals(False)
+        if rows:
+            table.selectRow(0)
+        else:
+            self._on_source_adapter_selection_changed()
+
+    def _selected_source_adapter(self):
+        table = getattr(self, "source_adapter_table", None)
+        if table is None or table.currentRow() < 0:
+            return None
+        item = table.item(table.currentRow(), 0)
+        adapter_id = item.data(Qt.ItemDataRole.UserRole) if item else ""
+        return next(
+            (
+                adapter
+                for adapter in getattr(self, "_source_adapter_rows_snapshot", [])
+                if adapter.get("id") == adapter_id
+            ),
+            None,
+        )
+
+    def _on_source_adapter_selection_changed(self):
+        adapter = self._selected_source_adapter()
+        approve_btn = getattr(self, "source_adapter_approve_btn", None)
+        revoke_btn = getattr(self, "source_adapter_revoke_btn", None)
+        status = getattr(self, "source_adapter_status", None)
+        if adapter is None:
+            if approve_btn is not None:
+                approve_btn.setEnabled(False)
+            if revoke_btn is not None:
+                revoke_btn.setEnabled(False)
+            if status is not None:
+                errors = len(
+                    getattr(self, "_source_adapter_snapshot", {}).get("errors", [])
+                )
+                status.setText(
+                    f"No declarative source adapters found. {errors} definition(s) "
+                    "failed to load." if errors
+                    else "No declarative source adapters found."
+                )
+            return
+        reviewed = bool(adapter.get("reviewed"))
+        if approve_btn is not None:
+            approve_btn.setEnabled(not reviewed)
+        if revoke_btn is not None:
+            revoke_btn.setEnabled(reviewed)
+        if status is not None:
+            state = (
+                "Current contract approved; this adapter is active."
+                if reviewed
+                else "Inert until reviewed — it will not issue any request."
+            )
+            status.setText(
+                f"{adapter.get('name') or adapter.get('id')}: {state} "
+                + self._source_adapter_request_summary(adapter)
+            )
+
+    def _on_source_adapter_refresh_clicked(self):
+        from ... import declarative
+
+        declarative.invalidate_registry_cache()
+        self._refresh_source_adapter_ui()
+        report = self._source_adapter_snapshot
+        pending = len(report.get("pending_review", []))
+        active = len(report.get("adapters", []))
+        errors = len(report.get("errors", []))
+        self._set_status(
+            f"Source adapters rescanned: {active} active, {pending} awaiting "
+            f"review, {errors} error(s).",
+            "warning" if (errors or pending) else "info",
+        )
+
+    def _on_source_adapter_approve_clicked(self):
+        from ... import declarative
+
+        selected = self._selected_source_adapter()
+        if selected is None:
+            self._set_status("Select a source adapter to review first.", "warning")
+            return
+        # Re-read from disk immediately before the confirmation so the approval
+        # is for the contract that exists now, not the one the table was built
+        # from — the file may have changed while the panel sat open.
+        declarative.invalidate_registry_cache()
+        _report, rows = self._source_adapter_rows()
+        fresh = next(
+            (adapter for adapter in rows
+             if adapter.get("id") == selected.get("id")),
+            None,
+        )
+        if fresh is None:
+            self._refresh_source_adapter_ui()
+            self._set_status("Source adapter is no longer available.", "error")
+            return
+        if fresh.get("reviewed"):
+            self._refresh_source_adapter_ui()
+            self._set_status("That contract is already approved.", "info")
+            return
+        if not ask_premium_confirmation(
+            self,
+            title=(
+                f"Review {fresh.get('name') or fresh.get('id')} source adapter"
+            ),
+            body=(
+                "This definition describes the outbound requests below. "
+                "StreamKeep will remember this exact contract and make the "
+                "adapter inert again if it changes.\n\n"
+                + self._source_adapter_contract_text(fresh)
+            ),
+            eyebrow="SOURCE ADAPTER REVIEW",
+            badge_text="Explicit review",
+            tone="warning",
+            summary_title="Review before activating",
+            summary_body=(
+                "Only the requests shown are approved. Any change to the hosts, "
+                "method, URL, headers, or query parameters requires this review "
+                "again."
+            ),
+            primary_label="Approve adapter",
+            secondary_label="Keep inert",
+            default_action="secondary",
+            min_width=650,
+        ):
+            self._set_status(
+                "Source adapter review cancelled; it remains inert.", "idle",
+            )
+            return
+        adapter_id = str(fresh.get("id", ""))
+        fingerprint = str(fresh.get("contract_fingerprint", ""))
+        self._config = declarative.approve_source_adapter(
+            adapter_id, fingerprint, self._config,
+        )
+        if not _save_config(self._config):
+            self._set_status("Source adapter approval could not be saved.", "error")
+            return
+        self._log(
+            f"[ADAPTER] Approved after explicit contract review: {adapter_id} "
+            f"({fingerprint[:12]})"
+        )
+        self._refresh_source_adapter_ui()
+        self._set_status(
+            f"{fresh.get('name') or adapter_id} approved and now active.",
+            "success",
+        )
+
+    def _on_source_adapter_revoke_clicked(self):
+        from ... import declarative
+
+        adapter = self._selected_source_adapter()
+        if adapter is None:
+            self._set_status("Select a source adapter to revoke first.", "warning")
+            return
+        adapter_id = str(adapter.get("id", ""))
+        self._config = declarative.revoke_source_adapter(adapter_id, self._config)
+        if not _save_config(self._config):
+            self._set_status("Source adapter revocation could not be saved.", "error")
+            return
+        self._log(f"[ADAPTER] Approval revoked; now inert: {adapter_id}")
+        self._refresh_source_adapter_ui()
+        self._set_status(
+            f"{adapter.get('name') or adapter_id} is inert until reviewed again.",
+            "warning",
+        )
 
     def _on_javascript_runtime_preference_changed(self, index):
         value = str(self.deno_preference_combo.itemData(index) or "path")

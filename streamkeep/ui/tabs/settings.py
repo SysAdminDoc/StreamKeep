@@ -565,6 +565,89 @@ def build_settings_tab(win):
     win._refresh_plugin_trust_ui()
     card_lay.addLayout(sections_top)
 
+    # ── Source adapter review (V147) ────────────────────────────────
+    adapter_block, adapter_lay = make_field_block(
+        "Source adapter review",
+        "Approve the outbound requests a declarative adapter describes before "
+        "it is allowed to issue any.",
+    )
+    adapter_hint = QLabel(
+        "A .yaml definition dropped into the adapters directory stays inert "
+        "until you read its contract and approve it here. Editing the hosts, "
+        "method, URL, headers, or query parameters of an approved adapter "
+        "makes it inert again until you review the change."
+    )
+    adapter_hint.setObjectName("subtleText")
+    adapter_hint.setWordWrap(True)
+    adapter_lay.addWidget(adapter_hint)
+    win.source_adapter_table = QTableWidget(0, 5)
+    win.source_adapter_table.setHorizontalHeaderLabels([
+        "Adapter", "Hosts", "Requests", "Definition", "State",
+    ])
+    win.source_adapter_table.setSelectionBehavior(
+        QAbstractItemView.SelectionBehavior.SelectRows
+    )
+    win.source_adapter_table.setSelectionMode(
+        QAbstractItemView.SelectionMode.SingleSelection
+    )
+    win.source_adapter_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    win.source_adapter_table.setMinimumHeight(150)
+    style_table(
+        win.source_adapter_table,
+        row_height=42,
+        accessible_name="Source adapter review",
+        accessible_description=(
+            "Declarative source adapters, the hosts and requests they declare, "
+            "and whether their current contract has been approved"
+        ),
+    )
+    adapter_header = win.source_adapter_table.horizontalHeader()
+    adapter_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    adapter_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    adapter_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    adapter_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+    adapter_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+    win.source_adapter_table.itemSelectionChanged.connect(
+        win._on_source_adapter_selection_changed
+    )
+    adapter_lay.addWidget(win.source_adapter_table)
+
+    adapter_actions = QHBoxLayout()
+    adapter_actions.setSpacing(8)
+    win.source_adapter_refresh_btn = QPushButton("Rescan adapters")
+    win.source_adapter_refresh_btn.setObjectName("secondary")
+    win.source_adapter_refresh_btn.clicked.connect(
+        win._on_source_adapter_refresh_clicked
+    )
+    adapter_actions.addWidget(win.source_adapter_refresh_btn)
+    win.source_adapter_approve_btn = QPushButton("Review and approve")
+    win.source_adapter_approve_btn.setObjectName("primary")
+    win.source_adapter_approve_btn.clicked.connect(
+        win._on_source_adapter_approve_clicked
+    )
+    adapter_actions.addWidget(win.source_adapter_approve_btn)
+    win.source_adapter_revoke_btn = QPushButton("Revoke approval")
+    win.source_adapter_revoke_btn.setObjectName("secondary")
+    win.source_adapter_revoke_btn.clicked.connect(
+        win._on_source_adapter_revoke_clicked
+    )
+    adapter_actions.addWidget(win.source_adapter_revoke_btn)
+    adapter_actions.addStretch(1)
+    adapter_lay.addLayout(adapter_actions)
+    win.source_adapter_status = QLabel("No source adapter selected.")
+    win.source_adapter_status.setObjectName("subtleText")
+    win.source_adapter_status.setWordWrap(True)
+    set_accessible(
+        win.source_adapter_status,
+        "Source adapter review status",
+        "Contract and review state of the selected declarative source adapter",
+    )
+    adapter_lay.addWidget(win.source_adapter_status)
+    card_lay.addWidget(adapter_block)
+    win._refresh_source_adapter_ui()
+
     # ── Cookies ─────────────────────────────────────────────────────
     cookies_block, cookies_lay = make_field_block(
         "Browser Cookies",

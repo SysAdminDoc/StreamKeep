@@ -2,7 +2,28 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [Unreleased]
+## [4.46.0] - 2026-08-06
+
+- A declarative source adapter is now inert until its request contract is
+  reviewed. A `.yaml` file dropped into the adapters directory defaulted to
+  enabled and went live on the next URL detection, despite describing outbound
+  requests and response mapping — while plugins required a fingerprinted
+  contract review and imported yt-dlp templates stayed disabled until
+  approved. An unreviewed definition is now parsed and listed but never
+  dispatched, so it issues no request at all. Approval is keyed to a
+  fingerprint of the reviewed surface only — the hosts, and per operation the
+  method, URL, header names and query parameter names — so renaming the
+  adapter or editing its response mapping keeps the approval, while
+  repointing it at another host makes it inert again until the operator reads
+  the change. Settings gains a **Source adapter review** panel listing every
+  definition with its hosts, requests and state; approving opens a dialog
+  spelling the contract out in plain language, and the contract is re-read
+  from disk immediately before that dialog so the approval is for the file as
+  it exists, not the row the table was built from. The CLI mirrors it:
+  `streamkeep source-adapters` prints what is awaiting review, and
+  `--approve`/`--revoke` act on it. Approvals never travel in a config
+  import — a shared config could otherwise pre-approve a definition its
+  recipient never read.
 
 - The OpenAI-compatible translation endpoint no longer bypasses the guarded
   transport. It was the one outbound request in the tree that skipped

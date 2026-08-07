@@ -156,7 +156,7 @@ _FLOAT_CONFIG_KEYS = frozenset({
 _DICT_CONFIG_KEYS = frozenset({
     "bandwidth_rule", "speed_schedule", "quality_defaults", "pp_presets",
     "lifecycle", "media_server", "schedules", "storage_snapshots", "hooks",
-    "ytdlp_arg_templates",
+    "ytdlp_arg_templates", "reviewed_source_adapters",
 })
 _LIST_CONFIG_KEYS = frozenset({
     "recent_urls", "proxy_pool", "smart_profiles", "source_adapters",
@@ -696,12 +696,18 @@ def _quarantine_import_capabilities(config):
         result["ytdlp_arg_templates"] = {}
 
     source_adapters = config.get("source_adapters", [])
+    reviewed_adapters = config.get("reviewed_source_adapters", {})
     hold(
-        "declarative_adapters", [("source_adapters",)],
-        active=bool(source_adapters),
+        "declarative_adapters",
+        [("source_adapters",), ("reviewed_source_adapters",)],
+        active=bool(source_adapters or reviewed_adapters),
     )
     if source_adapters:
         result["source_adapters"] = []
+    if reviewed_adapters:
+        # An imported approval would let a config file pre-approve a definition
+        # this operator never read. Reviews are made on this machine only.
+        result["reviewed_source_adapters"] = {}
 
     smart_profiles = config.get("smart_profiles", [])
     smart_active = bool(config.get("smart_mode") or smart_profiles)

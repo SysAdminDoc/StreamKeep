@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.46.0" date="2026-08-06">
+      <description><p>Declarative source adapters now stay inert until their outbound request contract is reviewed and approved, from the desktop or the CLI. Translation providers are routed through the guarded transport with bounded responses, window close joins every worker it owns, backups carry per-source download archives, browser cookie imports report why they failed, and a restored library reconciles its semantic index.</p></description>
+    </release>
     <release version="4.45.0" date="2026-08-03">
       <description><p>Gallery-dl image sets can now be ingested into the local library with public metadata, optional CBZ or ZIP packaging, and safe cover rendering; local semantic search and opt-in metadata translation also ship in this release.</p></description>
     </release>

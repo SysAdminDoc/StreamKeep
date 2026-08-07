@@ -1239,6 +1239,10 @@ def _run_source_adapters(args):
     from .plugins import declarative_adapter_diagnostics
 
     directory = getattr(args, "directory", "") or None
+    approve = [str(item) for item in getattr(args, "approve", []) or []]
+    revoke = [str(item) for item in getattr(args, "revoke", []) or []]
+    if approve or revoke:
+        _print_line(_apply_adapter_reviews(approve, revoke, directory))
     report = declarative_adapter_diagnostics(directory=directory)
     if getattr(args, "json", False):
         _print_line(json.dumps(report, indent=2, sort_keys=True))
@@ -1255,13 +1259,78 @@ def _run_source_adapters(args):
             f"{adapter.get('name', '?')} "
             f"({', '.join(capabilities) or 'resolve only'})"
         )
+    pending = report.get("pending_review", [])
+    if pending:
+        _print_line("")
+        _print_line(
+            "  AWAITING REVIEW - these definitions are inert until approved:"
+        )
+        for adapter in pending:
+            _print_line(
+                f"    {adapter.get('id', '?')} v{adapter.get('version', '?')} "
+                f"- {adapter.get('name', '?')}  [{adapter.get('source', '')}]"
+            )
+            _print_line(
+                f"      matches hosts: {', '.join(adapter.get('hosts', [])) or '(none)'}"
+            )
+            for operation in adapter.get("operations", []):
+                _print_line(
+                    f"      {operation.get('operation', '?')}: "
+                    f"{operation.get('method', 'GET')} {operation.get('url', '')}"
+                )
+                if operation.get("headers"):
+                    _print_line(
+                        "        headers: " + "; ".join(operation["headers"])
+                    )
+                if operation.get("params"):
+                    _print_line(
+                        "        query parameters: "
+                        + ", ".join(operation["params"])
+                    )
+            _print_line(
+                f"      approve with: streamkeep source-adapters "
+                f"--approve {adapter.get('id', '?')}"
+            )
     for error in report.get("errors", []):
         _print_line(
             f"  ERROR {error.get('source', 'definition')}: "
             f"{error.get('error', 'invalid definition')}"
         )
-    if not report.get("adapters") and not report.get("errors"):
+    if not report.get("adapters") and not report.get("errors") and not pending:
         _print_line("  No declarative source adapters found.")
+
+
+def _apply_adapter_reviews(approve, revoke, directory=None):
+    """Approve or revoke adapter contracts, then persist the config once."""
+    from . import declarative
+    from .config import load_config, save_config
+
+    config = load_config()
+    messages = []
+    if approve:
+        candidates = {
+            definition.adapter_id: definition
+            for definition in declarative.pending_source_adapters(
+                directory, config,
+            )
+        }
+        for adapter_id in approve:
+            definition = candidates.get(adapter_id)
+            if definition is None:
+                messages.append(
+                    f"  No adapter awaiting review with id {adapter_id!r}."
+                )
+                continue
+            config = declarative.approve_source_adapter(
+                adapter_id, definition.contract_fingerprint, config,
+            )
+            messages.append(f"  Approved {adapter_id}.")
+    for adapter_id in revoke:
+        config = declarative.revoke_source_adapter(adapter_id, config)
+        messages.append(f"  Revoked {adapter_id}; it is inert until reviewed again.")
+    save_config(config)
+    declarative.invalidate_registry_cache()
+    return "\n".join(messages)
 
 
 def _run_operations(args):
@@ -2463,6 +2532,14 @@ def build_parser():
         help="Inspect a source-adapter directory instead of the profile directory",
     )
     source_p.add_argument("--json", action="store_true", help="Emit JSON diagnostics")
+    source_p.add_argument(
+        "--approve", nargs="*", default=[], metavar="ADAPTER_ID",
+        help="Approve an adapter's current contract so it becomes active",
+    )
+    source_p.add_argument(
+        "--revoke", nargs="*", default=[], metavar="ADAPTER_ID",
+        help="Withdraw an approval so the adapter goes inert again",
+    )
 
     # -- operations --
     operations_p = sub.add_parser(

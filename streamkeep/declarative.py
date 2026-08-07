@@ -313,6 +313,64 @@ class DeclarativeDefinition:
     check_live: dict[str, Any] | None
     source: str = ""
 
+    def review_contract(self) -> dict:
+        """Describe, in plain terms, everything this adapter would request.
+
+        This is what an operator is asked to approve before the definition is
+        allowed to issue anything: which hosts it matches, and for each
+        operation the method, the URL template, the header names and the query
+        parameter names it sends. Response mapping is excluded — it shapes what
+        StreamKeep does with an answer, not who it talks to.
+        """
+        operations = []
+        for name, spec in (
+            ("resolve", self.resolve),
+            ("list_vods", self.list_vods),
+            ("check_live", self.check_live),
+        ):
+            if not spec:
+                continue
+            request = spec.get("request", {}) or {}
+            headers = request.get("headers", {}) or {}
+            params = request.get("params", {}) or {}
+            operations.append({
+                "operation": name,
+                "method": str(request.get("method", "GET") or "GET").upper(),
+                "url": str(request.get("url", "") or ""),
+                "headers": sorted(
+                    f"{key}: {value}" for key, value in headers.items()
+                ),
+                "params": sorted(str(key) for key in params),
+            })
+        return {
+            "id": self.adapter_id,
+            "name": self.name,
+            "version": self.version,
+            "hosts": list(self.hosts),
+            "operations": operations,
+        }
+
+    @property
+    def contract_fingerprint(self) -> str:
+        """Stable digest of exactly what ``review_contract`` shows.
+
+        Keyed to the reviewed surface rather than to the file's bytes, so a
+        comment, a display-name edit or a response-mapping tweak does not
+        invalidate an approval — but any change to the hosts, method, URL,
+        headers or parameters does, and the adapter goes inert until the
+        operator reads the new contract.
+        """
+        contract = self.review_contract()
+        return hashlib.sha256(
+            json.dumps(
+                {
+                    "hosts": contract["hosts"],
+                    "operations": contract["operations"],
+                },
+                sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
     def match(self, url: str):
         try:
             parsed = urllib.parse.urlsplit(str(url or "").strip())
@@ -1206,6 +1264,68 @@ def _config_entries(config):
         yield definition, None
 
 
+REVIEW_CONFIG_KEY = "reviewed_source_adapters"
+
+
+def _reviewed_fingerprints(config=None) -> dict:
+    """Return the operator's approved ``{adapter_id: contract_fingerprint}``."""
+    if not isinstance(config, dict):
+        try:
+            from .config import load_config
+            config = load_config()
+        except Exception:
+            # safe: an unreadable config approves nothing, which fails closed.
+            return {}
+    raw = config.get(REVIEW_CONFIG_KEY, {})
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in list(raw.items())[:MAX_DEFINITIONS]
+        if key and isinstance(value, str)
+    }
+
+
+def adapter_review_state(definition, config=None) -> bool:
+    """Return whether *definition*'s current contract has been approved."""
+    approved = _reviewed_fingerprints(config).get(definition.adapter_id, "")
+    return bool(approved) and approved == definition.contract_fingerprint
+
+
+def approve_source_adapter(adapter_id, fingerprint, config=None):
+    """Record an operator approval for one adapter contract.
+
+    Returns the updated config dict. The caller persists it; keeping the write
+    out of here lets the GUI batch it with the rest of a settings save and lets
+    the CLI save immediately.
+    """
+    if not isinstance(config, dict):
+        from .config import load_config
+        config = load_config()
+    reviews = config.get(REVIEW_CONFIG_KEY)
+    if not isinstance(reviews, dict):
+        reviews = {}
+    reviews = dict(reviews)
+    reviews[str(adapter_id)] = str(fingerprint)
+    config[REVIEW_CONFIG_KEY] = reviews
+    invalidate_registry_cache()
+    return config
+
+
+def revoke_source_adapter(adapter_id, config=None):
+    """Withdraw an approval so the adapter goes inert again."""
+    if not isinstance(config, dict):
+        from .config import load_config
+        config = load_config()
+    reviews = config.get(REVIEW_CONFIG_KEY)
+    if isinstance(reviews, dict) and str(adapter_id) in reviews:
+        reviews = dict(reviews)
+        reviews.pop(str(adapter_id), None)
+        config[REVIEW_CONFIG_KEY] = reviews
+        invalidate_registry_cache()
+    return config
+
+
 def registry_signature(directory=None, config=None):
     """Return a cheap fingerprint of everything the registry is built from.
 
@@ -1254,7 +1374,8 @@ def registry_signature(directory=None, config=None):
             for entry in raw[:MAX_DEFINITIONS]
             if isinstance(entry, dict)
         )
-    return (str(directory), tuple(entries), config_key)
+    reviews = tuple(sorted(_reviewed_fingerprints(config).items()))
+    return (str(directory), tuple(entries), config_key, reviews)
 
 
 def discover_source_adapters(directory=None, config=None):
@@ -1266,19 +1387,36 @@ def discover_source_adapters(directory=None, config=None):
     re-parsed up to ``MAX_DEFINITIONS`` YAML files, recompiled their regexes,
     and reloaded the config on each character typed.
     """
+    definitions, errors, _pending = _discover_all(directory, config)
+    return definitions, errors
+
+
+def pending_source_adapters(directory=None, config=None):
+    """Return definitions that parse cleanly but await an operator review."""
+    _definitions, _errors, pending = _discover_all(directory, config)
+    return pending
+
+
+def _discover_all(directory=None, config=None):
     signature = registry_signature(directory, config)
     with _REGISTRY_LOCK:
         cached = _REGISTRY_CACHE.get(signature)
     if cached is not None:
-        definitions, errors = cached
-        return list(definitions), [dict(error) for error in errors]
-    definitions, errors = _build_source_adapters(directory, config)
+        definitions, errors, pending = cached
+        return (
+            list(definitions),
+            [dict(error) for error in errors],
+            list(pending),
+        )
+    definitions, errors, pending = _build_source_adapters(directory, config)
     with _REGISTRY_LOCK:
         # Definitions are frozen dataclasses with precompiled patterns, so the
         # cached tuple is safe to share; callers get fresh list copies.
         _REGISTRY_CACHE.clear()
-        _REGISTRY_CACHE[signature] = (tuple(definitions), tuple(errors))
-    return definitions, errors
+        _REGISTRY_CACHE[signature] = (
+            tuple(definitions), tuple(errors), tuple(pending),
+        )
+    return definitions, errors, pending
 
 
 def invalidate_registry_cache():
@@ -1288,11 +1426,29 @@ def invalidate_registry_cache():
 
 
 def _build_source_adapters(directory=None, config=None):
-    """Parse every adapter definition from disk and config."""
+    """Parse every adapter definition from disk and config.
+
+    Returns ``(active, errors, pending)``. A definition only reaches *active*
+    once the operator has approved its current contract: a ``.yaml`` file
+    dropped into the adapters directory describes outbound requests and
+    response mapping, so it stays inert until reviewed, exactly as an imported
+    yt-dlp template does (V147).
+    """
     directory = Path(directory or SOURCE_ADAPTERS_DIR)
     definitions: list[DeclarativeDefinition] = []
+    pending: list[DeclarativeDefinition] = []
+    reviewed = _reviewed_fingerprints(config)
     errors: list[dict[str, str]] = []
     seen: set[str] = set()
+
+    def admit(definition):
+        if not definition.enabled:
+            return
+        approved = reviewed.get(definition.adapter_id, "")
+        if approved and approved == definition.contract_fingerprint:
+            definitions.append(definition)
+        else:
+            pending.append(definition)
     paths = []
     try:
         if directory.is_dir():
@@ -1322,8 +1478,7 @@ def _build_source_adapters(directory=None, config=None):
                     f"duplicate source adapter id: {definition.adapter_id}"
                 )
             seen.add(definition.adapter_id)
-            if definition.enabled:
-                definitions.append(definition)
+            admit(definition)
         except (OSError, UnicodeError, DeclarativeAdapterError) as error:
             errors.append({"source": str(path), "error": str(error)})
         except Exception as error:
@@ -1345,16 +1500,23 @@ def _build_source_adapters(directory=None, config=None):
             })
             continue
         seen.add(definition.adapter_id)
-        if definition.enabled:
-            definitions.append(definition)
+        admit(definition)
     if len(definitions) > MAX_DEFINITIONS:
         definitions = definitions[:MAX_DEFINITIONS]
-    return definitions, errors
+    return definitions, errors, pending[:MAX_DEFINITIONS]
 
 
 def declarative_adapter_diagnostics(directory=None, config=None):
-    definitions, errors = discover_source_adapters(directory, config)
+    definitions, errors, pending = _discover_all(directory, config)
     return {
+        "pending_review": [
+            {
+                **definition.review_contract(),
+                "source": definition.source,
+                "contract_fingerprint": definition.contract_fingerprint,
+            }
+            for definition in pending
+        ],
         "adapters": [
             {
                 "id": definition.adapter_id,
@@ -1366,6 +1528,11 @@ def declarative_adapter_diagnostics(directory=None, config=None):
                 "supports_vod_listing": definition.list_vods is not None,
                 "supports_live_check": definition.check_live is not None,
                 "direct": definition.direct,
+                # The approved contract travels with the active adapter so a
+                # review surface can show what was approved, and revoke it,
+                # without re-parsing the definition itself.
+                "operations": definition.review_contract()["operations"],
+                "contract_fingerprint": definition.contract_fingerprint,
             }
             for definition in definitions
         ],
