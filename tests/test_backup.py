@@ -567,7 +567,14 @@ class DownloadArchiveBackupTests(unittest.TestCase):
             self.assertTrue((restored / "download-archives" / "aaa.txt").is_file())
             self.assertTrue((restored / "download-archives" / "newer.txt").is_file())
 
-    def test_backup_excludes_credentials_plugins_and_source_adapters(self):
+    def test_backup_excludes_credentials_and_executable_plugins(self):
+        """V178 changed one of these three: adapters now travel.
+
+        A declarative request description can be carried because the enable-time
+        review makes an unapproved one inert. Credentials cannot (the archive is
+        secret-free by contract) and executable Python cannot (no review gate
+        makes arbitrary code safe), so those two stay excluded.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             config_dir = self._profile(root)
@@ -588,11 +595,12 @@ class DownloadArchiveBackupTests(unittest.TestCase):
             with zipfile.ZipFile(backup_path) as zf:
                 names = zf.namelist()
                 blob = b"".join(zf.read(name) for name in names)
-            for excluded in ("auth/", "plugins/", "source_adapters/"):
+            for excluded in ("auth/", "plugins/"):
                 self.assertFalse(
                     any(name.startswith(excluded) for name in names),
                     f"{excluded} must not be in a secret-free backup",
                 )
+            self.assertIn("source_adapters/entry.txt", names)
             self.assertNotIn(b"cookie-jar-secret", blob)
 
     def test_restore_refuses_traversing_directory_members(self):

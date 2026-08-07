@@ -6,9 +6,12 @@ Creates a secret-free ``.skbackup`` file (ZIP) containing:
   - tags.db (tag associations)
   - notifications.jsonl (notification history)
   - download-archives/ (per-source yt-dlp download archives)
+  - source_adapters/ (declarative YAML definitions, restored unapproved)
 
 Authentication state and cookies are deliberately excluded. Use the explicit
-password-protected portable-secret backup for credential transfer.
+password-protected portable-secret backup for credential transfer. Plugins are
+excluded because they are executable Python; the restore report names every
+exclusion so an absence is never silent.
 
 Restore extracts and replaces the current config directory contents.
 
@@ -54,19 +57,48 @@ SQLITE_BACKUP_FILES = {"library.db", "search.db", "tags.db"}
 # newline-delimited extractor ids, so nothing executable or secret travels with
 # them.
 #
+# ``source_adapters`` holds declarative YAML request descriptions. They travel
+# as of V178, but only because the enable-time review landed first: an adapter
+# whose contract fingerprint is not in ``reviewed_source_adapters`` is inert, so
+# a restored definition cannot act until the operator approves it here. The
+# approvals themselves are stripped on restore — see
+# ``ADAPTER_REVIEW_CONFIG_KEY`` below — because a definition arriving
+# pre-approved would make a backup file a way to enable a third-party request
+# description without anyone reviewing it on this machine.
+#
 # Deliberately NOT included, each for its own reason:
 #   ``auth``            — authentication state and cookie jars. The module
 #                         contract is a secret-free archive; credentials move
 #                         through the password-protected portable-secret path.
 #   ``plugins``         — executable Python. Restoring an archive would become
-#                         a way to plant code that runs in-process.
-#   ``source_adapters`` — definitions go live on the next URL detection, so
-#                         restoring them would enable third-party request
-#                         descriptions without review.
+#                         a way to plant code that runs in-process. There is no
+#                         opt-in for this: a review gate cannot make arbitrary
+#                         Python safe the way it can make a declarative request
+#                         description safe, so the exclusion is reported to the
+#                         operator rather than made configurable.
 #   ``semantic.db``     — a rebuildable derived index, excluded by design.
-BACKUP_DIRECTORIES = ["download-archives"]
+BACKUP_DIRECTORIES = ["download-archives", "source_adapters"]
 MAX_BACKUP_DIRECTORY_FILES = 5000
 MAX_BACKUP_DIRECTORY_BYTES = 64 * 1024 * 1024
+
+#: Directories excluded from a backup, with the reason the operator is told.
+#: Surfaced in the restore report so an exclusion is visible rather than a
+#: silent absence someone discovers when a plugin they relied on is gone.
+EXCLUDED_DIRECTORIES = {
+    "plugins": (
+        "plugins were not restored: they are executable Python, and a backup "
+        "that could plant code is a way to run it. Reinstall them and review "
+        "their permissions."
+    ),
+    "auth": (
+        "authentication state was not restored: this archive is secret-free by "
+        "contract. Use the password-protected portable-secret backup."
+    ),
+}
+
+#: Config key holding per-adapter contract approvals. Stripped on restore so a
+#: definition arriving from another machine is inert until reviewed on this one.
+ADAPTER_REVIEW_CONFIG_KEY = "reviewed_source_adapters"
 
 
 def _directory_members(name):
@@ -246,7 +278,9 @@ def restore_backup(backup_path):
                 dest = staging_dir / fname
                 data = zf.read(fname)
                 if fname == "config.json":
-                    dest.write_bytes(_secret_free_config_bytes(data))
+                    dest.write_bytes(_secret_free_config_bytes(
+                        data, strip_adapter_reviews=True,
+                    ))
                 elif fname in SQLITE_BACKUP_FILES:
                     dest.write_bytes(data)
                     _prepare_and_validate_sqlite(dest, fname)
@@ -305,6 +339,8 @@ def restore_backup(backup_path):
         note = reconcile_derived_indexes()
         if note:
             message += f". {note}"
+        for detail in restore_exclusion_notes(staged_directories):
+            message += f". {detail}"
         return True, message
     except OSError as e:
         for _current, tmp, _fname in prepared:
@@ -318,6 +354,27 @@ def restore_backup(backup_path):
         return False, f"Restore failed during activation: {redact_text(str(e))}"
     finally:
         _cleanup_staging(staging_dir)
+
+
+def restore_exclusion_notes(staged_directories=()):
+    """Return the lines a restore report should carry about what did not travel.
+
+    An exclusion the operator is never told about is indistinguishable from data
+    loss they discover later. The adapter note is only emitted when adapters
+    actually arrived, because "they need review" is noise otherwise.
+    """
+    notes = list(EXCLUDED_DIRECTORIES.values())
+    adapters = sum(
+        1 for directory, _filename, _dest in staged_directories
+        if directory == "source_adapters"
+    )
+    if adapters:
+        notes.insert(0, (
+            f"{adapters} source adapter definition(s) were restored in an "
+            "unreviewed, inert state - approve each one in Settings before it "
+            "can run"
+        ))
+    return notes
 
 
 def _activate_directory_members(staged_directories):
@@ -760,13 +817,23 @@ def _scrub_database_auth_state(connection):
     connection.commit()
 
 
-def _secret_free_config_bytes(data):
+def _secret_free_config_bytes(data, *, strip_adapter_reviews=False):
+    """Sanitise a ``config.json`` payload for staging.
+
+    ``strip_adapter_reviews`` drops the per-adapter contract approvals. It is
+    set on restore and not on create: stripping only at create time would leave
+    every backup already in existence able to deliver pre-approved adapters,
+    and the whole point of carrying definitions is that they arrive inert.
+    """
     from .secrets import secret_free_config
     config = json.loads(data.decode("utf-8"))
     if not isinstance(config, dict):
         raise ValueError("config.json is not an object")
+    scrubbed = secret_free_config(config)
+    if strip_adapter_reviews:
+        scrubbed.pop(ADAPTER_REVIEW_CONFIG_KEY, None)
     return json.dumps(
-        secret_free_config(config), indent=2, ensure_ascii=False
+        scrubbed, indent=2, ensure_ascii=False
     ).encode("utf-8")
 
 
