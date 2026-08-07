@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.48.0" date="2026-08-07">
+      <description><p>AI-upscaled video is no longer selectable by accident, so an archive keeps the real rendition rather than a synthesised one that merely reports a taller resolution. A platform whose extractor keeps failing now raises a health condition naming the platform and the engine that failed, and its engine can be switched for that platform alone. An adapter edit that leaves the file the same size is no longer missed, and the intermittent native crash at the end of a test run is fixed.</p></description>
+    </release>
     <release version="4.47.0" date="2026-08-06">
       <description><p>StreamKeep now takes an explicit position on FFmpeg 9.0: support is decided on the reported libavcodec ABI major rather than a version string, an untested ABI is refused by name instead of accepted silently, and certificate verification for remote inputs is stated explicitly so 8.x and 9.0 behave identically.</p></description>
     </release>

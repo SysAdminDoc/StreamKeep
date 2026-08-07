@@ -2,7 +2,7 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [4.47.0] - 2026-08-06
+## [4.48.0] - 2026-08-07
 
 - The broad-exception guardrail now measures error visibility rather than
   annotation compliance. It was satisfied by any `#` on or above the `pass`,
@@ -54,6 +54,8 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
   application is now held for the whole session, and leftover widgets and
   threads are retired while it is still alive. Against a two-module reproducer
   that crashed 7 runs in 10, the fault is gone.
+
+## [4.47.0] - 2026-08-06
 
 - Format-sort presets no longer rank a synthesised audio track above the
   original. yt-dlp *prepends* `-S` fields to its own default order rather than
