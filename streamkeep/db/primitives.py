@@ -7,6 +7,8 @@ the connection-owning module, which is what would make the package cyclic.
 
 from __future__ import annotations
 
+import threading
+
 from datetime import datetime, timezone
 
 
@@ -32,3 +34,11 @@ def _iso_epoch(value: object) -> float:
     from ..retry import iso_timestamp
 
     return iso_timestamp(value)
+
+
+#: Serialises every write to the library database (V163).
+#:
+#: It lives here because it must be ONE object shared by every table
+#: family, and a family module importing it back out of ``_legacy`` would
+#: make the package cyclic. Two locks would serialise nothing.
+_write_lock = threading.Lock()

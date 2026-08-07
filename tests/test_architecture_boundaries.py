@@ -41,6 +41,10 @@ _OWNED_BY = {
         "_profile_cache_key", "_profile_database_path",
         "_close_stale_profile_connections", "_connection_pool",
     ),
+    "streamkeep.db.monitor": (
+        "load_monitor_channels", "save_monitor_channel",
+        "save_all_monitor_channels", "delete_monitor_channel",
+    ),
     "streamkeep.server.auth": (
         "generate_bearer_token", "valid_bearer_token",
         "TokenGrant", "TokenStore", "PairingStore", "ReplayStore",
@@ -58,7 +62,7 @@ _OWNED_BY = {
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 4905
+_LEGACY_LINE_CEILING = 4785
 
 
 def test_each_domain_module_implements_what_it_exports():
@@ -118,7 +122,7 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
 
     root = Path(db._implementation.__file__).parent
     for name in ("schema", "history_actions", "primitives", "projections",
-                 "tombstones", "publishing", "connection"):
+                 "tombstones", "publishing", "connection", "monitor"):
         tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level and node.module:
@@ -135,6 +139,35 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
         assert db._implementation._connect is patched
     assert db._connect is original_connect
     assert db._implementation._connect is original_connect
+
+
+def test_every_table_family_serialises_behind_one_write_lock():
+    """Two locks would serialise nothing, and nothing would look wrong.
+
+    ``_write_lock`` moved to ``primitives`` when the monitor family was split
+    out, because a family module importing it back from ``_legacy`` is the cycle
+    the guard above forbids. The hazard is that each module ends up constructing
+    its *own* ``threading.Lock()``: every ``with _write_lock`` still succeeds,
+    concurrent writers no longer exclude each other, and the only symptom is a
+    database-locked error under load much later.
+    """
+    import threading
+
+    from streamkeep.db import _legacy, monitor, primitives
+
+    holders = {
+        "primitives": primitives._write_lock,
+        "_legacy": _legacy._write_lock,
+        "monitor": monitor._write_lock,
+        "facade": db._write_lock,
+    }
+    identities = {name: id(lock) for name, lock in holders.items()}
+
+    assert len(set(identities.values())) == 1, (
+        f"more than one write lock exists, so writes do not serialise: "
+        f"{identities}"
+    )
+    assert isinstance(primitives._write_lock, type(threading.Lock()))
 
 
 def test_patching_the_facade_reaches_the_module_that_defines_the_name():

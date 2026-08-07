@@ -15,6 +15,7 @@ from types import ModuleType
 from . import _legacy as _implementation
 from . import connection as _connection
 from . import history_actions as _history_actions
+from . import monitor as _monitor
 from . import primitives as _primitives
 from . import projections as _projections
 from . import publishing as _publishing
@@ -27,7 +28,7 @@ from . import tombstones as _tombstones
 # existing tests and profile-switching tools rely on.
 _DOMAINS = (
     _implementation, _connection, _schema, _history_actions, _tombstones,
-    _publishing, _projections, _primitives,
+    _publishing, _monitor, _projections, _primitives,
 )
 
 
