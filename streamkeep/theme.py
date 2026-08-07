@@ -127,6 +127,36 @@ def _accent_text(accent):
     return "#000000" if black_ratio >= white_ratio else "#ffffff"
 
 
+def readable_on(foreground, background, minimum=4.5):
+    """Darken or lighten *foreground* until it is legible on *background*.
+
+    Returned unchanged when it already clears *minimum*. This is computed
+    rather than hand-picked because the accent is user-supplied — ``apply_accent``
+    accepts any hex — so a palette value chosen to pass with the default accent
+    says nothing about the one the user actually set.
+    """
+    if contrast_ratio(foreground, background) >= minimum:
+        return foreground
+    # Move away from the background: toward black on a light surface, toward
+    # white on a dark one. Whichever end is reachable wins.
+    target = (
+        "#000000"
+        if contrast_ratio(background, "#000000")
+        >= contrast_ratio(background, "#ffffff")
+        else "#ffffff"
+    )
+    start = [int(foreground[index:index + 2], 16) for index in (1, 3, 5)]
+    end = [int(target[index:index + 2], 16) for index in (1, 3, 5)]
+    for step in range(1, 21):
+        blend = step / 20
+        mixed = "#%02x%02x%02x" % tuple(
+            round(start[i] + (end[i] - start[i]) * blend) for i in range(3)
+        )
+        if contrast_ratio(mixed, background) >= minimum:
+            return mixed
+    return target
+
+
 def _detect_system_theme():
     """Return 'dark' or 'light' based on OS preference."""
     try:
@@ -591,7 +621,7 @@ QPushButton#footerAction {{
     font-weight: 500;
 }}
 QPushButton#toggleAccent {{ background-color: transparent; color: {p['subtext1']}; }}
-QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {p['accent']}; }}
+QPushButton#toggleAccent:checked {{ background-color: {p['surface0']}; color: {readable_on(p['accent'], p['surface0'])}; }}
 QPushButton#danger {{ background-color: {p['red']}; color: {_accent_text(p['red'])}; }}
 QPushButton#danger:disabled {{
     background-color: {p['panelSoft']};

@@ -72,6 +72,58 @@ def test_secondary_text_meets_wcag_aa_in_every_palette():
                 )
 
 
+def test_every_rendered_rule_block_meets_wcag_aa_in_every_palette():
+    """Checks the stylesheet StreamKeep actually renders, not a hand-kept list
+    of tokens. A fixed token list cannot see a pairing introduced by a new
+    rule — which is how a *selected* state, the one place the label most needs
+    to be readable, shipped at 4.40:1 in the light palette."""
+    import re
+
+    from streamkeep.theme import THEMES, build_stylesheet
+
+    colour = re.compile(r"(?<![-\w])color\s*:\s*(#[0-9a-fA-F]{6})\s*;")
+    background = re.compile(r"background-color\s*:\s*(#[0-9a-fA-F]{6})\s*;")
+    failures = []
+    for name, palette in THEMES.items():
+        sheet = build_stylesheet(palette)
+        for block in re.finditer(r"([^{}]*)\{([^{}]*)\}", sheet):
+            selector, body = block.group(1).strip(), block.group(2)
+            # A disabled control is deliberately low-contrast.
+            if ":disabled" in selector:
+                continue
+            fg, bg = colour.search(body), background.search(body)
+            if not fg or not bg:
+                continue
+            ratio = contrast_ratio(fg.group(1), bg.group(1))
+            if ratio < 4.5:
+                failures.append(
+                    f"{name}: {selector} -> {fg.group(1)} on {bg.group(1)} "
+                    f"= {ratio:.2f}"
+                )
+    assert not failures, "rule blocks below WCAG AA:\n" + "\n".join(failures)
+
+
+def test_a_custom_accent_stays_readable_when_selected():
+    """The accent is user-supplied, so a palette value that happens to pass
+    with the default says nothing about the one the operator actually set."""
+    from streamkeep.theme import THEMES, readable_on
+
+    for name, palette in THEMES.items():
+        for accent in ("#f5c2e7", "#ffff00", "#00ff00", "#2563d9", "#111111"):
+            resolved = readable_on(accent, palette["surface0"])
+            ratio = contrast_ratio(resolved, palette["surface0"])
+            assert ratio >= 4.5, (
+                f"{name}: custom accent {accent} -> {resolved} = {ratio:.2f}"
+            )
+
+
+def test_readable_on_leaves_an_already_legible_colour_alone():
+    from streamkeep.theme import readable_on
+
+    assert readable_on("#000000", "#ffffff") == "#000000"
+    assert readable_on("#ffffff", "#000000") == "#ffffff"
+
+
 def test_density_releases_clipped_fixed_text_and_scales_table_rows(qt_application):
     root = QWidget()
     layout = QVBoxLayout(root)

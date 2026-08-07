@@ -106,13 +106,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Acceptance: each domain module owns its own statements rather than re-exporting; the boundary test asserts what each module implements (not that the facade is surface-identical); `_legacy.py` shrinks measurably per increment and the facade remains patch-compatible for existing tests.
   Complexity: XL
 
-- [ ] P2 — V164 — Fix the light-theme checked-toggle contrast
-  Why: the one rendered QSS rule block that fails WCAG AA is a *selected* state, which is exactly where the user needs to read the label.
-  Evidence: rendering all three palettes and checking every rule block pairing `color:` with `background-color:` produced zero failures in dark and high contrast and one in light — `QPushButton#toggleAccent:checked` at 4.40:1 (`#2563d9` on `#e1e8ef`), `streamkeep/theme.py:594`.
-  Touches: `streamkeep/theme.py`, `tests/test_visual_system.py`.
-  Acceptance: the checked toggle reaches ≥ 4.5:1 in every palette, and the visual-system test checks rendered rule blocks (fg/bg pairs in the same block, excluding `:disabled`) rather than a fixed token list.
-  Complexity: S
-
 - [ ] P2 — V165 — Surface per-source extractor health and make the engine swap one click
   Why: extractor breakage is monthly on YouTube and recurring on Kick, and today a broken source looks like a broken app. Making the "rent" visible turns a platform change into a degraded archive instead of a dead one.
   Evidence: https://github.com/yt-dlp/yt-dlp/issues/17284 (Kick extractor broken upstream, updated 2026-08-04), https://github.com/yt-dlp/yt-dlp/issues/16212 and https://github.com/yt-dlp/yt-dlp/issues/15750 (2026 YouTube 403/SABR waves); `streamkeep/health.py` already models standing conditions and `streamkeep/capabilities.py` already resolves engines. Complements V42 (which owns the yt-dlp channel toggle) — do not duplicate that scope here.

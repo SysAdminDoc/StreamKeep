@@ -4,6 +4,17 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- The selected toggle is legible in the light theme, and stays legible with a
+  custom accent. `QPushButton#toggleAccent:checked` rendered the accent on a
+  light surface at 4.40:1 — below WCAG AA, in a *selected* state, which is
+  exactly where the label most needs to be read. The colour is now computed
+  against its own background rather than taken from the palette, which matters
+  because the accent is user-supplied: a value chosen to pass with the default
+  says nothing about the one the operator actually set. The visual-system test
+  now walks the rendered stylesheet and checks every rule block that pairs a
+  foreground with a background (excluding `:disabled`), instead of a fixed
+  token list that could not see the pairing this rule introduced.
+
 - Declarative adapters survive a hostile or malformed HTML response. The
   walker and the text extractor both recursed, so a deeply nested body raised
   `RecursionError` — a type the request path does not handle, so it escaped
