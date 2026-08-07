@@ -4,6 +4,16 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- The database "split" started actually splitting. The 2026-08-04 change
+  created facades over an unchanged 6,700-line module, and the boundary test
+  asserted the facade forwarded the whole legacy surface — which made the
+  monolith a tested contract rather than something to decompose. The row and
+  view projections (14 functions, ~276 lines) now live in `db/projections.py`
+  and are implemented there rather than re-exported, and the boundary test
+  asserts ownership by `__module__` instead of identity with the facade, so a
+  module cannot decay back into a shim. A line ratchet keeps `_legacy.py` from
+  regrowing. The facade still serves every caller and stays patch-compatible.
+
 - Bulk archiving now backs off on its own instead of needing hand-tuned
   limits. When a host answers with 429 or another throttle, StreamKeep halves
   how many jobs it will run against *that host* and spaces its requests out,

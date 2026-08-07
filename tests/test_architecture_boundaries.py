@@ -8,10 +8,63 @@ from streamkeep.server import routes, static_assets
 from streamkeep.ui.tabs import settings_presets
 
 
-def test_database_facade_and_domain_modules_keep_the_legacy_surface():
+#: Modules that must *implement* their exports rather than forward them, and
+#: the functions that prove it. Identity with the facade is deliberately not
+#: asserted: that is what a re-export shim satisfies, and asserting it made
+#: the monolith a tested contract instead of something to decompose (V163).
+_OWNED_BY = {
+    "streamkeep.db.projections": (
+        "failed_job_public_view", "_row_to_failed_job_dict", "_circuit_engine",
+        "_queue_row_to_dict", "_row_to_history_dict", "_row_to_monitor_dict",
+        "_canonical_history_entry", "_canonical_tombstone_fields",
+    ),
+    "streamkeep.db.schema": ("migrate_database",),
+}
+
+#: The monolith may only shrink. Lower this when work moves out of it; a
+#: KeyError-free pass with a smaller file means the ratchet needs updating.
+_LEGACY_LINE_CEILING = 6461
+
+
+def test_each_domain_module_implements_what_it_exports():
+    """Ownership, not forwarding: the definition must live in the module."""
+    import importlib
+
+    for module_name, functions in _OWNED_BY.items():
+        module = importlib.import_module(module_name)
+        for name in functions:
+            owned = getattr(module, name)
+            assert owned.__module__ == module_name, (
+                f"{module_name}.{name} is defined in {owned.__module__}; "
+                "a domain module must own its statements, not re-export them"
+            )
+
+
+def test_the_legacy_module_only_ever_shrinks():
+    """A ratchet, so the split cannot quietly regrow the monolith."""
+    from pathlib import Path
+
+    legacy = Path(db._implementation.__file__)
+    count = len(legacy.read_text(encoding="utf-8").splitlines())
+
+    assert count <= _LEGACY_LINE_CEILING, (
+        f"{legacy.name} grew to {count} lines against a ceiling of "
+        f"{_LEGACY_LINE_CEILING}; new behaviour belongs in a domain module"
+    )
+    assert count >= _LEGACY_LINE_CEILING - 200, (
+        f"{legacy.name} is down to {count} lines - lower "
+        f"_LEGACY_LINE_CEILING to {count} so the ratchet keeps holding"
+    )
+
+
+def test_the_facade_still_serves_the_whole_surface():
+    """Decomposition must not break callers or patch-based tests."""
     assert history.load_history is db.load_history
     assert queue.enqueue_queue_job is db.enqueue_queue_job
     assert schema.migrate_database is not db.init_db
+    # Moved definitions stay reachable from the facade callers already use.
+    assert callable(db.failed_job_public_view)
+    assert callable(db._circuit_engine)
 
     original_connect = db._connect
     with mock.patch.object(db, "_connect") as patched:
