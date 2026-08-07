@@ -2,6 +2,31 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## [4.54.0] - 2026-08-07
+
+- A recording can now belong to as many collections as you like while still
+  existing once on disk. The season-folder layout gave every recording exactly
+  one home, so anything belonging to two playlists had to be duplicated or
+  arbitrarily assigned to one of them. Membership is explicit and ordered, and
+  adding a recording to a collection never removes it from another.
+  On export the season layout stays exactly as it was — that remains the single
+  real file — and each collection gets an additional entry under
+  `Collections/<name>/` pointing at those same bytes: a hardlink where the
+  filesystem allows one, and a `.strm` pointer (which Plex, Jellyfin, Emby and
+  Kodi all follow) when it does not. **Copying is deliberately not a fallback**,
+  because duplicating the bytes is the problem this removes; a home that can be
+  neither linked nor pointed at is reported as refused. The export result now
+  carries the strategy used for every home, including whether the primary copy
+  was hardlinked, so the choice is visible rather than buried in a log line.
+  Manage it with `StreamKeep.py collections list|show|of|add|remove|delete`.
+  Memberships follow a recording that moves on disk.
+
+- The monitor-channel table family now owns its own code, and the lock that
+  serialises every database write moved to a shared leaf module so it stays a
+  single object. Two locks would have serialised nothing while every write still
+  appeared to succeed, so that invariant is now asserted directly. The database
+  monolith is down to 4,785 lines from 6,737 at the start of this work.
+
 ## [4.53.0] - 2026-08-07
 
 - Deleted-VOD recovery now says what happened instead of just failing. Every

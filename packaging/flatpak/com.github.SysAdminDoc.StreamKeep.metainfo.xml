@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.54.0" date="2026-08-07">
+      <description><p>A recording can now belong to as many collections as you like while still existing once on disk. Membership is explicit and ordered, and adding a recording to one collection never removes it from another. On export the season layout stays the single real file and each collection gets an additional entry pointing at those same bytes - a hardlink where the filesystem allows one, otherwise a .strm pointer that Plex, Jellyfin, Emby and Kodi all follow. Copying is never a fallback, and the export states which strategy every home used. Manage collections from the command line with "collections list", "add", "remove" and friends.</p></description>
+    </release>
     <release version="4.53.0" date="2026-08-07">
       <description><p>Your custom site definitions now travel with a backup, arriving inert: a restore strips the per-adapter approvals so each one is review-required on the machine it lands on. Plugins are still never restored, and the restore report now says so rather than leaving their absence to be discovered. Deleted-VOD recovery reports what every candidate CDN domain said instead of just failing, and refuses outright when the platform is gating a VOD rather than probing around the control. Internally the browser companion's security boundary, host and origin validation, and remote-UI rendering all became modules that own their own code.</p></description>
     </release>
