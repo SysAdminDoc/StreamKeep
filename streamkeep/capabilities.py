@@ -8,6 +8,7 @@ import ctypes
 import ctypes.util
 import importlib.metadata
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import paths
 from .paths import _CREATE_NO_WINDOW
 from .sqlite_runtime import runtime_status as sqlite_runtime_status
 
@@ -406,6 +408,43 @@ def version_at_least(value, minimum):
     )
 
 
+#: yt-dlp update channels (V42). ``bundled`` is the frozen build that ships
+#: with StreamKeep and stays the default; ``external`` points at an operator
+#: supplied binary, which is how a user tracks yt-dlp nightly without waiting
+#: for a StreamKeep release. YouTube breakage is routinely fixed in nightly
+#: days before it reaches a stable yt-dlp.
+YTDLP_CHANNELS = ("bundled", "external")
+
+_YTDLP_REPAIR = (
+    'Install or update the signed dependency set with '
+    '"yt-dlp[default]>=2026.07.04".'
+)
+
+
+def normalize_ytdlp_channel(value) -> str:
+    candidate = str(value or "").strip().lower()
+    return candidate if candidate in YTDLP_CHANNELS else "bundled"
+
+
+def read_ytdlp_channel(config=None) -> str:
+    """Return the requested channel without importing config persistence."""
+    return normalize_ytdlp_channel(_read_config_value(config, "ytdlp_channel"))
+
+
+def read_ytdlp_external_command(config=None) -> str:
+    return str(_read_config_value(config, "ytdlp_external_command") or "").strip()
+
+
+def _read_config_value(config, key, default=""):
+    if isinstance(config, dict):
+        return config.get(key, default)
+    try:
+        raw = json.loads(paths.CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return default
+    return raw.get(key, default) if isinstance(raw, dict) else default
+
+
 def get_runtime_capabilities(*, refresh=False, config=None):
     """Return exact runtime identities, versions, provenance, and readiness."""
     global _CACHE, _CACHE_KEY
@@ -414,11 +453,18 @@ def get_runtime_capabilities(*, refresh=False, config=None):
     whisper_model_path = str(
         (config or {}).get("whisper_model_path", "") or ""
     ).strip()
-    cache_key = (read_runtime_preference(config), whisper_model_path)
+    # The channel and its binary are part of the key: without them, switching
+    # channels would keep serving the previously probed yt-dlp and the switch
+    # would look like it had no effect.
+    cache_key = (
+        read_runtime_preference(config), whisper_model_path,
+        read_ytdlp_channel(config), read_ytdlp_external_command(config),
+    )
     with _CACHE_LOCK:
         if _CACHE is None or refresh or _CACHE_KEY != cache_key:
             _CACHE = _probe_registry(
                 preference=cache_key[0], whisper_model_path=cache_key[1],
+                ytdlp_channel=cache_key[2], ytdlp_external_command=cache_key[3],
             )
             _CACHE_KEY = cache_key
         return copy.deepcopy(_CACHE)
@@ -489,9 +535,14 @@ def capability_state(record):
     return "unsafe" if record.get("available") else "missing"
 
 
-def _probe_registry(*, preference="path", whisper_model_path=""):
+def _probe_registry(
+    *, preference="path", whisper_model_path="",
+    ytdlp_channel="bundled", ytdlp_external_command="",
+):
     sqlite = _probe_sqlite_runtime()
-    yt_dlp = _probe_yt_dlp()
+    yt_dlp = _probe_yt_dlp(
+        channel=ytdlp_channel, external_command=ytdlp_external_command,
+    )
     pillow = _probe_module(
         "pillow", "Pillow", "PIL", MINIMUM_VERSIONS["pillow"],
         ["thumbnail-decode", "chat-render", "image-export"],
@@ -818,15 +869,11 @@ def _aggregate_mpv(python_mpv, libmpv):
     return record
 
 
-def _probe_yt_dlp():
+def _probe_bundled_yt_dlp():
     minimum = MINIMUM_VERSIONS["yt_dlp"]
-    repair = (
-        'Install or update the signed dependency set with '
-        '"yt-dlp[default]>=2026.07.04".'
-    )
     module_record = _probe_module(
         "yt_dlp", "yt-dlp", "yt_dlp", minimum,
-        ["site-extraction", "direct-download", "youtube"], repair,
+        ["site-extraction", "direct-download", "youtube"], _YTDLP_REPAIR,
     )
     if module_record.get("available"):
         module_record["command"] = (
@@ -835,12 +882,67 @@ def _probe_yt_dlp():
             else [sys.executable, "-m", "yt_dlp"]
         )
         return module_record
-    external = _probe_executable(
+    return _probe_executable(
         "yt_dlp", ["yt-dlp"], ["--version"], minimum,
-        ["site-extraction", "direct-download", "youtube"], repair,
+        ["site-extraction", "direct-download", "youtube"], _YTDLP_REPAIR,
         display_name="yt-dlp",
     )
-    return external
+
+
+def _probe_yt_dlp(*, channel="bundled", external_command=""):
+    """Probe the yt-dlp the operator asked for, never trusting its version.
+
+    An external build goes through the same executable probe as any other
+    tool, so a below-floor binary comes back ``supported: False`` and
+    ``require_capability`` refuses it before it can reach a download path.
+
+    An unusable external build falls back to the bundled one rather than
+    taking downloads down over a settings typo, but the record says so: the
+    channel reports what is *in use*, and ``channel_detail`` names the
+    external build's problem. Reporting the requested channel here instead
+    would let an operator believe they were getting nightly fixes they are not.
+    """
+    channel = normalize_ytdlp_channel(channel)
+    requested = str(external_command or "").strip()
+    if channel != "external" or not requested:
+        record = _probe_bundled_yt_dlp()
+        record["channel"] = "bundled"
+        record["channel_requested"] = channel
+        record["channel_detail"] = (
+            "using the yt-dlp that ships with StreamKeep"
+            if channel == "bundled"
+            else "no external yt-dlp path is configured"
+        )
+        return record
+
+    external = _probe_executable(
+        "yt_dlp", [requested], ["--version"], MINIMUM_VERSIONS["yt_dlp"],
+        ["site-extraction", "direct-download", "youtube"], _YTDLP_REPAIR,
+        display_name="yt-dlp",
+    )
+    external["channel_requested"] = "external"
+    external["external_command"] = requested
+    if external.get("supported"):
+        external["channel"] = "external"
+        external["channel_detail"] = (
+            f"using the external yt-dlp at {external.get('path') or requested}"
+        )
+        return external
+
+    problem = (
+        format_capability_problem(external)
+        if external.get("available")
+        else f"{requested} was not found or is not executable."
+    )
+    record = _probe_bundled_yt_dlp()
+    record["channel"] = "bundled"
+    record["channel_requested"] = "external"
+    record["external_command"] = requested
+    record["external_problem"] = problem
+    record["channel_detail"] = (
+        f"external yt-dlp unusable, fell back to the bundled build - {problem}"
+    )
+    return record
 
 
 def _probe_ejs(yt_dlp_record):

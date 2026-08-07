@@ -143,12 +143,24 @@ def ytdlp_runtime_status(config=None):
             f" yt-dlp path: {yt_dlp.get('path')} "
             f"({yt_dlp.get('provenance')})."
         )
+    # V42: which channel is actually in use, not which one was asked for. An
+    # external build that failed its version probe falls back to the bundled
+    # one, and an operator who is not told that would believe they were
+    # getting nightly extractor fixes they are not getting.
+    channel = yt_dlp.get("channel", "bundled")
+    channel_detail = str(yt_dlp.get("channel_detail") or "").strip()
+    if channel_detail:
+        detail += f" Channel: {channel} - {channel_detail}"
     return {
         "state": state,
         "summary": summary,
         "detail": detail.strip(),
         "yt_dlp_version": yt_dlp.get("version", ""),
         "yt_dlp_path": yt_dlp.get("path", ""),
+        "yt_dlp_channel": channel,
+        "yt_dlp_channel_requested": yt_dlp.get("channel_requested", channel),
+        "yt_dlp_channel_detail": channel_detail,
+        "yt_dlp_external_problem": yt_dlp.get("external_problem", ""),
         "ejs_available": ejs.get("supported", False),
         "ejs_version": ejs.get("version", ""),
         "ejs_requirement": ejs.get("required_by_ytdlp", ""),

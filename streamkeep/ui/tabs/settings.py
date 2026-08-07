@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ... import VERSION
-from ...capabilities import get_runtime_capabilities
+from ...capabilities import get_runtime_capabilities, normalize_ytdlp_channel
 from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
@@ -411,8 +411,12 @@ def build_settings_tab(win):
     yt_card, _, _ = make_metric_card(
         "yt-dlp",
         yt_status.get("summary", "Missing"),
-        str(yt_status.get("yt_dlp_version") or "Not found"),
+        # The version alone cannot tell a bundled build from an external one,
+        # and the whole point of the channel toggle is knowing which is live.
+        f"{yt_status.get('yt_dlp_version') or 'Not found'} "
+        f"({yt_status.get('yt_dlp_channel', 'bundled')})",
     )
+    yt_card.setToolTip(str(yt_status.get("yt_dlp_channel_detail") or ""))
     curl_card, _, _ = make_metric_card(
         "curl",
         curl["state"].title(),
@@ -503,6 +507,57 @@ def build_settings_tab(win):
     deno_lay.addWidget(win.deno_runtime_status)
     sections_top.addWidget(deno_block, 1)
     win._refresh_deno_runtime_controls()
+
+    ytdlp_block, ytdlp_lay = make_field_block(
+        "yt-dlp update channel",
+        "StreamKeep ships a frozen, version-checked yt-dlp. Point at your own "
+        "build to track nightly, which carries extractor fixes days before a "
+        "stable release. The build you name is version-probed like any other "
+        "tool and refused if it is below the supported floor.",
+    )
+    ytdlp_channel_row = QHBoxLayout()
+    ytdlp_channel_row.setSpacing(8)
+    ytdlp_channel_label = QLabel("Channel:")
+    ytdlp_channel_label.setFixedWidth(100)
+    ytdlp_channel_row.addWidget(ytdlp_channel_label)
+    win.ytdlp_channel_combo = QComboBox()
+    win.ytdlp_channel_combo.addItem("Bundled (recommended)", userData="bundled")
+    win.ytdlp_channel_combo.addItem("External build", userData="external")
+    saved_channel = normalize_ytdlp_channel(win._config.get("ytdlp_channel"))
+    win.ytdlp_channel_combo.setCurrentIndex(
+        max(0, win.ytdlp_channel_combo.findData(saved_channel))
+    )
+    win.ytdlp_channel_combo.currentIndexChanged.connect(
+        win._on_ytdlp_channel_changed
+    )
+    ytdlp_channel_row.addWidget(win.ytdlp_channel_combo, 1)
+    ytdlp_lay.addLayout(ytdlp_channel_row)
+
+    ytdlp_path_row = QHBoxLayout()
+    ytdlp_path_row.setSpacing(8)
+    ytdlp_path_label = QLabel("Executable:")
+    ytdlp_path_label.setFixedWidth(100)
+    ytdlp_path_row.addWidget(ytdlp_path_label)
+    win.ytdlp_external_input = QLineEdit(
+        str(win._config.get("ytdlp_external_command", "") or "")
+    )
+    win.ytdlp_external_input.setPlaceholderText(
+        "Path to a yt-dlp executable (leave empty to use the bundled build)"
+    )
+    win.ytdlp_external_input.editingFinished.connect(win._on_ytdlp_channel_changed)
+    ytdlp_path_row.addWidget(win.ytdlp_external_input, 1)
+    win.ytdlp_external_browse = QPushButton("Browse")
+    win.ytdlp_external_browse.setObjectName("secondary")
+    win.ytdlp_external_browse.clicked.connect(win._on_browse_ytdlp_executable)
+    ytdlp_path_row.addWidget(win.ytdlp_external_browse)
+    ytdlp_lay.addLayout(ytdlp_path_row)
+
+    win.ytdlp_channel_status = QLabel("")
+    win.ytdlp_channel_status.setObjectName("subtleText")
+    win.ytdlp_channel_status.setWordWrap(True)
+    ytdlp_lay.addWidget(win.ytdlp_channel_status)
+    sections_top.addWidget(ytdlp_block, 1)
+    win._refresh_ytdlp_channel_controls()
 
     plugin_block, plugin_lay = make_field_block(
         "Plugin trust",

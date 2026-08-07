@@ -745,6 +745,73 @@ class SettingsToolsMixin:
             "success",
         )
 
+    def _on_browse_ytdlp_executable(self):
+        from PyQt6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select a yt-dlp executable", "",
+            "Executables (*.exe *.cmd *.bat);;All files (*)",
+        )
+        if path:
+            self.ytdlp_external_input.setText(path)
+            self._on_ytdlp_channel_changed()
+
+    def _on_ytdlp_channel_changed(self, _index=None):
+        """Save the channel and re-probe, so the switch is visible immediately."""
+        from ...capabilities import (
+            invalidate_runtime_capabilities_cache,
+            normalize_ytdlp_channel,
+        )
+
+        combo = getattr(self, "ytdlp_channel_combo", None)
+        if combo is None:
+            return
+        channel = normalize_ytdlp_channel(combo.itemData(combo.currentIndex()))
+        command = str(self.ytdlp_external_input.text() or "").strip()
+        if (self._config.get("ytdlp_channel") == channel
+                and str(self._config.get("ytdlp_external_command", "") or "") == command):
+            return
+        self._config["ytdlp_channel"] = channel
+        self._config["ytdlp_external_command"] = command
+        self._persist_config()
+        invalidate_runtime_capabilities_cache()
+        self._refresh_ytdlp_channel_controls()
+
+    def _refresh_ytdlp_channel_controls(self):
+        """Report the channel in use, which is not always the one requested."""
+        label = getattr(self, "ytdlp_channel_status", None)
+        if label is None:
+            return
+        from ...extractors.ytdlp import ytdlp_runtime_status
+
+        status = ytdlp_runtime_status(self._config)
+        self._ytdlp_status_snapshot = status
+        channel = status.get("yt_dlp_channel", "bundled")
+        requested = status.get("yt_dlp_channel_requested", channel)
+        version = status.get("yt_dlp_version") or "not available"
+        text = f"Using the {channel} yt-dlp {version}."
+        detail = str(status.get("yt_dlp_channel_detail") or "").strip()
+        if detail:
+            text += f" {detail}"
+        label.setText(text)
+        fell_back = requested != channel
+        label.setObjectName("warningText" if fell_back else "subtleText")
+        label.setToolTip(str(status.get("yt_dlp_external_problem") or ""))
+        # Re-polish: an object-name change does not restyle an existing widget.
+        label.style().unpolish(label)
+        label.style().polish(label)
+        if fell_back:
+            self._set_status(
+                "The external yt-dlp could not be used; the bundled build is "
+                "still active. " + str(status.get("yt_dlp_external_problem") or ""),
+                "warning",
+            )
+        enabled = channel == "external" or requested == "external"
+        for widget_name in ("ytdlp_external_input", "ytdlp_external_browse"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
+
     def _refresh_deno_runtime_controls(self):
         if not hasattr(self, "deno_runtime_status"):
             return

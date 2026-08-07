@@ -97,6 +97,7 @@ _STRING_CONFIG_KEYS = frozenset({
     "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
     "ytdlp_wait_for_video",
     "ytdlp_external_downloader", "ytdlp_aria2c_min_split_size",
+    "ytdlp_channel", "ytdlp_external_command",
     "streamlink_hls_start_offset",
     "queue_complete_action",
     "youtube_pot_base_url", "youtube_pot_server_command",
