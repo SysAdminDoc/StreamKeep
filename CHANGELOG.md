@@ -2,7 +2,7 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
-## [Unreleased]
+## [4.50.0] - 2026-08-07
 
 - Translation coverage is visible where the choice is made. Spanish sits near
   15% translated, and the beta caveat lived only in the README — so switching

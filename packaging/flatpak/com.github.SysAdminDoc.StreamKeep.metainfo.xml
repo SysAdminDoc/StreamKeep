@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.50.0" date="2026-08-07">
+      <description><p>The language selector now states how much of each catalog is actually translated and marks incomplete ones as beta, so switching to a partly-translated language no longer produces a mostly-English interface with no explanation. Internally, the database schema module now owns the migrations it had only been dispatching, and the history action log became a module of its own.</p></description>
+    </release>
     <release version="4.49.0" date="2026-08-07">
       <description><p>A live capture ended by a crash or a power loss now leaves a playable recording instead of an unreadable file, and the final repack can no longer cost the capture it was meant to tidy up. Bulk archiving backs off on its own when a host throttles, per host, so one strict site no longer slows the rest of the queue. The database split began actually moving behaviour out of its legacy module rather than forwarding it.</p></description>
     </release>
