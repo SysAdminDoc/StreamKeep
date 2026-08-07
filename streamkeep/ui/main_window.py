@@ -2520,8 +2520,11 @@ class StreamKeep(
                 notify_progress,
             )
             if progress_enabled:
-                total_jobs = max(1, int(snapshot.get("total", 0)) // 100)
-                completed_jobs = int(snapshot.get("completed", 0)) // 100
+                # Item counts come from the snapshot's own tallies: a batch
+                # that ended in failure reports a full-width bar, so deriving
+                # the count from `completed` would claim every item finished.
+                total_jobs = max(1, int(snapshot.get("items_total", 0) or 0))
+                completed_jobs = int(snapshot.get("items_done", 0) or 0)
                 notify_progress(
                     "StreamKeep queue",
                     f"{completed_jobs} of {total_jobs} queue item(s)",

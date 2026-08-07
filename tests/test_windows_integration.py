@@ -19,6 +19,8 @@ def test_aggregate_queue_progress_scales_a_batch_to_one_hundred_per_item():
         "completed": 150,
         "total": 300,
         "failed": 0,
+        "items_done": 1,
+        "items_total": 3,
     }
 
 
@@ -43,8 +45,42 @@ def test_aggregate_queue_progress_clears_after_a_clean_batch():
         "completed": 0,
         "total": 0,
         "failed": 0,
+        "items_done": 0,
+        "items_total": 0,
     }
     assert aggregate_queue_progress([{"status": "cancelled"}])["state"] == "none"
+
+
+def test_a_batch_that_ends_with_a_failure_is_full_width_and_counts_truthfully():
+    """V153: the terminal branch used item counts where every other branch
+    uses hundredths, so a failed batch painted a zero-width red bar and the
+    progress notification reported "1 of 1"."""
+    snapshot = aggregate_queue_progress([
+        {"status": "done"},
+        {"status": "done"},
+        {"status": "failed"},
+        {"status": "cancelled"},
+    ])
+    assert snapshot["state"] == "error"
+    assert snapshot["failed"] == 1
+    # Three considered rows (the cancelled row is excluded), in hundredths.
+    assert snapshot["total"] == 300
+    assert snapshot["completed"] == snapshot["total"]
+    # ...but only two of them actually completed.
+    assert (snapshot["items_done"], snapshot["items_total"]) == (2, 3)
+
+
+def test_terminal_and_running_branches_agree_on_units():
+    """Both branches must express total in hundredths of an item so the
+    shell surfaces can recover a job count by dividing by 100."""
+    running = aggregate_queue_progress([
+        {"status": "done"}, {"status": "queued"},
+    ])
+    terminal = aggregate_queue_progress([
+        {"status": "done"}, {"status": "failed"},
+    ])
+    assert running["total"] == terminal["total"] == 200
+    assert terminal["items_total"] == running["items_total"] == 2
 
 
 def test_taskbar_wrapper_is_a_noop_when_disabled():

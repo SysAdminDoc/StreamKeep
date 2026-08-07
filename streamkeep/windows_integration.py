@@ -48,6 +48,12 @@ def aggregate_queue_progress(queue: Iterable[Mapping], *, paused=False, error=Fa
     100% across the whole batch.  Once all rows are complete the shell surface
     is cleared.  Failed rows retain an ``error`` state so an unattended user
     can see that the batch needs attention.
+
+    ``completed`` and ``total`` are always in hundredths of an item so the
+    shell surfaces can divide by 100 to recover a job count.  ``items_done``
+    and ``items_total`` carry the plain counts a notification wants to read
+    out, because a batch that ends in failure is *finished* (a full-width
+    bar) while still having completed fewer items than it holds.
     """
     rows = [row for row in (queue or ()) if isinstance(row, Mapping)]
     considered = [
@@ -66,12 +72,31 @@ def aggregate_queue_progress(queue: Iterable[Mapping], *, paused=False, error=Fa
         if str(row.get("status", "queued") or "queued").strip().lower()
         not in _TERMINAL_QUEUE_STATUSES
     ]
+    items_done = sum(
+        str(row.get("status", "") or "").strip().lower() == "done"
+        for row in considered
+    )
     if not pending:
+        if not failed:
+            return {
+                "state": "none",
+                "completed": 0,
+                "total": 0,
+                "failed": 0,
+                "items_done": 0,
+                "items_total": 0,
+            }
+        # The batch is over, so its progress is complete — the state, not the
+        # bar length, is what says it ended badly.  A partially-filled red bar
+        # reads as "still working" to the shell.
+        span = len(considered) * 100
         return {
-            "state": "error" if failed else "none",
-            "completed": 0 if failed else 0,
-            "total": len(considered) if failed else 0,
+            "state": "error",
+            "completed": span,
+            "total": span,
             "failed": failed,
+            "items_done": items_done,
+            "items_total": len(considered),
         }
 
     total = max(1, len(considered))
@@ -105,6 +130,8 @@ def aggregate_queue_progress(queue: Iterable[Mapping], *, paused=False, error=Fa
         "completed": max(0, min(completed, total * 100)),
         "total": total * 100,
         "failed": failed,
+        "items_done": items_done,
+        "items_total": len(considered),
     }
 
 
