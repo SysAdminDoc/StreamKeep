@@ -141,7 +141,24 @@ def stage_translations() -> tuple[bool, str]:
         ok, detail = _run([
             sys.executable, "-m", "streamkeep.i18n.compile_translations",
         ])
-    return ok, detail
+    if not ok:
+        return ok, detail
+    # V171: report coverage so a catalog regressing becomes visible here
+    # rather than only to the user who switches language. This reports, it
+    # does not gate: coverage falls legitimately every time UI strings are
+    # added faster than they are translated.
+    try:
+        from streamkeep.i18n import coverage_report
+
+        lines = [
+            f"{entry['language']}: {entry['translated']}/{entry['total']} "
+            f"({entry['ratio'] * 100:.1f}%)"
+            + (" BETA" if entry["beta"] else "")
+            for entry in coverage_report() if entry["total"]
+        ]
+    except Exception as error:
+        return True, f"{detail}\ncoverage unavailable: {error}".strip()
+    return True, "\n".join([detail, *lines]).strip()
 
 
 def stage_dependency_floors() -> tuple[bool, str]:

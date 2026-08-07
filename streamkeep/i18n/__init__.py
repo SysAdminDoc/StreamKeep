@@ -105,6 +105,82 @@ def available_languages() -> list[str]:
     return sorted(langs, key=lambda code: (code != "en", code == "qps-ploc", code))
 
 
+#: Below this share of translated messages a catalog is labelled beta in the
+#: language selector. Spanish sat at 14.8% while the caveat lived only in the
+#: README, so a user switching language saw a mostly-English UI with nothing
+#: to explain it (V171).
+BETA_COVERAGE_THRESHOLD = 0.85
+
+
+def catalog_coverage(language: str) -> dict:
+    """Return how much of one catalog is actually translated.
+
+    ``translated`` counts messages with a usable translation, which is the same
+    test :func:`_load_catalog` applies when deciding what the app can show -
+    so the number reported is the number the user experiences, not a count of
+    rows in the file.
+    """
+    code = str(language or "").lower()
+    if code in {"en", ""}:
+        return {"language": "en", "total": 0, "translated": 0,
+                "ratio": 1.0, "beta": False}
+    if code == "qps-ploc":
+        # The pseudo locale is generated, not translated; it is complete by
+        # construction and is a layout test rather than a language.
+        return {"language": code, "total": 0, "translated": 0,
+                "ratio": 1.0, "beta": False}
+
+    path = _I18N_DIR / f"streamkeep_{code}.ts"
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return {"language": code, "total": 0, "translated": 0,
+                "ratio": 0.0, "beta": True}
+
+    total = translated = 0
+    for context in root.findall("context"):
+        for message in context.findall("message"):
+            if not (message.findtext("source") or ""):
+                continue
+            total += 1
+            node = message.find("translation")
+            if node is None or node.get("type") == "unfinished":
+                continue
+            forms = [form.text or "" for form in node.findall("numerusform")]
+            if (forms and any(forms)) or (node.text or "").strip():
+                translated += 1
+    ratio = (translated / total) if total else 0.0
+    return {
+        "language": code,
+        "total": total,
+        "translated": translated,
+        "ratio": ratio,
+        "beta": ratio < BETA_COVERAGE_THRESHOLD,
+    }
+
+
+def language_label(language: str, name: str = "") -> str:
+    """Label a language for the selector, marking incomplete catalogs.
+
+    English and the pseudo locale are returned unchanged: neither has a
+    coverage figure that means anything to a user.
+    """
+    code = str(language or "")
+    text = str(name or code)
+    coverage = catalog_coverage(code)
+    if not coverage["total"]:
+        return text
+    percent = round(coverage["ratio"] * 100)
+    if coverage["beta"]:
+        return f"{text} - {percent}% translated (beta)"
+    return f"{text} - {percent}% translated"
+
+
+def coverage_report() -> list[dict]:
+    """Coverage for every shipped catalog, for the release gate."""
+    return [catalog_coverage(code) for code in available_languages()]
+
+
 def current_language() -> str:
     """Return the installed language code, or ``en`` for source strings."""
     return _current_lang

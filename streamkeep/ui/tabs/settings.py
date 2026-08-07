@@ -7,7 +7,7 @@ webhook, dedup, media library, post-processing + converter, manual
 converter buttons, import/export/save row.
 """
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QHeaderView, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
@@ -328,8 +328,22 @@ def build_settings_tab(win):
         "es": "Español",
         "qps-ploc": "Pseudo (layout test)",
     }
+    # V171: the beta caveat used to live only in the README, so switching to a
+    # 15%-translated catalog produced a mostly-English UI with no explanation.
+    # The selector states the coverage instead.
+    from ...i18n import catalog_coverage, language_label as _language_label
+
     for lang in available_languages():
-        win.language_combo.addItem(language_labels.get(lang, lang), lang)
+        name = language_labels.get(lang, lang)
+        win.language_combo.addItem(_language_label(lang, name), lang)
+        coverage = catalog_coverage(lang)
+        if coverage["total"]:
+            win.language_combo.setItemData(
+                win.language_combo.count() - 1,
+                f"{coverage['translated']} of {coverage['total']} messages "
+                "are translated; the rest are shown in English.",
+                Qt.ItemDataRole.ToolTipRole,
+            )
     lang_idx = max(0, win.language_combo.findData(win._config.get("language", "en")))
     win.language_combo.setCurrentIndex(lang_idx)
     win.language_combo.currentIndexChanged.connect(win._on_language_changed)

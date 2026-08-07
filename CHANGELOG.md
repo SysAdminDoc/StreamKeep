@@ -4,6 +4,16 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Translation coverage is visible where the choice is made. Spanish sits near
+  15% translated, and the beta caveat lived only in the README — so switching
+  language produced a mostly-English UI with nothing to explain it. The
+  language selector now states each catalog's translated percentage and marks
+  anything below 85% as beta, with the exact message counts in its tooltip.
+  The release gate reports coverage too, so a catalog regressing is visible
+  before a release rather than after a user switches. Coverage is reported,
+  not gated: it falls legitimately whenever UI strings are added faster than
+  they are translated.
+
 - The database decomposition continued. `schema.py` now owns the migrations it
   had only been dispatching, so reviewing the schema no longer means walking
   the legacy module; the history action log and two shared leaf primitives also
