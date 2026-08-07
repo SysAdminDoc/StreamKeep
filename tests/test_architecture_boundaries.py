@@ -41,6 +41,10 @@ _OWNED_BY = {
         "_profile_cache_key", "_profile_database_path",
         "_close_stale_profile_connections", "_connection_pool",
     ),
+    "streamkeep.server.auth": (
+        "generate_bearer_token", "valid_bearer_token",
+        "TokenGrant", "TokenStore", "PairingStore", "ReplayStore",
+    ),
 }
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
@@ -204,6 +208,78 @@ def test_a_forwarding_shim_is_not_given_a_binding_of_its_own():
     assert forwarded not in vars(publishing), (
         "the patch gave the shim a binding; its forwarding is now frozen"
     )
+
+
+#: ``server/_legacy.py`` may only shrink, same ratchet as the db monolith.
+_SERVER_LEGACY_LINE_CEILING = 2548
+
+
+def test_the_server_legacy_module_only_ever_shrinks():
+    from pathlib import Path
+
+    from streamkeep.server import _legacy as server_legacy
+
+    legacy = Path(server_legacy.__file__)
+    count = len(legacy.read_text(encoding="utf-8").splitlines())
+
+    assert count <= _SERVER_LEGACY_LINE_CEILING, (
+        f"server/{legacy.name} grew to {count} lines against a ceiling of "
+        f"{_SERVER_LEGACY_LINE_CEILING}; new behaviour belongs in a sibling"
+    )
+    assert count >= _SERVER_LEGACY_LINE_CEILING - 200, (
+        f"server/{legacy.name} is down to {count} lines - lower "
+        f"_SERVER_LEGACY_LINE_CEILING to {count} so the ratchet keeps holding"
+    )
+
+
+def test_the_server_auth_module_does_not_import_the_monolith():
+    """The constraint that lets it own its statements at all."""
+    import ast
+    from pathlib import Path
+
+    from streamkeep.server import _legacy as server_legacy
+
+    source = (Path(server_legacy.__file__).parent / "auth.py").read_text(
+        encoding="utf-8",
+    )
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.level and node.module:
+            assert node.module != "_legacy", "server/auth.py imports _legacy"
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.endswith("_legacy")
+
+
+def test_patching_the_server_facade_reaches_the_module_that_defines_the_name():
+    """Same contract as the db facade, and it broke the same way.
+
+    Moving the auth layer out of ``server/_legacy`` gave its names two bindings.
+    A facade that wrote to only the first left ``server.auth`` -- where the code
+    actually lives -- still running the original, while reading the name back
+    through the facade returned the patch and made it look applied.
+    """
+    from streamkeep.server import _legacy as server_legacy
+    from streamkeep.server import auth
+
+    with mock.patch.object(local_server, "generate_bearer_token",
+                           return_value="PATCHED"):
+        assert local_server.generate_bearer_token() == "PATCHED", "the facade"
+        assert auth.generate_bearer_token() == "PATCHED", "the defining module"
+        assert server_legacy.generate_bearer_token() == "PATCHED", "the importer"
+
+    for module in (auth, server_legacy):
+        assert module.generate_bearer_token() != "PATCHED", "restore leaked"
+
+
+def test_the_scope_vocabulary_is_owned_by_auth_and_reachable_from_the_facade():
+    """Constants have no ``__module__``, so ownership is asserted by identity."""
+    from streamkeep.server import auth
+
+    assert local_server.ALL_SCOPES is auth.ALL_SCOPES
+    assert auth.ALL_SCOPES == {
+        auth.SCOPE_STATUS, auth.SCOPE_QUEUE, auth.SCOPE_RECOVERY,
+    }
+    assert local_server.TOKEN_TTL_MAX_SECONDS == auth.TOKEN_TTL_MAX_SECONDS
 
 
 def test_server_facade_exposes_route_table_and_external_web_ui():

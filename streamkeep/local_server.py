@@ -11,33 +11,80 @@ import sys
 from types import ModuleType
 
 from .server import _legacy as _implementation
+from .server import auth as _auth
+
+# V163: the facade composes the domain modules rather than requiring every name
+# to be re-exported through the legacy one. ``_implementation`` stays first so a
+# patched attribute there still wins, which is the contract existing tests rely
+# on.
+_DOMAINS = (_implementation, _auth)
+
+
+def _owner(name):
+    """First domain module that can serve ``name`` — reads only.
+
+    ``hasattr`` on purpose: a module that forwards through ``__getattr__`` is a
+    legitimate source for a read.
+    """
+    for module in _DOMAINS:
+        if hasattr(module, name):
+            return module
+    return None
+
+
+def _holders(name):
+    """Every domain module holding a real binding for ``name`` — writes.
+
+    While the server was one module, patching ``local_server.X`` rebound the one
+    binding every caller resolved. Splitting the auth layer out gave those names
+    two bindings — one where they are defined, one in the legacy module that
+    imported them back — and writing to only the first leaves the defining
+    module still running the original. Reading the patched name back through the
+    facade returns the patch either way, so an identity assertion cannot tell
+    the difference; patch reach has to cover every holder.
+
+    ``vars()`` rather than ``hasattr``: a module forwarding through
+    ``__getattr__`` has no binding of its own, and writing one into it would
+    freeze that forward at today's value.
+    """
+    return [module for module in _DOMAINS if name in vars(module)]
 
 
 class _LocalServerFacade(ModuleType):
     """Forward the legacy server surface without changing its patch contract."""
 
     def __getattr__(self, name):
-        return getattr(_implementation, name)
+        owner = _owner(name)
+        if owner is None:
+            raise AttributeError(name)
+        return getattr(owner, name)
 
     def __setattr__(self, name, value):
-        if name != "_implementation" and hasattr(_implementation, name):
-            previous = getattr(_implementation, name)
+        holders = () if name == "_implementation" else _holders(name)
+        if holders:
             history = self.__dict__.setdefault("_forwarded_previous", {})
-            history.setdefault(name, []).append(previous)
-            setattr(_implementation, name, value)
+            history.setdefault(name, []).append(
+                [(module, vars(module)[name]) for module in holders]
+            )
+            for module in holders:
+                setattr(module, name, value)
         super().__setattr__(name, value)
 
     def __delattr__(self, name):
         history = self.__dict__.get("_forwarded_previous", {})
         values = history.get(name, [])
         if name != "_implementation" and values:
-            setattr(_implementation, name, values.pop())
+            for module, previous in values.pop():
+                setattr(module, name, previous)
             if not values:
                 history.pop(name, None)
         super().__delattr__(name)
 
     def __dir__(self):
-        return sorted(set(super().__dir__()) | set(dir(_implementation)))
+        names = set(super().__dir__())
+        for module in _DOMAINS:
+            names |= set(dir(module))
+        return sorted(names)
 
 
 _facade = sys.modules[__name__]

@@ -5,6 +5,6 @@ move.  New route, policy, and asset code belongs in the sibling modules;
 ``streamkeep.local_server`` remains the public facade for existing callers.
 """
 
-from . import _legacy
+from . import _legacy, auth
 
-__all__ = ["_legacy"]
+__all__ = ["_legacy", "auth"]
