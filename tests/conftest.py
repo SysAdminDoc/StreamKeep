@@ -83,20 +83,46 @@ def qt_application():
 
 
 def _retire_qt_objects(app):
-    """Destroy leftover Qt objects while the ``QApplication`` is still alive."""
+    """Destroy leftover Qt objects while the ``QApplication`` is still alive.
+
+    Windows close *first* (V179). A window's own ``closeEvent`` knows how to
+    stop the workers it started -- cancel, wait, then terminate -- and the
+    generic sweep below cannot: ``quit()`` only unblocks a thread running an
+    event loop, so a ``QThread`` whose ``run()`` is overridden and sitting in
+    ``subprocess.communicate()`` ignores it entirely and the wait just burns
+    its timeout before teardown proceeds around a live thread.
+
+    That is the whole of V179. The health probe runs ~10 executable version
+    checks at a 5s timeout each; on a starved CPU it is still inside one of
+    them when the session ends, and tearing the interpreter down underneath it
+    aborts the process with an access violation and no summary. It looked
+    intermittent and load-dependent because the load is only what makes the
+    thread slow enough to still be running.
+    """
+    for widget in app.topLevelWidgets():
+        widget.close()
+    app.processEvents()
+
     gc.collect()
     for obj in gc.get_objects():
         if not isinstance(obj, QThread):
             continue
         try:
-            if obj.isRunning():
-                obj.quit()
-                obj.wait(5000)
+            if not obj.isRunning():
+                continue
+            cancel = getattr(obj, "cancel", None)
+            if callable(cancel):
+                cancel()
+            obj.quit()
+            if not obj.wait(3000):
+                # A blocked ``run()`` override will not return on its own, and
+                # leaving it alive is precisely what crashes the process.
+                obj.terminate()
+                obj.wait(1000)
         except RuntimeError:  # C++ side already gone
             pass
 
     for widget in app.topLevelWidgets():
-        widget.close()
         widget.deleteLater()
     for _ in range(5):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
