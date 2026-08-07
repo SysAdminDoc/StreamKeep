@@ -2,6 +2,26 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
+## [Unreleased]
+
+- A live capture that is killed now leaves a playable recording. An MP4 keeps
+  its index in a `moov` atom the muxer writes when the file is *closed*, so a
+  capture ended by a crash or a power loss produced a file with every captured
+  byte on disk and none of it readable — measured against ffmpeg 8.1.2 by
+  killing an 8-second capture, the file held 1,048,624 bytes and ffprobe
+  reported "moov atom not found". Unbounded live captures into MP4-family
+  containers are now written fragmented and flushed per packet, so the file is
+  playable at whatever point it is cut; the same kill now plays back 7.5 of its
+  8 seconds. Matroska and MPEG-TS already wrote their structure as they went
+  and are untouched, and chunked capture already bounded the loss to the
+  segment in flight, so it is deliberately unchanged.
+
+- The final mux is no longer the step the whole capture depends on. A capture
+  that ends cleanly is repacked into a plain, seekable file, but its input is
+  already a complete recording and the result is swapped in only once it
+  exists — so interrupting the repack, or running it twice, costs nothing worse
+  than leaving the recording in its fragmented form, which still plays.
+
 ## [4.48.0] - 2026-08-07
 
 - The broad-exception guardrail now measures error visibility rather than

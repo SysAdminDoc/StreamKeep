@@ -81,6 +81,9 @@ class DownloadWorker(QThread):
         self.ytdlp_format = ""
         # V166: AI super-resolution video is excluded unless opted into.
         self.allow_synthesised_tracks = False
+        # V161: set when this capture was written in a truncation-safe form,
+        # so finalization knows there is a fragmented file to tidy up.
+        self._used_streaming_output = False
         self.ytdlp_format_sort = ""
         self.ytdlp_container = "mp4"
         self.ytdlp_audio_format = ""
@@ -1702,6 +1705,80 @@ class DownloadWorker(QThread):
             })
         return env
 
+    def _finalize_streaming_capture(self, outfile):
+        """Return a survived fragmented capture to a plain, seekable file.
+
+        This is the "final mux" the old design made the fragile step, and it is
+        now resumable in the only sense that matters: its input is already a
+        complete, playable recording, and the result is swapped in only once it
+        exists. Interrupt it, kill the machine, run it twice - the worst case
+        is that the capture stays fragmented, which still plays.
+        """
+        if not self._used_streaming_output:
+            return True
+        from ..live_capture import build_finalize_remux_command
+
+        source = str(outfile)
+        if not os.path.isfile(source) or os.path.getsize(source) <= 0:
+            return True
+        stem, suffix = os.path.splitext(source)
+        target = f"{stem}.streamkeep-final{suffix}"
+        try:
+            command = build_finalize_remux_command(
+                source, target, ffmpeg=self._ffmpeg_path or "ffmpeg",
+            )
+        except ValueError:
+            return True
+        try:
+            completed = subprocess.run(
+                command, capture_output=True, text=True,
+                creationflags=_CREATE_NO_WINDOW,
+                env=self._guarded_child_env(),
+            )
+            if (
+                completed.returncode == 0
+                and os.path.isfile(target)
+                and os.path.getsize(target) > 0
+            ):
+                os.replace(target, source)
+                return True
+            detail = (completed.stderr or "").strip().splitlines()
+            self.log.emit(
+                "[WARN] Could not repack the capture into a plain container; "
+                "the fragmented recording is complete and playable"
+                + (f": {detail[-1]}" if detail else "")
+            )
+        except (OSError, ValueError) as error:
+            self.log.emit(
+                f"[WARN] Could not repack the capture: {error}; the "
+                "fragmented recording is complete and playable"
+            )
+        finally:
+            if os.path.exists(target) and os.path.isfile(target):
+                try:
+                    os.remove(target)
+                except OSError:
+                    # The temp copy is inert; the real output is already sound.
+                    pass
+        return True
+
+    def _live_streaming_args(self, outfile, is_live_capture):
+        """Keep an unbounded live capture playable if its writer is killed.
+
+        Only for a live capture writing one continuous file. A fixed-duration
+        download ends by closing its own file, and chunked capture already
+        bounds the loss to the segment in flight - measured, both with and
+        without the equivalent segment option, so it is deliberately not
+        applied there.
+        """
+        if not is_live_capture:
+            return []
+        from ..live_capture import streaming_output_args
+
+        args = streaming_output_args(os.path.splitext(str(outfile))[1])
+        self._used_streaming_output = bool(args)
+        return args
+
     def _build_ffmpeg_download_cmd(
         self, outfile, start, duration, *, executable=None,
     ):
@@ -1740,6 +1817,7 @@ class DownloadWorker(QThread):
                     *self._ffmpeg_input_args(self.playlist_url),
                     *self._ffmpeg_input_args(self.audio_url),
                     "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+                    *self._live_streaming_args(outfile, is_live_capture),
                     "-y", outfile,
                 ]
             cmd = [
@@ -1755,6 +1833,7 @@ class DownloadWorker(QThread):
                 "-hide_banner", "-loglevel", "info",
                 *self._ffmpeg_input_args(self.playlist_url),
                 "-c", "copy", *( ["-an"] if self.mute else [] ),
+                *self._live_streaming_args(outfile, is_live_capture),
                 "-y", outfile,
             ]
         else:
@@ -1768,6 +1847,7 @@ class DownloadWorker(QThread):
             cmd.append("-an")
         if not is_live_capture:
             cmd.extend(["-t", str(duration)])
+        cmd.extend(self._live_streaming_args(outfile, is_live_capture))
         cmd.extend(["-y", outfile])
         return cmd
 
@@ -2901,6 +2981,7 @@ class DownloadWorker(QThread):
                             ):
                                 last_error = self._last_failure_reason
                                 break
+                        self._finalize_streaming_capture(outfile)
                         size = os.path.getsize(outfile)
                         self.progress.emit(seg_idx, 100, "Complete")
                         self.segment_done.emit(seg_idx, fmt_size(size))

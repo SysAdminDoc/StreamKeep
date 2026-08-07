@@ -334,3 +334,63 @@ def write_concat_list(staging_dir) -> str:
     except OSError:
         return ""
     return str(listing)
+
+
+# ── Truncation-safe live capture (V161) ─────────────────────────────
+# An MP4 keeps its index in a `moov` atom that the muxer writes when the file
+# is closed. A live capture that is killed - power loss, a crash, a hard stop -
+# therefore leaves a file with no index, and ffprobe reports "moov atom not
+# found": every byte captured is on disk and none of it is readable. Measured
+# against ffmpeg 8.1.2 by killing an 8-second capture: the plain MP4 wrote
+# 1,048,624 bytes and was unplayable, the fragmented one wrote 1,124,871 bytes
+# and played back 7.5 seconds.
+#
+# Fragmented MP4 writes a `moof`+`mdat` pair per fragment instead, so the file
+# on disk is playable at any point it is cut. That is the periodic flush: it
+# costs a little size and makes the file marginally less portable, which is why
+# a capture that ends cleanly is remuxed back to a plain MP4 afterwards.
+_FRAGMENTED_MP4_FLAGS = "+frag_keyframe+empty_moov+default_base_moof"
+
+#: Containers whose index is written at close and which therefore need it.
+_INDEX_AT_CLOSE_CONTAINERS = frozenset({"mp4", "m4a", "m4v", "mov"})
+
+
+def needs_streaming_flags(container) -> bool:
+    """Is this container unreadable when its writer is killed mid-file?"""
+    return str(container or "").strip().lstrip(".").lower() in (
+        _INDEX_AT_CLOSE_CONTAINERS
+    )
+
+
+def streaming_output_args(container) -> list[str]:
+    """ffmpeg output args that keep a live capture playable if it is cut.
+
+    Returns ``[]`` for containers that are already recoverable - Matroska and
+    MPEG-TS write their structure as they go - so this never changes a command
+    that did not have the problem.
+    """
+    if not needs_streaming_flags(container):
+        return []
+    # -flush_packets keeps the muxer from holding a fragment in the IO buffer,
+    # which is what decides how much of the tail survives the kill.
+    return ["-movflags", _FRAGMENTED_MP4_FLAGS, "-flush_packets", "1"]
+
+
+def build_finalize_remux_command(source, target, *, ffmpeg="ffmpeg"):
+    """Return the argv that turns a finished fragmented capture into a plain one.
+
+    A stream copy, written to a *new* file. The fragmented capture stays on
+    disk and playable until the remux has succeeded, so a mux interrupted at
+    any point costs nothing: the previous step's artifact is still a complete,
+    playable recording. That is what makes the final mux resumable rather than
+    the one fragile step the whole capture depends on.
+    """
+    if not str(source or "") or not str(target or ""):
+        raise ValueError("A finalize remux needs both a source and a target")
+    if os.path.abspath(str(source)) == os.path.abspath(str(target)):
+        raise ValueError("A finalize remux must not write over its own source")
+    return [
+        str(ffmpeg), "-hide_banner", "-nostdin", "-y",
+        "-i", str(source), "-c", "copy", "-movflags", "+faststart",
+        str(target),
+    ]
