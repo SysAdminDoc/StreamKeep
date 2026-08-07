@@ -124,7 +124,7 @@ _BOOL_CONFIG_KEYS = frozenset({
     "translate_metadata_enabled",
     "semantic_search_enabled",
     "ytdlp_live_from_start", "live_engine_fallback", "streamlink_live_engine",
-    "rate_governor_enabled",
+    "rate_governor_enabled", "backfill_oldest_first",
     "streamlink_hls_live_restart", "twitch_unmute",
     "ytdlp_embed_chapters",
     "ytdlp_embed_metadata", "ytdlp_embed_thumbnail",

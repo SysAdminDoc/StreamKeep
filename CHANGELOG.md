@@ -4,6 +4,18 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Channel backfill now fetches whatever is closest to being deleted, not
+  whatever is newest. Kick keeps a replay 7 days unverified and 30 verified,
+  and only 16 or 30 at a time, so working newest-first spent that budget
+  backwards: the newest item had the whole window left while the oldest might
+  have hours, and a long queue lost the oldest reachable VOD permanently. The
+  queue row states why an item was ordered where it was, including how much of
+  the window is left. Only platforms with a documented retention window are
+  reordered — guessing a policy and rearranging someone's queue on it would be
+  worse than doing nothing — and items with no usable publication date keep
+  their original position rather than displacing one whose urgency is known.
+  `backfill_oldest_first` turns it off.
+
 - A third pass of the database decomposition. The history action log gained the
   replay, compaction and row-deletion work that maintains it; the user
   tombstone ledger became its own module; published-recording identifiers,

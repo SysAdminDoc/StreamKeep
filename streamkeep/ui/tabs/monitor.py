@@ -1642,7 +1642,29 @@ class MonitorTabMixin:
         if source_url:
             from ...paths import source_archive_path
             archive_path = source_archive_path(source_url)
-        for v in vods:
+        # V169: platforms that delete their own replays decide how long we have
+        # to capture them, so fetch whatever is closest to expiring first.
+        # Platforms with no documented window are returned in their original
+        # order, which is why this can be called unconditionally.
+        from ...retention import order_backfill
+
+        entry_platform = ""
+        for entry in self.monitor.entries:
+            if entry.channel_id == channel_id:
+                entry_platform = entry.platform or ""
+                break
+        ordered = order_backfill(
+            vods,
+            entry_platform or (getattr(vods[0], "platform", "") if vods else ""),
+            # getattr: lightweight monitor test doubles carry no config, and
+            # the surrounding code already tolerates them.
+            enabled=bool(
+                (getattr(self, "_config", None) or {}).get(
+                    "backfill_oldest_first", True
+                )
+            ),
+        )
+        for v, backfill_note in ordered:
             try:
                 tombstone = _db.find_tombstone_for_item(v)
             except Exception:
@@ -1671,6 +1693,7 @@ class MonitorTabMixin:
                 v.source,
                 title=v.title,
                 platform=v.platform,
+                note=backfill_note,
                 vod_source=v.source,
                 vod_platform=v.platform,
                 vod_title=v.title,
