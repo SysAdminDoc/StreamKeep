@@ -335,6 +335,11 @@ def parse_hls_master(body, base_url):
             base_url = base_url + "/"
 
     rendition_groups = {"audio": {}, "subtitle": {}}
+    # A TYPE=VIDEO rendition carries no separate URI, but its NAME is the
+    # provider's own human label for the variant that references it. That is
+    # worth more than the URL's last path component, which on some CDNs is a
+    # bare index ("0.m3u8") rather than anything a person can choose between.
+    video_group_names = {}
     group_indexes = {}
     for raw_line in body.splitlines():
         line = raw_line.strip()
@@ -348,6 +353,10 @@ def parse_hls_master(body, base_url):
             else ""
         )
         group_id = attrs.get("GROUP-ID", "")
+        if media_type == "VIDEO" and group_id:
+            label = attrs.get("NAME", "").strip()
+            if label:
+                video_group_names.setdefault(group_id, label)
         if not kind or not group_id:
             continue
         key = (kind, group_id)
@@ -384,9 +393,12 @@ def parse_hls_master(body, base_url):
             frame_rate = _to_float(pending.get("FRAME-RATE"))
             # VIDEO-RANGE signals HDR (PQ/HLG) vs SDR for format selection.
             video_range = pending.get("VIDEO-RANGE", "").upper()
-            # Human-facing name: last path component, fall back to resolution.
+            # Human-facing name: the provider's own declared label for this
+            # variant's video rendition when it gives one, else the last path
+            # component, else the resolution.
             tail = q_url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
-            name = tail or res or "stream"
+            declared = video_group_names.get(pending.get("VIDEO", ""), "")
+            name = declared or tail or res or "stream"
             codecs = pending.get("CODECS", "")
             video_codec = codecs.split(",", 1)[0] if codecs else ""
             video_track = MediaTrackInfo(

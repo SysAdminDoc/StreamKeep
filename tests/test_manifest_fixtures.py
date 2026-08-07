@@ -260,6 +260,46 @@ class HLSMasterPlaylistTests(unittest.TestCase):
         self.assertIn("1280x720", resolutions)
         self.assertIn("640x360", resolutions)
 
+    def test_a_declared_video_rendition_name_beats_the_path_component(self):
+        """Some CDNs number their variant playlists, so the last path
+        component is "0.m3u8" and useless as a thing to choose between. When
+        the manifest declares a TYPE=VIDEO rendition, its NAME is the
+        provider's own label for that variant and is used instead."""
+        body = (
+            '#EXTM3U\n'
+            '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="1080p60",NAME="1080p60",'
+            'AUTOSELECT=YES,DEFAULT=YES\n'
+            '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="480p30",NAME="480p30",'
+            'AUTOSELECT=YES,DEFAULT=NO\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=1920x1080,'
+            'VIDEO="1080p60"\n'
+            '0.m3u8\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=854x480,'
+            'VIDEO="480p30"\n'
+            '1.m3u8\n'
+        )
+        qualities = parse_hls_master(body, "https://vod.example.com/x/")
+        self.assertEqual([q.name for q in qualities], ["1080p60", "480p30"])
+
+    def test_the_path_component_is_still_used_without_a_video_group(self):
+        body = (
+            '#EXTM3U\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=1920x1080\n'
+            '1080p60/playlist.m3u8\n'
+        )
+        qualities = parse_hls_master(body, "https://cdn.example.com/live/")
+        self.assertEqual([q.name for q in qualities], ["playlist.m3u8"])
+
+    def test_an_unnamed_video_group_does_not_blank_the_label(self):
+        body = (
+            '#EXTM3U\n'
+            '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="chunked",NAME=""\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=8000000,VIDEO="chunked"\n'
+            'source.m3u8\n'
+        )
+        qualities = parse_hls_master(body, "https://cdn.example.com/live/")
+        self.assertEqual([q.name for q in qualities], ["source.m3u8"])
+
     def test_master_variant_urls_resolved(self):
         qualities = parse_hls_master(
             _read("master.m3u8"),

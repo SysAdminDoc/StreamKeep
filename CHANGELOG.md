@@ -4,6 +4,34 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Kick VODs resolve and download again. Kick's site rework moved VOD delivery
+  off the endpoint the extractor used, which has returned 404 for anything
+  recent since — the same breakage that is still open upstream in yt-dlp
+  (issue 17284), so the fallback could not cover it either. Metadata is now
+  read from a channel-scoped listing keyed by the numeric creator id, and the
+  media URL is minted by a playback POST rather than read off the video
+  record. The legacy endpoint is still tried when the new path yields nothing,
+  because it continues to answer for some older archives, and a VOD that
+  cannot be resolved returns nothing rather than raising, so the yt-dlp
+  fallback still gets its turn. A subscriber-only VOD now says so instead of
+  reporting an empty source. The channel `/videos` listing enumerates past
+  broadcasts through the same path when the older listing stops answering.
+
+- Request headers an origin requires now travel with the stream to the
+  downloader. Kick's reworked delivery host answers a manifest fetch that
+  carries no `User-Agent` with a JSON security block, and its segments behave
+  the same way, so resolving succeeded while every download failed. Extractors
+  can report the headers their source needs, and FFmpeg is given them as
+  `-user_agent`/`-headers` for remote inputs; a browser handoff captured for
+  the same URL still wins where the two disagree.
+
+- HLS variants are labelled with the name the manifest declares for them.
+  Where a master playlist references a `TYPE=VIDEO` rendition group, that
+  rendition's `NAME` is now the variant's label. Providers that number their
+  variant playlists were previously listed as `0.m3u8`, `1.m3u8` and so on,
+  which is not something a person can choose between; they now read `1080p60`,
+  `480p30`. Manifests without video rendition groups are unchanged.
+
 - Took an explicit position on FFmpeg 9.0 instead of inheriting one. The
   capability floor was `8.1.2` with no ceiling, so FFmpeg 9.0 — released
   2026-08-04, a different library ABI — was already being accepted on any

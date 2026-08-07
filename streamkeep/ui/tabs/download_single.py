@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from ... import db as _db
 from ...extractors import Extractor, YtDlpExtractor
+from ...har import merge_stream_headers as _merge_stream_headers
 from ...theme import CAT
 from ...utils import (
     build_template_context as _build_template_context,
@@ -1168,7 +1169,10 @@ class DownloadSingleMixin:
             dub_lang=ytdlp_options["dub_lang"],
             mute=ytdlp_options["mute"],
             request_headers=tuple(
-                getattr(self, "_companion_request_headers", {}).items()
+                _merge_stream_headers(
+                    getattr(self, "_companion_request_headers", {}),
+                    self.stream_info,
+                ).items()
             ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=_dl_overrides.get("rate_limit") or YtDlpExtractor.rate_limit,

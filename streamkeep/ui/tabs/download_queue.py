@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from ... import db as _db
 from ...extractors import YtDlpExtractor
+from ...har import merge_stream_headers as _merge_stream_headers
 from ...models import HistoryEntry, ResumeState, StreamInfo
 from ...postprocess import AUDIO_EXTS, VIDEO_EXTS, PostProcessor
 from ...theme import CAT
@@ -1194,9 +1195,11 @@ class DownloadQueueMixin:
             ytdlp_source=ytdlp_source,
             ytdlp_format=ytdlp_format,
             request_headers=tuple(
-                getattr(self, "_companion_handoff_headers", {})
-                .get(str(item.get("url", "")), {})
-                .items()
+                _merge_stream_headers(
+                    getattr(self, "_companion_handoff_headers", {})
+                    .get(str(item.get("url", "")), {}),
+                    info,
+                ).items()
             ),
             cookies_browser=YtDlpExtractor.cookies_browser,
             rate_limit=rl,

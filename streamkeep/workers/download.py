@@ -1615,9 +1615,34 @@ class DownloadWorker(QThread):
         )
         if start is not None:
             args.extend(["-ss", str(start)])
+        if self._is_remote_input(input_url):
+            # Some origins reject FFmpeg's default `Lavf/` identity outright.
+            # These are the same headers the extractor used to read the
+            # manifest, so the segment fetches have to carry them too.
+            args.extend(self._ffmpeg_header_args())
         if self._guarded_proxy is not None and self._is_remote_input(input_url):
             args.extend(["-http_proxy", self._guarded_proxy.url])
         args.extend(["-i", input_url])
+        return args
+
+    def _ffmpeg_header_args(self):
+        """Render ``request_headers`` as FFmpeg input options."""
+        from ..har import normalize_replay_headers
+
+        headers = normalize_replay_headers(getattr(self, "request_headers", {}))
+        if not headers:
+            return []
+        args = []
+        extra = []
+        for name, value in headers.items():
+            # FFmpeg has a dedicated option for the User-Agent; passing it
+            # through -headers as well makes the request carry it twice.
+            if name.lower() == "user-agent":
+                args.extend(["-user_agent", value])
+            else:
+                extra.append(f"{name}: {value}")
+        if extra:
+            args.extend(["-headers", "".join(f"{line}\r\n" for line in extra)])
         return args
 
     def _guarded_child_env(self):

@@ -12,7 +12,7 @@ import logging
 import re
 
 from .. import CURL_UA
-from ..http import curl, curl_json
+from ..http import curl, curl_json, curl_post_json
 from ..hls import parse_hls_master, parse_hls_duration
 from ..models import StreamInfo, VODInfo
 from ..utils import fmt_duration
@@ -40,11 +40,36 @@ _OFFICIAL_API = "https://api.kick.com/public/v1"
 # playback_url.  Keep these as fallback until the official API covers media.
 _V2_API = "https://kick.com/api/v2"
 
-# Undocumented v1 — the only endpoint that resolves a VOD UUID to its HLS
-# master playlist (v2 no longer exposes video-by-uuid).
+# Legacy undocumented v1 on the main domain. This resolved a VOD UUID to its
+# HLS master until Kick's 2026 URL rework, after which it returns 404 for new
+# VODs (yt-dlp issue 17284). Kept because it still answers for some older
+# archives, but it is no longer tried first.
 _V1_API = "https://kick.com/api/v1"
 
+# The reworked path (V174). Kick moved VOD metadata and playback onto a
+# separate host: metadata is a channel-scoped list keyed by the numeric
+# creator id, and the media URL now comes from a POST that mints a playback
+# session rather than from a field on the video record.
+_WEB_API = "https://web.kick.com/api/v1"
+
 _JSON_HEADERS = {"User-Agent": CURL_UA, "Accept": "application/json"}
+_POST_HEADERS = {**_JSON_HEADERS, "Content-Type": "application/json"}
+
+# The playback endpoint rejects an empty body. These are the session objects
+# the web player sends; ``non_personalised_ads`` keeps the request from
+# carrying an advertising profile.
+_PLAYBACK_PAYLOAD = {
+    "video_player": {"player": {}},
+    "video_session": {},
+    "user_session": {"non_personalised_ads": True},
+}
+
+# ``status`` on a video record, mapped to why a source may be missing.
+_VOD_AVAILABILITY = {
+    "public": "public",
+    "private": "private",
+    "sub_only": "subscriber_only",
+}
 
 
 class KickExtractor(Extractor):
@@ -136,6 +161,154 @@ class KickExtractor(Extractor):
             title = str(ls.get("session_title") or ls.get("title") or "")
         return source, title
 
+    # ── Reworked web API helpers (V174) ───────────────────────────────
+
+    def _v2_channel(self, slug):
+        """Fetch the v2 channel record — the only source of the creator id."""
+        if not _SAFE_SLUG.match(slug or ""):
+            return None
+        data = curl_json(f"{_V2_API}/channels/{slug}", headers=_JSON_HEADERS)
+        return data if isinstance(data, dict) else None
+
+    def _creator_id(self, slug, channel=None):
+        """Return the numeric creator id for *slug* as a string, or ''.
+
+        The reworked endpoints are keyed by this id, not by the slug. It is
+        read from the v2 channel record, falling back to the official API's
+        ``broadcaster_user_id`` so a v2 outage does not take the path down.
+        """
+        record = channel if isinstance(channel, dict) else self._v2_channel(slug)
+        if isinstance(record, dict):
+            raw = record.get("id")
+            if isinstance(raw, (int, str)) and str(raw).strip().isdigit():
+                return str(raw).strip()
+        official = self._official_channel(slug) if slug else None
+        if isinstance(official, dict):
+            raw = official.get("broadcaster_user_id") or official.get("user_id")
+            if isinstance(raw, (int, str)) and str(raw).strip().isdigit():
+                return str(raw).strip()
+        return ""
+
+    def _web_playback(self, video_id):
+        """Mint a playback session for *video_id* via the reworked POST.
+
+        Returns the response dict, or ``None`` when the endpoint refuses. A
+        refusal is reported as a populated top-level ``data`` object carrying
+        ``type``/``details`` — a 200 with an error body, not an HTTP error —
+        so the presence of that key is what distinguishes failure, and the
+        caller degrades to another path rather than raising.
+        """
+        if not video_id or not _SAFE_UUID.match(video_id):
+            return None
+        payload = curl_post_json(
+            f"{_WEB_API}/stream/{video_id}/playback",
+            _PLAYBACK_PAYLOAD,
+            headers=_POST_HEADERS,
+        )
+        if not isinstance(payload, dict):
+            return None
+        if isinstance(payload.get("data"), dict) and payload["data"]:
+            detail = ": ".join(
+                str(payload["data"].get(key) or "")
+                for key in ("type", "details")
+                if payload["data"].get(key)
+            )
+            logger.info("Kick playback refused for %s: %s", video_id, detail)
+            return None
+        return payload
+
+    @staticmethod
+    def _playback_media_url(playback, live=False):
+        """Read the HLS URL out of a playback response.
+
+        ``playback_url`` is an object keyed by ``live``/``vod`` on the
+        reworked endpoint but a bare string on the v2 channel record, so both
+        shapes are accepted.
+        """
+        if not isinstance(playback, dict):
+            return ""
+        raw = playback.get("playback_url")
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, dict):
+            keys = ("live", "vod") if live else ("vod", "live")
+            for key in keys:
+                value = raw.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return ""
+
+    def _web_channel_videos(self, creator_id):
+        """List a channel's past broadcasts from the reworked endpoint."""
+        if not str(creator_id or "").isdigit():
+            return []
+        data = curl_json(
+            f"{_WEB_API}/channels/{creator_id}/videos", headers=_JSON_HEADERS,
+        )
+        if isinstance(data, dict):
+            data = data.get("data")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    def _web_video_record(self, creator_id, video_id):
+        """Find one video's metadata within its channel's listing."""
+        for item in self._web_channel_videos(creator_id):
+            if str(item.get("id") or "") == str(video_id):
+                return item
+        return None
+
+    def _web_vod_source(self, vod_id, slug, log_fn=None):
+        """Resolve a VOD through the reworked path.
+
+        Returns ``{source, title, availability, channel}``; an empty ``source``
+        means the caller should try another path. The playback POST is what
+        carries the creator id, so metadata is looked up only once a session
+        exists — which is also how a slugless ``/video/<uuid>`` permalink
+        recovers its channel.
+        """
+        empty = {"source": "", "title": "", "availability": "", "channel": ""}
+        playback = self._web_playback(vod_id)
+        if not playback:
+            return empty
+        found = dict(empty)
+        found["source"] = self._playback_media_url(playback)
+        session = playback.get("video_session")
+        creator_id = ""
+        if isinstance(session, dict):
+            creator_id = str(session.get("creator_id") or "")
+        if not creator_id and slug:
+            creator_id = self._creator_id(slug)
+        record = self._web_video_record(creator_id, vod_id) if creator_id else None
+        if isinstance(record, dict):
+            found["title"] = str(record.get("title") or "")
+            found["availability"] = _VOD_AVAILABILITY.get(
+                str(record.get("status") or ""), "",
+            )
+            channel = record.get("channel")
+            if isinstance(channel, dict):
+                found["channel"] = str(channel.get("slug") or "")
+        if not found["source"] and found["availability"] == "subscriber_only":
+            self._log(
+                log_fn,
+                f"Kick VOD {vod_id} is subscriber-only; no playable source "
+                "without a subscribed session.",
+            )
+        return found
+
+    @staticmethod
+    def _web_video_duration_ms(record):
+        """Return a video record's duration in milliseconds.
+
+        The reworked record reports seconds where the v2 record reported
+        milliseconds, so the unit has to be chosen per shape rather than
+        assumed - reading one as the other is a 1000x error in the UI.
+        """
+        raw = (record or {}).get("duration")
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            return 0
+        return int(max(0.0, seconds) * 1000)
+
     # ── Public interface ──────────────────────────────────────────────
 
     def check_live(self, url):
@@ -173,6 +346,12 @@ class KickExtractor(Extractor):
         api_url = f"{_V2_API}/channels/{slug}/videos?page={page}"
         data = curl_json(api_url, headers=_JSON_HEADERS)
         if not data or not isinstance(data, list):
+            # The v2 listing did not answer. Fall through to the reworked
+            # channel listing, which is keyed by creator id and returns the
+            # whole archive in one unpaged response.
+            web_vods = self._list_web_vods(slug, log_fn)
+            if web_vods:
+                return web_vods, None
             self._log(log_fn, "No VODs found or API error")
             return [], None
 
@@ -216,6 +395,48 @@ class KickExtractor(Extractor):
         next_cursor = str(page + 1) if len(data) >= 20 else None
         return vods, next_cursor
 
+    def _list_web_vods(self, slug, log_fn=None):
+        """Enumerate past broadcasts through the reworked channel listing.
+
+        Records here carry no media URL — the source is minted per video by
+        the playback POST — so each entry is given its permalink and resolved
+        on demand. That is also why this listing is not paged: it returns the
+        channel's archive in one response.
+        """
+        creator_id = self._creator_id(slug)
+        if not creator_id:
+            return []
+        records = self._web_channel_videos(creator_id)
+        if not records:
+            return []
+        vods = []
+        for record in records:
+            vod_id = str(record.get("id") or "")
+            if not _SAFE_UUID.fullmatch(vod_id):
+                continue
+            duration_ms = self._web_video_duration_ms(record)
+            channel = record.get("channel")
+            channel_slug = slug
+            if isinstance(channel, dict):
+                channel_slug = str(channel.get("slug") or slug)
+            permalink = f"https://kick.com/{channel_slug}/videos/{vod_id}"
+            vods.append(self._canonicalize_vod_info(VODInfo(
+                title=str(record.get("title") or "Untitled"),
+                date=str(record.get("start_time") or record.get("created_at") or ""),
+                # Resolving the permalink is what mints the media URL.
+                source=permalink,
+                is_live=bool(record.get("is_live", False)),
+                viewers=int(record.get("viewer_count") or 0),
+                duration=fmt_duration(duration_ms / 1000) if duration_ms else "",
+                duration_ms=duration_ms,
+                platform="Kick",
+                channel=channel_slug,
+                source_id=f"vod:{vod_id}",
+                webpage_url=permalink,
+            )))
+        self._log(log_fn, f"Found {len(vods)} VOD(s) via the reworked listing")
+        return vods
+
     def resolve(self, url, log_fn=None):
         """Resolve Kick URL to StreamInfo with qualities."""
         slug = self.extract_channel_id(url) or ""
@@ -229,7 +450,19 @@ class KickExtractor(Extractor):
             )
         vod_id = self.extract_vod_id(url)
         if vod_id:
-            source, title = self._v1_video(vod_id)
+            # Reworked path first: since Kick's URL rework the legacy
+            # video-by-uuid endpoint 404s for anything recent (yt-dlp 17284).
+            # The legacy call is still made when the new one yields nothing,
+            # because it continues to answer for some older archives.
+            found = self._web_vod_source(vod_id, slug, log_fn)
+            source, title = found["source"], found["title"]
+            # A slugless /video/<uuid> permalink carries no channel, so take
+            # the one the reworked metadata reports.
+            slug = slug or found["channel"]
+            if not source:
+                legacy_source, legacy_title = self._v1_video(vod_id)
+                source = legacy_source
+                title = title or legacy_title
             if source:
                 return self._resolve_m3u8(
                     source,
@@ -241,8 +474,15 @@ class KickExtractor(Extractor):
                         f"https://kick.com/{slug}/videos/{vod_id}"
                         if slug else f"https://kick.com/video/{vod_id}"
                     ),
+                    # The reworked delivery host refuses a request with no
+                    # User-Agent, answering the manifest fetch with a JSON
+                    # security block instead of the playlist.
+                    headers=_JSON_HEADERS,
                 )
-            self._log(log_fn, f"Kick VOD {vod_id}: no source URL (private/pruned?)")
+            reason = found["availability"] or "private/pruned?"
+            self._log(log_fn, f"Kick VOD {vod_id}: no source URL ({reason})")
+            # Returning None rather than raising is what lets FetchWorker
+            # retry the URL through the yt-dlp fallback.
             return None
         if slug:
             # Live check via v2 — only v2 returns playback_url
@@ -266,13 +506,19 @@ class KickExtractor(Extractor):
                 return info
         vods, _ = self.list_vods(url, log_fn)
         if len(vods) == 1:
+            only = vods[0]
+            # Reworked listing entries carry a permalink rather than a media
+            # URL, because the source is minted per video by the playback
+            # POST. Resolve through the permalink so that step still happens.
+            if self.extract_vod_id(only.source):
+                return self.resolve(only.source, log_fn)
             return self._resolve_m3u8(
-                vods[0].source,
+                only.source,
                 log_fn,
-                channel=slug or vods[0].channel,
-                title=vods[0].title,
-                source_id=vods[0].source_id,
-                webpage_url=vods[0].webpage_url,
+                channel=slug or only.channel,
+                title=only.title,
+                source_id=only.source_id,
+                webpage_url=only.webpage_url,
             )
         return None  # Multiple VODs handled by UI
 
@@ -293,6 +539,9 @@ class KickExtractor(Extractor):
             title=title or "",
             source_id=source_id,
             webpage_url=webpage_url,
+            # Whatever was needed to read the manifest is needed again for
+            # every segment, so it travels with the stream to the downloader.
+            http_headers=dict(request_headers),
         )
 
         if "#EXT-X-STREAM-INF" in body:

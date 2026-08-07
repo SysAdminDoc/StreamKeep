@@ -62,13 +62,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
 
 #### P1 — Next
 
-- [ ] P1 — V174 — Ship the reworked Kick extraction path while upstream is broken
-  Why: Kick VOD metadata has been returning 404 upstream since the site's URL rework, the fix PR is open and unmerged, and Kick is StreamKeep's defensible ground (Ganymede has declined it). The replacement endpoints are documented in the issue, so this is buildable now — and it is the clearest demonstration of why owning a native extractor is worth its maintenance cost.
-  Evidence: https://github.com/yt-dlp/yt-dlp/issues/17284 (open, last touched 2026-08-04; documents `mobile.kick.com/api/v1/channels/{channel_id}/videos/{video_id}` for metadata and a POST to `.../stream/{video_id}/playback` with an `android_ivs` identity returning `playback_url.live` and `playback_url.vod`); https://github.com/yt-dlp/yt-dlp/pull/17322 (canonical shape, unmerged); https://github.com/yt-dlp/yt-dlp/issues/15888 (`/videos` channel playlist still unsupported upstream); `streamkeep/extractors/kick.py`.
-  Touches: `streamkeep/extractors/kick.py`, `streamkeep/workers/fetch.py` fallback path, `tests/test_extractors.py`, fixtures.
-  Acceptance: a Kick VOD permalink resolves and downloads when the yt-dlp fallback fails; the channel `/videos` listing enumerates past broadcasts; the extractor degrades to the yt-dlp fallback rather than erroring when Kick changes again; fixtures cover both the old and new response shapes.
-  Complexity: M
-
 - [ ] P1 — V154 — Give failures a typed, machine-readable taxonomy
   Why: the failure ledger records text, so nothing can distinguish "retry later" (throttled, transient network, scheduled stream not live) from "gone forever" (deleted, geo-blocked, members-only) — which is what drives retry policy, recovery guidance and queue poisoning. yt-dlp has declined this for years, and a frontend owning its own queue is the only place it can exist.
   Evidence: https://github.com/yt-dlp/yt-dlp/issues/1659 and https://github.com/yt-dlp/yt-dlp/issues/457 (declined/deferred); https://github.com/kieraneglin/pinchflat/issues/648 (members-only videos permanently poison the queue, 16 reactions); Sonarr's ~29 named accept/reject specifications; `streamkeep/db/_legacy.py` `failed_jobs`, `streamkeep/ui/recover_dialog.py`.

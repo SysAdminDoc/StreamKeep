@@ -132,6 +132,20 @@ def normalize_replay_headers(raw_headers):
     return _replay_headers(raw_headers)
 
 
+def merge_stream_headers(handoff, info):
+    """Combine browser-handoff headers with the ones a stream needs.
+
+    An extractor can report headers its origin requires in order to serve the
+    manifest and its segments (``StreamInfo.http_headers``). Those are a
+    property of the source, so a per-URL handoff captured from the browser
+    wins where the two disagree — the user's own capture is the more specific
+    statement about that request.
+    """
+    merged = dict(normalize_replay_headers(getattr(info, "http_headers", {})))
+    merged.update(normalize_replay_headers(handoff))
+    return merged
+
+
 def replay_header_argv(headers):
     """Return safe ``--add-header`` argv for a normalized handoff mapping."""
     argv = []

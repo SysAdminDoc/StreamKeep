@@ -145,6 +145,13 @@ class StreamInfo:
     # endpoint used by the downloader; these fields are safe for sidecars.
     source_id: str = ""
     webpage_url: str = ""
+    # Request headers the origin needs in order to serve ``url`` and its
+    # segments. Some hosts reject a bare request outright — Kick's reworked
+    # delivery host answers a manifest fetch with no User-Agent by returning a
+    # JSON security block — so whatever the extractor used to resolve has to
+    # travel with the stream to the downloader. Never credential material:
+    # cookies and auth are carried by their own profile-bound channels.
+    http_headers: dict[str, str] = field(default_factory=dict)
     # Parsed Podcasting 2.0 item metadata. Kept separate from the delivery
     # fields so a queue/finalizer can preserve the publisher's public tags.
     podcast_metadata: dict = field(default_factory=dict)

@@ -149,10 +149,19 @@ class TestKickExtractorURL(unittest.TestCase):
 
 
 class TestKickExtractorResolve(unittest.TestCase):
-    """Kick resolve() and list_vods() with mocked HTTP."""
+    """Kick resolve() and list_vods() with mocked HTTP.
+
+    These cover the legacy response shapes. The reworked path is tried first,
+    so ``curl_post_json`` is stubbed to refuse for the whole class — that is
+    exactly the "new endpoint is unavailable, fall back" case, and it also
+    keeps the suite from issuing a real request to web.kick.com.
+    """
 
     def setUp(self):
         self.ext = KickExtractor()
+        playback = patch(f"{_KICK}.curl_post_json", return_value=None)
+        self.mock_playback = playback.start()
+        self.addCleanup(playback.stop)
 
     @patch(f"{_KICK}.curl_json")
     @patch(f"{_KICK}.curl")
@@ -186,12 +195,25 @@ class TestKickExtractorResolve(unittest.TestCase):
 
     @patch(f"{_KICK}.curl_json")
     def test_resolve_no_livestream_no_vods(self, mock_curl_json):
-        mock_curl_json.side_effect = [
-            {"data": {}},   # _v2_livestream_data — no playback_url
-            [],              # list_vods API
-        ]
+        # After the v2 listing comes back empty the reworked listing is tried,
+        # which needs a creator id; every lookup here answers with nothing.
+        mock_curl_json.return_value = None
         info = self.ext.resolve("https://kick.com/offline_user")
         self.assertIsNone(info)
+
+    @patch(f"{_KICK}.curl_json")
+    def test_resolve_falls_through_every_path_before_giving_up(
+        self, mock_curl_json,
+    ):
+        """Returning None rather than raising is what lets FetchWorker retry
+        the URL through the yt-dlp fallback."""
+        mock_curl_json.side_effect = [
+            {"data": {}},   # _v2_livestream_data - no playback_url
+            [],             # v2 list_vods
+            None,           # _v2_channel for the creator id
+            None,           # official channel lookup
+        ]
+        self.assertIsNone(self.ext.resolve("https://kick.com/offline_user"))
 
     @patch(f"{_KICK}.curl_json")
     def test_resolve_api_returns_none(self, mock_curl_json):
@@ -357,6 +379,241 @@ class TestKickExtractorResolve(unittest.TestCase):
         result = self.ext.check_live("https://twitch.tv/nope")
         self.assertIsNone(result)
         mock_curl_json.assert_not_called()
+
+
+class TestKickReworkedApi(unittest.TestCase):
+    """Kick's post-URL-rework endpoints (V174).
+
+    Since the rework the legacy video-by-uuid endpoint 404s, VOD metadata is a
+    channel-scoped list keyed by the numeric creator id, and the media URL is
+    minted by a POST rather than read off the video record.
+    """
+
+    VOD_ID = "019f77a6-ec40-7e2d-b1fc-575b6801b20d"
+    PERMALINK = f"https://kick.com/xqc/videos/{VOD_ID}"
+
+    def setUp(self):
+        self.ext = KickExtractor()
+
+    def _playback(self, vod_url="https://vod.kick.com/master.m3u8"):
+        return {
+            "playback_url": {"vod": vod_url, "live": ""},
+            "video_session": {"creator_id": "668"},
+        }
+
+    def _video_record(self, status="public", duration=7200):
+        return {
+            "id": self.VOD_ID,
+            "title": "Reworked archive",
+            "status": status,
+            "duration": duration,
+            "is_live": False,
+            "viewer_count": 1234,
+            "start_time": "2026-07-26T10:00:00Z",
+            "channel": {"slug": "xqc", "username": "xQc"},
+        }
+
+    def _master(self):
+        return (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=1920x1080\n"
+            "1080p60/playlist.m3u8\n"
+        )
+
+    @patch(f"{_KICK}.curl")
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_vod_resolves_through_the_reworked_path(
+        self, mock_post, mock_curl_json, mock_curl,
+    ):
+        mock_post.return_value = self._playback()
+        mock_curl_json.return_value = {"data": [self._video_record()]}
+        mock_curl.side_effect = [
+            self._master(),
+            "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n",
+        ]
+
+        info = self.ext.resolve(self.PERMALINK)
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Reworked archive")
+        self.assertEqual(info.channel, "xqc")
+        self.assertEqual(info.source_id, f"vod:{self.VOD_ID}")
+        self.assertGreater(len(info.qualities), 0)
+        # The playback session is a POST to the reworked host, with the body
+        # the endpoint requires - it rejects an empty one.
+        url, payload = mock_post.call_args.args[0], mock_post.call_args.args[1]
+        self.assertEqual(url, f"https://web.kick.com/api/v1/stream/{self.VOD_ID}/playback")
+        self.assertIn("video_session", payload)
+        self.assertTrue(payload["user_session"]["non_personalised_ads"])
+
+    @patch(f"{_KICK}.curl")
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_refused_playback_falls_back_to_the_legacy_shape(
+        self, mock_post, mock_curl_json, mock_curl,
+    ):
+        """A refusal arrives as HTTP 200 with a populated ``data`` object, not
+        as an HTTP error, so the presence of that key is the tell."""
+        mock_post.return_value = {
+            "data": {"type": "not_found", "details": "video unavailable"},
+        }
+        mock_curl_json.return_value = {
+            "source": "https://legacy.kick.com/master.m3u8",
+            "livestream": {"session_title": "Older archive"},
+        }
+        mock_curl.side_effect = [
+            self._master(),
+            "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n",
+        ]
+
+        info = self.ext.resolve(self.PERMALINK)
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Older archive")
+
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_subscriber_only_vod_reports_why_and_does_not_raise(
+        self, mock_post, mock_curl_json,
+    ):
+        mock_post.return_value = {
+            "playback_url": {"vod": ""},
+            "video_session": {"creator_id": "668"},
+        }
+        mock_curl_json.return_value = {
+            "data": [self._video_record(status="sub_only")],
+        }
+        logged = []
+
+        self.assertIsNone(self.ext.resolve(self.PERMALINK, logged.append))
+        self.assertTrue(
+            any("subscriber-only" in line for line in logged),
+            f"expected a subscriber-only explanation, got {logged}",
+        )
+
+    def test_the_playback_url_object_and_the_bare_string_are_both_read(self):
+        # The reworked endpoint returns an object; the v2 channel record still
+        # returns a bare string.
+        self.assertEqual(
+            self.ext._playback_media_url({"playback_url": {"vod": "v", "live": "l"}}),
+            "v",
+        )
+        self.assertEqual(
+            self.ext._playback_media_url(
+                {"playback_url": {"vod": "v", "live": "l"}}, live=True,
+            ),
+            "l",
+        )
+        self.assertEqual(
+            self.ext._playback_media_url({"playback_url": "https://bare/x.m3u8"}),
+            "https://bare/x.m3u8",
+        )
+        self.assertEqual(self.ext._playback_media_url({}), "")
+        self.assertEqual(self.ext._playback_media_url(None), "")
+
+    def test_the_reworked_record_reports_seconds_not_milliseconds(self):
+        """Reading one unit as the other is a 1000x error in the UI."""
+        self.assertEqual(self.ext._web_video_duration_ms({"duration": 7200}), 7_200_000)
+        self.assertEqual(self.ext._web_video_duration_ms({"duration": 0}), 0)
+        self.assertEqual(self.ext._web_video_duration_ms({}), 0)
+        self.assertEqual(self.ext._web_video_duration_ms({"duration": "bad"}), 0)
+        self.assertEqual(self.ext._web_video_duration_ms({"duration": -5}), 0)
+
+    @patch(f"{_KICK}.curl_json")
+    def test_the_channel_listing_enumerates_past_broadcasts(self, mock_curl_json):
+        second = self._video_record(duration=1800)
+        second["id"] = "019f9c52-2528-75fd-a634-199577affa36"
+        second["title"] = "Second archive"
+        mock_curl_json.side_effect = [
+            None,                                   # v2 /videos is gone
+            {"id": 668, "user": {"username": "xQc"}},   # v2 channel -> creator id
+            {"data": [self._video_record(), second]},   # reworked listing
+        ]
+
+        vods, cursor = self.ext.list_vods("https://kick.com/xqc")
+
+        self.assertEqual([v.title for v in vods], ["Reworked archive", "Second archive"])
+        self.assertEqual(vods[0].duration_ms, 7_200_000)
+        self.assertEqual(vods[0].channel, "xqc")
+        # Records carry no media URL, so each entry points at its permalink
+        # and the source is minted when that permalink is resolved.
+        self.assertEqual(vods[0].source, self.PERMALINK)
+        self.assertEqual(vods[0].source_id, f"vod:{self.VOD_ID}")
+        # The reworked listing is unpaged - it returns the whole archive.
+        self.assertIsNone(cursor)
+
+    @patch(f"{_KICK}.curl")
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_slugless_permalink_recovers_its_channel_from_metadata(
+        self, mock_post, mock_curl_json, mock_curl,
+    ):
+        """`kick.com/video/<uuid>` carries no slug, and the canonical
+        webpage_url the library stores is that slugless form - so re-resolving
+        a stored recording must not lose the channel."""
+        mock_post.return_value = self._playback()
+        mock_curl_json.return_value = {"data": [self._video_record()]}
+        mock_curl.side_effect = [
+            self._master(),
+            "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n",
+        ]
+
+        info = self.ext.resolve(f"https://kick.com/video/{self.VOD_ID}")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.channel, "xqc")
+
+    @patch(f"{_KICK}.curl_json")
+    def test_the_creator_id_falls_back_to_the_official_api(self, mock_curl_json):
+        mock_curl_json.side_effect = [
+            None,                                             # v2 channel down
+            {"data": [{"broadcaster_user_id": 4242}]},        # official API
+        ]
+        self.assertEqual(self.ext._creator_id("xqc"), "4242")
+
+    @patch(f"{_KICK}.curl_json")
+    def test_a_non_numeric_creator_id_is_refused(self, mock_curl_json):
+        mock_curl_json.side_effect = [
+            {"id": "../../etc"},
+            None,
+        ]
+        self.assertEqual(self.ext._creator_id("xqc"), "")
+        self.assertEqual(self.ext._web_channel_videos("../../etc"), [])
+
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_malformed_vod_id_never_reaches_the_network(self, mock_post):
+        self.assertIsNone(self.ext._web_playback("../../etc/passwd"))
+        self.assertIsNone(self.ext._web_playback(""))
+        mock_post.assert_not_called()
+
+    @patch(f"{_KICK}.curl")
+    @patch(f"{_KICK}.curl_json")
+    @patch(f"{_KICK}.curl_post_json")
+    def test_a_lone_reworked_vod_resolves_through_its_permalink(
+        self, mock_post, mock_curl_json, mock_curl,
+    ):
+        """A listing entry's source is a permalink, so resolving a channel with
+        one archived broadcast has to take the playback step, not treat the
+        permalink as a playlist."""
+        mock_post.return_value = self._playback()
+        mock_curl_json.side_effect = [
+            {"data": {}},                                # no livestream
+            None,                                        # v2 /videos gone
+            {"id": 668, "user": {"username": "xQc"}},    # creator id
+            {"data": [self._video_record()]},            # reworked listing
+            {"data": [self._video_record()]},            # metadata on resolve
+        ]
+        mock_curl.side_effect = [
+            self._master(),
+            "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n",
+        ]
+
+        info = self.ext.resolve("https://kick.com/xqc")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.source_id, f"vod:{self.VOD_ID}")
+        self.assertGreater(len(info.qualities), 0)
 
 
 # ===================================================================
