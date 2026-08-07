@@ -2,6 +2,55 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## [4.53.0] - 2026-08-07
+
+- Deleted-VOD recovery now says what happened instead of just failing. Every
+  candidate CDN domain is probed and reported individually, because Twitch
+  rotates those domains — so "nothing found" without a per-domain answer cannot
+  tell a stale domain list from a VOD that is genuinely gone. Each outcome is
+  named: served, not on this domain, unreachable, or gated.
+  **Recovery now refuses a VOD the platform is gating.** It reconstructs URLs for
+  segments the CDN still serves unauthenticated; a 401 or 403 means it does not,
+  and the attempt stops there with the reason stated rather than trying the next
+  domain, the next quality, and the other timestamp guesses until something
+  answers. Working around an access control is not what this feature is for.
+  Separately, a stream whose date could not be parsed used to be skipped in
+  complete silence — the fallback scraper emits dates with seconds and ISO
+  separators that the parser did not accept, producing no timestamps and so no
+  probes at all. Those formats are now understood, and a date that genuinely
+  cannot be read is reported instead of vanishing.
+
+- Declarative source adapters now travel with a backup, so moving a profile to
+  another machine no longer silently leaves your custom site definitions behind.
+  They arrive **inert**: a restore strips the per-adapter contract approvals, so
+  every definition is review-required on the machine it lands on. Carrying the
+  approvals would have turned a backup file into a way to enable a third-party
+  request description that nobody reviewed there — and because the stripping
+  happens on restore rather than on create, backups made before this change are
+  covered too. Plugins remain excluded, and the reason is now stated in the
+  restore report: they are executable Python, and no review gate makes arbitrary
+  code safe the way it can a data-only definition. Every exclusion is reported,
+  so a missing directory is never something you discover later.
+
+- The browser companion's security boundary is now a module you can read end to
+  end. Bearer-token minting and validation, the scope vocabulary, the pairing
+  code exchange, and the nonce replay ledger moved out of the 2,748-line request
+  handler into `streamkeep/server/auth.py`, which previously only forwarded to
+  it. Behaviour is unchanged.
+
+- Fixed the same patch-reach defect in the companion server facade that the
+  database facade had: once the auth layer owned its own definitions, patching a
+  name on `streamkeep.local_server` reached the legacy module but not the module
+  where the code actually lives. Reading the name back returned the patch either
+  way, so nothing could see the gap.
+
+- Host and origin validation — which `Host` header and which browser `Origin`
+  the companion will accept, a security decision rather than a formatting one —
+  now lives in `streamkeep/server/origins.py`, and the remote UI's language
+  selection and template rendering moved next to the asset loader that already
+  served it. The companion's request-handler module is down to 2,340 lines from
+  2,748 at the start of this work. Behaviour is unchanged.
+
 ## [4.52.0] - 2026-08-07
 
 - Fixed a release-metadata bug that had been deleting a release from the Linux

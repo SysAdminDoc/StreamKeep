@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.53.0" date="2026-08-07">
+      <description><p>Your custom site definitions now travel with a backup, arriving inert: a restore strips the per-adapter approvals so each one is review-required on the machine it lands on. Plugins are still never restored, and the restore report now says so rather than leaving their absence to be discovered. Deleted-VOD recovery reports what every candidate CDN domain said instead of just failing, and refuses outright when the platform is gating a VOD rather than probing around the control. Internally the browser companion's security boundary, host and origin validation, and remote-UI rendering all became modules that own their own code.</p></description>
+    </release>
     <release version="4.52.0" date="2026-08-07">
       <description><p>The yt-dlp update channel is now a setting: StreamKeep still ships a frozen, version-checked build by default, but you can point it at your own to follow nightly, and a build below the supported floor is refused by name rather than trusted. The health panel reports which channel is actually in use, not the one requested. An intermittent crash at the end of a test run was traced to a background health probe still running when the window that owned it went away; stopping such a probe no longer requires killing the thread it runs on.</p></description>
     </release>
