@@ -4,6 +4,15 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Asking what runtimes are installed no longer crashes on an unsupported
+  architecture. A pinned Deno asset exists for five host triples, and on
+  anything else `host_target` raised straight out of `get_runtime_capabilities`
+  — so a niche architecture could not read its own capability registry at all,
+  rather than simply being told the runtime is missing. It is now reported
+  like any other absent runtime, and the repair text points at installing a
+  runtime on PATH instead of at the managed installer, which has no asset for
+  that host and would fail.
+
 - The selected toggle is legible in the light theme, and stays legible with a
   custom accent. `QPushButton#toggleAccent:checked` rendered the accent on a
   light surface at 4.40:1 — below WCAG AA, in a *selected* state, which is

@@ -436,3 +436,65 @@ class ReleaseFloorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnsupportedHostArchitectureTests(unittest.TestCase):
+    """V158 — an unsupported host is a missing runtime, not a crash.
+
+    A pinned Deno asset exists for five host triples. On anything else
+    ``host_target`` raises, and that escaped the managed probe into
+    ``get_runtime_capabilities``: asking "what runtimes do I have?" crashed
+    instead of answering "not this one". The managed probe is exercised
+    directly because a machine with Node on PATH never reaches it.
+    """
+
+    def _unsupported(self):
+        from streamkeep import javascript_runtime as jsr
+
+        return (
+            mock.patch.object(jsr.platform, "machine", return_value="riscv64"),
+            mock.patch.object(jsr.platform, "system", return_value="Linux"),
+            mock.patch.object(jsr, "bundled_deno_path", return_value=""),
+        )
+
+    def test_the_managed_probe_reports_instead_of_raising(self):
+        machine, system, bundled = self._unsupported()
+        with machine, system, bundled:
+            record = capabilities._probe_managed_javascript_runtime()
+
+        self.assertFalse(record["available"])
+        self.assertFalse(record["supported"])
+        self.assertEqual(record["provenance"], "unsupported-host")
+        self.assertIn("riscv64", record["detail"])
+
+    def test_the_repair_text_does_not_send_them_at_an_impossible_install(self):
+        machine, system, bundled = self._unsupported()
+        with machine, system, bundled:
+            record = capabilities._probe_managed_javascript_runtime()
+
+        # The managed installer has no asset for this host, so pointing at it
+        # would be the one action guaranteed to fail.
+        self.assertNotIn("--install-deno", record["repair"])
+        self.assertIn("PATH", record["repair"])
+
+    def test_the_full_registry_survives_an_unsupported_host(self):
+        machine, system, bundled = self._unsupported()
+        with machine, system, bundled:
+            registry = capabilities.get_runtime_capabilities(
+                refresh=True, config={"javascript_runtime_preference": "managed"},
+            )
+        self.assertIn("javascript", registry)
+
+    def test_a_supported_host_still_probes_normally(self):
+        from streamkeep import javascript_runtime as jsr
+
+        with mock.patch.object(jsr.platform, "machine", return_value="AMD64"),                 mock.patch.object(jsr.platform, "system", return_value="Windows"),                 mock.patch.object(jsr, "bundled_deno_path", return_value=""):
+            record = capabilities._probe_managed_javascript_runtime()
+        self.assertNotEqual(record.get("provenance"), "unsupported-host")
+
+    def test_host_target_still_refuses_an_unknown_host_by_name(self):
+        from streamkeep.javascript_runtime import DenoRuntimeError, host_target
+
+        with self.assertRaises(DenoRuntimeError) as caught:
+            host_target(system="Plan9", machine="sparc")
+        self.assertIn("sparc", str(caught.exception))

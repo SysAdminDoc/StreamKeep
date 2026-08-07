@@ -71,13 +71,6 @@ Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0
   Acceptance: the crash is reproduced under `-p no:randomly` with a narrowed test set and either fixed or pinned to a named upstream issue; a full suite run repeated ten times shows no access violation.
   Complexity: M
 
-- [ ] P2 — V158 — Guard capability probing on unsupported host architectures
-  Why: `host_target()` raises for anything outside five pinned triples and the capability probe has no guard, so Windows-on-ARM64 with no PATH JavaScript runtime raises out of `get_runtime_capabilities` instead of reporting a missing runtime.
-  Evidence: `streamkeep/javascript_runtime.py:99-116`, `:182-186`; `streamkeep/capabilities.py:400-403`, `:1010-1019`.
-  Touches: `streamkeep/capabilities.py`, tests.
-  Acceptance: an unsupported host returns the existing "missing runtime" capability record with repair guidance; a test simulating an unknown `platform.machine()` does not raise.
-  Complexity: S
-
 - [ ] P2 — V159 — Make the power policy sleep instead of hibernate
   Why: `rundll32 powrprof.dll,SetSuspendState 0,1,0` ignores its first argument, so any machine with hibernation enabled hibernates when the user asked for sleep.
   Evidence: `streamkeep/power.py:189`.

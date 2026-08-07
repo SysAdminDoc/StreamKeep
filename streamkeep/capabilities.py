@@ -1068,12 +1068,31 @@ def _probe_managed_javascript_runtime():
     from .javascript_runtime import (
         DENO_VERSION,
         DENO_MINIMUM_VERSION,
+        DenoRuntimeError,
         bundled_deno_path,
         get_managed_deno_info,
     )
 
-    bundled = bundled_deno_path()
-    managed = get_managed_deno_info() if not bundled else {}
+    # A pinned Deno asset exists for five host triples. Anything else — a
+    # niche architecture, a BSD — makes `host_target` raise, and that used to
+    # escape the whole capability registry: asking "what runtimes do I have?"
+    # crashed instead of answering "not this one". An unsupported host is a
+    # missing runtime, reported like any other.
+    try:
+        bundled = bundled_deno_path()
+        managed = get_managed_deno_info() if not bundled else {}
+    except DenoRuntimeError as error:
+        bundled = ""
+        managed = {
+            "available": False,
+            "path": "",
+            "version": "",
+            "provenance": "unsupported-host",
+            "source": "",
+            "asset": "",
+            "pinned_archive_sha256": "",
+            "detail": str(error),
+        }
     info = managed or {
         "available": bool(bundled),
         "path": bundled,
@@ -1086,12 +1105,18 @@ def _probe_managed_javascript_runtime():
     }
     path = str(info.get("path") or "") if info.get("available") else ""
     if not path:
+        unsupported = info.get("provenance") == "unsupported-host"
         record = _base_record(
             "javascript", "Deno", "managed-executable", DENO_MINIMUM_VERSION,
             ["youtube-js-runtime"],
+            # Telling an operator to run the managed installer on a host with
+            # no pinned asset sends them at the one action that cannot work.
+            "Install Deno or Node.js for this architecture and ensure it is "
+            "first in PATH; StreamKeep ships no pinned runtime for this host."
+            if unsupported else
             "Install the pinned Deno runtime from StreamKeep Settings or "
             "`python StreamKeep.py youtube-health --install-deno`.",
-            provenance="missing",
+            provenance="unsupported-host" if unsupported else "missing",
             detail=info.get("detail", ""),
         )
         record.update({
