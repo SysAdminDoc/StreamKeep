@@ -4,6 +4,17 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- The intermittent native crash at the end of a test run is fixed. Roughly one
+  full run in five died with `Windows fatal exception: access violation` after
+  every test had already passed, which on a release gate reads as a code
+  regression rather than a harness fault. pytest finalises session-scoped
+  fixtures inside the last item's teardown, and the Qt fixture's local was the
+  only reference to the `QApplication` — so the application was destroyed first
+  and Qt then tore down still-live widgets underneath a dead application. The
+  application is now held for the whole session, and leftover widgets and
+  threads are retired while it is still alive. Against a two-module reproducer
+  that crashed 7 runs in 10, the fault is gone.
+
 - Format-sort presets no longer rank a synthesised audio track above the
   original. yt-dlp *prepends* `-S` fields to its own default order rather than
   merging into it, so a preset's fields are compared before the default
