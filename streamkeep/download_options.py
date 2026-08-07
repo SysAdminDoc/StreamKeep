@@ -10,12 +10,19 @@ import urllib.parse
 from datetime import datetime
 
 
+# Every preset leads with ``lang``. yt-dlp *prepends* ``-S`` fields to its own
+# default order, so a preset's fields are compared before the default ``lang``
+# is ever reached: under "smallest", a platform's AI-dubbed audio rendition
+# beats the original purely for being a smaller file, and the archive quietly
+# stores a synthesised version of the thing it was meant to preserve.
+# ``lang`` reads yt-dlp's ``language_preference``, which the YouTube extractor
+# sets to 10 for the original track and 5 for a dub.
 FORMAT_SORT_PRESETS = {
-    "prefer-av1": "vcodec:av01,res,fps,hdr:12,acodec,br",
-    "cap-2160p": "res:2160",
-    "cap-1080p": "res:1080",
-    "cap-720p": "res:720",
-    "smallest": "+size,+br,+res,+fps",
+    "prefer-av1": "lang,vcodec:av01,res,fps,hdr:12,acodec,br",
+    "cap-2160p": "lang,res:2160",
+    "cap-1080p": "lang,res:1080",
+    "cap-720p": "lang,res:720",
+    "smallest": "lang,+size,+br,+res,+fps",
 }
 
 VIDEO_CONTAINERS = ("mp4", "mkv", "webm", "original")

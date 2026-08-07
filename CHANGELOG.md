@@ -4,6 +4,15 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [4.47.0] - 2026-08-06
 
+- Format-sort presets no longer rank a synthesised audio track above the
+  original. yt-dlp *prepends* `-S` fields to its own default order rather than
+  merging into it, so a preset's fields are compared before the default
+  language preference is ever consulted — under "smallest" a platform's
+  AI-dubbed rendition won on file size alone, and the archive quietly stored a
+  synthesised track in place of the thing it was meant to preserve. Every
+  preset now leads with `lang`, which reads the extractor's original-versus-dub
+  preference, and still expresses its own intent after it.
+
 - Repository hygiene restored. v4.45.0 and v4.46.0 shipped untagged, so the
   WinGet manifest's installer URL pointed at releases git had no ref for; both
   are now tagged. The tracked file set also matches the repo's own stated

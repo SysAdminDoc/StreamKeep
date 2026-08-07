@@ -62,10 +62,34 @@ def test_raw_format_spec_is_preserved_verbatim():
 
 def test_named_format_sort_presets_resolve_to_ytdlp_expressions():
     options = validate_download_options(format_sort_preset="cap-720p")
-    assert options["format_sort"] == "res:720"
+    assert options["format_sort"] == "lang,res:720"
 
     options = validate_download_options(format_sort_preset="smallest")
-    assert options["format_sort"] == "+size,+br,+res,+fps"
+    assert options["format_sort"] == "lang,+size,+br,+res,+fps"
+
+
+def test_every_preset_ranks_original_language_before_its_own_fields():
+    """yt-dlp *prepends* `-S` fields to its default order, so a preset's own
+    fields are compared before the default `lang` is ever reached. Under
+    "smallest" that meant a platform's AI-dubbed rendition won on file size
+    alone, and the archive stored a synthesised track in place of the
+    original."""
+    from streamkeep.download_options import FORMAT_SORT_PRESETS
+
+    for name, expression in FORMAT_SORT_PRESETS.items():
+        fields = expression.split(",")
+        assert fields[0] == "lang", (
+            f"preset {name!r} compares {fields[0]!r} before language "
+            f"preference: {expression}"
+        )
+
+
+def test_a_preset_still_expresses_its_own_intent_after_the_language_field():
+    from streamkeep.download_options import FORMAT_SORT_PRESETS
+
+    assert FORMAT_SORT_PRESETS["cap-1080p"] == "lang,res:1080"
+    assert "vcodec:av01" in FORMAT_SORT_PRESETS["prefer-av1"]
+    assert "+size" in FORMAT_SORT_PRESETS["smallest"]
 
 
 @pytest.mark.parametrize("value", ["best\n--exec calc", "best\x00audio"])
