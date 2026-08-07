@@ -13,6 +13,7 @@ import sys
 from types import ModuleType
 
 from . import _legacy as _implementation
+from . import connection as _connection
 from . import history_actions as _history_actions
 from . import primitives as _primitives
 from . import projections as _projections
@@ -25,16 +26,38 @@ from . import tombstones as _tombstones
 # first so a patched attribute there still wins, which is the contract the
 # existing tests and profile-switching tools rely on.
 _DOMAINS = (
-    _implementation, _schema, _history_actions, _tombstones,
+    _implementation, _connection, _schema, _history_actions, _tombstones,
     _publishing, _projections, _primitives,
 )
 
 
 def _owner(name):
+    """First domain module that can serve ``name`` — reads only.
+
+    ``hasattr`` on purpose: a shim that forwards through ``__getattr__`` is a
+    legitimate source for a read.
+    """
     for module in _DOMAINS:
         if hasattr(module, name):
             return module
     return None
+
+
+def _holders(name):
+    """Every domain module holding a real binding for ``name`` — writes.
+
+    Before V163 the package was a single module, so patching ``db.X`` rebound
+    the one binding every caller resolved against. The split gave a moved name
+    several bindings — one where it is defined, one in each module that
+    imported it — and writing to only the first left the defining module and
+    its importers still calling the original. Patch reach has to cover all of
+    them or the patch silently does nothing to the code under test.
+
+    ``vars()`` rather than ``hasattr``: a shim forwarding through
+    ``__getattr__`` has no binding of its own, and writing one into it would
+    freeze that forward at today's value.
+    """
+    return [module for module in _DOMAINS if name in vars(module)]
 
 
 class _DatabaseFacade(ModuleType):
@@ -47,20 +70,22 @@ class _DatabaseFacade(ModuleType):
         return getattr(owner, name)
 
     def __setattr__(self, name, value):
-        owner = None if name.startswith("_implementation") else _owner(name)
-        if owner is not None:
-            previous = getattr(owner, name)
+        holders = () if name.startswith("_implementation") else _holders(name)
+        if holders:
             history = self.__dict__.setdefault("_forwarded_previous", {})
-            history.setdefault(name, []).append((owner, previous))
-            setattr(owner, name, value)
+            history.setdefault(name, []).append(
+                [(module, vars(module)[name]) for module in holders]
+            )
+            for module in holders:
+                setattr(module, name, value)
         super().__setattr__(name, value)
 
     def __delattr__(self, name):
         history = self.__dict__.get("_forwarded_previous", {})
         values = history.get(name, [])
         if name != "_implementation" and values:
-            owner, previous = values.pop()
-            setattr(owner, name, previous)
+            for module, previous in values.pop():
+                setattr(module, name, previous)
             if not values:
                 history.pop(name, None)
         super().__delattr__(name)

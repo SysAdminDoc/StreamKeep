@@ -36,11 +36,16 @@ _OWNED_BY = {
         "_normalize_tombstone_reason",
     ),
     "streamkeep.db.publishing": ("_publishing_id", "_new_publishing_id"),
+    "streamkeep.db.connection": (
+        "_connect", "_check_schema_version", "close_connections",
+        "_profile_cache_key", "_profile_database_path",
+        "_close_stale_profile_connections", "_connection_pool",
+    ),
 }
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 5107
+_LEGACY_LINE_CEILING = 4905
 
 
 def test_each_domain_module_implements_what_it_exports():
@@ -100,7 +105,7 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
 
     root = Path(db._implementation.__file__).parent
     for name in ("schema", "history_actions", "primitives", "projections",
-                 "tombstones", "publishing"):
+                 "tombstones", "publishing", "connection"):
         tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level and node.module:
@@ -117,6 +122,88 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
         assert db._implementation._connect is patched
     assert db._connect is original_connect
     assert db._implementation._connect is original_connect
+
+
+def test_patching_the_facade_reaches_the_module_that_defines_the_name():
+    """Identity with the facade is not reach.
+
+    Before V163 the package was one module, so patching ``db.X`` rebound the
+    single binding every caller resolved. The split gave each moved name two
+    bindings -- one in the module that defines it, one in each module that
+    imported it -- and the facade wrote to whichever it found first. The
+    identity assertions above still passed while the code under test went on
+    calling the real function, which is the failure mode where a check
+    authorises everything and reads like one that ran.
+
+    ``_utc_now_iso`` is the witness: defined in ``primitives``, imported by
+    ``tombstones``, and reachable through the facade.
+    """
+    from streamkeep.db import primitives, tombstones
+
+    with mock.patch.object(db, "_utc_now_iso", return_value="PATCHED"):
+        assert db._utc_now_iso() == "PATCHED", "the facade itself"
+        assert primitives._utc_now_iso() == "PATCHED", "the defining module"
+        assert tombstones._utc_now_iso() == "PATCHED", "an importing sibling"
+
+    # And every binding is restored, or the patch leaks into later tests.
+    assert db._utc_now_iso() != "PATCHED"
+    assert primitives._utc_now_iso() != "PATCHED"
+    assert tombstones._utc_now_iso() != "PATCHED"
+
+
+def test_patching_db_path_redirects_the_code_that_actually_opens_the_file():
+    """The heaviest patch contract in the suite, asserted end to end.
+
+    175 test sites redirect the library with ``patch.object(db, "DB_PATH")``.
+    Once the connection layer moved out of ``_legacy`` that name had two
+    bindings, and only an assertion that a real connection lands on the
+    patched path can tell the difference between a redirect and a test
+    quietly writing to the operator's own library.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from streamkeep.db import connection
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "redirected.db"
+        with mock.patch.object(db, "DB_PATH", target):
+            assert connection.DB_PATH == target, "the module that opens it"
+            assert db._implementation.DB_PATH == target, "and the legacy one"
+
+            handle = db._connect()
+            try:
+                handle.execute("CREATE TABLE probe (x INTEGER)")
+                handle.commit()
+            finally:
+                handle.close()
+                db.close_connections()
+
+        assert target.is_file(), "the connection went somewhere else entirely"
+
+    assert connection.DB_PATH != target
+    assert db._implementation.DB_PATH != target
+
+
+def test_a_forwarding_shim_is_not_given_a_binding_of_its_own():
+    """Writing into a shim would freeze its forward at today's value.
+
+    ``publishing`` resolves part of its surface through ``__getattr__``. If a
+    patch wrote those names into its ``__dict__``, unpatching would restore a
+    *static copy* of the forwarded value and the shim would stop tracking the
+    module it forwards to.
+    """
+    from streamkeep.db import publishing
+
+    forwarded = "publish_recording"  # served by __getattr__, not defined here
+    assert forwarded not in vars(publishing)
+
+    with mock.patch.object(db, forwarded):
+        pass
+
+    assert forwarded not in vars(publishing), (
+        "the patch gave the shim a binding; its forwarding is now frozen"
+    )
 
 
 def test_server_facade_exposes_route_table_and_external_web_ui():
