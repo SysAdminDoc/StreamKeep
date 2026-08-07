@@ -24,14 +24,23 @@ _OWNED_BY = {
     ),
     "streamkeep.db.history_actions": (
         "_append_history_action_in_connection", "_history_action_record",
-        "_history_action_identity_key",
+        "_history_action_identity_key", "_replay_history_actions_in_connection",
+        "_compact_history_actions_in_connection",
+        "_delete_history_rows_in_connection",
     ),
-    "streamkeep.db.primitives": ("_utc_now_iso", "_sqlite_table_exists"),
+    "streamkeep.db.primitives": (
+        "_utc_now_iso", "_sqlite_table_exists", "_utc_iso", "_iso_epoch",
+    ),
+    "streamkeep.db.tombstones": (
+        "_upsert_tombstone_in_connection", "_find_tombstone_in_connection",
+        "_normalize_tombstone_reason",
+    ),
+    "streamkeep.db.publishing": ("_publishing_id", "_new_publishing_id"),
 }
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 5477
+_LEGACY_LINE_CEILING = 5107
 
 
 def test_each_domain_module_implements_what_it_exports():
@@ -90,7 +99,8 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
     from pathlib import Path
 
     root = Path(db._implementation.__file__).parent
-    for name in ("schema", "history_actions", "primitives", "projections"):
+    for name in ("schema", "history_actions", "primitives", "projections",
+                 "tombstones", "publishing"):
         tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level and node.module:

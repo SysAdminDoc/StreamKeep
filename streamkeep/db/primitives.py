@@ -20,3 +20,15 @@ def _sqlite_table_exists(connection, table_name: str) -> bool:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _utc_iso(timestamp: float) -> str:
+    from ..retry import utc_iso
+
+    return utc_iso(timestamp)
+
+
+def _iso_epoch(value: object) -> float:
+    from ..retry import iso_timestamp
+
+    return iso_timestamp(value)

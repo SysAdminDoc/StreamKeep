@@ -17,6 +17,8 @@ import sqlite3
 import time
 import uuid
 
+from ..sqlite_runtime import runtime_status
+
 from .history_actions import _append_history_action_in_connection
 from .primitives import _sqlite_table_exists, _utc_now_iso
 
@@ -1034,3 +1036,52 @@ def _migrate_retry_v10(db):
             int(decision.terminal),
             int(row[0]),
         ))
+
+
+def _fts5_enabled():
+    return bool(runtime_status().get("fts5_fixed", True))
+
+
+def _configure_history_fts(db):
+    """Create FTS5 only above its security floor; otherwise remove triggers."""
+    if not _fts5_enabled():
+        db.executescript("""
+            DROP TRIGGER IF EXISTS history_fts_insert;
+            DROP TRIGGER IF EXISTS history_fts_delete;
+            DROP TRIGGER IF EXISTS history_fts_update;
+        """)
+        return
+
+    existing = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='history_fts'"
+    ).fetchone()
+    trigger_names = {
+        row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name IN ('history_fts_insert', 'history_fts_delete', "
+            "'history_fts_update')"
+        ).fetchall()
+    }
+    db.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
+            title, platform, channel, path, url,
+            content='history', content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+        END;
+        CREATE TRIGGER IF NOT EXISTS history_fts_update
+        AFTER UPDATE OF title, platform, channel, path, url ON history BEGIN
+            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
+            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
+            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
+            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
+        END;
+    """)
+    if existing is None or len(trigger_names) != 3:
+        db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")

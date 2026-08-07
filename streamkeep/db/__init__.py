@@ -16,13 +16,18 @@ from . import _legacy as _implementation
 from . import history_actions as _history_actions
 from . import primitives as _primitives
 from . import projections as _projections
+from . import publishing as _publishing
 from . import schema as _schema
+from . import tombstones as _tombstones
 
 # V163: the facade composes the domain modules rather than requiring every
 # name to be re-exported through the legacy one. ``_implementation`` stays
 # first so a patched attribute there still wins, which is the contract the
 # existing tests and profile-switching tools rely on.
-_DOMAINS = (_implementation, _schema, _history_actions, _projections, _primitives)
+_DOMAINS = (
+    _implementation, _schema, _history_actions, _tombstones,
+    _publishing, _projections, _primitives,
+)
 
 
 def _owner(name):

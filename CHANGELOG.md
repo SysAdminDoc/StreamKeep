@@ -2,6 +2,17 @@
 
 All notable changes to StreamKeep are recorded here for local release hygiene. `README.md` is the only tracked root Markdown file in this repo; this file is intentionally ignored by git per repo policy.
 
+## [Unreleased]
+
+- A third pass of the database decomposition. The history action log gained the
+  replay, compaction and row-deletion work that maintains it; the user
+  tombstone ledger became its own module; published-recording identifiers,
+  full-text-search configuration, and two time helpers moved to the modules
+  that should own them. `db/_legacy.py` is down from 5,477 to 5,107 lines
+  (6,737 before this work began). `publishing.py` was a pure forwarding shim
+  and now owns definitions, so its import of the legacy module became lazy —
+  the boundary test's cycle guard covers it and every other domain module.
+
 ## [4.50.0] - 2026-08-07
 
 - Translation coverage is visible where the choice is made. Spanish sits near

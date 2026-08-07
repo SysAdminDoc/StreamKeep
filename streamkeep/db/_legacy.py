@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import secrets
 import sqlite3
 import threading
 import time
@@ -35,10 +33,40 @@ from ..sqlite_runtime import runtime_status
 # V163: these projections are implemented in ``projections`` and imported
 # here. A dependency, not a re-export - the definitions live there and
 # nothing in this module redefines them.
+from .primitives import (  # noqa: F401
+    _iso_epoch,
+    _utc_iso,
+)
+from .projections import (  # noqa: F401
+    _normalize_backup_state,
+)
+from .schema import (  # noqa: F401
+    _configure_history_fts,
+    _fts5_enabled,
+)
+from .publishing import (  # noqa: F401
+    _new_publishing_id,
+    _publishing_id,
+    _publishing_text,
+)
+from .tombstones import (  # noqa: F401
+    _find_tombstone_in_connection,
+    _normalize_tombstone_reason,
+    _upsert_tombstone_in_connection,
+)
+from .history_actions import (  # noqa: F401
+    HISTORY_ACTION_COMPACTION_LIMIT,
+    _compact_history_actions_in_connection,
+    _delete_history_rows_in_connection,
+    _history_action_count_in_connection,
+    _history_action_payload,
+    _history_fts_query,
+    _history_select_with_upgrade,
+    _maybe_compact_history_actions_in_connection,
+    _replay_history_actions_in_connection,
+)
 from .history_actions import (  # noqa: F401
     _append_history_action_in_connection,
-    _history_action_identity_key,
-    _history_action_record,
 )
 from .primitives import (  # noqa: F401
     _sqlite_table_exists,
@@ -66,13 +94,13 @@ from .projections import (  # noqa: F401
 DB_PATH = CONFIG_DIR / "library.db"
 SCHEMA_VERSION = 23
 
-HISTORY_ACTION_COMPACTION_LIMIT = 10_000
 
-TOMBSTONE_REASONS = frozenset({"user", "retention", "lifecycle"})
+
+
 TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
 
-_PUBLISHING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_PUBLISHING_TEXT_LIMIT = 256
+
+
 
 _write_lock = threading.Lock()
 _connection_pool_lock = threading.RLock()
@@ -336,53 +364,8 @@ def init_db() -> None:
 
 
 
-def _fts5_enabled():
-    return bool(runtime_status().get("fts5_fixed", True))
 
 
-def _configure_history_fts(db):
-    """Create FTS5 only above its security floor; otherwise remove triggers."""
-    if not _fts5_enabled():
-        db.executescript("""
-            DROP TRIGGER IF EXISTS history_fts_insert;
-            DROP TRIGGER IF EXISTS history_fts_delete;
-            DROP TRIGGER IF EXISTS history_fts_update;
-        """)
-        return
-
-    existing = db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='history_fts'"
-    ).fetchone()
-    trigger_names = {
-        row[0] for row in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger' "
-            "AND name IN ('history_fts_insert', 'history_fts_delete', "
-            "'history_fts_update')"
-        ).fetchall()
-    }
-    db.executescript("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
-            title, platform, channel, path, url,
-            content='history', content_rowid='id'
-        );
-        CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
-            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
-            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
-        END;
-        CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
-            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
-        END;
-        CREATE TRIGGER IF NOT EXISTS history_fts_update
-        AFTER UPDATE OF title, platform, channel, path, url ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, platform, channel, path, url)
-            VALUES ('delete', old.id, old.title, old.platform, old.channel, old.path, old.url);
-            INSERT INTO history_fts(rowid, title, platform, channel, path, url)
-            VALUES (new.id, new.title, new.platform, new.channel, new.path, new.url);
-        END;
-    """)
-    if existing is None or len(trigger_names) != 3:
-        db.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
 
 
 
@@ -459,31 +442,10 @@ def history_snapshot_id() -> int:
         db.close()
 
 
-def _history_fts_query(query: str) -> str:
-    """Build a literal prefix-token FTS query from untrusted user text."""
-    tokens = re.findall(r"\w+", str(query or "").lower(), flags=re.UNICODE)
-    return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"*' for token in tokens)
 
 
 
 
-def _history_select_with_upgrade(alias: str = "h") -> str:
-    """Select history plus the latest per-item upgrade audit summary."""
-    return (
-        f"SELECT {alias}.*, "
-        f"COALESCE((SELECT d.decision FROM upgrade_decisions d "
-        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
-        "AS upgrade_decision, "
-        f"COALESCE((SELECT d.reason_code FROM upgrade_decisions d "
-        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
-        "AS upgrade_reason_code, "
-        f"COALESCE((SELECT d.reason FROM upgrade_decisions d "
-        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
-        "AS upgrade_reason, "
-        f"COALESCE((SELECT d.execution_status FROM upgrade_decisions d "
-        f"WHERE d.history_id={alias}.id ORDER BY d.id DESC LIMIT 1), '') "
-        "AS upgrade_execution_status"
-    )
 
 
 def query_history_page(
@@ -704,170 +666,16 @@ def save_history_entry(entry_dict: dict[str, Any]) -> int | None:
 
 
 
-def _history_action_payload(row) -> dict[str, Any]:
-    item = dict(row)
-    try:
-        value = json.loads(item.get("value_json", "{}") or "{}")
-    except (json.JSONDecodeError, TypeError):
-        value = {}
-    item["value"] = value if isinstance(value, dict) else {}
-    return item
 
 
-def _history_action_count_in_connection(connection) -> int:
-    if not _sqlite_table_exists(connection, "history_actions"):
-        return 0
-    return int(connection.execute(
-        "SELECT COUNT(*) FROM history_actions"
-    ).fetchone()[0] or 0)
 
 
-def _delete_history_projection_rows_in_connection(connection, entry_ids):
-    """Delete rows during replay without emitting another action."""
-    ids = sorted({int(entry_id) for entry_id in entry_ids if int(entry_id) > 0})
-    if not ids:
-        return 0
-    placeholders = ",".join("?" for _ in ids)
-    for table in ("published_recordings", "archive_manifests"):
-        if _sqlite_table_exists(connection, table):
-            connection.execute(
-                f"DELETE FROM {table} WHERE history_id IN ({placeholders})",
-                ids,
-            )
-    cursor = connection.execute(
-        f"DELETE FROM history WHERE id IN ({placeholders})", ids
-    )
-    return int(cursor.rowcount or 0)
 
 
-def _compact_history_actions_in_connection(connection, max_rows: int) -> int:
-    if not _sqlite_table_exists(connection, "history_actions"):
-        return 0
-    rows = connection.execute(
-        "SELECT id, history_id, identity_key FROM history_actions "
-        "ORDER BY id DESC"
-    ).fetchall()
-    if len(rows) <= max_rows:
-        return 0
-    active_keys = {
-        _history_action_identity_key(dict(row))
-        for row in connection.execute("SELECT * FROM history").fetchall()
-    }
-    keep: dict[tuple[str, int], int] = {}
-    for row in rows:
-        key = str(row[2] or "")
-        history_id = int(row[1] or 0)
-        marker = (key, history_id) if key else ("", history_id)
-        keep.setdefault(marker, int(row[0]))
-    keep_ids = set(keep.values())
-    # Every active projection keeps its newest event even if the caller asks
-    # for a cap smaller than the number of active identities.  The remainder
-    # of the cap is spent on the newest deletion/audit identities.
-    active_keep = {
-        action_id for marker, action_id in keep.items()
-        if marker[0] in active_keys
-    }
-    if len(keep_ids) > max_rows:
-        retained = set(active_keep)
-        for row in rows:
-            if len(retained) >= max_rows:
-                break
-            action_id = int(row[0])
-            if action_id in keep_ids:
-                retained.add(action_id)
-        keep_ids = retained
-    stale = [int(row[0]) for row in rows if int(row[0]) not in keep_ids]
-    if stale:
-        connection.executemany(
-            "DELETE FROM history_actions WHERE id=?",
-            ((action_id,) for action_id in stale),
-        )
-    return len(stale)
 
 
-def _maybe_compact_history_actions_in_connection(connection) -> int:
-    count = _history_action_count_in_connection(connection)
-    if count <= HISTORY_ACTION_COMPACTION_LIMIT:
-        return 0
-    return _compact_history_actions_in_connection(
-        connection, HISTORY_ACTION_COMPACTION_LIMIT,
-    )
 
 
-def _replay_history_actions_in_connection(
-    connection, *, seed_missing: bool = True, prefer_identity: bool = True,
-) -> dict[str, int]:
-    """Reconcile materialized history state from the append-only log."""
-    result = {"actions": 0, "applied": 0, "deleted": 0, "seeded": 0}
-    if not (
-        _sqlite_table_exists(connection, "history")
-        and _sqlite_table_exists(connection, "history_actions")
-    ):
-        return result
-    action_rows = connection.execute(
-        "SELECT * FROM history_actions ORDER BY id ASC"
-    ).fetchall()
-    result["actions"] = len(action_rows)
-    latest_by_id: dict[int, dict[str, Any]] = {}
-    latest_by_identity: dict[str, dict[str, Any]] = {}
-    for row in action_rows:
-        action = _history_action_payload(row)
-        history_id = int(action.get("history_id", 0) or 0)
-        identity_key = str(action.get("identity_key", "") or "")
-        if history_id > 0:
-            latest_by_id[history_id] = action
-        if identity_key:
-            latest_by_identity[identity_key] = action
-
-    rows = connection.execute("SELECT * FROM history ORDER BY id ASC").fetchall()
-    delete_ids: list[int] = []
-    for row in rows:
-        row_dict = dict(row)
-        history_id = int(row_dict.get("id", 0) or 0)
-        identity_key = _history_action_identity_key(row_dict)
-        by_id = latest_by_id.get(history_id)
-        if by_id and str(by_id.get("identity_key", "") or "") not in {
-            "", identity_key,
-        }:
-            by_id = None
-        by_identity = latest_by_identity.get(identity_key)
-        selected = by_identity if prefer_identity else by_id
-        if by_id and by_identity:
-            if selected is None or int(by_id.get("id", 0)) > int(
-                selected.get("id", 0)
-            ):
-                selected = by_id
-        elif selected is None:
-            selected = by_id or by_identity
-        if selected is None:
-            if seed_missing:
-                _append_history_action_in_connection(
-                    connection, history_id, "snapshot", row_dict,
-                )
-                result["seeded"] += 1
-            continue
-        if str(selected.get("action", "snapshot")) == "delete":
-            delete_ids.append(history_id)
-            continue
-        value = selected.get("value", {})
-        record = _history_action_record(value)
-        connection.execute(
-            "UPDATE history SET favorite=?, watched=?, "
-            "watch_position_secs=?, bookmarks=? WHERE id=?",
-            (
-                int(record["favorite"]), int(record["watched"]),
-                float(record["watch_position_secs"]),
-                json.dumps(record["bookmarks"], ensure_ascii=False),
-                history_id,
-            ),
-        )
-        result["applied"] += 1
-    result["deleted"] = _delete_history_projection_rows_in_connection(
-        connection, delete_ids,
-    )
-    if seed_missing:
-        _maybe_compact_history_actions_in_connection(connection)
-    return result
 
 
 def load_history_actions(
@@ -973,91 +781,10 @@ def replay_history_actions(
 
 
 
-def _normalize_tombstone_reason(reason):
-    normalized = str(reason or "user").strip().lower()
-    if normalized not in TOMBSTONE_REASONS:
-        raise ValueError(
-            f"tombstone reason must be one of {sorted(TOMBSTONE_REASONS)}"
-        )
-    return normalized
 
 
-def _find_tombstone_in_connection(conn, fields, *, reasons=None):
-    clauses = []
-    params: list[Any] = []
-    platform = str(fields.get("platform", "") or "")
-    source_id = str(fields.get("source_id", "") or "")
-    webpage_url = str(fields.get("webpage_url", "") or "")
-    if source_id:
-        if platform:
-            clauses.append(
-                "(platform=? COLLATE NOCASE AND source_id=?)"
-            )
-            params.extend((platform, source_id))
-        else:
-            clauses.append("source_id=?")
-            params.append(source_id)
-    if webpage_url:
-        clauses.append("webpage_url=?")
-        params.append(webpage_url)
-    if not clauses:
-        return None
-    reason_values = tuple(
-        _normalize_tombstone_reason(reason) for reason in reasons
-    ) if reasons is not None else ()
-    where = [f"({' OR '.join(clauses)})"]
-    if reason_values:
-        placeholders = ",".join("?" for _ in reason_values)
-        where.append(f"reason IN ({placeholders})")
-        params.extend(reason_values)
-    row = conn.execute(
-        "SELECT id, platform, source_id, webpage_url, deleted_at, reason, "
-        "path, title, channel FROM media_tombstones "
-        f"WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT 1",
-        params,
-    ).fetchone()
-    return dict(row) if row else None
 
 
-def _upsert_tombstone_in_connection(
-    conn, fields, *, reason="user", deleted_at=None,
-):
-    reason = _normalize_tombstone_reason(reason)
-    if not fields.get("source_id") and not fields.get("webpage_url"):
-        return None
-    deleted_at = str(deleted_at or _utc_now_iso())
-    existing = _find_tombstone_in_connection(conn, fields)
-    if existing is None:
-        cursor = conn.execute(
-            "INSERT INTO media_tombstones "
-            "(platform, source_id, webpage_url, deleted_at, reason, path, title, channel) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (
-                fields.get("platform", ""), fields.get("source_id", ""),
-                fields.get("webpage_url", ""), deleted_at, reason,
-                fields.get("path", ""), fields.get("title", ""),
-                fields.get("channel", ""),
-            ),
-        )
-        return int(cursor.lastrowid)
-
-    # A deliberate user deletion must never be downgraded by a later
-    # retention/lifecycle pass for the same media identity.
-    effective_reason = (
-        "user" if existing.get("reason") == "user" or reason == "user"
-        else reason
-    )
-    conn.execute(
-        "UPDATE media_tombstones SET platform=?, source_id=?, webpage_url=?, "
-        "deleted_at=?, reason=?, path=?, title=?, channel=? WHERE id=?",
-        (
-            fields.get("platform", ""), fields.get("source_id", ""),
-            fields.get("webpage_url", ""), deleted_at, effective_reason,
-            fields.get("path", ""), fields.get("title", ""),
-            fields.get("channel", ""), int(existing["id"]),
-        ),
-    )
-    return int(existing["id"])
 
 
 def record_tombstone(
@@ -1901,32 +1628,10 @@ def build_rebuilt_library_database(
             staged.close()
 
 
-def _publishing_id(value: Any, field: str = "share_id") -> str:
-    candidate = str(value or "").strip().lower()
-    if not _PUBLISHING_ID_RE.fullmatch(candidate):
-        raise ValueError(f"{field} is invalid")
-    return candidate
 
 
-def _publishing_text(value: Any, field: str) -> str:
-    text = str(value or "").strip()
-    if len(text) > _PUBLISHING_TEXT_LIMIT:
-        raise ValueError(f"{field} is too long")
-    if any(ord(char) < 32 or ord(char) == 127 for char in text):
-        raise ValueError(f"{field} contains control characters")
-    return text
 
 
-def _new_publishing_id(db) -> str:
-    """Generate an unguessable id without trusting caller-provided ids."""
-    while True:
-        candidate = secrets.token_hex(16)
-        if not db.execute(
-            "SELECT 1 FROM published_recordings WHERE share_id=? "
-            "UNION ALL SELECT 1 FROM published_feeds WHERE feed_id=? LIMIT 1",
-            (candidate, candidate),
-        ).fetchone():
-            return candidate
 
 
 def publish_recording(history_id: int) -> dict[str, Any] | None:
@@ -2174,39 +1879,6 @@ def published_recordings_for_feed(feed_id: Any) -> list[dict[str, Any]] | None:
         db.close()
 
 
-def _delete_history_rows_in_connection(conn, entry_ids, *, reason="user") -> int:
-    """Record and remove history rows while the caller owns the transaction."""
-    ids = sorted({int(entry_id) for entry_id in entry_ids})
-    if not ids:
-        return 0
-    reason = _normalize_tombstone_reason(reason)
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        f"SELECT * FROM history WHERE id IN ({placeholders})", ids
-    ).fetchall()
-    for row in rows:
-        _append_history_action_in_connection(
-            conn, int(row[0]), "delete", dict(row), reason=reason,
-        )
-        _upsert_tombstone_in_connection(
-            conn,
-            _canonical_tombstone_fields(dict(row)),
-            reason=reason,
-        )
-    conn.execute(
-        f"DELETE FROM published_recordings WHERE history_id IN ({placeholders})",
-        ids,
-    )
-    conn.execute(
-        f"DELETE FROM archive_manifests WHERE history_id IN ({placeholders})",
-        ids,
-    )
-    conn.execute(
-        f"DELETE FROM history WHERE id IN ({placeholders})",
-        ids,
-    )
-    _maybe_compact_history_actions_in_connection(conn)
-    return len(rows)
 
 
 def delete_history_entries(
@@ -4921,18 +4593,6 @@ def load_backup_state(profile_id: str = "default") -> dict[str, Any]:
     return _normalize_backup_state(state)
 
 
-def _normalize_backup_state(state: dict[str, Any]) -> dict[str, Any]:
-    state["running_since"] = float(state.get("running_since", 0) or 0)
-    state["next_run_at"] = float(state.get("next_run_at", 0) or 0)
-    state["cadence_seconds"] = int(state.get("cadence_seconds", 0) or 0)
-    state["last_size"] = int(state.get("last_size", 0) or 0)
-    state["consecutive_failures"] = int(state.get("consecutive_failures", 0) or 0)
-    for key in (
-        "profile_id", "running_owner", "last_started_at", "last_success_at",
-        "last_failure_at", "last_path", "last_error", "updated_at",
-    ):
-        state[key] = str(state.get(key, "") or "")
-    return state
 
 
 def claim_due_backup(
@@ -5166,40 +4826,10 @@ def release_backup_claim(
             db.close()
 
 
-def backup_state_public_view(state: dict[str, Any]) -> dict[str, Any]:
-    """Project backup state into the operations API shape (no host paths)."""
-    from ..retry import sanitize_failure_reason
-
-    normalized = _normalize_backup_state(dict(state or {}))
-    last_path = normalized["last_path"]
-    return {
-        "running": bool(normalized["running_owner"]),
-        "cadence_seconds": normalized["cadence_seconds"],
-        "next_run_at": (
-            _utc_iso(normalized["next_run_at"])
-            if normalized["next_run_at"] > 0 else ""
-        ),
-        "last_started_at": normalized["last_started_at"],
-        "last_success_at": normalized["last_success_at"],
-        "last_failure_at": normalized["last_failure_at"],
-        "last_size": normalized["last_size"],
-        "last_name": os.path.basename(last_path) if last_path else "",
-        "last_error": sanitize_failure_reason(normalized["last_error"])
-        if normalized["last_error"] else "",
-        "consecutive_failures": normalized["consecutive_failures"],
-    }
 
 
-def _utc_iso(timestamp: float) -> str:
-    from ..retry import utc_iso
-
-    return utc_iso(timestamp)
 
 
-def _iso_epoch(value: object) -> float:
-    from ..retry import iso_timestamp
-
-    return iso_timestamp(value)
 
 
 

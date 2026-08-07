@@ -14,9 +14,12 @@ forwarding shim the way the earlier "split" modules did.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from typing import Any
+
+from .primitives import _utc_iso
 
 
 def _circuit_engine(queue_data, context) -> str:
@@ -341,3 +344,41 @@ def _row_to_monitor_dict(row):
     except (json.JSONDecodeError, TypeError):
         d["upgrade_profile"] = {}
     return d
+
+
+def _normalize_backup_state(state: dict[str, Any]) -> dict[str, Any]:
+    state["running_since"] = float(state.get("running_since", 0) or 0)
+    state["next_run_at"] = float(state.get("next_run_at", 0) or 0)
+    state["cadence_seconds"] = int(state.get("cadence_seconds", 0) or 0)
+    state["last_size"] = int(state.get("last_size", 0) or 0)
+    state["consecutive_failures"] = int(state.get("consecutive_failures", 0) or 0)
+    for key in (
+        "profile_id", "running_owner", "last_started_at", "last_success_at",
+        "last_failure_at", "last_path", "last_error", "updated_at",
+    ):
+        state[key] = str(state.get(key, "") or "")
+    return state
+
+
+def backup_state_public_view(state: dict[str, Any]) -> dict[str, Any]:
+    """Project backup state into the operations API shape (no host paths)."""
+    from ..retry import sanitize_failure_reason
+
+    normalized = _normalize_backup_state(dict(state or {}))
+    last_path = normalized["last_path"]
+    return {
+        "running": bool(normalized["running_owner"]),
+        "cadence_seconds": normalized["cadence_seconds"],
+        "next_run_at": (
+            _utc_iso(normalized["next_run_at"])
+            if normalized["next_run_at"] > 0 else ""
+        ),
+        "last_started_at": normalized["last_started_at"],
+        "last_success_at": normalized["last_success_at"],
+        "last_failure_at": normalized["last_failure_at"],
+        "last_size": normalized["last_size"],
+        "last_name": os.path.basename(last_path) if last_path else "",
+        "last_error": sanitize_failure_reason(normalized["last_error"])
+        if normalized["last_error"] else "",
+        "consecutive_failures": normalized["consecutive_failures"],
+    }
