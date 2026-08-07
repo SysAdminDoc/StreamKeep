@@ -101,3 +101,22 @@ def _retire_qt_objects(app):
     for _ in range(5):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rate_governor():
+    """Give every test a governor with no memory of the last one.
+
+    The per-host rate governor keeps module-level state on purpose — in
+    production a host's backoff has to outlive the job that earned it. In a
+    suite that makes it shared mutable state, so a test that records a
+    throttle could otherwise hold back an unrelated test's queue.
+    """
+    from streamkeep import governor
+
+    governor.reset()
+    governor.configure(
+        enabled=True, default_concurrency=governor.DEFAULT_CONCURRENCY,
+    )
+    yield
+    governor.reset()

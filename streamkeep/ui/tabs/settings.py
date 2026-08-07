@@ -703,6 +703,40 @@ def build_settings_tab(win):
     card_lay.addWidget(engine_block)
     win._refresh_source_engine_ui()
 
+    # ── Adaptive rate governance (V162) ─────────────────────────────
+    governor_block, governor_lay = make_field_block(
+        "Rate governance",
+        "Back off automatically when a host says you are going too fast.",
+    )
+    governor_hint = QLabel(
+        "When a host answers with 429 or another throttle, StreamKeep halves "
+        "how many jobs it runs against that host and spaces the requests out, "
+        "then gives the capacity back after a run of clean transfers. The "
+        "reaction is per host, so slowing down for a strict site does not slow "
+        "down the rest of the queue, and a Retry-After header is honoured over "
+        "our own estimate."
+    )
+    governor_hint.setObjectName("subtleText")
+    governor_hint.setWordWrap(True)
+    governor_lay.addWidget(governor_hint)
+    win.rate_governor_check = QCheckBox("Back off automatically when throttled")
+    win.rate_governor_check.setChecked(
+        bool(win._config.get("rate_governor_enabled", True))
+    )
+    win.rate_governor_check.toggled.connect(win._on_rate_governor_toggled)
+    governor_lay.addWidget(win.rate_governor_check)
+    win.rate_governor_status = QLabel("No host is being throttled.")
+    win.rate_governor_status.setObjectName("subtleText")
+    win.rate_governor_status.setWordWrap(True)
+    set_accessible(
+        win.rate_governor_status,
+        "Rate governance status",
+        "Hosts StreamKeep is currently backing off from",
+    )
+    governor_lay.addWidget(win.rate_governor_status)
+    card_lay.addWidget(governor_block)
+    win._refresh_rate_governor_ui()
+
     # ── Cookies ─────────────────────────────────────────────────────
     cookies_block, cookies_lay = make_field_block(
         "Browser Cookies",

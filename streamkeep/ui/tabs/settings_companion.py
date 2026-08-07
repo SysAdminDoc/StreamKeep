@@ -753,12 +753,14 @@ class SettingsCompanionMixin:
         if not isinstance(health, dict):
             from ...health import load_health_snapshot
             health = load_health_snapshot()
+        from ...governor import public_view as _governor_public_view
         from ...health import public_snapshot
         return {
             "downloads": downloads,
             "queue": queue_items,
             "failures": failures,
             "retry_circuits": _db.load_retry_circuits(),
+            "rate_governor": _governor_public_view(),
             "backup": _db.backup_state_public_view(_db.load_backup_state()),
             "history": history,
             "monitor": monitor,

@@ -42,6 +42,7 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Persist fetch, download, and finalize failures to a retryable recovery ledger that survives restart. Failed jobs include category-specific next-step guidance in the queue, Operations view, CLI, and authenticated web remote, with direct links to relevant local settings where safe.
 - Use parallel HTTP range downloads for direct files when the server supports ranges.
 - Apply bandwidth windows, day/night/weekend speed scheduling, per-download rate limits, and lifecycle cleanup rules.
+- Back off automatically when a host throttles: a 429 halves the concurrency StreamKeep allows against that host and spaces its requests out, recovering after sustained success. The reaction is per host, so one strict site does not slow the rest of the queue; `Retry-After` is honoured when it asks for longer than the computed delay. Settings lists the hosts currently being backed off from and can disable it.
 - Optionally restore audio in Twitch VODs when Twitch exposes a reachable
   same-format replacement for a copyright-muted HLS fragment; enable it in
   Settings or with `download --twitch-unmute`.

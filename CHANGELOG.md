@@ -4,6 +4,19 @@ All notable changes to StreamKeep are recorded here for local release hygiene. `
 
 ## [Unreleased]
 
+- Bulk archiving now backs off on its own instead of needing hand-tuned
+  limits. When a host answers with 429 or another throttle, StreamKeep halves
+  how many jobs it will run against *that host* and spaces its requests out,
+  then gives the capacity back after a run of clean transfers — multiplicative
+  decrease, additive increase, because a throttle means you are already over
+  the line while a run of successes only means you are not over it yet. A
+  `Retry-After` header is honoured over the computed delay when it asks for
+  longer, and never used to shorten a backoff already earned. The reaction is
+  queue-wide but per host, so slowing down for one strict site leaves every
+  other source at full speed, and a host nobody has upset for half an hour
+  recovers without any traffic at all. Settings shows which hosts are being
+  backed off from and can turn the whole thing off.
+
 - A live capture that is killed now leaves a playable recording. An MP4 keeps
   its index in a `moov` atom the muxer writes when the file is *closed*, so a
   capture ended by a crash or a power loss produced a file with every captured

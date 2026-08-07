@@ -5443,6 +5443,14 @@ def save_failed_job(
         queue_dict.get("source_id", ""),
     )
     circuit_engine = _circuit_engine(queue_dict, context or {})
+    if decision.category == "rate_limit":
+        # V162: every classified failure passes through here, which makes it
+        # the one place a throttle is guaranteed to be seen no matter which
+        # worker hit it. The governor is pure and in-process, so this cannot
+        # fail the ledger write it rides along with.
+        from ..governor import record_throttle
+
+        record_throttle(url, retry_after=decision.retry_after_seconds)
     with _write_lock:
         conn = _connect()
         try:

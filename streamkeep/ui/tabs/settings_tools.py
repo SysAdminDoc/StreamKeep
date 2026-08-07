@@ -350,6 +350,58 @@ class SettingsToolsMixin:
         )
         return report, rows
 
+    # ── Adaptive rate governance (V162) ─────────────────────────────
+
+    def _refresh_rate_governor_ui(self):
+        from ...governor import public_view
+
+        status = getattr(self, "rate_governor_status", None)
+        if status is None:
+            return
+        view = public_view()
+        if not view["enabled"]:
+            status.setText(
+                "Automatic backoff is off; a throttling host will keep being "
+                "asked at the configured pace."
+            )
+            return
+        hosts = view["hosts"]
+        if not hosts:
+            status.setText("No host is being throttled.")
+            return
+        lines = [
+            f"{entry['host']}: {entry['concurrency']} at once"
+            + (
+                f", {entry['delay_seconds']:g}s between requests"
+                if entry["delay_seconds"] else ""
+            )
+            for entry in hosts[:5]
+        ]
+        if len(hosts) > 5:
+            lines.append(f"and {len(hosts) - 5} more")
+        status.setText("Backing off — " + "; ".join(lines))
+
+    def _on_rate_governor_toggled(self, checked):
+        from ...governor import configure
+
+        enabled = bool(checked)
+        self._config["rate_governor_enabled"] = enabled
+        configure(
+            enabled=enabled,
+            default_concurrency=int(self._config.get("max_concurrent", 4) or 4),
+        )
+        if not _save_config(self._config):
+            self._set_status(
+                "Could not save the rate governance setting.", "error",
+            )
+            return
+        self._refresh_rate_governor_ui()
+        self._set_status(
+            "Automatic backoff is on." if enabled
+            else "Automatic backoff is off.",
+            "info",
+        )
+
     # ── Per-source download engine (V165) ───────────────────────────
 
     def _source_engine_rows(self):

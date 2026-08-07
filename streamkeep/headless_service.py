@@ -87,8 +87,19 @@ class HeadlessJobService(QObject):
         super().__init__(parent)
         self.output_dir = str(output_dir or default_output_dir())
         self.max_concurrent = max(1, int(max_concurrent or 1))
+        # V162: which host each running job is talking to, and when that host
+        # was last approached, so the governor's advice can be enforced across
+        # the whole queue rather than inside one job.
+        self._job_hosts: dict[str, str] = {}
+        self._host_last_start: dict[str, float] = {}
         self.parallel_connections = max(1, int(parallel_connections or 1))
         self.config = dict(config or {})
+        from .governor import configure as _configure_governor
+
+        _configure_governor(
+            enabled=bool(self.config.get("rate_governor_enabled", True)),
+            default_concurrency=self.max_concurrent,
+        )
         self.owner_id = str(owner_id or f"server:{os.getpid()}:{uuid.uuid4().hex}")
         self._lease_acquired = False
         self._apply_runtime_config()
@@ -702,8 +713,38 @@ class HeadlessJobService(QObject):
                 continue
             if not self._eligible(job):
                 continue
+            held = self._governor_defers(job)
+            if held:
+                # Not an error and not a skip: the job stays queued and the
+                # next pass reconsiders it once the host has had its pause.
+                continue
             self._start_fetch(job)
             available -= 1
+
+    def _governor_defers(self, job: dict[str, Any]) -> str:
+        """Return why this job must wait for its host, or '' to start it.
+
+        The whole point of V162 is that the reaction is queue-wide: a 429 from
+        one job has to slow every other job aimed at the same host, which only
+        works if the decision is made here rather than inside a worker.
+        """
+        from .governor import concurrency_for, delay_for, host_key
+
+        host = host_key(
+            job.get("url") or job.get("webpage_url") or ""
+        )
+        if not host:
+            return ""
+        running = sum(1 for value in self._job_hosts.values() if value == host)
+        allowed = concurrency_for(host, ceiling=self.max_concurrent)
+        if running >= allowed:
+            return f"{host} is limited to {allowed} concurrent"
+        delay = delay_for(host)
+        if delay > 0:
+            waited = time.time() - self._host_last_start.get(host, 0.0)
+            if waited < delay:
+                return f"{host} is paced at {delay:g}s between requests"
+        return ""
 
     @staticmethod
     def _eligible(job: dict[str, Any]) -> bool:
@@ -719,7 +760,13 @@ class HeadlessJobService(QObject):
             return True
 
     def _start_fetch(self, job: dict[str, Any]) -> None:
+        from .governor import host_key
+
         job_id = str(job["job_id"])
+        host = host_key(job.get("url") or job.get("webpage_url") or "")
+        if host:
+            self._job_hosts[job_id] = host
+            self._host_last_start[host] = time.time()
         current = db.claim_queue_job(
             job_id, self.owner_id, status="fetching", progress=0, error=""
         )
@@ -1194,6 +1241,7 @@ class HeadlessJobService(QObject):
             self._forget_request_headers(job_id)
             self._dispatch()
             return
+        self._release_host(job_id, succeeded=False)
         self._fail_job(job_id, "fetch", error)
         self._forget_request_headers(job_id)
 
@@ -1229,7 +1277,16 @@ class HeadlessJobService(QObject):
             dispatch=False,
         )
 
+    def _release_host(self, job_id: str, *, succeeded: bool) -> None:
+        """Give the host its slot back and tell the governor how it went."""
+        from .governor import record_success
+
+        host = self._job_hosts.pop(str(job_id), "")
+        if host and succeeded:
+            record_success(host)
+
     def _on_download_done(self, job_id: str) -> None:
+        self._release_host(job_id, succeeded=True)
         job = db.load_queue_job(job_id)
         if (
             self._stopping or job_id in self._download_errors or not job
