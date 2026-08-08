@@ -2,6 +2,36 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## [4.57.0] - 2026-08-08
+
+Failures now surface where you are looking, and keyboard focus is visible again.
+
+- Transient messages appear in the window itself. The OS notification and the
+  tray balloon deliberately stay quiet while StreamKeep is focused, so as not to
+  interrupt you — but nothing replaced them, which meant a user watching the app
+  was the user least likely to learn that anything had failed.
+- Three History actions that returned silently now say why they cannot proceed:
+  **Show chat highlights**, **Storyboard** and **Transcribe** each name the
+  component that is missing instead of appearing to do nothing when clicked.
+- Global search distinguishes a broken transcript index from an empty archive.
+  It previously reported "No results found." for both.
+- Storage cleanup names the folders it could not recycle and why. It reported
+  "Recycled 3 of 5" without saying which two failed.
+- Exporting the Operations view reports a failure in the window. Its status label
+  sits at the bottom of a long scroll page and was usually off-screen.
+- Clearing your notification history states how many entries it cleared and
+  offers **Undo clear** in the bell menu. It was previously silent and permanent.
+- The URL field now shows a visible focus indicator. It had none at all, which
+  made keyboard navigation of the app's primary control invisible.
+- A selected row in the search results is distinguishable from a hovered one.
+  Both used the same background.
+- The navigation rail's focus ring meets the contrast minimum for a UI component
+  in every theme; in the light theme it previously measured 2.91:1 against a
+  required 3:1.
+- Global search no longer disappears in a narrow window. Below the width where
+  the field is hidden it collapses to a labelled button that reveals it, so the
+  control stays reachable at every supported window size.
+
 ## [4.56.0] - 2026-08-08
 
 This release is about failures that used to happen quietly.

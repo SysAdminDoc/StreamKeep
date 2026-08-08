@@ -850,14 +850,27 @@ class ToastOverlay(QWidget):
         self._layout.setSpacing(8)
         self._layout.addStretch(1)
         self._toasts = []
+        self._attached = parent is not None
         set_accessible_role(self, "alert")
         set_accessible(self, "Notifications", "transient status messages")
         if parent is not None:
             parent.installEventFilter(self)
+            # Stop filtering the moment the parent starts going away. Otherwise
+            # a resize emitted during teardown reaches an overlay whose own C++
+            # side is already gone, which is an access violation rather than an
+            # exception.
+            parent.destroyed.connect(self._detach)
         self.hide()
+
+    def _detach(self):
+        """Stop observing the parent; called when the parent is destroyed."""
+        self._attached = False
 
     # ── geometry ────────────────────────────────────────────────────
     def eventFilter(self, watched, event):
+        if not self._attached or not self._toasts:
+            # Nothing on screen to move, or the parent is going away.
+            return False
         if watched is self.parent() and event.type() in (
             QEvent.Type.Resize, QEvent.Type.Show,
         ):
@@ -865,7 +878,14 @@ class ToastOverlay(QWidget):
         return False
 
     def _reposition(self):
-        parent = self.parentWidget()
+        if not self._attached:
+            return
+        try:
+            parent = self.parentWidget()
+        except RuntimeError:
+            # Our own C++ side is gone.
+            self._attached = False
+            return
         if parent is None:
             return
         hint = self.sizeHint()
@@ -942,7 +962,13 @@ class ToastOverlay(QWidget):
         self._toasts.remove(card)
         try:
             self._layout.removeWidget(card)
-            card.setParent(None)
+            # Deliberately NOT setParent(None): reparenting to nothing makes the
+            # card a top-level widget that Qt tracks until the deferred delete
+            # runs, and the session teardown then closes and deletes it a second
+            # time. That is the V177 double-delete shape. removeWidget already
+            # detaches it from the layout; deleteLater does the rest while it is
+            # still owned by the overlay.
+            card.hide()
             card.deleteLater()
         except RuntimeError:
             # The overlay's C++ side is already gone (the window closed while a
