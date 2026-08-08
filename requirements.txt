@@ -6,12 +6,12 @@ PyQt6-Qt6>=6.11.1
 Pillow>=12.3.0
 yt-dlp[default]>=2026.07.04
 send2trash>=2.1.0,<3
-websocket-client>=1.7
-keyring>=25.0
+websocket-client>=1.9.0
+keyring>=25.7.0
 argon2-cffi>=25.1.0
 cryptography>=50.0.0
 defusedxml>=0.7.1
-PyYAML>=6.0.2
+PyYAML>=6.0.3
 urllib3>=2.7.0
 paramiko>=5.0.0
 

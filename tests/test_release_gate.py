@@ -111,9 +111,15 @@ class StageDriverTests(unittest.TestCase):
         self.assertIn("skipped", detail)
 
     def test_release_python_policy_accepts_target_and_rejects_older_runtime(self):
-        self.assertEqual(gate.release_python_error((3, 14, 6)), "")
-        error = gate.release_python_error((3, 13, 14))
-        self.assertIn("Python 3.14.6", error)
+        # Derived from the gate's own floor so a bump does not need this test
+        # edited -- and so a bump cannot pass while the policy still admits the
+        # superseded patch (V193).
+        floor = gate.MIN_RELEASE_PYTHON
+        expected = ".".join(str(part) for part in floor)
+        self.assertEqual(gate.release_python_error(floor), "")
+        below = (floor[0], floor[1], max(0, floor[2] - 1))
+        self.assertIn(expected, gate.release_python_error(below))
+        self.assertIn(expected, gate.release_python_error((3, 13, 14)))
 
     def test_no_stage_introduces_signing_or_ci(self):
         # The gate is local and unsigned by policy; nothing in it may shell out
@@ -327,3 +333,61 @@ class PinnedArtifactRegistryTests(unittest.TestCase):
             ok, detail = gate.stage_pinned_binaries()
         self.assertTrue(ok, detail)
         self.assertIn("sqlite 3.53.3 >= 3.53.2", detail)
+
+
+class ReleasePythonFloorTests(unittest.TestCase):
+    """The release Python floor is declared in four places and must agree.
+
+    A half-landed bump would let one lane build on an interpreter another lane
+    refuses. 3.14.7 carries security content the previous floor admitted an
+    interpreter without: tarfile.data_filter path-traversal fixes, libexpat
+    2.8.1 (CVE-2026-45186) and pip 26.1 (CVE-2026-3219) (V193).
+    """
+
+    _DECLARING_FILES = (
+        "packaging/build.py",
+        "packaging/release_gate.py",
+        "packaging/reproducible_build.py",
+        "StreamKeep.spec",
+    )
+
+    def _declared_floors(self):
+        import re
+
+        found = {}
+        for relative in self._DECLARING_FILES:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            match = re.search(
+                r"^MIN_RELEASE_PYTHON = \((\d+),\s*(\d+),\s*(\d+)\)",
+                text, re.MULTILINE,
+            )
+            self.assertIsNotNone(
+                match, f"{relative} no longer declares MIN_RELEASE_PYTHON"
+            )
+            found[relative] = tuple(int(part) for part in match.groups())
+        return found
+
+    def test_every_lane_declares_the_same_floor(self):
+        floors = self._declared_floors()
+        self.assertEqual(
+            len(set(floors.values())), 1,
+            f"the release Python floor disagrees between lanes: {floors}",
+        )
+
+    def test_no_lane_still_names_a_superseded_floor_in_its_message(self):
+        floors = self._declared_floors()
+        expected = ".".join(str(part) for part in next(iter(floors.values())))
+        for relative in self._DECLARING_FILES:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn(expected, text, (
+                f"{relative} declares {expected} but its operator-facing "
+                "message names a different version"
+            ))
+
+    def test_the_readme_states_the_same_release_floor(self):
+        floors = self._declared_floors()
+        expected = ".".join(str(part) for part in next(iter(floors.values())))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"Python {expected}", readme, (
+            "README.md must state the release floor the lanes enforce"
+        ))

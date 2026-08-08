@@ -397,6 +397,15 @@ def test_release_build_inputs_name_the_shipped_python_target():
         ROOT / "packaging" / "reproducible_build.py"
     ).read_text(encoding="utf-8")
     spec_source = (ROOT / "StreamKeep.spec").read_text(encoding="utf-8")
+    # Derived from the gate's declared floor so a bump does not need this test
+    # edited, and so a half-landed bump fails instead of passing (V193).
+    import sys as _sys
+    if str(ROOT / "packaging") not in _sys.path:
+        _sys.path.insert(0, str(ROOT / "packaging"))
+    from release_gate import MIN_RELEASE_PYTHON
+
+    tuple_literal = ", ".join(str(part) for part in MIN_RELEASE_PYTHON)
+    dotted = ".".join(str(part) for part in MIN_RELEASE_PYTHON)
     for source in (build_source, reproducible_source, spec_source):
-        assert "3, 14, 6" in source
-        assert "3.14.6" in source
+        assert tuple_literal in source
+        assert dotted in source

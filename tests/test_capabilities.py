@@ -1,4 +1,5 @@
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -498,3 +499,76 @@ class UnsupportedHostArchitectureTests(unittest.TestCase):
         with self.assertRaises(DenoRuntimeError) as caught:
             host_target(system="Plan9", machine="sparc")
         self.assertIn("sparc", str(caught.exception))
+
+
+class OptionalEngineFloorTests(unittest.TestCase):
+    """gallery-dl and faster-whisper must declare a floor like every other engine.
+
+    They were the only third-party engines with none, so nothing could refuse an
+    outdated build by name the way ffmpeg, curl, yt-dlp, streamlink and Deno are
+    refused (V194).
+    """
+
+    def test_gallery_dl_declares_a_floor_and_a_recommendation(self):
+        from streamkeep.integrations import gallery_dl
+
+        self.assertIsInstance(gallery_dl.MIN_GALLERY_DL_VERSION, tuple)
+        self.assertGreaterEqual(
+            gallery_dl.RECOMMENDED_GALLERY_DL_VERSION,
+            gallery_dl.MIN_GALLERY_DL_VERSION,
+            "the recommendation must not be below the floor",
+        )
+
+    def test_an_outdated_gallery_dl_is_refused_by_name(self):
+        from streamkeep.integrations import gallery_dl
+
+        with mock.patch.object(gallery_dl, "gallery_dl_available", lambda: True), \
+                mock.patch.object(gallery_dl, "gallery_dl_version", lambda: "1.20.0"):
+            supported, version, detail = gallery_dl.gallery_dl_supported()
+        self.assertFalse(supported)
+        self.assertEqual(version, "1.20.0")
+        self.assertIn("below the supported floor", detail)
+        self.assertIn("1.32.0", detail)
+
+    def test_a_current_gallery_dl_is_accepted(self):
+        from streamkeep.integrations import gallery_dl
+
+        with mock.patch.object(gallery_dl, "gallery_dl_available", lambda: True), \
+                mock.patch.object(gallery_dl, "gallery_dl_version", lambda: "1.32.9"):
+            supported, _version, detail = gallery_dl.gallery_dl_supported()
+        self.assertTrue(supported, detail)
+
+    def test_a_gallery_dl_without_a_version_is_allowed_not_refused(self):
+        """A probe failure must not break a working install."""
+        from streamkeep.integrations import gallery_dl
+
+        with mock.patch.object(gallery_dl, "gallery_dl_available", lambda: True), \
+                mock.patch.object(gallery_dl, "gallery_dl_version", lambda: ""):
+            supported, version, detail = gallery_dl.gallery_dl_supported()
+        self.assertTrue(supported)
+        self.assertEqual(version, "")
+        self.assertIn("did not report a version", detail)
+
+    def test_an_outdated_faster_whisper_is_refused_by_name(self):
+        from streamkeep.postprocess import transcribe_worker
+
+        stub = types.SimpleNamespace(__version__="1.0.0", WhisperModel=object)
+        supported, version, detail = transcribe_worker.faster_whisper_supported(stub)
+        self.assertFalse(supported)
+        self.assertEqual(version, "1.0.0")
+        self.assertIn("below the supported floor", detail)
+
+    def test_an_outdated_faster_whisper_is_not_selected_as_the_backend(self):
+        from streamkeep.postprocess import transcribe_worker
+
+        stub = types.SimpleNamespace(__version__="1.0.0", WhisperModel=object)
+        with mock.patch.dict(sys.modules, {"faster_whisper": stub}), \
+                mock.patch.object(
+                    transcribe_worker, "_whisperx_available", lambda: False
+                ), \
+                mock.patch.object(transcribe_worker.shutil, "which", lambda _n: None):
+            backend = transcribe_worker.is_available()
+        self.assertNotEqual(
+            backend, "faster-whisper",
+            "an unsupported build must not be chosen as the backend",
+        )

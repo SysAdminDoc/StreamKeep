@@ -48,6 +48,44 @@ def _ffmpeg_whisper_capability(config=None, *, refresh=False):
     ).get("ffmpeg_whisper", {})
 
 
+#: faster-whisper had no declared floor, so an ancient build could not be
+#: refused by name (V194). As with gallery-dl the floor is the oldest release
+#: StreamKeep supports rather than the newest published: no advisory drives it,
+#: and refusing a working install for being one patch behind is worse than
+#: reporting it.
+MIN_FASTER_WHISPER_VERSION = (1, 2, 0)
+MIN_FASTER_WHISPER_DESCRIPTION = "1.2.0 or newer"
+
+
+def _faster_whisper_version_tuple(value) -> tuple[int, ...]:
+    parts = []
+    for chunk in str(value or "").split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def faster_whisper_supported(module=None):
+    """Return ``(supported, version, detail)`` for the installed faster-whisper."""
+    if module is None:
+        try:
+            import faster_whisper as module
+        except ImportError:
+            return False, "", "faster-whisper is not installed."
+    version = str(getattr(module, "__version__", "") or "")
+    if not version:
+        # Present but unidentifiable; allowed, with the fact recorded, rather
+        # than refusing a working install over a probe failure.
+        return True, "", "faster-whisper is installed but reports no version."
+    if _faster_whisper_version_tuple(version) < MIN_FASTER_WHISPER_VERSION:
+        return False, version, (
+            f"faster-whisper {version} is below the supported floor "
+            f"({MIN_FASTER_WHISPER_DESCRIPTION}). Upgrade with "
+            "'python -m pip install -U faster-whisper'."
+        )
+    return True, version, f"faster-whisper {version} is supported."
+
+
 def is_available(config=None):
     """Which Whisper runtime (if any) is usable right now."""
     if _whisperx_available():
@@ -57,7 +95,8 @@ def is_available(config=None):
     except ImportError:
         faster_whisper = None
     if faster_whisper is not None and hasattr(faster_whisper, "WhisperModel"):
-        return "faster-whisper"
+        if faster_whisper_supported(faster_whisper)[0]:
+            return "faster-whisper"
     for name in ("whisper-cli", "whisper.cpp", "main"):
         if shutil.which(name):
             return name

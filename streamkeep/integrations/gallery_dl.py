@@ -17,10 +17,13 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+
+from ..paths import _CREATE_NO_WINDOW
 
 _MODULE = "gallery_dl"
 _EXECUTABLE = "gallery-dl"
@@ -59,8 +62,26 @@ _GALLERY_HOST_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in
 ))
 
 
+#: gallery-dl and faster-whisper were the only third-party engines with no
+#: declared floor, so ``capabilities`` could not refuse an outdated build by
+#: name the way it does for ffmpeg, curl, yt-dlp, streamlink and Deno (V194).
+#:
+#: The floor is the oldest release StreamKeep supports, not the newest one
+#: published. No gallery-dl advisory drives it, so pinning to the current
+#: release would refuse a working install two patches behind for no security
+#: reason. ``RECOMMENDED`` is reported separately so the operator can see an
+#: upgrade is available without being blocked by it.
+MIN_GALLERY_DL_VERSION = (1, 32, 0)
+MIN_GALLERY_DL_DESCRIPTION = "1.32.0 or newer"
+RECOMMENDED_GALLERY_DL_VERSION = (1, 32, 9)
+
+
 class GalleryDlUnavailable(RuntimeError):
     """Raised when a gallery-dl operation is requested but it is not installed."""
+
+
+class GalleryDlTooOld(GalleryDlUnavailable):
+    """Raised when the installed gallery-dl is below the supported floor."""
 
 
 def gallery_dl_available():
@@ -89,6 +110,75 @@ def gallery_dl_command_prefix():
     if exe:
         return [exe]
     raise GalleryDlUnavailable(gallery_dl_install_hint())
+
+
+def require_gallery_dl():
+    """Return the argv prefix, refusing a build below the declared floor."""
+    supported, version, detail = gallery_dl_supported()
+    if not supported:
+        raise GalleryDlTooOld(detail) if version else GalleryDlUnavailable(detail)
+    return gallery_dl_command_prefix()
+
+
+def _version_tuple(value) -> tuple[int, ...]:
+    """Return a comparable tuple for a dotted gallery-dl version string."""
+    parts = []
+    for chunk in str(value or "").split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def gallery_dl_version():
+    """Return the installed gallery-dl version string, or "" when unknown."""
+    try:
+        module = importlib.import_module(_MODULE)
+    except Exception:
+        module = None
+    if module is not None:
+        version = getattr(getattr(module, "version", None), "__version__", "")
+        if not version:
+            version = str(getattr(module, "__version__", "") or "")
+        if version:
+            return str(version)
+    exe = shutil.which(_EXECUTABLE)
+    if not exe:
+        return ""
+    try:
+        result = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (result.stdout or result.stderr or "").strip().split()[-1:][0]         if (result.stdout or result.stderr).strip() else ""
+
+
+def gallery_dl_supported():
+    """Return ``(supported, version, detail)`` for the installed gallery-dl."""
+    if not gallery_dl_available():
+        return False, "", gallery_dl_install_hint()
+    version = gallery_dl_version()
+    if not version:
+        # Present but unidentifiable. Refusing would break a working install
+        # over a probe failure, so it is allowed with the fact recorded.
+        return True, "", "gallery-dl is installed but did not report a version."
+    if _version_tuple(version) < MIN_GALLERY_DL_VERSION:
+        return False, version, (
+            f"gallery-dl {version} is below the supported floor "
+            f"({MIN_GALLERY_DL_DESCRIPTION}). Upgrade with "
+            "'python -m pip install -U gallery-dl'."
+        )
+    if _version_tuple(version) < RECOMMENDED_GALLERY_DL_VERSION:
+        recommended = ".".join(
+            str(part) for part in RECOMMENDED_GALLERY_DL_VERSION
+        )
+        return True, version, (
+            f"gallery-dl {version} is supported; {recommended} is newer and "
+            "carries more extractors."
+        )
+    return True, version, f"gallery-dl {version} is supported."
 
 
 def gallery_dl_install_hint():
