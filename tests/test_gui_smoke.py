@@ -13,7 +13,8 @@ from streamkeep.models import HistoryEntry, MediaTrackInfo, MonitorEntry, Qualit
 from streamkeep import db
 
 
-def _ready_ytdlp_status():
+def _ready_ytdlp_status(config=None):
+    del config
     return {
         "state": "ready",
         "summary": "Ready",
@@ -25,8 +26,8 @@ def _ready_ytdlp_status():
     }
 
 
-def _ready_runtime_registry(*, refresh=False, config=None):
-    del refresh, config
+def _ready_runtime_registry(*, refresh=False, config=None, should_cancel=None):
+    del refresh, config, should_cancel
 
     def record(name, version, path):
         return {
@@ -95,6 +96,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
         "output_dir": str(tmp_path),
         "check_for_updates": False,
         "companion_server_enabled": False,
+        "first_run_complete": True,
         "ytdlp_arg_templates": {
             "Archive headers": [
                 "--add-header", "Referer: https://example.com/",
@@ -590,6 +592,60 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
                 assert dialog.windowTitle()
                 dialog.close()
         finally:
+            window.close()
+            qt_application.processEvents()
+
+
+def test_main_window_shows_onboarding_from_startup_path(tmp_path, qt_application):
+    import streamkeep.ui.main_window as main_window
+    import streamkeep.ui.onboarding as onboarding
+
+    config = {
+        "output_dir": str(tmp_path),
+        "check_for_updates": False,
+        "companion_server_enabled": False,
+    }
+    with mock.patch.object(main_window, "_load_config", return_value=dict(config)), \
+            mock.patch.object(main_window, "_save_config", return_value=True), \
+            mock.patch.object(main_window, "_write_log_line"), \
+            mock.patch.object(main_window._db, "CONFIG_DIR", tmp_path), \
+            mock.patch.object(main_window._db, "DB_PATH", tmp_path / "library.db"), \
+            mock.patch.object(main_window.QSystemTrayIcon, "isSystemTrayAvailable", return_value=False), \
+            mock.patch.object(main_window, "_available_video_codec_keys", return_value=["h264"]), \
+            mock.patch("streamkeep.ui.tabs.settings.available_video_codec_keys", return_value=["h264"]), \
+            mock.patch("streamkeep.ui.thumb_loader.ThumbLoader.request"), \
+            mock.patch("streamkeep.search.index_all_async", lambda *args, **kwargs: None), \
+            mock.patch.object(
+                onboarding,
+                "get_runtime_capabilities",
+                side_effect=_ready_runtime_registry,
+            ) as probe, \
+            mock.patch.object(onboarding, "ytdlp_runtime_status", return_value=_ready_ytdlp_status()):
+        main_window._db.init_db()
+        window = main_window.StreamKeep()
+        window.show()
+        try:
+            for _ in range(20):
+                qt_application.processEvents()
+                dialog = window._onboarding_dialog
+                if dialog is not None:
+                    break
+            assert isinstance(dialog, onboarding.OnboardingWizard)
+            assert dialog.isVisible()
+            assert dialog._probe_progress.isVisible()
+            assert "Checking" in dialog._probe_status.text()
+            assert dialog._probe_worker is not None
+            assert dialog._probe_worker.wait(1000)
+            qt_application.processEvents()
+            assert probe.call_count == 1
+            assert dialog._probe_progress.maximum() == 1
+            dialog._skip_all()
+            qt_application.processEvents()
+            assert window._onboarding_dialog is None
+            assert window._config["first_run_complete"] is True
+        finally:
+            if window._onboarding_dialog is not None:
+                window._onboarding_dialog.close()
             window.close()
             qt_application.processEvents()
 

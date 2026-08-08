@@ -2,8 +2,10 @@
 
 from PyQt6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QPushButton,
-    QApplication, QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QProgressBar, QRadioButton, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
+from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..capabilities import format_capability_problem, get_runtime_capabilities
 from ..i18n import TranslatableDialog
@@ -16,6 +18,39 @@ from .widgets import (
     make_status_banner,
     update_status_banner,
 )
+
+
+class _CapabilityProbeWorker(QThread):
+    """Probe managed runtimes without blocking the first-run dialog."""
+
+    progress = pyqtSignal(str)
+    result_ready = pyqtSignal(object, object)
+    probe_failed = pyqtSignal(str)
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self._config = dict(config or {})
+
+    def run(self):
+        try:
+            self.progress.emit("Checking managed runtimes…")
+            registry = get_runtime_capabilities(
+                refresh=True,
+                config=self._config,
+                should_cancel=self.isInterruptionRequested,
+            )
+            if registry is None or self.isInterruptionRequested():
+                return
+            self.progress.emit("Checking the yt-dlp fallback…")
+            # ytdlp_runtime_status reads the registry cache populated above;
+            # this is a cheap formatting pass, not a second probe.
+            runtime_status = ytdlp_runtime_status(config=self._config)
+        except Exception as error:
+            if not self.isInterruptionRequested():
+                self.probe_failed.emit(str(error))
+            return
+        if not self.isInterruptionRequested():
+            self.result_ready.emit(registry, runtime_status)
 
 
 class OnboardingWizard(TranslatableDialog):
@@ -36,6 +71,10 @@ class OnboardingWizard(TranslatableDialog):
         self._config = config if config is not None else {}
         self._output_dir = str(default_output_dir())
         self._theme = "dark"
+        self._skipped = False
+        self._probe_worker = None
+        self._capability_registry = {}
+        self._ytdlp_status = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 18)
@@ -87,8 +126,7 @@ class OnboardingWizard(TranslatableDialog):
         nav.addWidget(self._next_btn)
         layout.addLayout(nav)
 
-        self._check_ffmpeg()
-        self._check_ytdlp_runtime()
+        self._start_capability_probe()
         self._update_summary()
         self._update_nav()
 
@@ -107,6 +145,16 @@ class OnboardingWizard(TranslatableDialog):
         content.addWidget(self._ffmpeg_banner)
         self._ytdlp_banner, self._ytdlp_title, self._ytdlp_body = make_status_banner()
         content.addWidget(self._ytdlp_banner)
+        self._probe_status = QLabel("Checking managed runtimes…")
+        self._probe_status.setObjectName("fieldHint")
+        self._probe_status.setWordWrap(True)
+        content.addWidget(self._probe_status)
+        self._probe_progress = QProgressBar()
+        self._probe_progress.setObjectName("onboardingProbeProgress")
+        self._probe_progress.setAccessibleName("Runtime readiness progress")
+        self._probe_progress.setRange(0, 0)
+        self._probe_progress.setTextVisible(False)
+        content.addWidget(self._probe_progress)
 
         checklist, checklist_content = make_dialog_section(
             "What this setup covers",
@@ -226,9 +274,79 @@ class OnboardingWizard(TranslatableDialog):
         outer.addStretch(1)
         return page
 
-    def _check_ffmpeg(self):
-        registry = get_runtime_capabilities(refresh=True)
-        ffmpeg = registry["ffmpeg"]
+    def _start_capability_probe(self):
+        """Start the one runtime scan after the dialog has been constructed."""
+        self._set_probe_pending("Checking managed runtimes…")
+        self._probe_worker = _CapabilityProbeWorker(self._config, self)
+        self._probe_worker.progress.connect(self._set_probe_pending)
+        self._probe_worker.result_ready.connect(self._on_capability_probe_ready)
+        self._probe_worker.probe_failed.connect(self._on_capability_probe_failed)
+        self._probe_worker.start()
+
+    def _set_probe_pending(self, message):
+        if hasattr(self, "_probe_status"):
+            self._probe_status.setText(str(message or "Checking managed runtimes…"))
+        if hasattr(self, "_probe_progress"):
+            self._probe_progress.setRange(0, 0)
+            self._probe_progress.setValue(0)
+        if hasattr(self, "_ffmpeg_title"):
+            update_status_banner(
+                self._ffmpeg_banner,
+                self._ffmpeg_title,
+                self._ffmpeg_body,
+                title="Checking FFmpeg readiness",
+                body="The runtime check is running in the background.",
+                tone="info",
+            )
+        if hasattr(self, "_ytdlp_title"):
+            update_status_banner(
+                self._ytdlp_banner,
+                self._ytdlp_title,
+                self._ytdlp_body,
+                title="Checking yt-dlp fallback",
+                body="The runtime check is running in the background.",
+                tone="info",
+            )
+
+    def _on_capability_probe_ready(self, registry, runtime_status):
+        self._capability_registry = dict(registry or {})
+        self._ytdlp_status = dict(runtime_status or {})
+        if hasattr(self, "_probe_progress"):
+            self._probe_progress.setRange(0, 1)
+            self._probe_progress.setValue(1)
+        if hasattr(self, "_probe_status"):
+            self._probe_status.setText("Runtime readiness check complete.")
+        self._check_ffmpeg(self._capability_registry)
+        self._check_ytdlp_runtime(self._ytdlp_status)
+
+    def _on_capability_probe_failed(self, message):
+        if hasattr(self, "_probe_progress"):
+            self._probe_progress.setRange(0, 1)
+            self._probe_progress.setValue(1)
+        if hasattr(self, "_probe_status"):
+            self._probe_status.setText(
+                "Runtime checks are unavailable; you can continue and repair them later."
+            )
+        update_status_banner(
+            self._ffmpeg_banner,
+            self._ffmpeg_title,
+            self._ffmpeg_body,
+            title="Runtime check unavailable",
+            body=str(message or "The managed runtime probe failed."),
+            tone="warning",
+        )
+        update_status_banner(
+            self._ytdlp_banner,
+            self._ytdlp_title,
+            self._ytdlp_body,
+            title="Runtime check unavailable",
+            body="You can review optional runtime setup later in Settings.",
+            tone="warning",
+        )
+
+    def _check_ffmpeg(self, registry=None):
+        registry = registry if registry is not None else self._capability_registry
+        ffmpeg = registry.get("ffmpeg", {})
         if ffmpeg.get("supported"):
             tone = "success"
             title = "FFmpeg ready"
@@ -249,9 +367,8 @@ class OnboardingWizard(TranslatableDialog):
             tone=tone,
         )
 
-    def _check_ytdlp_runtime(self):
-        get_runtime_capabilities(refresh=True)
-        status = ytdlp_runtime_status()
+    def _check_ytdlp_runtime(self, status=None):
+        status = status if status is not None else self._ytdlp_status
         state = status.get("state", "missing")
         if state == "ready":
             title = "yt-dlp fallback is ready"
@@ -358,6 +475,7 @@ class OnboardingWizard(TranslatableDialog):
         self._update_nav()
 
     def _skip_all(self):
+        self._skipped = True
         self._config["first_run_complete"] = True
         self.accept()
 
@@ -368,6 +486,13 @@ class OnboardingWizard(TranslatableDialog):
         apply_theme(self._theme, app=QApplication.instance())
         self.accept()
 
+    def closeEvent(self, event):
+        worker = self._probe_worker
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            worker.wait(7000)
+        super().closeEvent(event)
+
     @property
     def chosen_theme(self):
         return self._theme
@@ -375,3 +500,7 @@ class OnboardingWizard(TranslatableDialog):
     @property
     def chosen_output_dir(self):
         return self._output_dir
+
+    @property
+    def skipped(self):
+        return self._skipped

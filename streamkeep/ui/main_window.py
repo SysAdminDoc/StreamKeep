@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QProgressBar,
     QFrame, QStackedWidget, QSystemTrayIcon, QTableWidgetItem,
     QMenu, QAbstractItemView,
@@ -260,6 +260,8 @@ class StreamKeep(
         self._last_auto_output = ""
         self._history = []
         self._config = _load_config()
+        self._onboarding_dialog = None
+        self._onboarding_checked = False
         try:
             from streamkeep.i18n import install_translator
             install_translator(self._config.get("language", "en"))
@@ -454,6 +456,41 @@ class StreamKeep(
         self._gui_log_handler = install_gui_logging(self._log)
         # Keyboard shortcuts (F11)
         self._setup_shortcuts()
+
+    def _maybe_show_onboarding(self):
+        """Show first-run setup once, after the main window has painted."""
+        if self._onboarding_checked:
+            return
+        self._onboarding_checked = True
+        if self._startup_check or self._config.get("first_run_complete"):
+            return
+        from .onboarding import OnboardingWizard
+
+        dialog = OnboardingWizard(self, config=self._config)
+        self._onboarding_dialog = dialog
+        dialog.finished.connect(
+            lambda result, wizard=dialog: self._onboarding_finished(wizard, result)
+        )
+        dialog.show()
+
+    def _onboarding_finished(self, dialog, result):
+        """Persist first-run choices and release the dialog reference."""
+        if dialog is not self._onboarding_dialog:
+            return
+        try:
+            if result == QDialog.DialogCode.Accepted:
+                if not dialog.skipped:
+                    output_dir = dialog.chosen_output_dir
+                    self._config["output_dir"] = output_dir
+                    if hasattr(self, "output_input"):
+                        self.output_input.setText(output_dir)
+                    if hasattr(self, "settings_output"):
+                        self.settings_output.setText(output_dir)
+                    self._config["theme"] = dialog.chosen_theme
+                if not self._persist_config():
+                    self._log("[ONBOARDING] Could not persist first-run choices.")
+        finally:
+            self._onboarding_dialog = None
 
     # ── Keyboard Shortcuts ────────────────────────────────────────────
 
@@ -2216,6 +2253,10 @@ class StreamKeep(
     def showEvent(self, event):
         super().showEvent(event)
         self._update_responsive_chrome(self.width())
+        if not self._startup_check:
+            # Run after this first paint, while the wizard's worker keeps
+            # capability probes off the event thread.
+            QTimer.singleShot(0, self._maybe_show_onboarding)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
