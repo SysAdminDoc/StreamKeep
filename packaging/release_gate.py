@@ -215,29 +215,45 @@ def stage_pinned_binaries() -> tuple[bool, str]:
     """Advisory scan for external binaries StreamKeep pins by version.
 
     ``stage_advisories`` runs pip-audit over ``requirements.lock``, which by
-    construction only sees Python wheels. The managed Deno runtime is a
-    downloaded executable pinned by version and SHA-256, so no lock file
-    mentions it and no advisory feed the gate consults would ever flag it —
-    the runtime sat 17 published advisories behind without a single stage
-    noticing. This closes that blind spot for every version StreamKeep pins
-    rather than merely floors.
+    construction only sees Python wheels. An artefact downloaded as a binary and
+    pinned by version plus hash is invisible to it -- the managed Deno runtime
+    sat 17 published advisories behind without a single stage noticing.
+
+    The set is not written here: it comes from ``packaging.pinned_artifacts``,
+    and ``tests/test_release_gate.py`` derives which modules must appear in that
+    registry. This stage previously named one binary while claiming to cover
+    every pin, which certified the SQLite DLL by omission (V187).
     """
     import json
     import urllib.error
     import urllib.request
 
     sys.path.insert(0, str(ROOT))
-    from streamkeep.javascript_runtime import DENO_MINIMUM_VERSION, DENO_VERSION
+    from pinned_artifacts import pinned_artifacts, version_tuple
 
-    pinned = (
-        ("deno", "crates.io", DENO_VERSION),
-        ("deno", "crates.io", DENO_MINIMUM_VERSION),
-    )
     findings: list[str] = []
-    for name, ecosystem, version in pinned:
+    checked: list[str] = []
+    for artifact in pinned_artifacts():
+        label = f"{artifact.name} {artifact.version}"
+        if not artifact.osv_queryable:
+            # OSV cannot answer for this artefact, so the declared known-fixed
+            # release is the check. Skipping would authorise it silently.
+            if not artifact.minimum_safe:
+                return False, (
+                    f"{label} is neither OSV-queryable nor given a "
+                    "minimum_safe version, so nothing verifies it"
+                )
+            if version_tuple(artifact.version) < version_tuple(artifact.minimum_safe):
+                findings.append(
+                    f"{label} is below the known-fixed "
+                    f"{artifact.minimum_safe} ({artifact.note})"
+                )
+            else:
+                checked.append(f"{label} >= {artifact.minimum_safe}")
+            continue
         payload = json.dumps({
-            "version": version,
-            "package": {"name": name, "ecosystem": ecosystem},
+            "version": artifact.version,
+            "package": {"name": artifact.name, "ecosystem": artifact.ecosystem},
         }).encode("utf-8")
         request = urllib.request.Request(
             "https://api.osv.dev/v1/query",
@@ -251,18 +267,19 @@ def stage_pinned_binaries() -> tuple[bool, str]:
             # Fail closed. A network problem must not read as "no advisories" —
             # a check wired to nothing authorises everything.
             return False, (
-                f"could not reach the OSV advisory feed for {name} {version}: "
+                f"could not reach the OSV advisory feed for {label}: "
                 f"{error}. Re-run with network access, or pass "
                 f"--skip pinned-binaries to acknowledge the gap explicitly."
             )
         vulns = body.get("vulns") or []
         if vulns:
             ids = ", ".join(sorted(entry.get("id", "?") for entry in vulns))
-            findings.append(f"{name} {version}: {len(vulns)} advisory/ies ({ids})")
+            findings.append(f"{label}: {len(vulns)} advisory/ies ({ids})")
+        else:
+            checked.append(label)
     if findings:
         return False, "; ".join(findings)
-    checked = ", ".join(f"{name} {version}" for name, _eco, version in pinned)
-    return True, f"no known advisories for {checked}"
+    return True, f"no known advisories for {', '.join(checked)}"
 
 
 def stage_reproducible_build() -> tuple[bool, str]:

@@ -229,3 +229,101 @@ class CapabilityClaimStageTests(unittest.TestCase):
         self.assertTrue(shipped["upload-delivery"].paths)
         self.assertIn("plugin-adapters", shipped)
         self.assertTrue(shipped["plugin-adapters"].paths)
+
+
+class PinnedArtifactRegistryTests(unittest.TestCase):
+    """The pinned-binaries scope must be derived, not hand-written.
+
+    ``stage_pinned_binaries`` exists because pip-audit cannot see a downloaded
+    binary. Its scope was a hand-written tuple naming one artefact while the
+    docstring claimed it covered every pin, so the SHA3-pinned SQLite DLL was
+    certified by omission (V187).
+    """
+
+    def test_every_module_that_pins_a_download_is_in_the_registry(self):
+        import ast
+
+        from pinned_artifacts import COMPLETENESS_EXEMPTIONS, pinned_artifacts
+
+        registered = {artifact.module for artifact in pinned_artifacts()}
+        candidates = []
+        for directory in ("streamkeep", "packaging"):
+            for path in sorted((ROOT / directory).rglob("*.py")):
+                if "__pycache__" in str(path):
+                    continue
+                text = path.read_text(encoding="utf-8")
+                tree = ast.parse(text)
+                names = {
+                    target.id
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Assign)
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
+                # A pinned external download declares both a version and a
+                # digest of the thing it downloads.
+                pins_version = any(name.endswith("_VERSION") for name in names)
+                pins_digest = any(
+                    "SHA" in name or name.endswith("_DIGEST") for name in names
+                )
+                downloads = "urllib.request" in text or "_URL" in names
+                if pins_version and pins_digest and downloads:
+                    candidates.append(
+                        str(path.relative_to(ROOT)).replace("\\", "/")
+                    )
+
+        missing = [
+            candidate for candidate in candidates
+            if candidate not in registered
+            and candidate not in COMPLETENESS_EXEMPTIONS
+        ]
+        self.assertFalse(missing, (
+            "these modules pin an external download but are absent from "
+            "packaging/pinned_artifacts.py, so the gate certifies them by "
+            f"omission: {missing}"
+        ))
+
+    def test_an_artifact_osv_cannot_answer_for_still_declares_a_floor(self):
+        from pinned_artifacts import pinned_artifacts
+
+        for artifact in pinned_artifacts():
+            if artifact.osv_queryable:
+                continue
+            self.assertTrue(artifact.minimum_safe, (
+                f"{artifact.name} {artifact.version} is not OSV-queryable and "
+                "declares no minimum_safe, so nothing verifies it"
+            ))
+
+    def test_the_stage_fails_when_a_pin_is_below_its_known_fixed_release(self):
+        from unittest import mock as _mock
+
+        import pinned_artifacts as registry
+
+        stale = registry.PinnedArtifact(
+            name="sqlite", version="3.53.1",
+            module="packaging/sqlite_runtime.py",
+            ecosystem="", minimum_safe="3.53.2", note="FTS5 overflow",
+        )
+        with _mock.patch.object(
+            registry, "pinned_artifacts", lambda: (stale,)
+        ):
+            ok, detail = gate.stage_pinned_binaries()
+        self.assertFalse(ok)
+        self.assertIn("below the known-fixed", detail)
+
+    def test_the_stage_reports_a_non_queryable_pin_it_verified(self):
+        from unittest import mock as _mock
+
+        import pinned_artifacts as registry
+
+        current = registry.PinnedArtifact(
+            name="sqlite", version="3.53.3",
+            module="packaging/sqlite_runtime.py",
+            ecosystem="", minimum_safe="3.53.2", note="FTS5 overflow",
+        )
+        with _mock.patch.object(
+            registry, "pinned_artifacts", lambda: (current,)
+        ):
+            ok, detail = gate.stage_pinned_binaries()
+        self.assertTrue(ok, detail)
+        self.assertIn("sqlite 3.53.3 >= 3.53.2", detail)
