@@ -2,6 +2,47 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## [4.56.0] - 2026-08-08
+
+This release is about failures that used to happen quietly.
+
+- A Settings save no longer erases the media-server keys the form has no controls
+  for. The dialog rebuilt that whole config section from its widgets and returned
+  13 of the 15 keys the schema allows, so `upload_profile_id`,
+  `upload_after_import` and `sidecar_profile` — set through the REST API or a
+  config import — were deleted every time anyone touched Settings.
+- Automatic recording that cannot create its output folder, retention that cannot
+  reach the Recycle Bin, and chat capture that will not start now say so instead
+  of leaving the monitor reporting normal operation. Each raises a standing
+  condition that clears on its own once the same work succeeds, because a health
+  probe cannot rediscover a go-live that already came and went.
+- A crash inside any background worker is now written to the crash log and shown.
+  Previously only the main thread was covered, which in an app built from 41
+  worker threads and shipped without a console meant a failing download, capture,
+  transcription or backup left no trace anywhere.
+- A download queue that cannot resume reports it. Four callers resumed the queue
+  after a power, disk or Settings change and all four swallowed the failure; two
+  of them had already announced "resuming queue" first.
+- Crash recovery says when it fails. The three routines that repair a
+  half-completed restore, rebuild or re-template were silenced, so the app
+  continued against a mixed config directory with nothing to indicate why.
+- Content summaries sent to a cloud provider are refused unless the endpoint is
+  `https`, and every provider answer is read under a size limit. An `http://`
+  base URL previously sent the API key in cleartext.
+- Exporting a clip while its preview, waveform or scene detection is still
+  running no longer risks taking the app down.
+- A collection export will not overwrite a `.strm` file it did not write, and a
+  re-export that can hardlink now removes the pointer an earlier export left
+  behind instead of listing one recording twice.
+- Transcribing non-English speech no longer fails on the text it produced. Text
+  read back from ffmpeg, yt-dlp and the transcription engines was being decoded
+  with the system locale's encoding, which raises on anything outside cp1252 on
+  Windows; the same default was corrupting non-Latin filenames handed to ffmpeg.
+- The media-server API and the deleted-VOD recovery page are read under a size
+  cap rather than without limit.
+- gallery-dl and faster-whisper now declare a supported version floor like every
+  other engine, so an outdated install is named rather than silently used.
+
 ## [4.55.0] - 2026-08-07
 
 - The download-queue and executor-lease family now owns its own code, which was

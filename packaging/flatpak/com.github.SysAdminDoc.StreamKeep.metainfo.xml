@@ -29,6 +29,9 @@
   <launchable type="desktop-id">com.github.SysAdminDoc.StreamKeep.desktop</launchable>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.56.0" date="2026-08-08">
+      <description><p>Failures that used to happen quietly now say so. A Settings save no longer erases the upload destination and sidecar profile it has no controls for. Automatic recording that cannot create its folder, retention that cannot reach the Recycle Bin, and a download queue that cannot resume all report themselves instead of leaving the monitor claiming everything is fine, and each raises a standing condition that clears when the work next succeeds. A crash inside any background worker is now written to the crash log and shown, where before it left no trace at all in a release build. Content summaries sent to a cloud provider are refused unless the address is https, and every provider answer is read under a limit. Exporting a clip while its preview or scene detection is still running no longer risks taking the app down. A collection export will not overwrite a .strm file it did not write, and a re-export cleans up after itself instead of listing one recording twice. Transcribing non-English speech no longer fails on the text it produced.</p></description>
+    </release>
     <release version="4.55.0" date="2026-08-07">
       <description><p>Internal work only: the download-queue and executor-lease code now lives in its own module instead of the database monolith, which is down to 4,013 lines from 6,737. No behaviour changes.</p></description>
     </release>
