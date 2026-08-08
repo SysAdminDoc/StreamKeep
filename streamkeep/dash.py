@@ -1,8 +1,9 @@
 """DASH/MPD manifest parser — static and dynamic manifests (F50).
 
 Parses MPEG-DASH Media Presentation Description (MPD) XML into
-``QualityInfo`` entries.  Handles ``SegmentTemplate`` (pattern-based
-URLs) and ``SegmentList`` (explicit URL lists) addressing.
+``QualityInfo`` entries.  Handles ``SegmentTemplate`` (including
+``SegmentTimeline``), ``SegmentList`` (explicit URL lists), and
+``SegmentBase``/``indexRange`` single-file addressing.
 
 Both static and dynamic (live) MPD manifests are supported — dynamic
 manifests are passed through to ffmpeg which handles segment polling
@@ -10,6 +11,7 @@ natively.  DRM-protected content (``ContentProtection`` elements) is
 detected and skipped with a warning.
 """
 
+import math
 import re
 import urllib.parse
 
@@ -17,12 +19,16 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
 from .http import curl
-from .models import MediaTrackInfo, QualityInfo
+from .models import DASHSegment, MediaTrackInfo, QualityInfo
 from .net_guard import RemoteURLPolicyError, validate_remote_url
 
 # MPD namespace — most manifests use this, but some omit it
 _MPD_NS = "urn:mpeg:dash:schema:mpd:2011"
 _NS = {"mpd": _MPD_NS}
+_DASH_MAX_TIMELINE_SEGMENTS = 100_000
+_DASH_TEMPLATE_RE = re.compile(
+    r"\$\$|\$(RepresentationID|Number|Bandwidth|Time)(%0\d+d)?\$"
+)
 
 
 _DASH_URI_ATTRIBUTES = {
@@ -196,16 +202,38 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
         log_fn("[DASH] Dynamic/live MPD — ffmpeg will handle segment polling.")
 
     total_secs = _parse_duration(root.attrib.get("mediaPresentationDuration", ""))
+    minimum_update_period = _parse_duration(
+        root.attrib.get("minimumUpdatePeriod", "")
+    )
 
     qualities = []
     manifest_dir = urllib.parse.urljoin(base_url, "./")
     root_base = _child_base_url(root, manifest_dir, ns)
     fmt = "dash-live" if is_dynamic else "dash"
+    root_template = _find(root, "SegmentTemplate", ns)
+    root_list = _find(root, "SegmentList", ns)
+    root_base_segment = _find(root, "SegmentBase", ns)
+    periods = _findall(root, "Period", ns)
 
-    for period_index, period in enumerate(_findall(root, "Period", ns)):
+    for period_index, period in enumerate(periods):
         period_id = period.attrib.get("id", "") or f"period-{period_index + 1}"
         period_base = _child_base_url(period, root_base, ns)
+        period_duration_secs = _parse_duration(
+            period.attrib.get("duration", "")
+        )
+        if not period_duration_secs and len(periods) == 1:
+            period_duration_secs = total_secs
+        period_template = _first_element(
+            _find(period, "SegmentTemplate", ns), root_template
+        )
+        period_list = _first_element(
+            _find(period, "SegmentList", ns), root_list
+        )
+        period_base_segment = _first_element(
+            _find(period, "SegmentBase", ns), root_base_segment
+        )
         period_tracks = []
+        track_metadata = {}
         kind_indexes = {"video": 0, "audio": 0, "subtitle": 0}
         for adapt_index, adapt_set in enumerate(
             _findall(period, "AdaptationSet", ns)
@@ -223,6 +251,15 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 role.attrib.get("value", "").lower()
                 for role in _findall(adapt_set, "Role", ns)
             }
+            adapt_template = _first_element(
+                _find(adapt_set, "SegmentTemplate", ns), period_template
+            )
+            adapt_list = _first_element(
+                _find(adapt_set, "SegmentList", ns), period_list
+            )
+            adapt_base_segment = _first_element(
+                _find(adapt_set, "SegmentBase", ns), period_base_segment
+            )
             for rep_index, rep in enumerate(
                 _findall(adapt_set, "Representation", ns)
             ):
@@ -242,17 +279,127 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 stream_index = kind_indexes[kind]
                 kind_indexes[kind] += 1
 
+                rep_base = _child_base_url(rep, adapt_base, ns)
+                seg_template = _first_element(
+                    _find(rep, "SegmentTemplate", ns), adapt_template
+                )
+                seg_list = _first_element(
+                    _find(rep, "SegmentList", ns), adapt_list
+                )
+                seg_base = _first_element(
+                    _find(rep, "SegmentBase", ns), adapt_base_segment
+                )
+                segments = []
+                initialization_url = ""
+                initialization_range = ""
+                index_range = ""
+                if seg_template is not None:
+                    timeline = _find(seg_template, "SegmentTimeline", ns)
+                    if timeline is not None:
+                        timescale = max(
+                            1,
+                            _parse_int_value(
+                                seg_template.attrib.get("timescale"), 1
+                            ) or 1,
+                        )
+                        period_duration_units = (
+                            int(round(period_duration_secs * timescale))
+                            if period_duration_secs > 0 else None
+                        )
+                        segments = _expand_segment_timeline(
+                            seg_template,
+                            timeline,
+                            rep_base,
+                            representation_id=rid,
+                            bandwidth=bandwidth,
+                            period_duration_units=period_duration_units,
+                            ns=ns,
+                        )
+                    initialization_template = seg_template.attrib.get(
+                        "initialization", ""
+                    )
+                    if initialization_template:
+                        parsed_start_number = _parse_int_value(
+                            seg_template.attrib.get("startNumber"), None
+                        )
+                        start_number = (
+                            parsed_start_number
+                            if parsed_start_number is not None else 1
+                        )
+                        initialization_url = _resolve_segment_template(
+                            initialization_template,
+                            rep_base,
+                            representation_id=rid,
+                            number=start_number,
+                            time=0,
+                            bandwidth=bandwidth,
+                        )
+                if seg_list is not None:
+                    (
+                        segments,
+                        initialization_url,
+                        initialization_range,
+                        _list_timescale,
+                    ) = _expand_segment_list(
+                        seg_list,
+                        rep_base,
+                        representation_id=rid,
+                        bandwidth=bandwidth,
+                        ns=ns,
+                    )
+                if seg_base is not None:
+                    timescale = max(
+                        1,
+                        _parse_int_value(
+                            seg_base.attrib.get("timescale"), 1
+                        ) or 1,
+                    )
+                    index_range = str(
+                        seg_base.attrib.get("indexRange", "") or ""
+                    )
+                    initialization = _find(seg_base, "Initialization", ns)
+                    if initialization is not None:
+                        source_url = str(
+                            initialization.attrib.get("sourceURL", "") or ""
+                        )
+                        initialization_url = (
+                            urllib.parse.urljoin(rep_base, source_url)
+                            if source_url else rep_base
+                        )
+                        initialization_range = str(
+                            initialization.attrib.get("range", "") or ""
+                        )
+                    period_duration_units = (
+                        int(round(period_duration_secs * timescale))
+                        if period_duration_secs > 0 else 0
+                    )
+                    parsed_start_number = _parse_int_value(
+                        seg_base.attrib.get("startNumber"), None
+                    )
+                    segments = [DASHSegment(
+                        uri=rep_base,
+                        number=(
+                            parsed_start_number
+                            if parsed_start_number is not None else 1
+                        ),
+                        start=0,
+                        duration=period_duration_units,
+                        timescale=timescale,
+                        index_range=index_range,
+                    )]
+
                 rep_base_el = _find(rep, "BaseURL", ns)
                 has_rep_base = bool(
                     rep_base_el is not None and (rep_base_el.text or "").strip()
                 )
                 segmented = any((
-                    _find(rep, "SegmentTemplate", ns) is not None,
-                    _find(adapt_set, "SegmentTemplate", ns) is not None,
-                    _find(rep, "SegmentList", ns) is not None,
-                    _find(adapt_set, "SegmentList", ns) is not None,
+                    seg_template is not None,
+                    seg_list is not None,
+                    seg_base is not None,
                 ))
-                if segmented:
+                if seg_base is not None:
+                    rep_url = rep_base
+                elif segmented:
                     rep_url = base_url
                 elif has_rep_base:
                     rep_url = urllib.parse.urljoin(
@@ -282,8 +429,9 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                     label_el = _find(adapt_set, "Label", ns)
                 if label_el is not None and (label_el.text or "").strip():
                     label = label_el.text.strip()
+                track_id = f"dash-{period_id}-{kind}-{rid}"
                 period_tracks.append(MediaTrackInfo(
-                    id=f"dash-{period_id}-{kind}-{rid}",
+                    id=track_id,
                     kind=kind,
                     label=label,
                     language=language,
@@ -297,7 +445,15 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                     autoselect=True,
                     forced="forced-subtitle" in role_values,
                     period_id=period_id,
+                    index_range=index_range,
+                    initialization_range=initialization_range,
                 ))
+                track_metadata[track_id] = {
+                    "segments": list(segments),
+                    "initialization_url": initialization_url,
+                    "initialization_range": initialization_range,
+                    "index_range": index_range,
+                }
 
         for kind in ("video", "audio"):
             candidates = [track for track in period_tracks if track.kind == kind]
@@ -308,6 +464,7 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
             None,
         )
         for track in period_tracks:
+            metadata = track_metadata.get(track.id, {})
             qualities.append(QualityInfo(
                 name=track.label,
                 url=track.url,
@@ -322,6 +479,15 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 ),
                 tracks=list(period_tracks),
                 primary_track_id=track.id,
+                segments=list(metadata.get("segments", [])),
+                initialization_url=str(
+                    metadata.get("initialization_url", "") or ""
+                ),
+                initialization_range=str(
+                    metadata.get("initialization_range", "") or ""
+                ),
+                index_range=str(metadata.get("index_range", "") or ""),
+                minimum_update_period=minimum_update_period,
             ))
 
     kind_order = {"video": 0, "audio": 1, "subtitle": 2}
@@ -359,6 +525,14 @@ def _find(parent, tag, ns):
     return results[0] if results else None
 
 
+def _first_element(*elements):
+    """Return the first present XML element without relying on truthiness."""
+    for element in elements:
+        if element is not None:
+            return element
+    return None
+
+
 def _child_base_url(element, parent_url, ns):
     base_el = _find(element, "BaseURL", ns)
     if base_el is None or not (base_el.text or "").strip():
@@ -366,11 +540,192 @@ def _child_base_url(element, parent_url, ns):
     return urllib.parse.urljoin(parent_url, base_el.text.strip())
 
 
+def _parse_int_value(value, default=None):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return default
+
+
 def _int_attr(element, name):
     try:
         return max(0, int(element.attrib.get(name, 0) or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _substitute_segment_template(
+    template, *, representation_id, number, time, bandwidth,
+):
+    """Expand the DASH URL-template identifiers in one media URL."""
+    values = {
+        "RepresentationID": str(representation_id or ""),
+        "Number": number,
+        "Time": time,
+        "Bandwidth": bandwidth,
+    }
+
+    def replace(match):
+        token = match.group(0)
+        if token == "$$":
+            return "$"
+        name = match.group(1)
+        value = values.get(name)
+        if value is None:
+            return token
+        formatter = match.group(2)
+        if formatter:
+            try:
+                return formatter % int(value)
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+    return _DASH_TEMPLATE_RE.sub(replace, str(template or ""))
+
+
+def _resolve_segment_template(
+    template, base_url, *, representation_id, number, time, bandwidth,
+):
+    value = _substitute_segment_template(
+        template,
+        representation_id=representation_id,
+        number=number,
+        time=time,
+        bandwidth=bandwidth,
+    )
+    return urllib.parse.urljoin(base_url, value) if value else ""
+
+
+def _expand_segment_timeline(
+    template,
+    timeline,
+    base_url,
+    *,
+    representation_id,
+    bandwidth,
+    period_duration_units=None,
+    ns="",
+    max_segments=_DASH_MAX_TIMELINE_SEGMENTS,
+):
+    """Expand ``SegmentTimeline/S`` rows into a bounded resolved snapshot."""
+    if template is None or timeline is None:
+        return []
+    timescale = max(
+        1,
+        _parse_int_value(template.attrib.get("timescale"), 1) or 1,
+    )
+    parsed_start_number = _parse_int_value(
+        template.attrib.get("startNumber"), None,
+    )
+    start_number = (
+        parsed_start_number if parsed_start_number is not None else 1
+    )
+    media_template = template.attrib.get("media", "")
+    cursor = None
+    segments = []
+    rows = _findall(timeline, "S", ns)
+    for row_index, row in enumerate(rows):
+        duration = _parse_int_value(row.attrib.get("d"), None)
+        if duration is None or duration <= 0:
+            continue
+        explicit_start = _parse_int_value(row.attrib.get("t"), None)
+        if explicit_start is not None:
+            cursor = explicit_start
+        elif cursor is None:
+            cursor = 0
+        repeat = _parse_int_value(row.attrib.get("r"), 0) or 0
+        if repeat < -1:
+            repeat = 0
+        if repeat == -1:
+            next_start = None
+            if row_index + 1 < len(rows):
+                next_start = _parse_int_value(
+                    rows[row_index + 1].attrib.get("t"), None
+                )
+            boundary = (
+                next_start if next_start is not None else period_duration_units
+            )
+            if boundary is not None and boundary > cursor:
+                repeat = max(0, math.ceil((boundary - cursor) / duration) - 1)
+            else:
+                # A dynamic MPD can intentionally leave the final repeat open.
+                # Keep one current segment in the snapshot; ffmpeg remains the
+                # live refresher and the cap prevents an allocation storm.
+                repeat = 0
+        count = min(repeat + 1, max(0, max_segments - len(segments)))
+        for offset in range(count):
+            start = cursor + offset * duration
+            number = start_number + len(segments)
+            segments.append(DASHSegment(
+                uri=_resolve_segment_template(
+                    media_template,
+                    base_url,
+                    representation_id=representation_id,
+                    number=number,
+                    time=start,
+                    bandwidth=bandwidth,
+                ),
+                number=number,
+                start=start,
+                duration=duration,
+                timescale=timescale,
+            ))
+        cursor += (repeat + 1) * duration
+        if len(segments) >= max_segments:
+            break
+    return segments
+
+
+def _expand_segment_list(
+    segment_list, base_url, *, representation_id, bandwidth, ns="",
+):
+    """Resolve explicit SegmentList rows into the DASH segment model."""
+    del representation_id, bandwidth  # reserved for future template parity
+    if segment_list is None:
+        return [], "", "", 1
+    timescale = max(
+        1,
+        _parse_int_value(segment_list.attrib.get("timescale"), 1) or 1,
+    )
+    duration = _parse_int_value(segment_list.attrib.get("duration"), 0) or 0
+    parsed_start_number = _parse_int_value(
+        segment_list.attrib.get("startNumber"), None,
+    )
+    start_number = (
+        parsed_start_number if parsed_start_number is not None else 1
+    )
+    initialization_url = ""
+    initialization_range = ""
+    initialization = _find(segment_list, "Initialization", ns)
+    if initialization is not None:
+        source_url = str(initialization.attrib.get("sourceURL", "") or "")
+        initialization_url = (
+            urllib.parse.urljoin(base_url, source_url) if source_url else base_url
+        )
+        initialization_range = str(
+            initialization.attrib.get("range", "") or ""
+        )
+    segments = []
+    for index, segment_url in enumerate(_findall(segment_list, "SegmentURL", ns)):
+        media = segment_url.attrib.get("media", "")
+        if not media:
+            continue
+        number = start_number + index
+        segments.append(DASHSegment(
+            uri=urllib.parse.urljoin(base_url, media),
+            number=number,
+            start=index * duration,
+            duration=duration,
+            timescale=timescale,
+            media_range=str(segment_url.attrib.get("mediaRange", "") or ""),
+            index_range=str(
+                segment_url.attrib.get("indexRange", "")
+                or segment_url.attrib.get("index", "")
+                or ""
+            ),
+        ))
+    return segments, initialization_url, initialization_range, timescale
 
 
 def _representation_kind(mime, content_type, codec):

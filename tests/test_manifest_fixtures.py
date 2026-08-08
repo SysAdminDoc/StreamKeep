@@ -112,6 +112,10 @@ class DashDynamicMPDTests(unittest.TestCase):
             all(q.format_type == "dash-live" for q in qualities),
             "Dynamic MPD qualities should have format_type='dash-live'",
         )
+        self.assertTrue(
+            all(q.minimum_update_period == 5 for q in qualities),
+            "Dynamic MPD refresh cadence should be preserved",
+        )
 
 
 class DashDRMTests(unittest.TestCase):

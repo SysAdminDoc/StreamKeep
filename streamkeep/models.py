@@ -6,6 +6,18 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class DASHSegment:
+    """One resolved DASH media reference from a SegmentTimeline/List/Base."""
+    uri: str = ""
+    number: int = 0
+    start: int = 0                  # media timescale units
+    duration: int = 0               # media timescale units
+    timescale: int = 1
+    media_range: str = ""
+    index_range: str = ""
+
+
+@dataclass
 class MediaTrackInfo:
     """One selectable video, audio, or subtitle representation."""
     id: str = ""
@@ -25,6 +37,11 @@ class MediaTrackInfo:
     autoselect: bool = False
     forced: bool = False
     period_id: str = ""
+    # DASH SegmentBase metadata.  These values are optional for HLS/direct
+    # tracks and let a native worker preserve the byte-range contract when a
+    # Representation is carried in one remote file.
+    index_range: str = ""
+    initialization_range: str = ""
 
 
 @dataclass
@@ -42,6 +59,19 @@ class QualityInfo:
     ytdlp_format: str = ""          # Format spec (e.g. "137+140")
     tracks: list[MediaTrackInfo] = field(default_factory=list)
     primary_track_id: str = ""
+    # DASH addressing metadata.  ``segments`` is populated for
+    # SegmentTimeline/SegmentList and contains a bounded, fully resolved
+    # snapshot; SegmentBase keeps its single-file index/initialization ranges.
+    segments: list[DASHSegment] = field(default_factory=list)
+    initialization_url: str = ""
+    initialization_range: str = ""
+    index_range: str = ""
+    minimum_update_period: float = 0.0
+
+    @property
+    def segment_urls(self) -> list[str]:
+        """Return the resolved media URLs in this DASH snapshot."""
+        return [str(segment.uri) for segment in self.segments if segment.uri]
 
 
 @dataclass

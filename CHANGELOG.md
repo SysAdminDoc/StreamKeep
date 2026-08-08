@@ -41,6 +41,10 @@ The seven desktop routes now share one archive-control-room visual system.
   IMPORT, and QUERYPARAM variables across recursive master/media playlists,
   rejects undefined references with named errors, records playlist version and
   VOD/EVENT metadata, and refuses protocol versions above the supported floor.
+- Native DASH parsing now expands `SegmentTimeline` repeats and URL templates,
+  preserves `SegmentList`/`SegmentBase` byte-range metadata, carries the MPD's
+  `minimumUpdatePeriod`, and sends safe `Range` headers for selected
+  single-file representations.
 
 ## [4.57.0] - 2026-08-08
 

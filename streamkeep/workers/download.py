@@ -1641,7 +1641,7 @@ class DownloadWorker(QThread):
             self.error.emit(segment_index, message)
             return False
 
-    def _ffmpeg_input_args(self, url, *, start=None):
+    def _ffmpeg_input_args(self, url, *, start=None, byte_range=""):
         filtered_url = (
             self._twitch_ssai_manifest_path
             if self._twitch_ssai_manifest_path
@@ -1659,17 +1659,23 @@ class DownloadWorker(QThread):
             # Some origins reject FFmpeg's default `Lavf/` identity outright.
             # These are the same headers the extractor used to read the
             # manifest, so the segment fetches have to carry them too.
-            args.extend(self._ffmpeg_header_args())
+            extra_headers = {}
+            range_value = str(byte_range or "").strip()
+            if re.fullmatch(r"\d+-\d*", range_value):
+                extra_headers["Range"] = f"bytes={range_value}"
+            args.extend(self._ffmpeg_header_args(extra_headers=extra_headers))
         if self._guarded_proxy is not None and self._is_remote_input(input_url):
             args.extend(["-http_proxy", self._guarded_proxy.url])
         args.extend(["-i", input_url])
         return args
 
-    def _ffmpeg_header_args(self):
+    def _ffmpeg_header_args(self, *, extra_headers=None):
         """Render ``request_headers`` as FFmpeg input options."""
         from ..har import normalize_replay_headers
 
         headers = normalize_replay_headers(getattr(self, "request_headers", {}))
+        for name, value in (extra_headers or {}).items():
+            headers[str(name)] = str(value)
         if not headers:
             return []
         args = []
@@ -1864,7 +1870,8 @@ class DownloadWorker(QThread):
         fields = (
             "id", "kind", "label", "language", "url", "group_id", "codec",
             "bandwidth", "resolution", "stream_index", "default",
-            "autoselect", "forced", "period_id",
+            "autoselect", "forced", "period_id", "index_range",
+            "initialization_range",
         )
         if isinstance(track, dict):
             return {name: track.get(name) for name in fields}
@@ -1909,23 +1916,30 @@ class DownloadWorker(QThread):
         input_indexes = {}
         for record in records:
             url = str(record["url"])
-            if url not in input_indexes:
-                input_indexes[url] = len(inputs)
-                inputs.append(url)
+            byte_range = str(record.get("index_range") or "").strip()
+            if not re.fullmatch(r"\d+-\d*", byte_range):
+                byte_range = ""
+            input_key = (url, byte_range)
+            record["_input_key"] = input_key
+            if input_key not in input_indexes:
+                input_indexes[input_key] = len(inputs)
+                inputs.append(input_key)
 
         cmd = [
             executable, *FFMPEG_REMOTE_SAFETY,
             "-hide_banner", "-loglevel", "info",
         ]
-        for url in inputs:
+        for url, byte_range in inputs:
             cmd.extend(self._ffmpeg_input_args(
-                url, start=start if start > 0 else None,
+                url,
+                start=start if start > 0 else None,
+                byte_range=byte_range,
             ))
         output_indexes = {"audio": 0, "subtitle": 0}
         for record in records:
             kind = record["kind"]
             selector = allowed[kind]
-            input_index = input_indexes[str(record["url"])]
+            input_index = input_indexes[record["_input_key"]]
             cmd.extend([
                 "-map", f"{input_index}:{selector}:{record['stream_index']}"
             ])
