@@ -2,6 +2,13 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## [4.55.0] - 2026-08-07
+
+- The download-queue and executor-lease family now owns its own code, which was
+  the largest remaining piece of the database monolith. `db/queue.py` had been a
+  pure forwarding shim; it now holds the 18 functions it always declared. The
+  monolith is down to 4,013 lines from 6,737 at the start of this work.
+
 ## [4.54.0] - 2026-08-07
 
 - A recording can now belong to as many collections as you like while still
