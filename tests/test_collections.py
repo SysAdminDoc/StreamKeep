@@ -464,3 +464,95 @@ def test_an_export_without_collections_reports_no_homes(tmp_path):
     assert result["collection_homes"] == []
     assert result["collection_strategies"] == []
     assert result["primary_strategy"] in ("hardlink", "copy")
+
+
+# ── V219: both outputs of a collection home are guarded ──────────────
+
+def _blocked_link(monkeypatch):
+    """Make os.link fail so materialization takes the .strm fallback."""
+    def _refuse(*_args, **_kwargs):
+        raise OSError("cross-device link not permitted")
+    monkeypatch.setattr(media_server.os, "link", _refuse)
+
+
+def test_a_foreign_strm_at_the_home_path_is_refused_not_overwritten(
+    tmp_path, monkeypatch,
+):
+    """The pointer path was unguarded while the media path was refused.
+
+    ``materialize_collection_homes`` writes either a hardlink at the media path
+    or a ``.strm`` beside it. Only the media path was checked, so a re-export
+    truncated whatever was at the pointer path (V219).
+    """
+    library = tmp_path / "lib"
+    destination = library / "ep.mp4"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"video-bytes")
+
+    planned = media_server.plan_collection_homes(
+        _plan(library, destination), ["Tutorials"],
+    )
+    strm = os.path.splitext(planned[1].destination)[0] + ".strm"
+    os.makedirs(os.path.dirname(strm), exist_ok=True)
+    with open(strm, "w", encoding="utf-8") as handle:
+        handle.write("someone else's playlist\nsecond line\n")
+
+    _blocked_link(monkeypatch)
+    homes = media_server.materialize_collection_homes(planned)
+
+    assert homes[1].strategy == "refused"
+    assert ".strm" in homes[1].reason
+    with open(strm, encoding="utf-8") as handle:
+        assert handle.read() == "someone else's playlist\nsecond line\n"
+
+
+def test_re_exporting_refreshes_our_own_pointer(tmp_path, monkeypatch):
+    """A pointer this module wrote must be replaceable, e.g. after a move."""
+    library = tmp_path / "lib"
+    destination = library / "ep.mp4"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"video-bytes")
+    planned = media_server.plan_collection_homes(
+        _plan(library, destination), ["Tutorials"],
+    )
+
+    _blocked_link(monkeypatch)
+    first = media_server.materialize_collection_homes(planned)
+    assert first[1].strategy == "strm"
+
+    second = media_server.materialize_collection_homes(planned)
+    assert second[1].strategy == "strm", (
+        "our own pointer must be refreshable, not treated as a blocker"
+    )
+    with open(second[1].destination, encoding="utf-8") as handle:
+        assert handle.read().strip() == str(destination)
+
+
+def test_a_successful_hardlink_removes_a_stale_pointer(tmp_path, monkeypatch):
+    """One recording must not appear twice in a collection folder.
+
+    An export that fell back to a pointer, followed by one that could hardlink,
+    left both behind -- the second aimed at a stale primary (V219).
+    """
+    library = tmp_path / "lib"
+    destination = library / "ep.mp4"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"video-bytes")
+    planned = media_server.plan_collection_homes(
+        _plan(library, destination), ["Tutorials"],
+    )
+
+    _blocked_link(monkeypatch)
+    fallback = media_server.materialize_collection_homes(planned)
+    strm = fallback[1].destination
+    assert os.path.exists(strm)
+
+    monkeypatch.undo()
+    linked = media_server.materialize_collection_homes(planned)
+
+    assert linked[1].strategy == "hardlink"
+    assert not os.path.exists(strm), "the stale .strm pointer survived"
+    assert "stale .strm" in linked[1].reason
+    home_dir = os.path.dirname(linked[1].destination)
+    entries = sorted(os.listdir(home_dir))
+    assert len(entries) == 1, f"one recording, one entry; found {entries}"

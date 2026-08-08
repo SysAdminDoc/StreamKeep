@@ -312,6 +312,50 @@ def plan_collection_homes(
     return homes
 
 
+#: The first line of a StreamKeep ``.strm`` pointer is the primary's path, so a
+#: pointer this export wrote is recognisable and safe to replace. Anything else
+#: at that path belongs to the operator or another tool.
+_STRM_MAX_PROBE_BYTES = 64 * 1024
+
+
+def _is_streamkeep_pointer(strm_path) -> bool:
+    """Return whether *strm_path* looks like a pointer StreamKeep wrote."""
+    try:
+        if os.path.getsize(strm_path) > _STRM_MAX_PROBE_BYTES:
+            return False
+        with open(strm_path, encoding="utf-8") as handle:
+            first = handle.readline().strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    # One absolute path and nothing else is the shape this module writes.
+    return bool(first) and os.path.isabs(first)
+
+
+def _occupied_home_path(destination, strm_path):
+    """Return the path blocking this home, or ``""`` when it is free.
+
+    A ``.strm`` this module wrote is not a blocker: re-exporting must be able to
+    refresh its own pointer, for instance after a re-template moved the primary.
+    A foreign file at either path is.
+    """
+    if os.path.lexists(destination):
+        return destination
+    if os.path.lexists(strm_path) and not _is_streamkeep_pointer(strm_path):
+        return strm_path
+    return ""
+
+
+def _remove_stale_pointer(strm_path) -> bool:
+    """Delete a pointer this module wrote. Returns whether one was removed."""
+    if not os.path.lexists(strm_path) or not _is_streamkeep_pointer(strm_path):
+        return False
+    try:
+        os.unlink(strm_path)
+        return True
+    except OSError:
+        return False
+
+
 def materialize_collection_homes(
     homes: list[CollectionHome] | tuple[CollectionHome, ...],
     *,
@@ -332,17 +376,30 @@ def materialize_collection_homes(
         if home.is_primary:
             continue
         os.makedirs(os.path.dirname(home.destination), exist_ok=True)
-        if os.path.lexists(home.destination):
+        # A home has two possible outputs -- the media path and a ``.strm``
+        # beside it -- so both have to be checked before writing either. The
+        # media path was guarded and the pointer was not, so a re-export
+        # silently truncated a pre-existing ``.strm`` while carefully refusing
+        # the media file next to it (V219).
+        strm_path = os.path.splitext(home.destination)[0] + ".strm"
+        occupied = _occupied_home_path(home.destination, strm_path)
+        if occupied:
             results.append(replace(
                 home, strategy="refused",
-                reason="a file already exists at this collection home",
+                reason=f"a file already exists at this collection home: {occupied}",
             ))
             continue
         try:
             os.link(primary.destination, home.destination)
+            # A previous export may have fallen back to a pointer when the
+            # target was on another volume. Leaving it behind would show the
+            # recording twice, the second time aimed at a stale primary.
+            removed_pointer = _remove_stale_pointer(strm_path)
+            reason = "linked to the primary copy"
+            if removed_pointer:
+                reason += "; removed the stale .strm pointer from a previous export"
             results.append(replace(
-                home, strategy="hardlink",
-                reason="linked to the primary copy",
+                home, strategy="hardlink", reason=reason,
             ))
             if log_fn:
                 log_fn(
@@ -352,7 +409,6 @@ def materialize_collection_homes(
             continue
         except OSError as error:
             link_error = error
-        strm_path = os.path.splitext(home.destination)[0] + ".strm"
         try:
             with open(strm_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(primary.destination + "\n")
