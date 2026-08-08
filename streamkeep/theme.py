@@ -359,6 +359,31 @@ QFrame#dialogStatus[tone="info"] {{ border-left: 3px solid {p['accent']}; }}
 QFrame#dialogStatus[tone="success"] {{ border-left: 3px solid {p['green']}; }}
 QFrame#dialogStatus[tone="warning"] {{ border-left: 3px solid {p['yellow']}; }}
 QFrame#dialogStatus[tone="error"] {{ border-left: 3px solid {p['red']}; }}
+/* In-window transient notifications (V196). Raised above the page on
+   ``panelHi`` with a stroke, because a toast floats over arbitrary content and
+   needs its own edge rather than borrowing the page background. The tone is
+   carried by a left bar *and* by the message text, never by colour alone. */
+QFrame#toast {{
+    background-color: {p['panelHi']};
+    border: 1px solid {p['stroke']};
+    border-left: 3px solid {p['accent']};
+    border-radius: 10px;
+}}
+QFrame#toast[tone="success"] {{ border-left-color: {p['green']}; }}
+QFrame#toast[tone="warning"] {{ border-left-color: {p['yellow']}; }}
+QFrame#toast[tone="error"] {{ border-left-color: {p['red']}; }}
+QLabel#toastBody {{
+    color: {p['text']};
+    background-color: transparent;
+}}
+QLabel#toastGlyph {{
+    color: {p['accent']};
+    background-color: transparent;
+    font-size: {font_size + 1}px;
+}}
+QFrame#toast[tone="success"] QLabel#toastGlyph {{ color: {p['green']}; }}
+QFrame#toast[tone="warning"] QLabel#toastGlyph {{ color: {p['yellow']}; }}
+QFrame#toast[tone="error"] QLabel#toastGlyph {{ color: {p['red']}; }}
 QFrame#updateBanner, QFrame#resumeBanner, QFrame#activeRecordings {{
     background-color: {p['panelHi']};
     border: none;

@@ -1373,12 +1373,14 @@ class StorageTabMixin:
             )
             return
         recycled = 0
+        failures = []
         for g in targets:
             try:
                 _send2trash(g.dir_path)
                 recycled += 1
             except Exception as e:
                 self._log(f"[STORAGE] Could not recycle {g.dir_path}: {e}")
+                failures.append((os.path.basename(g.dir_path.rstrip(os.sep)), e))
                 continue
             try:
                 _db.delete_history_for_paths([g.dir_path], reason="user")
@@ -1386,6 +1388,13 @@ class StorageTabMixin:
                 self._log(
                     f"[STORAGE] Could not record tombstone for {g.dir_path}: {e}"
                 )
+        if failures:
+            # "Recycled 3 of 5" does not say which two, or why (V196).
+            first, reason = failures[0]
+            extra = f" and {len(failures) - 1} more" if len(failures) > 1 else ""
+            self._report_failure(
+                f"Could not recycle {first}{extra}: {reason}", level="warning",
+            )
         if recycled:
             self._log(
                 f"[STORAGE] Recycled {recycled} folder(s) totalling "

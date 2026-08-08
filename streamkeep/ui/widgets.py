@@ -801,3 +801,141 @@ def set_metric(value_label, sub_label, value, sub=""):
     value_label.setText(value)
     sub_label.setText(sub)
     sub_label.setVisible(bool(sub))
+
+
+class ToastOverlay(QWidget):
+    """A stack of transient in-window messages, anchored bottom-right.
+
+    The OS-level channels (`_notify`, `_fire_native_toast`) deliberately stay
+    quiet while the window is focused, so as not to interrupt someone already
+    looking at the app. The consequence was that a user watching StreamKeep was
+    the user least likely to learn that anything had failed: 32 `except` blocks
+    reached only the log, and a menu action that could not proceed simply did
+    nothing (V196).
+
+    This is the in-window replacement. Per repo policy it is a toast rather than
+    a modal: it never blocks, it never needs dismissing, and the same text is
+    also pushed to the notification centre so it remains readable afterwards.
+    """
+
+    #: How long each tone stays before fading, in milliseconds. An error is
+    #: worth reading twice as long as a success.
+    LIFETIME_MS = {
+        "error": 9000,
+        "warning": 7000,
+        "success": 4000,
+        "info": 5000,
+    }
+    #: More than this and the oldest is dropped rather than growing off-screen.
+    MAX_VISIBLE = 4
+    MARGIN = 18
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("toastOverlay")
+        # Transparent to the mouse: a toast must never swallow a click meant
+        # for the control underneath it.
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(8)
+        self._layout.addStretch(1)
+        self._toasts = []
+        set_accessible_role(self, "alert")
+        set_accessible(self, "Notifications", "transient status messages")
+        if parent is not None:
+            parent.installEventFilter(self)
+        self.hide()
+
+    # ── geometry ────────────────────────────────────────────────────
+    def eventFilter(self, watched, event):
+        if watched is self.parent() and event.type() in (
+            QEvent.Type.Resize, QEvent.Type.Show,
+        ):
+            self._reposition()
+        return False
+
+    def _reposition(self):
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        hint = self.sizeHint()
+        width = min(max(320, hint.width()), max(320, parent.width() - 2 * self.MARGIN))
+        height = hint.height()
+        self.setGeometry(
+            parent.width() - width - self.MARGIN,
+            parent.height() - height - self.MARGIN,
+            width,
+            height,
+        )
+
+    # ── api ─────────────────────────────────────────────────────────
+    def show_toast(self, text, level="info"):
+        """Add one message. Returns the created card, or ``None`` if empty."""
+        message = str(text or "").strip()
+        if not message:
+            return None
+        tone = str(level or "info").strip().lower()
+        if tone not in self.LIFETIME_MS:
+            tone = "info"
+
+        card = QFrame(self)
+        card.setObjectName("toast")
+        card.setProperty("tone", tone)
+        row = QHBoxLayout(card)
+        row.setContentsMargins(14, 11, 14, 11)
+        row.setSpacing(10)
+        glyph = QLabel({
+            "success": "✔",
+            "warning": "⚠",
+            "error": "✖",
+            "info": "•",
+        }[tone], card)
+        glyph.setObjectName("toastGlyph")
+        # The glyph repeats the tone the border already carries, so it is
+        # decorative -- the text is the message, and colour is never the only
+        # signal.
+        glyph.setAccessibleName("")
+        label = QLabel(message, card)
+        label.setObjectName("toastBody")
+        label.setWordWrap(True)
+        row.addWidget(glyph, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(label, 1)
+        update_accessible_status(card, message, tone=tone, label="Notification")
+
+        self._layout.addWidget(card)
+        self._toasts.append(card)
+        while len(self._toasts) > self.MAX_VISIBLE:
+            self._dismiss(self._toasts[0])
+
+        QTimer.singleShot(self.LIFETIME_MS[tone], lambda: self._dismiss(card))
+        self.show()
+        self.raise_()
+        self._reposition()
+        return card
+
+    def _dismiss(self, card):
+        if card not in self._toasts:
+            return
+        self._toasts.remove(card)
+        self._layout.removeWidget(card)
+        card.setParent(None)
+        card.deleteLater()
+        if not self._toasts:
+            self.hide()
+        else:
+            self._reposition()
+
+    def clear(self):
+        for card in list(self._toasts):
+            self._dismiss(card)
+
+    def visible_messages(self):
+        """Return the text of every toast currently on screen (for tests)."""
+        return [
+            card.findChild(QLabel, "toastBody").text()
+            for card in self._toasts
+            if card.findChild(QLabel, "toastBody") is not None
+        ]

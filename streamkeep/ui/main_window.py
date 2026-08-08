@@ -214,6 +214,7 @@ def _status_icon(color_key="green"):
 from .worker_teardown import iter_owned_workers, stop_worker as _stop_worker
 from .widgets import (
     TAB_STYLE,
+    ToastOverlay,
     configure_accessibility,
     make_metric_card,
     make_field_block,
@@ -318,6 +319,8 @@ class StreamKeep(
         self._companion_server = None        # LocalCompanionServer instance
         self._companion_last_error = ""
         self._notifications = NotificationCenter(capacity=50)
+        #: The last cleared batch, so the clear is undoable (V196).
+        self._cleared_notifications = None
         from streamkeep.health import load_health_snapshot
         self._health_snapshot = load_health_snapshot()
         self._health_worker = None
@@ -1879,6 +1882,10 @@ class StreamKeep(
         central = QWidget()
         central.setObjectName("chrome")
         self.setCentralWidget(central)
+        # In-window transient notifications. The OS-level channels stay quiet
+        # while the window is focused, which left a user watching the app with
+        # no feedback at all when something failed (V196).
+        self._toasts = ToastOverlay(central)
         outer = QHBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -2438,6 +2445,7 @@ class StreamKeep(
         when the user has enabled audio cues in Settings."""
         self._notifications.push(text, level=level)
         self._refresh_notif_badge()
+        self._toast(text, level)
         if level in ("success", "warning", "error"):
             if bool(self._config.get("notif_sound", False)):
                 try:
@@ -2447,6 +2455,41 @@ class StreamKeep(
                     pass  # safe: best-effort fallback; preserve the primary operation
             if bool(self._config.get("native_notifications", False)):
                 self._fire_native_toast(text, level)
+
+    def _toast(self, text, level="info"):
+        """Show an in-window transient message.
+
+        The OS notification and the tray balloon both suppress themselves while
+        the window is focused, deliberately -- interrupting someone who is
+        already looking at the app is worse than not. But nothing replaced them,
+        so 32 failure paths that reached only ``_log`` were invisible to exactly
+        the user most likely to be waiting on them (V196).
+        """
+        overlay = getattr(self, "_toasts", None)
+        if overlay is None:
+            return None
+        try:
+            return overlay.show_toast(text, level)
+        except Exception as error:
+            self._log(f"[UI] Could not show a notification: {error}")
+            return None
+
+    def _report_failure(self, text, *, level="error"):
+        """Tell the user a background operation could not proceed.
+
+        One call puts the message in the status pill, the notification centre
+        and an in-window toast, so an action that silently did nothing now says
+        why wherever the user happens to be looking.
+        """
+        message = str(text or "").strip()
+        if not message:
+            return
+        self._log(f"[UI] {message}")
+        try:
+            self._set_status(message, "error" if level == "error" else "warning")
+        except Exception as error:
+            self._log(f"[UI] Could not set status: {error}")
+        self._notify_center(message, level)
 
     def _init_windows_integration(self):
         """Start optional taskbar and progress-notification surfaces (V135)."""
@@ -2899,6 +2942,9 @@ class StreamKeep(
             menu.addSeparator()
             clear_act = menu.addAction("Clear all")
             clear_act.triggered.connect(self._on_clear_notifications)
+        if getattr(self, "_cleared_notifications", None):
+            undo_act = menu.addAction("Undo clear")
+            undo_act.triggered.connect(self._on_undo_clear_notifications)
         menu.addSeparator()
         log_act = menu.addAction("View full log\u2026")
         log_act.triggered.connect(self._on_show_notification_log)
@@ -2909,8 +2955,40 @@ class StreamKeep(
         menu.exec(pos)
 
     def _on_clear_notifications(self):
+        """Clear the notification history, saying how much was cleared.
+
+        This wiped the whole ring buffer with no confirm, no status and no undo
+        -- silent destruction of the only record of what the app had reported
+        (V196). Per repo policy the action stays immediate; what it gains is a
+        statement of what happened and a one-step undo.
+        """
+        cleared = list(self._notifications.items())
         self._notifications.clear()
         self._refresh_notif_badge()
+        if not cleared:
+            self._set_status("There were no notifications to clear.", "idle")
+            return
+        self._cleared_notifications = cleared
+        self._set_status(
+            f"Cleared {len(cleared)} notification(s).", "success",
+        )
+        self._toast(
+            f"Cleared {len(cleared)} notification(s) — use Undo clear to "
+            "restore them.",
+            "info",
+        )
+
+    def _on_undo_clear_notifications(self):
+        """Put back the notifications the last clear removed."""
+        cleared = getattr(self, "_cleared_notifications", None)
+        if not cleared:
+            self._set_status("There is nothing to restore.", "idle")
+            return
+        for note in cleared:
+            self._notifications.push(getattr(note, "text", ""), level=getattr(note, "level", "info"))
+        self._cleared_notifications = None
+        self._refresh_notif_badge()
+        self._set_status(f"Restored {len(cleared)} notification(s).", "success")
 
     def _on_show_notification_log(self):
         from .notification_log_dialog import NotificationLogDialog
@@ -2966,6 +3044,7 @@ class StreamKeep(
         query = self._global_search.text().strip().lower()
         results_widget = self._global_results
         results_widget.clear()
+        degraded = False
 
         if not query or len(query) < 2:
             results_widget.setVisible(False)
@@ -3043,14 +3122,28 @@ class StreamKeep(
                 item.setData(Qt.ItemDataRole.UserRole, ("semantic", hit))
                 items.append(item)
         except Exception as error:
-            self._log(f"[SEARCH] Transcript/comment/moment search unavailable: {error}")
+            # Degrading to history-only is fine; reporting "No results found."
+            # afterwards is not, because the user cannot tell an empty archive
+            # from a broken index (V196).
+            degraded = True
+            self._log(
+                f"[SEARCH] Transcript/comment/moment search unavailable: {error}"
+            )
+            self._toast(
+                "Transcript and comment search is unavailable — showing "
+                "history matches only.",
+                "warning",
+            )
 
         if items:
             for it in items:
                 results_widget.addItem(it)
             results_widget.setVisible(True)
         else:
-            no_result = QListWidgetItem("No results found.")
+            no_result = QListWidgetItem(
+                "No history matches — transcript search is unavailable."
+                if degraded else "No results found."
+            )
             no_result.setData(Qt.ItemDataRole.UserRole, None)
             results_widget.addItem(no_result)
             results_widget.setVisible(True)

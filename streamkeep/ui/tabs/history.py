@@ -1161,8 +1161,13 @@ class HistoryTabMixin:
             return
         try:
             from ...chat.spike_detect import detect_spikes
-        except Exception:
-            self._log("[CHAT] Could not load spike detector.")
+        except Exception as error:
+            # This is a menu action: returning quietly meant the user clicked
+            # "Show chat highlights" and nothing whatsoever happened (V196).
+            self._report_failure(
+                f"Chat highlights need the spike detector, which could not be "
+                f"loaded: {error}",
+            )
             return
         spikes = detect_spikes(jsonl)
         if not spikes:
@@ -1202,8 +1207,11 @@ class HistoryTabMixin:
         src = vids[0][1]
         try:
             from ...postprocess.scene_worker import SceneWorker
-        except Exception:
-            self._log("[SCENE] Could not load scene detector.")
+        except Exception as error:
+            self._report_failure(
+                f"The storyboard needs the scene detector, which could not be "
+                f"loaded: {error}",
+            )
             return
         worker = SceneWorker(src)
         worker.log.connect(self._log)
@@ -1269,7 +1277,9 @@ class HistoryTabMixin:
         try:
             scan_iter = os.scandir(src_dir)
         except OSError as e:
-            self._log(f"[TRANSCRIBE] Cannot read directory: {e}")
+            self._report_failure(
+                f"Cannot read the recording folder to transcribe it: {e}",
+            )
             return
         for entry in scan_iter:
             if not entry.is_file():

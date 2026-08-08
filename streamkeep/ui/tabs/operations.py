@@ -184,7 +184,11 @@ def _export_operations(win):
     try:
         report = write_operations_report(path, _current_filters())
     except (OSError, ValueError) as error:
-        win.operations_status.setText(f"Could not export operations: {error}")
+        message = f"Could not export operations: {error}"
+        win.operations_status.setText(message)
+        # operations_status sits at the bottom of a long scroll page and is
+        # very likely off-screen when the export fails (V196).
+        win._report_failure(message)
         return
     win.operations_status.setText(
         f"Exported {report['row_count']} row(s) to {path}"
