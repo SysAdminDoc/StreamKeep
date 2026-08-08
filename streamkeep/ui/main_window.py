@@ -2019,6 +2019,20 @@ class StreamKeep(
         self._global_search.returnPressed.connect(self._on_global_search)
         header_lay.addWidget(self._global_search)
 
+        # Below 1180px the search field is hidden to make room, but the window
+        # minimum is 1020px -- so at the smallest supported size a functional
+        # control disappeared with no other way to reach it (V195). This button
+        # takes its place and reveals the field on demand.
+        self._global_search_btn = QPushButton("")
+        self._global_search_btn.setObjectName("headerIcon")
+        self._global_search_btn.setIcon(_chrome_icon("search"))
+        self._global_search_btn.setFixedSize(42, 42)
+        self._global_search_btn.setAccessibleName("Search downloads")
+        self._global_search_btn.setToolTip("Search downloads")
+        self._global_search_btn.clicked.connect(self._on_reveal_global_search)
+        self._global_search_btn.setVisible(False)
+        header_lay.addWidget(self._global_search_btn)
+
         self.notif_button = QPushButton("")
         self.notif_button.setObjectName("headerIcon")
         self.notif_button.setIcon(_chrome_icon("bell"))
@@ -2175,9 +2189,29 @@ class StreamKeep(
 
     def _update_responsive_chrome(self, width):
         if hasattr(self, "_global_search"):
-            self._global_search.setVisible(width >= 1180)
+            roomy = width >= 1180
+            # A revealed field stays revealed until it is dismissed, so a narrow
+            # window is not a dead end -- exactly one of the field and the button
+            # is reachable at every supported width (V195).
+            revealed = roomy or bool(getattr(self, "_global_search_revealed", False))
+            self._global_search.setVisible(revealed)
+            if hasattr(self, "_global_search_btn"):
+                self._global_search_btn.setVisible(not revealed)
         if hasattr(self, "shell_page_body"):
             self.shell_page_body.setVisible(width >= 1080)
+
+    def _on_reveal_global_search(self):
+        """Show and focus the search field in a window too narrow to hold it."""
+        self._global_search_revealed = True
+        self._update_responsive_chrome(self.width())
+        self._global_search.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def _dismiss_global_search(self):
+        """Collapse the revealed field back to its button."""
+        self._global_search_revealed = False
+        if hasattr(self, "_global_results"):
+            self._global_results.setVisible(False)
+        self._update_responsive_chrome(self.width())
 
     def showEvent(self, event):
         super().showEvent(event)

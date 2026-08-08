@@ -553,7 +553,19 @@ QLineEdit#sourceComposer {{
     min-height: 30px;
     font-size: 14px;
 }}
-QLineEdit#sourceComposer:hover, QLineEdit#sourceComposer:focus {{ border: none; }}
+/* The composer sits inside its own framed card, so it deliberately has no
+   border of its own -- but suppressing :focus too left the single most
+   important control in the app with no visible focus state (WCAG 2.4.7, V195).
+   A bottom rule reads as an underline inside the card rather than a competing
+   box, and is distinct from :hover. */
+QLineEdit#sourceComposer:hover {{
+    border: none;
+    border-bottom: 1px solid {p['overlay0']};
+}}
+QLineEdit#sourceComposer:focus {{
+    border: none;
+    border-bottom: 2px solid {p['accent']};
+}}
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover,
 QTimeEdit:hover, QDateEdit:hover {{ border-color: {p['overlay0']}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
@@ -732,7 +744,15 @@ QListWidget, QListWidget#globalResults, QListWidget#playerChapterList {{
     outline: none;
 }}
 QListWidget::item {{ padding: {padding}px {padding + 2}px; border-radius: {radius - 2}px; }}
-QListWidget::item:hover, QListWidget::item:selected {{ background-color: {p['surface0']}; }}
+QListWidget::item:hover {{ background-color: {p['surface0']}; }}
+/* Selection is what the keyboard moves, so it needs to be distinguishable
+   from a mouse hover -- both were surface0, which made the focused row in the
+   global search results invisible (WCAG 2.4.7, V195). */
+QListWidget::item:selected {{
+    background-color: {p['surface1']};
+    border-left: 2px solid {p['accent']};
+}}
+QListWidget:focus::item:selected {{ background-color: {p['surface2']}; }}
 QMenu {{
     background-color: {p['panel']};
     color: {p['text']};

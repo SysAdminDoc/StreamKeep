@@ -247,14 +247,18 @@ QPushButton#tab:hover {{
     color: {CAT['text']};
     background-color: {CAT['panelHi']};
 }}
+/* The focus ring was overlay0 on panelHi, which measures 2.91:1 in the light
+   palette -- below WCAG 1.4.11's 3:1 for a UI component. accent clears it in all
+   three palettes (4.86 light / 5.10 dark / 6.58 high-contrast) and matches how
+   focus is drawn everywhere else (V195). */
 QPushButton#tab:focus {{
     background-color: {CAT['panelHi']};
-    border: 1px solid {CAT['overlay0']};
+    border: 1px solid {CAT['accent']};
     border-left: 3px solid transparent;
 }}
 QPushButton#tabActive:focus {{
     background-color: {CAT['panelHi']};
-    border: 1px solid {CAT['overlay0']};
+    border: 1px solid {CAT['accent']};
     border-left: 3px solid {CAT['accent']};
 }}
 QPushButton#tabActive {{
@@ -838,6 +842,9 @@ class ToastOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Never a standalone window: see ``show_toast``.
+        if parent is not None:
+            self.setWindowFlags(Qt.WindowType.Widget)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
@@ -910,19 +917,37 @@ class ToastOverlay(QWidget):
         while len(self._toasts) > self.MAX_VISIBLE:
             self._dismiss(self._toasts[0])
 
-        QTimer.singleShot(self.LIFETIME_MS[tone], lambda: self._dismiss(card))
-        self.show()
-        self.raise_()
-        self._reposition()
+        # Parent the timer to the card rather than using ``singleShot``, so
+        # destroying the overlay destroys the pending callback with it. A free
+        # ``singleShot`` fires after the window is gone and raises on the
+        # deleted layout -- a toast must not outlive its window.
+        timer = QTimer(card)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._dismiss(card))
+        timer.start(self.LIFETIME_MS[tone])
+        # An overlay is an anchored child, never a window of its own. Showing a
+        # parentless one makes it a top-level widget that Qt keeps in
+        # ``topLevelWidgets`` while Python owns the only reference -- destroy the
+        # Python side and the next access is an access violation, which is the
+        # V177 shape. So it only ever paints inside a parent.
+        if self.parentWidget() is not None:
+            self.show()
+            self.raise_()
+            self._reposition()
         return card
 
     def _dismiss(self, card):
         if card not in self._toasts:
             return
         self._toasts.remove(card)
-        self._layout.removeWidget(card)
-        card.setParent(None)
-        card.deleteLater()
+        try:
+            self._layout.removeWidget(card)
+            card.setParent(None)
+            card.deleteLater()
+        except RuntimeError:
+            # The overlay's C++ side is already gone (the window closed while a
+            # toast was still on screen). Nothing left to detach.
+            return
         if not self._toasts:
             self.hide()
         else:

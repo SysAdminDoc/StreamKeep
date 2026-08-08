@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import unittest
 from datetime import date
 
 import pytest
@@ -232,3 +233,142 @@ scroll.close()
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+# ── V195: focus must be visible, and a control must not vanish ────────
+
+class FocusVisibilityTests(unittest.TestCase):
+    """Every focusable control needs a focus state distinct from hover.
+
+    The composer -- the single most important control in the app -- had
+    ``border: none`` on both ``:hover`` and ``:focus``, so keyboard focus was
+    invisible. List items gave ``::item:hover`` and ``::item:selected`` the same
+    background, so the focused row in the global search results could not be
+    told from a hovered one. Both are WCAG 2.4.7 failures on the primary
+    interaction path (V195).
+    """
+
+    def _rules(self, palette_name):
+        from streamkeep import theme
+
+        return theme.build_stylesheet(theme.THEMES[palette_name])
+
+    def test_the_composer_focus_state_differs_from_its_hover_state(self):
+        import re
+
+        for palette in ("dark", "light", "high_contrast"):
+            qss = self._rules(palette)
+            hover = re.search(
+                r"QLineEdit#sourceComposer:hover \{(.*?)\}", qss, re.S,
+            )
+            focus = re.search(
+                r"QLineEdit#sourceComposer:focus \{(.*?)\}", qss, re.S,
+            )
+            self.assertIsNotNone(hover, f"{palette}: no composer hover rule")
+            self.assertIsNotNone(focus, f"{palette}: no composer focus rule")
+            self.assertNotEqual(
+                hover.group(1).strip(), focus.group(1).strip(),
+                f"{palette}: composer focus is indistinguishable from hover",
+            )
+            self.assertNotIn(
+                "border: none;", focus.group(1).replace("border: none;\n", "", 1),
+                f"{palette}: composer focus suppresses every border",
+            )
+
+    def test_a_selected_list_item_differs_from_a_hovered_one(self):
+        import re
+
+        for palette in ("dark", "light", "high_contrast"):
+            qss = self._rules(palette)
+            hover = re.search(r"QListWidget::item:hover \{(.*?)\}", qss, re.S)
+            selected = re.search(
+                r"QListWidget::item:selected \{(.*?)\}", qss, re.S,
+            )
+            self.assertIsNotNone(hover, f"{palette}: no list hover rule")
+            self.assertIsNotNone(selected, f"{palette}: no list selected rule")
+            self.assertNotEqual(
+                hover.group(1).strip(), selected.group(1).strip(),
+                f"{palette}: a selected row looks exactly like a hovered one",
+            )
+
+    def test_the_nav_rail_focus_ring_clears_the_ui_component_minimum(self):
+        """WCAG 1.4.11 wants 3:1 for a non-text UI component."""
+        from streamkeep.theme import THEMES, contrast_ratio
+
+        for name, palette in THEMES.items():
+            ratio = contrast_ratio(palette["accent"], palette["panelHi"])
+            self.assertGreaterEqual(
+                ratio, 3.0,
+                f"{name}: nav-rail focus ring is {ratio:.2f}:1 against panelHi",
+            )
+
+    def test_the_nav_rail_focus_ring_does_not_use_the_failing_token(self):
+        from streamkeep.ui import widgets
+
+        style = widgets.TAB_STYLE()
+        self.assertIn(":focus", style)
+        focus_blocks = [
+            block for block in style.split("}")
+            if ":focus" in block and "border: 1px solid" in block
+        ]
+        self.assertTrue(focus_blocks, "no nav-rail focus border found")
+        for block in focus_blocks:
+            self.assertNotIn(
+                widgets.CAT["overlay0"], block,
+                "overlay0 measures 2.91:1 on panelHi in the light palette",
+            )
+
+
+class GlobalSearchReachabilityTests(unittest.TestCase):
+    """A functional control must not disappear at a supported window size."""
+
+    def test_search_collapses_to_a_button_instead_of_vanishing(self):
+        from streamkeep.ui.main_window import StreamKeep
+
+        window = StreamKeep(startup_check=True)
+        try:
+            # Narrower than the 1180px threshold but within the 1020px minimum.
+            window._update_responsive_chrome(1024)
+            self.assertFalse(
+                window._global_search.isVisible(),
+                "the field is expected to yield space at this width",
+            )
+            self.assertTrue(
+                window._global_search_btn.isVisibleTo(window),
+                "search became unreachable: no field and no button",
+            )
+            self.assertTrue(window._global_search_btn.accessibleName())
+            self.assertTrue(window._global_search_btn.toolTip())
+
+            # Revealing it puts the field back and hides the button.
+            window._on_reveal_global_search()
+            self.assertTrue(window._global_search.isVisibleTo(window))
+            self.assertFalse(window._global_search_btn.isVisibleTo(window))
+
+            # Dismissing returns to the button, not to nothing.
+            window._dismiss_global_search()
+            self.assertTrue(window._global_search_btn.isVisibleTo(window))
+
+            # Wide again: the field is shown and the button steps aside.
+            window._update_responsive_chrome(1400)
+            self.assertTrue(window._global_search.isVisibleTo(window))
+            self.assertFalse(window._global_search_btn.isVisibleTo(window))
+        finally:
+            window.close()
+
+    def test_exactly_one_search_affordance_at_every_supported_width(self):
+        from streamkeep.ui.main_window import StreamKeep
+
+        window = StreamKeep(startup_check=True)
+        try:
+            for width in (1020, 1100, 1179, 1180, 1400, 2560):
+                window._update_responsive_chrome(width)
+                reachable = (
+                    window._global_search.isVisibleTo(window)
+                    or window._global_search_btn.isVisibleTo(window)
+                )
+                self.assertTrue(
+                    reachable, f"search is unreachable at {width}px",
+                )
+        finally:
+            window.close()
