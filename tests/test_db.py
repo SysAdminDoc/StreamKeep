@@ -921,3 +921,52 @@ class DbMaintenanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── V185: crash recovery reports its own failure ─────────────────────
+
+def test_a_failed_recovery_is_recorded_and_logged_without_aborting_startup(
+    tmp_path, monkeypatch,
+):
+    """A failed rollback must be visible, and must not stop the library opening.
+
+    ``init_db`` runs three crash-recovery entry points before and after opening
+    the schema. Their failure used to be swallowed, so the app carried on
+    against a half-restored config directory with no trace at all (V185).
+    """
+    from streamkeep import crash_log
+    from streamkeep.db import recovery as db_recovery
+
+    warnings = []
+    monkeypatch.setattr(crash_log, "record_startup_warning", warnings.append)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("rollback could not complete")
+
+    monkeypatch.setattr(db_recovery, "call_recovery", _boom)
+    db_recovery.consume_failures()
+
+    db_path = tmp_path / "library.db"
+    with mock.patch.object(db, "DB_PATH", db_path):
+        db.init_db()
+        # Startup still completed and the schema is usable.
+        row_id = db.save_history_entry(
+            {"platform": "test", "title": "ok", "url": "u"}
+        )
+        assert row_id, "the library must open despite a failed recovery"
+
+    failures = db_recovery.consume_failures()
+    stages = {entry["stage"] for entry in failures}
+    assert stages == {"restore", "rebuild", "re-template"}, stages
+    assert all("rollback could not complete" in entry["error"] for entry in failures)
+    assert len(warnings) == 3, "each failed recovery must reach the crash log"
+    assert any("restore recovery failed" in text for text in warnings)
+
+
+def test_recovery_failures_are_consumed_once():
+    from streamkeep.db import recovery as db_recovery
+
+    db_recovery.consume_failures()
+    db_recovery._FAILURES.append({"stage": "restore", "error": "x"})
+    assert len(db_recovery.consume_failures()) == 1
+    assert db_recovery.consume_failures() == []

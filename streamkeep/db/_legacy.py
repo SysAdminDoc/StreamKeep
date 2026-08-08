@@ -47,6 +47,7 @@ from .connection import (  # noqa: F401
 from .monitor import (  # noqa: F401
     save_all_monitor_channels,
 )
+from . import recovery as _recovery
 from .primitives import _write_lock  # noqa: F401
 # V163: the download-queue family lives in ``queue`` and the tombstone
 # block-list in ``tombstones``. Imported, not re-exported -- the
@@ -125,19 +126,13 @@ from .projections import (  # noqa: F401
 
 def init_db() -> None:
     """Create tables if they don't exist.  Idempotent."""
-    # Repair a config directory left mixed by a restore that died mid-swap
-    # before opening the database. Lazy imports avoid backup<->db and
-    # rebuild<->db cycles.
-    try:
-        from ..backup import finalize_interrupted_restore
-        finalize_interrupted_restore()
-    except Exception:
-        pass  # safe: best-effort fallback; preserve the primary operation
-    try:
-        from ..rebuild import finalize_interrupted_rebuild
-        finalize_interrupted_rebuild()
-    except Exception:
-        pass  # safe: best-effort fallback; preserve the primary operation
+    # Repair a config directory left mixed by a restore or rebuild that died
+    # mid-swap, before opening the database. Failures are reported rather than
+    # swallowed and never abort startup -- see ``db/recovery.py`` (V185).
+    _recovery.report_failure("restore", lambda: _recovery.call_recovery(
+        ".backup", "finalize_interrupted_restore"))
+    _recovery.report_failure("rebuild", lambda: _recovery.call_recovery(
+        ".rebuild", "finalize_interrupted_rebuild"))
     _check_schema_version()
     db = _connect()
     try:
@@ -157,11 +152,13 @@ def init_db() -> None:
         db.close()
     # Repair an interrupted re-template after the schema is open so recovery
     # can compare the durable history path with the staged filesystem move.
-    try:
-        from ..maintenance import finalize_interrupted_retemplates
-        finalize_interrupted_retemplates(config_dir=CONFIG_DIR)
-    except Exception:
-        pass  # safe: best-effort fallback; preserve the primary operation
+    _recovery.report_failure(
+        "re-template",
+        lambda: _recovery.call_recovery(
+            ".maintenance", "finalize_interrupted_retemplates",
+            config_dir=CONFIG_DIR,
+        ),
+    )
 
 
 

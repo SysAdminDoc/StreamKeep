@@ -718,3 +718,60 @@ def test_close_waits_for_maintenance_worker_before_teardown(qt_application):
             worker.wait(1500)
         window.deleteLater()
         qt_application.processEvents()
+
+
+def test_a_queue_that_cannot_resume_says_so(qt_application, tmp_path, monkeypatch):
+    """Resuming the queue must not fail silently.
+
+    Four callers resume the queue after a power, disk or Settings change. Each
+    swallowed the exception, so a failure left the queue permanently stalled
+    with nothing on screen -- and two of them had already announced "resuming
+    queue" first (V185).
+    """
+    from streamkeep.ui.main_window import StreamKeep
+
+    window = StreamKeep(startup_check=True)
+    try:
+        statuses = []
+        logged = []
+        notified = []
+        monkeypatch.setattr(
+            window, "_set_status",
+            lambda text, tone="info": statuses.append((text, tone)),
+        )
+        monkeypatch.setattr(window, "_log", logged.append)
+        monkeypatch.setattr(
+            window, "_notify_center",
+            lambda text, level="info": notified.append((text, level)),
+        )
+        monkeypatch.setattr(
+            window, "_advance_queue",
+            lambda: (_ for _ in ()).throw(RuntimeError("lease is held")),
+        )
+
+        assert window._resume_queue_or_report() is False
+
+        assert any("lease is held" in line for line in logged), logged
+        assert statuses and statuses[-1][1] == "error", statuses
+        assert "could not be resumed" in statuses[-1][0]
+        assert notified and notified[-1][1] == "error", notified
+    finally:
+        window.close()
+
+
+def test_a_queue_that_resumes_reports_nothing(qt_application, monkeypatch):
+    from streamkeep.ui.main_window import StreamKeep
+
+    window = StreamKeep(startup_check=True)
+    try:
+        statuses = []
+        monkeypatch.setattr(
+            window, "_set_status",
+            lambda text, tone="info": statuses.append((text, tone)),
+        )
+        monkeypatch.setattr(window, "_advance_queue", lambda: None)
+
+        assert window._resume_queue_or_report() is True
+        assert not statuses, "a successful resume must stay quiet"
+    finally:
+        window.close()

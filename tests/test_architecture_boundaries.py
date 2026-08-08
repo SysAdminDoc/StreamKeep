@@ -68,7 +68,7 @@ _OWNED_BY = {
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 4013
+_LEGACY_LINE_CEILING = 4010
 
 
 def test_each_domain_module_implements_what_it_exports():

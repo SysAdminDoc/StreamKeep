@@ -1500,6 +1500,34 @@ class StreamKeep(
         for name, value in list(vars(self).items()):
             yield from collect(name.lstrip("_") or name, value)
 
+    def _resume_queue_or_report(self):
+        """Resume the queue, saying so when it cannot be resumed.
+
+        Four callers resume the queue after a power, disk or Settings change.
+        Each wrapped the call so a failure could not break the window, which is
+        right, but swallowed it entirely -- leaving the queue permanently
+        stalled with no log line and nothing on screen. Two of them had already
+        told the user "resuming queue" first, so the app reported the opposite
+        of what happened (V185).
+        """
+        try:
+            self._advance_queue()
+            return True
+        except Exception as error:
+            self._log(f"[QUEUE] Could not resume the queue: {error}")
+            self._set_status(
+                "The download queue could not be resumed — see the log. "
+                "Press Start on the queue to retry.",
+                "error",
+            )
+            try:
+                self._notify_center(
+                    f"The download queue could not be resumed: {error}", "error",
+                )
+            except Exception as notify_error:
+                self._log(f"[QUEUE] Could not notify: {notify_error}")
+            return False
+
     def closeEvent(self, event):
         _stop_worker(
             getattr(self, "download_worker", None), 3000,
@@ -2726,10 +2754,7 @@ class StreamKeep(
             self._log("[POWER] Queue power policy disabled — resuming pending work.")
         self._disk_monitor.start()
         if resume_power_queue:
-            try:
-                self._advance_queue()
-            except Exception:
-                pass  # safe: settings changes must not break the window
+            self._resume_queue_or_report()
         self._update_windows_queue_surfaces()
 
     def _apply_disk_monitor_settings(self):
@@ -2757,10 +2782,7 @@ class StreamKeep(
                 )
             self._power_pause_active = False
             if resume_power_queue:
-                try:
-                    self._advance_queue()
-                except Exception:
-                    pass  # safe: settings changes must not break the window
+                self._resume_queue_or_report()
             self._update_windows_queue_surfaces()
             return
         if getattr(self, "_disk_monitor", None) is None:
@@ -2826,10 +2848,7 @@ class StreamKeep(
         if self._disk_pause_active and free_bytes >= self._disk_critical_bytes:
             self._disk_pause_active = False
             self._notify_center("Disk space recovered — resuming queue", "success")
-            try:
-                self._advance_queue()
-            except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
+            self._resume_queue_or_report()
             self._update_windows_queue_surfaces()
 
     def _on_disk_space_warning(self, path, free_bytes):
@@ -2877,10 +2896,7 @@ class StreamKeep(
                 "[POWER] Queue resumed on AC with Energy Saver inactive."
             )
             self._notify_center("Queue resumed on AC.", "success")
-            try:
-                self._advance_queue()
-            except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
+            self._resume_queue_or_report()
         self._update_windows_queue_surfaces()
 
     def _fire_native_toast(self, text, level="info"):
