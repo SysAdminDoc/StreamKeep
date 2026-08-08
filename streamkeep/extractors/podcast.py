@@ -9,6 +9,7 @@ import json
 import math
 import re
 import urllib.parse
+from datetime import datetime
 
 from .. import CURL_UA
 from ..http import curl
@@ -20,12 +21,30 @@ _ATTR_RE = re.compile(
     r'([\w:.-]+)\s*=\s*"([^"]*)"|([\w:.-]+)\s*=\s*\'([^\']*)\''
 )
 _ITEM_RE = re.compile(r"<item\b[^>]*>.*?</item\s*>", re.IGNORECASE | re.DOTALL)
+_LIVE_ITEM_RE = re.compile(
+    r"<(?:[A-Za-z_][\w.-]*:)?liveItem\b[^>]*>.*?</(?:[A-Za-z_][\w.-]*:)?liveItem\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
 _CHANNEL_RE = re.compile(
     r"<channel\b[^>]*>(?P<body>.*?)</channel\s*>",
     re.IGNORECASE | re.DOTALL,
 )
 _PAGED_FEED_LIMIT = 32
 _MAX_PODCAST_LIST_ROWS = 20_000
+
+
+def _iso_datetime(value):
+    """Parse a publisher timestamp without letting it escape as a scheduler input."""
+    text = _strip_cdata(value)
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed
+    return parsed.astimezone().replace(tzinfo=None)
 
 
 def _parse_attrs(attr_text):
@@ -122,14 +141,21 @@ def _first_prefixed_text(xml_text, local_name):
 
 def _public_url(value, base_url=""):
     text = str(value or "").strip()
-    if not text:
+    if not text or len(text) > 2048 or any(
+        ord(char) < 32 or ord(char) == 127 for char in text
+    ):
         return ""
     try:
         text = urllib.parse.urljoin(base_url or "", text)
         parsed = urllib.parse.urlsplit(text)
     except ValueError:
         return ""
-    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
         return ""
     return text
 
@@ -306,6 +332,167 @@ def _parse_alternate_enclosures(xml_text, feed_url=""):
     return rows
 
 
+def podcast_source_candidates(metadata, primary_url=""):
+    """Return ranked HTTP(S) podcast deliveries with source-level failover.
+
+    The standard enclosure is retained as the compatibility fallback. A
+    publisher-marked ``default`` alternate outranks it, while non-default
+    alternates are ordered by advertised bitrate/height and declaration order.
+    Non-HTTP transports and torrent descriptors remain metadata only; they are
+    never handed to the guarded downloader.
+    """
+    primary = _public_url(primary_url)
+    rows = []
+    if primary:
+        rows.append({
+            "url": primary,
+            "content_type": "",
+            "alternate_index": -1,
+            "source_index": -1,
+            "default": False,
+            "rank": (1, 0, 0, 0),
+        })
+    alternates = metadata.get("alternate_enclosures", []) if isinstance(metadata, dict) else []
+    if not isinstance(alternates, list):
+        alternates = []
+    for alternate_index, alternate in enumerate(alternates[:256]):
+        if not isinstance(alternate, dict):
+            continue
+        is_default = bool(alternate.get("default")) or str(
+            alternate.get("rel", "") or ""
+        ).casefold() == "default"
+        try:
+            bitrate = max(0, int(float(alternate.get("bitrate", 0) or 0)))
+        except (TypeError, ValueError, OverflowError):
+            bitrate = 0
+        try:
+            height = max(0, int(float(alternate.get("height", 0) or 0)))
+        except (TypeError, ValueError, OverflowError):
+            height = 0
+        sources = alternate.get("sources", [])
+        if not isinstance(sources, list):
+            continue
+        for source_index, source in enumerate(sources[:64]):
+            if not isinstance(source, dict):
+                continue
+            content_type = str(source.get("content_type", "") or "").casefold()
+            if content_type in {
+                "application/x-bittorrent", "application/x-torrent",
+            }:
+                continue
+            url = _public_url(source.get("uri", ""))
+            if not url:
+                continue
+            rows.append({
+                "url": url,
+                "content_type": str(source.get("content_type", "") or ""),
+                "alternate_index": alternate_index,
+                "source_index": source_index,
+                "default": is_default,
+                "rank": (
+                    2 if is_default else 0,
+                    bitrate,
+                    height,
+                    -alternate_index,
+                ),
+            })
+    unique = {}
+    for row in rows:
+        unique.setdefault(row["url"], row)
+    return sorted(
+        unique.values(),
+        key=lambda row: (
+            -row["rank"][0],
+            -row["rank"][1],
+            -row["rank"][2],
+            row["rank"][3],
+            row["source_index"],
+        ),
+    )
+
+
+def podcast_live_start_at(metadata, *, now=None):
+    """Return a future liveItem start in the queue's local naive ISO format."""
+    live = metadata.get("live_item", {}) if isinstance(metadata, dict) else {}
+    if not isinstance(live, dict) or str(live.get("status", "")).casefold() != "pending":
+        return ""
+    start = _iso_datetime(live.get("start", ""))
+    if start is None:
+        return ""
+    current = now if isinstance(now, datetime) else datetime.now()
+    if current.tzinfo is not None:
+        current = current.astimezone().replace(tzinfo=None)
+    if start <= current:
+        return ""
+    return start.replace(microsecond=0).isoformat()
+
+
+def _parse_live_item(record, channel_metadata, feed_url=""):
+    attrs = record.get("attrs", {}) if isinstance(record, dict) else {}
+    body = str(record.get("body", "") or "") if isinstance(record, dict) else ""
+    status = str(attrs.get("status", "") or "").casefold()
+    if status not in {"pending", "live", "ended"}:
+        status = "unknown"
+    metadata = _merge_metadata(channel_metadata, _parse_scope_metadata(body, feed_url))
+    content_links = []
+    for link in _tag_records(body, "contentLink")[:64]:
+        link_attrs = link.get("attrs", {})
+        href = _public_url(link_attrs.get("href"), feed_url)
+        if not href:
+            continue
+        content_links.append({
+            "href": href,
+            "text": _record_text(link),
+        })
+    live = {
+        "status": status,
+        "start": _strip_cdata(attrs.get("start", "")),
+        "end": _strip_cdata(attrs.get("end", "")),
+        "content_links": content_links,
+    }
+    metadata["live_item"] = live
+    enclosure = _enclosure(body, feed_url)
+    if enclosure is None:
+        candidates = podcast_source_candidates(metadata)
+        if candidates:
+            enclosure = {
+                "url": candidates[0]["url"],
+                "type": candidates[0].get("content_type", ""),
+                "length": 0,
+                "bitrate": 0,
+            }
+    if enclosure is None:
+        return None
+    title = _first_text(body, "title") or "Live podcast"
+    guid = _first_text(body, "guid")
+    start = live["start"]
+    end = live["end"]
+    duration_seconds = 0.0
+    start_dt = _iso_datetime(start)
+    end_dt = _iso_datetime(end)
+    if start_dt is not None and end_dt is not None:
+        duration_seconds = max(0.0, (end_dt - start_dt).total_seconds())
+    return {
+        "title": title,
+        "date": start,
+        "duration_seconds": duration_seconds,
+        "duration": _duration_label(duration_seconds),
+        "enclosure": enclosure,
+        "guid": guid,
+        "is_live": True,
+        "live_status": status,
+        "start_time": start,
+        "end_time": end,
+        "content_links": content_links,
+        "metadata": metadata,
+        "artwork_url": (
+            (metadata.get("artwork") or [{}])[0].get("href", "")
+            if isinstance(metadata.get("artwork"), list) else ""
+        ),
+        "raw_xml": record.get("raw", "") if isinstance(record, dict) else "",
+    }
+
+
 def _parse_images(xml_text, feed_url=""):
     images = []
     for record in _tag_records(xml_text, "image"):
@@ -343,6 +530,16 @@ def _parse_scope_metadata(xml_text, feed_url=""):
                 break
     if episode_guid:
         metadata["guid"] = episode_guid
+
+    locked_rows = _tag_records(xml_text, "locked")
+    if locked_rows:
+        locked_record = locked_rows[0]
+        locked_value = _record_text(locked_record).casefold()
+        if locked_value in {"yes", "no"}:
+            metadata["locked"] = locked_value
+            owner = _strip_cdata(locked_record["attrs"].get("owner", ""))
+            if owner:
+                metadata["locked_owner"] = owner[:512]
 
     season_rows = _tag_records(xml_text, "season")
     if season_rows:
@@ -459,6 +656,9 @@ def _feed_parts(feed_body):
         channel_inner = feed_body
     items = [match.group(0) for match in _ITEM_RE.finditer(channel_inner)]
     channel_scope = _ITEM_RE.sub("", channel_inner)
+    # liveItem is channel-scoped, but its child metadata must not leak into
+    # every ordinary episode's inherited channel metadata.
+    channel_scope = _LIVE_ITEM_RE.sub("", channel_scope)
     return channel_inner, channel_scope, items
 
 
@@ -505,7 +705,7 @@ def parse_podcast_feed(feed_body, feed_url=""):
     rows, allowing callers such as the monitor to follow RFC 5005 ``rel=next``
     links without treating a page URL as an episode identity.
     """
-    _channel_inner, channel_scope, item_xmls = _feed_parts(feed_body)
+    channel_inner, channel_scope, item_xmls = _feed_parts(feed_body)
     channel_metadata = _parse_scope_metadata(channel_scope, feed_url)
     channel_title = _first_text(channel_scope, "title") or ""
     items = []
@@ -554,6 +754,14 @@ def parse_podcast_feed(feed_body, feed_url=""):
             ),
             "raw_xml": item_xml,
         })
+    live_scope = _LIVE_ITEM_RE.findall(channel_inner)
+    for raw_live in live_scope[:256]:
+        records = _tag_records(raw_live, "liveItem")
+        if not records:
+            continue
+        row = _parse_live_item(records[0], channel_metadata, feed_url)
+        if row is not None:
+            items.append(row)
     return {
         "channel_title": channel_title,
         "channel_metadata": channel_metadata,
@@ -672,7 +880,13 @@ class PodcastRSSExtractor(Extractor):
                 enclosure = row["enclosure"]
                 metadata = _merge_metadata(inherited_metadata, row["metadata"])
                 identity_seed = str(
-                    row.get("guid") or enclosure.get("url") or ""
+                    row.get("guid")
+                    or (
+                        metadata.get("podcast_guid")
+                        if row.get("is_live") else ""
+                    )
+                    or enclosure.get("url")
+                    or ""
                 ).strip()
                 if not identity_seed:
                     continue
@@ -686,7 +900,11 @@ class PodcastRSSExtractor(Extractor):
                     title=row["title"],
                     date=row["date"],
                     source=enclosure["url"],
-                    is_live=False,
+                    is_live=bool(row.get("is_live", False)),
+                    live_status=str(row.get("live_status", "") or ""),
+                    start_time=str(row.get("start_time", "") or ""),
+                    end_time=str(row.get("end_time", "") or ""),
+                    content_links=list(row.get("content_links", []) or []),
                     viewers=0,
                     duration=row["duration"],
                     duration_ms=int(row["duration_seconds"] * 1000),

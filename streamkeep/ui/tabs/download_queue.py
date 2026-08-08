@@ -348,6 +348,10 @@ class DownloadQueueMixin:
         feed_url = str(item.get("feed_url", "") or "").strip()
         source_id = str(item.get("source_id", "") or "").strip()
         webpage_url = str(item.get("webpage_url", "") or "").strip()
+        from ...metadata import normalize_podcast_metadata
+        podcast_metadata = normalize_podcast_metadata(
+            item.get("podcast_metadata", {})
+        )
         from ...metadata import build_archival_provenance
         provenance = build_archival_provenance(
             StreamInfo(
@@ -386,6 +390,7 @@ class DownloadQueueMixin:
             "vod_title": vod_title,
             "vod_channel": vod_channel,
             "feed_url": feed_url,
+            "podcast_metadata": podcast_metadata,
             "source_id": source_id,
             "webpage_url": webpage_url,
             "download_archive": str(
@@ -462,6 +467,7 @@ class DownloadQueueMixin:
         vod_title="",
         vod_channel="",
         feed_url="",
+        podcast_metadata=None,
         source_id="",
         webpage_url="",
         quality="",
@@ -592,6 +598,7 @@ class DownloadQueueMixin:
             "vod_title": vod_title or title,
             "vod_channel": vod_channel,
             "feed_url": feed_url,
+            "podcast_metadata": podcast_metadata,
             "source_id": source_id,
             "webpage_url": webpage_url,
             "download_archive": download_archive,
@@ -840,6 +847,8 @@ class DownloadQueueMixin:
             vod_channel=item.get("vod_channel") or None,
             source_id=item.get("source_id") or None,
             webpage_url=item.get("webpage_url") or None,
+            feed_url=item.get("feed_url") or None,
+            podcast_metadata=item.get("podcast_metadata") or None,
             request_headers=(
                 getattr(self, "_companion_handoff_headers", {})
                 .get(str(item.get("url", "")), {})

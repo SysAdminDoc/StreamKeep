@@ -1,8 +1,14 @@
 import base64
 import hashlib
+from datetime import datetime
 from unittest import mock
 
-from streamkeep.extractors.podcast import PodcastRSSExtractor, parse_podcast_feed
+from streamkeep.extractors.podcast import (
+    PodcastRSSExtractor,
+    parse_podcast_feed,
+    podcast_live_start_at,
+    podcast_source_candidates,
+)
 from streamkeep.feed import generate_rss
 from streamkeep.metadata import MetadataSaver, load_metadata_sidecar
 from streamkeep.models import StreamInfo
@@ -157,3 +163,137 @@ def test_published_feed_preserves_non_payment_podcast_tags(tmp_path):
     assert "<podcast:episode" in xml
     assert "podcast:value" not in xml
     assert "xmlns:podcast" in xml
+
+
+def test_podcast_source_candidates_rank_default_and_skip_torrents():
+    metadata = {
+        "alternate_enclosures": [
+            {
+                "default": False,
+                "bitrate": 256,
+                "sources": [{"uri": "https://cdn.example/high.mp3"}],
+            },
+            {
+                "default": True,
+                "bitrate": 64,
+                "sources": [
+                    {"uri": "https://cdn.example/default.mp3"},
+                    {
+                        "uri": "https://cdn.example/torrent",
+                        "content_type": "application/x-bittorrent",
+                    },
+                ],
+            },
+        ]
+    }
+    candidates = podcast_source_candidates(
+        metadata, "https://cdn.example/primary.mp3"
+    )
+    assert [row["url"] for row in candidates] == [
+        "https://cdn.example/default.mp3",
+        "https://cdn.example/primary.mp3",
+        "https://cdn.example/high.mp3",
+    ]
+
+
+def test_podcast_source_failover_uses_next_source(monkeypatch):
+    from streamkeep.workers.fetch import FetchWorker
+
+    metadata = {
+        "alternate_enclosures": [{
+            "default": True,
+            "sources": [
+                {"uri": "https://cdn.example/first.mp3"},
+                {"uri": "https://cdn.example/second.mp3"},
+            ],
+        }]
+    }
+    worker = FetchWorker(
+        "https://feed.example/show.rss",
+        vod_source="https://cdn.example/primary.mp3",
+        vod_platform="Podcast",
+        podcast_metadata=metadata,
+    )
+    calls = []
+    sentinel = object()
+
+    def resolve(_ext, url):
+        calls.append(url)
+        return sentinel if url.endswith("second.mp3") else None
+
+    monkeypatch.setattr(worker, "_resolve_or_fallback", resolve)
+    monkeypatch.setattr(
+        "streamkeep.workers.fetch.detect_direct_media", lambda *args, **kwargs: None
+    )
+    result = worker._resolve_podcast_candidates(
+        "https://cdn.example/primary.mp3"
+    )
+    assert result is sentinel
+    assert calls == [
+        "https://cdn.example/first.mp3",
+        "https://cdn.example/second.mp3",
+    ]
+
+
+def test_live_item_is_listed_and_schedulable():
+    feed = """
+    <rss xmlns:podcast="https://podcastindex.org/namespace/1.0">
+      <channel>
+        <title>Live Show</title>
+        <podcast:guid>live-show-guid</podcast:guid>
+        <podcast:locked owner="owner@example.com">yes</podcast:locked>
+        <podcast:liveItem status="pending" start="2030-01-02T03:04:05" end="2030-01-02T04:04:05">
+          <title>Scheduled live room</title>
+          <guid>live-guid</guid>
+          <podcast:contentLink href="https://live.example/room">Watch</podcast:contentLink>
+          <podcast:alternateEnclosure type="audio/mpeg" default="true">
+            <podcast:source uri="https://cdn.example/live.mp3" contentType="audio/mpeg"/>
+          </podcast:alternateEnclosure>
+        </podcast:liveItem>
+      </channel>
+    </rss>
+    """
+    parsed = parse_podcast_feed(feed, "https://feed.example/live.xml")
+    assert len(parsed["items"]) == 1
+    row = parsed["items"][0]
+    assert row["is_live"] is True
+    assert row["live_status"] == "pending"
+    assert row["enclosure"]["url"].endswith("live.mp3")
+    assert row["content_links"][0]["href"] == "https://live.example/room"
+    assert row["metadata"]["locked"] == "yes"
+    assert row["metadata"]["locked_owner"] == "owner@example.com"
+    assert podcast_live_start_at(
+        row["metadata"], now=datetime(2029, 1, 1)
+    ) == "2030-01-02T03:04:05"
+
+
+def test_published_feed_renders_alternate_sources_integrity_and_locked(tmp_path):
+    media = tmp_path / "episode.mp3"
+    media.write_bytes(b"audio")
+    xml = generate_rss([{
+        "share_id": "b" * 32,
+        "title": "Episode",
+        "channel": "Show",
+        "media_path": str(media),
+        "podcast": {
+            "podcast_guid": "show-guid",
+            "locked": "yes",
+            "locked_owner": "owner@example.com",
+            "alternate_enclosures": [{
+                "type": "audio/mpeg",
+                "default": True,
+                "sources": [{
+                    "uri": "https://cdn.example/episode.mp3",
+                    "content_type": "audio/mpeg",
+                }],
+                "integrity": {
+                    "type": "sri",
+                    "value": "sha384-encoded",
+                },
+            }],
+        },
+    }], "https://localhost:8080")
+    assert '<podcast:locked owner="owner@example.com">yes</podcast:locked>' in xml
+    assert 'uri="https://cdn.example/episode.mp3"' in xml
+    assert 'contentType="audio/mpeg"' in xml
+    assert 'value="sha384-encoded"' in xml

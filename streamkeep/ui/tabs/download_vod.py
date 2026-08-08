@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QCheckBox, QHBoxLayout, QTableWidgetItem, QWidget
 
 from ...extractors import YtDlpExtractor
+from ...extractors.podcast import podcast_live_start_at
 from ...theme import CAT
 from ...utils import (
     build_template_context as _build_template_context,
@@ -60,7 +61,11 @@ class DownloadVodMixin:
                         vod_channel=vod.channel,
                         feed_url=getattr(vod, "feed_url", ""),
                         source_id=getattr(vod, "source_id", ""),
-                        webpage_url=getattr(vod, "webpage_url", "")):
+                        webpage_url=getattr(vod, "webpage_url", ""),
+                        podcast_metadata=getattr(vod, "podcast_metadata", {}),
+                        start_at=podcast_live_start_at(
+                            getattr(vod, "podcast_metadata", {})
+                        )):
                     added += 1
             source_label = self._queue_active_item.get("title") or self._queue_active_item.get("url", "")
             self._release_queue_item("done")
@@ -179,6 +184,10 @@ class DownloadVodMixin:
                 feed_url=getattr(vod, "feed_url", ""),
                 source_id=getattr(vod, "source_id", ""),
                 webpage_url=getattr(vod, "webpage_url", ""),
+                podcast_metadata=getattr(vod, "podcast_metadata", {}),
+                start_at=podcast_live_start_at(
+                    getattr(vod, "podcast_metadata", {})
+                ),
             )
             if ok:
                 added += 1
@@ -203,6 +212,7 @@ class DownloadVodMixin:
                     feed_url=getattr(vod, "feed_url", ""),
                     source_id=getattr(vod, "source_id", ""),
                     webpage_url=getattr(vod, "webpage_url", ""),
+                    podcast_metadata=getattr(vod, "podcast_metadata", {}),
                 )
                 return
         self._log("No VOD checked.")
@@ -346,6 +356,10 @@ class DownloadVodMixin:
             vod_platform=vod.platform,
             vod_title=vod.title,
             vod_channel=vod.channel,
+            feed_url=getattr(vod, "feed_url", ""),
+            source_id=getattr(vod, "source_id", ""),
+            webpage_url=getattr(vod, "webpage_url", ""),
+            podcast_metadata=getattr(vod, "podcast_metadata", {}),
         )
         worker.log.connect(self._log)
         worker.finished.connect(self._batch_on_fetched)

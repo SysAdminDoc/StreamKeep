@@ -129,6 +129,56 @@ def _podcast_item_xml(metadata):
         lines.append(
             f"      <podcast:txt{attr}>{_escape_xml_text(txt['value'])}</podcast:txt>"
         )
+    for alternate in (
+        metadata.get("alternate_enclosures", [])
+        if isinstance(metadata.get("alternate_enclosures", []), list) else []
+    ):
+        if not isinstance(alternate, dict):
+            continue
+        attrs = []
+        for key, xml_key in (
+            ("type", "type"), ("length", "length"), ("bitrate", "bitrate"),
+            ("height", "height"), ("lang", "lang"), ("title", "title"),
+            ("rel", "rel"), ("codecs", "codecs"), ("default", "default"),
+        ):
+            value = alternate.get(key)
+            if value not in (None, "", 0, False):
+                attrs.append(f'{xml_key}="{_escape_xml_attribute(value)}"')
+        source_lines = []
+        for source in alternate.get("sources", []) if isinstance(
+            alternate.get("sources", []), list
+        ) else []:
+            if not isinstance(source, dict) or not source.get("uri"):
+                continue
+            source_attrs = [
+                f'uri="{_escape_xml_attribute(source["uri"])}"',
+            ]
+            if source.get("content_type"):
+                source_attrs.append(
+                    "contentType=\""
+                    + _escape_xml_attribute(source["content_type"])
+                    + "\""
+                )
+            source_lines.append(
+                f"        <podcast:source {' '.join(source_attrs)}/>"
+            )
+        if not source_lines:
+            continue
+        integrity = alternate.get("integrity")
+        integrity_line = ""
+        if isinstance(integrity, dict) and integrity.get("value"):
+            integrity_line = (
+                "\n        <podcast:integrity"
+                f' type="{_escape_xml_attribute(integrity.get("type", ""))}"'
+                f' value="{_escape_xml_attribute(integrity["value"])}"/>'
+            )
+        attr_text = f" {' '.join(attrs)}" if attrs else ""
+        lines.append(
+            f"      <podcast:alternateEnclosure{attr_text}>\n"
+            + "\n".join(source_lines)
+            + integrity_line
+            + "\n      </podcast:alternateEnclosure>"
+        )
     for image in metadata.get("artwork", []) if isinstance(metadata.get("artwork", []), list) else []:
         if not isinstance(image, dict) or not image.get("href"):
             continue
@@ -270,6 +320,23 @@ def generate_rss(entries, base_url, *, title="StreamKeep", channel=None,
     if len(podcast_mediums) == 1:
         channel_podcast += (
             f"\n    <podcast:medium>{_escape_xml_text(next(iter(podcast_mediums)))}</podcast:medium>"
+        )
+    podcast_locked = {
+        str(meta.get("locked", "") or "").casefold()
+        for meta in entry_metadata if meta.get("locked")
+    }
+    if len(podcast_locked) == 1 and next(iter(podcast_locked)) in {"yes", "no"}:
+        owners = {
+            str(meta.get("locked_owner", "") or "")
+            for meta in entry_metadata if meta.get("locked_owner")
+        }
+        owner_attr = (
+            f' owner="{_escape_xml_attribute(next(iter(owners)))}"'
+            if len(owners) == 1 else ""
+        )
+        channel_podcast += (
+            f"\n    <podcast:locked{owner_attr}>"
+            f"{next(iter(podcast_locked))}</podcast:locked>"
         )
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>

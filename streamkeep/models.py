@@ -196,6 +196,12 @@ class VODInfo:
     date: str = ""
     source: str = ""
     is_live: bool = False
+    # Podcasting 2.0 liveItem scheduling metadata.  These remain public feed
+    # declarations; queue code decides whether a future start is actionable.
+    live_status: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    content_links: list[dict[str, str]] = field(default_factory=list)
     viewers: int = 0
     duration: str = ""
     duration_ms: int = 0

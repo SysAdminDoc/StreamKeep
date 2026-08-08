@@ -321,8 +321,8 @@ class DownloadSingleMixin:
     # ── Fetch / resolve ─────────────────────────────────────────
 
     def _on_fetch(self, vod_source=None, vod_platform=None, vod_title=None,
-                 vod_channel=None, feed_url=None, source_id=None,
-                 webpage_url=None):
+                  vod_channel=None, feed_url=None, source_id=None,
+                  webpage_url=None, podcast_metadata=None):
         url = self.url_input.text().strip()
         if not url:
             return
@@ -335,6 +335,9 @@ class DownloadSingleMixin:
             "feed_url": feed_url or "",
             "source_id": source_id or "",
             "webpage_url": webpage_url or "",
+            "podcast_metadata": (
+                dict(podcast_metadata) if isinstance(podcast_metadata, dict) else {}
+            ),
         }
         # Track recent URLs for the autocomplete dropdown
         if not vod_source:
@@ -396,6 +399,8 @@ class DownloadSingleMixin:
             vod_channel=vod_channel,
             source_id=source_id,
             webpage_url=webpage_url,
+            feed_url=feed_url,
+            podcast_metadata=podcast_metadata,
             request_headers=getattr(self, "_companion_request_headers", {}),
         )
         self._fetch_worker.log.connect(self._log)

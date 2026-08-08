@@ -566,11 +566,18 @@ def _podcast_text(value, limit=4096):
 
 def _podcast_url(value):
     text = _podcast_text(value, 2048)
+    if not text or any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return ""
     try:
         parsed = urllib.parse.urlsplit(text)
     except ValueError:
         return ""
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
         return ""
     return text
 
@@ -590,10 +597,32 @@ def normalize_podcast_metadata(value):
     """
     raw = value if isinstance(value, dict) else {}
     payload = {}
-    for key in ("guid", "podcast_guid", "medium"):
+    for key in ("guid", "podcast_guid", "medium", "locked", "locked_owner"):
         text = _podcast_text(raw.get(key, ""), 512)
         if text:
             payload[key] = text
+
+    live_item = raw.get("live_item")
+    if isinstance(live_item, dict):
+        live = {
+            "status": _podcast_text(live_item.get("status", ""), 32),
+            "start": _podcast_text(live_item.get("start", ""), 128),
+            "end": _podcast_text(live_item.get("end", ""), 128),
+            "content_links": [],
+        }
+        for link in live_item.get("content_links", []) if isinstance(
+            live_item.get("content_links", []), list
+        ) else []:
+            if not isinstance(link, dict):
+                continue
+            href = _podcast_url(link.get("href", ""))
+            if href:
+                live["content_links"].append({
+                    "href": href,
+                    "text": _podcast_text(link.get("text", ""), 512),
+                })
+        if any(live[key] for key in ("status", "start", "end")) or live["content_links"]:
+            payload["live_item"] = live
 
     for key in ("season", "episode"):
         row = raw.get(key)

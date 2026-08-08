@@ -45,6 +45,10 @@ The seven desktop routes now share one archive-control-room visual system.
   preserves `SegmentList`/`SegmentBase` byte-range metadata, carries the MPD's
   `minimumUpdatePeriod`, and sends safe `Range` headers for selected
   single-file representations.
+- Podcasting 2.0 archival now ranks guarded `alternateEnclosure` deliveries,
+  fails over across declared sources, preserves and verifies publisher
+  integrity declarations, renders locked/source metadata in published feeds,
+  and turns pending `liveItem` entries into scheduled queue captures.
 
 ## [4.57.0] - 2026-08-08
 

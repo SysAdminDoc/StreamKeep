@@ -24,7 +24,7 @@ class FetchWorker(QThread):
     def __init__(
         self, url, vod_source=None, vod_platform=None, vod_title=None,
         vod_channel=None, source_id=None, webpage_url=None,
-        request_headers=None,
+        request_headers=None, feed_url=None, podcast_metadata=None,
     ):
         super().__init__()
         self.url = url.strip()
@@ -34,6 +34,10 @@ class FetchWorker(QThread):
         self.vod_channel = str(vod_channel or "")
         self.source_id = str(source_id or "")
         self.webpage_url = str(webpage_url or "")
+        self.feed_url = str(feed_url or "")
+        self.podcast_metadata = copy.deepcopy(
+            podcast_metadata if isinstance(podcast_metadata, dict) else {}
+        )
         self.request_headers = normalize_replay_headers(request_headers)
         self._last_resolve_error = ""
 
@@ -55,6 +59,79 @@ class FetchWorker(QThread):
 
     def _resolve_failure(self, fallback):
         return self._last_resolve_error or str(fallback)
+
+    def _resolve_podcast_candidates(self, primary_url, ext=None):
+        """Resolve a podcast enclosure with publisher-declared failover.
+
+        Podcasting 2.0 alternate enclosures can list several sources for the
+        same recording.  Every candidate is already reduced to a public
+        HTTP(S) URL by the parser/metadata normalizer; still keep the normal
+        extractor and guarded direct-media path in the loop so a dead CDN or
+        a transient format-specific failure advances to the next source.
+        """
+        from ..extractors.podcast import PodcastRSSExtractor, podcast_source_candidates
+        from ..net_guard import RemoteURLPolicyError, normalize_remote_url
+
+        metadata = self.podcast_metadata if isinstance(self.podcast_metadata, dict) else {}
+        candidates = podcast_source_candidates(metadata, primary_url)
+        if not candidates:
+            return None
+        resolver = ext
+        if resolver is None or str(getattr(resolver, "NAME", "")).casefold() != "podcast":
+            resolver = PodcastRSSExtractor()
+        try:
+            resolver.request_headers = dict(self.request_headers)
+        except Exception:
+            pass  # Optional extractor instances may not expose request headers.
+        total = len(candidates)
+        for index, candidate in enumerate(candidates, 1):
+            if self._interrupted():
+                return None
+            url = str(candidate.get("url", "") or "").strip()
+            if not url:
+                continue
+            try:
+                url, _host, _port = normalize_remote_url(url)
+            except RemoteURLPolicyError as error:
+                self.log.emit(
+                    f"[PODCAST] Skipping unsafe delivery source: {error}"
+                )
+                continue
+            self.log.emit(
+                f"[PODCAST] Trying delivery source {index}/{total}: {url[:160]}"
+            )
+            info = None
+            try:
+                if ".m3u8" in url.casefold() or "stream.kick.com" in url.casefold():
+                    info = KickExtractor()._resolve_m3u8(
+                        url,
+                        log_fn=self._capture_resolve_log,
+                        headers=self.request_headers,
+                    )
+                else:
+                    info = self._resolve_or_fallback(
+                        resolver, url
+                    )
+                if info is None and not self._interrupted():
+                    info = detect_direct_media(
+                        url,
+                        log_fn=self._capture_resolve_log,
+                        headers=self.request_headers,
+                    )
+            except Exception as error:  # noqa: BLE001 — fail over to next source
+                if self._interrupted():
+                    return None
+                self._capture_resolve_log(
+                    f"[PODCAST] Delivery source failed: {error}"
+                )
+            if info is not None:
+                self.log.emit(f"[PODCAST] Delivery source selected: {url[:160]}")
+                return info
+            if index < total:
+                self.log.emit(
+                    f"[PODCAST] Delivery source unavailable; trying source {index + 1}/{total}."
+                )
+        return None
 
     def _resolve_or_fallback(self, ext, url):
         """Resolve *url* with the detected extractor, falling back to the
@@ -277,6 +354,20 @@ class FetchWorker(QThread):
 
     def _resolve_direct(self, source):
         """Resolve a direct source URL (m3u8 or VOD ID)."""
+        if str(self.vod_platform or "").casefold() == "podcast" or self.podcast_metadata.get(
+            "alternate_enclosures"
+        ):
+            info = self._resolve_podcast_candidates(source)
+            return self._apply_vod_metadata(
+                info,
+                platform=self.vod_platform,
+                title=self.vod_title,
+                channel=self.vod_channel,
+                source_id=self.source_id,
+                webpage_url=self.webpage_url,
+                feed_url=self.feed_url,
+                podcast_metadata=self.podcast_metadata,
+            )
         # Twitch VOD IDs are numeric strings
         if source.isdigit():
             info = TwitchExtractor()._resolve_vod(
@@ -307,7 +398,13 @@ class FetchWorker(QThread):
 
     def _resolve_source(self, vod, ext):
         """Resolve a VODInfo to StreamInfo."""
-        if vod.platform == "Twitch" and vod.source.isdigit():
+        podcast_metadata = getattr(vod, "podcast_metadata", None) or {}
+        if str(getattr(vod, "platform", "")).casefold() == "podcast" or podcast_metadata.get(
+            "alternate_enclosures"
+        ):
+            self.podcast_metadata = copy.deepcopy(podcast_metadata)
+            info = self._resolve_podcast_candidates(vod.source, ext)
+        elif vod.platform == "Twitch" and vod.source.isdigit():
             info = TwitchExtractor()._resolve_vod(
                 vod.source, log_fn=self._capture_resolve_log
             )
@@ -328,7 +425,7 @@ class FetchWorker(QThread):
             webpage_url=getattr(vod, "webpage_url", ""),
             feed_url=getattr(vod, "feed_url", ""),
             thumbnail_url=getattr(vod, "thumbnail_url", ""),
-            podcast_metadata=getattr(vod, "podcast_metadata", None),
+            podcast_metadata=podcast_metadata,
         )
 
 

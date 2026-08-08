@@ -86,3 +86,34 @@ def test_queue_item_round_trips_feed_url():
     # Absent feed_url defaults to empty, never missing.
     plain = normalize(object(), {"url": "https://x", "platform": "Twitch"})
     assert plain["feed_url"] == ""
+
+
+def test_queue_item_round_trips_podcast_delivery_metadata():
+    from streamkeep.ui.tabs.download_queue import DownloadQueueMixin
+
+    normalize = DownloadQueueMixin._normalize_queue_item
+    metadata = {
+        "alternate_enclosures": [{
+            "sources": [{
+                "uri": "https://cdn.example/alternate.mp3",
+                "content_type": "audio/mpeg",
+            }],
+            "integrity": {"type": "sri", "value": "sha256-encoded"},
+        }],
+        "live_item": {
+            "status": "pending",
+            "start": "2030-01-02T03:04:05",
+            "content_links": [{"href": "https://live.example/room", "text": "Watch"}],
+        },
+    }
+    item = normalize(object(), {
+        "url": "https://cdn.example/primary.mp3",
+        "platform": "Podcast",
+        "vod_source": "https://cdn.example/primary.mp3",
+        "podcast_metadata": metadata,
+    })
+    assert item["podcast_metadata"]["alternate_enclosures"][0]["sources"][0]["uri"] == (
+        "https://cdn.example/alternate.mp3"
+    )
+    assert item["podcast_metadata"]["live_item"]["status"] == "pending"
+    assert normalize(object(), item)["podcast_metadata"] == item["podcast_metadata"]
