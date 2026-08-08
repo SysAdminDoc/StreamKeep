@@ -20,6 +20,14 @@ import tempfile
 import threading
 import urllib.request
 
+from ..net_guard import (
+    MAX_PROVIDER_RESPONSE_BYTES,
+    GuardedRequestError,
+    guarded_json_post,
+    read_bounded,
+    require_https_endpoint,
+)
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
@@ -28,6 +36,9 @@ MAX_SUMMARY_WORDS = 500
 MAX_TRANSCRIPT_CHARS = 1_500_000
 SUMMARY_PROVIDER_VERSION = "summary-contract-v1"
 _CLOUD_PROVIDERS = frozenset({"anthropic", "openai"})
+ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
+#: Ollama is local and unauthenticated; addressed directly, read bounded.
+OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 _URL_RE = re.compile(r"https?://[^\s<>]+", re.I)
 _TOKEN_RE = re.compile(
@@ -175,13 +186,21 @@ def _query_ollama(prompt, model="llama3", log_fn=None):
             "stream": False,
         }).encode("utf-8")
         req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
+            OLLAMA_ENDPOINT,
             data=body,
             headers={"Content-Type": "application/json"},
         )
+        # Ollama listens unauthenticated on loopback, so it is addressed
+        # directly rather than through the address-validating proxy, which
+        # exists to keep *remote* requests off private space. The read is still
+        # bounded: anything squatting that port could otherwise stream an
+        # unbounded body into the finalize path.
         with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("response", "")
+            payload = read_bounded(
+                resp, MAX_PROVIDER_RESPONSE_BYTES, subject="ollama provider",
+            )
+        data = json.loads(payload.decode("utf-8"))
+        return data.get("response", "")
     except Exception as e:
         if log_fn:
             log_fn(f"[SUMMARY] ollama query failed: {e}")
@@ -199,17 +218,24 @@ def _query_openai_compat(prompt, api_url, api_key, model="gpt-4o-mini", log_fn=N
             ],
             "max_tokens": 2000,
         }).encode("utf-8")
-        req = urllib.request.Request(
-            api_url.rstrip("/") + "/v1/chat/completions",
+        base = require_https_endpoint(
+            api_url, subject="OpenAI-compatible summary provider",
+        )
+        if not base:
+            raise GuardedRequestError(
+                "An OpenAI-compatible provider needs an https:// base URL."
+            )
+        data = guarded_json_post(
+            base + "/v1/chat/completions",
             data=body,
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
             },
+            timeout=120,
+            subject="OpenAI-compatible summary provider",
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"]
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         if log_fn:
             log_fn(f"[SUMMARY] OpenAI-compat query failed ({api_url}): {e}")
@@ -225,18 +251,18 @@ def _query_anthropic(prompt, api_key, model="claude-sonnet-4-20250514", log_fn=N
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": prompt}],
         }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
+        data = guarded_json_post(
+            ANTHROPIC_ENDPOINT,
             data=body,
             headers={
                 "Content-Type": "application/json",
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
             },
+            timeout=120,
+            subject="Anthropic summary provider",
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["content"][0]["text"]
+        return data["content"][0]["text"]
     except Exception as e:
         if log_fn:
             log_fn(f"[SUMMARY] Anthropic query failed: {e}")

@@ -119,3 +119,88 @@ def test_smart_thumbnail_preserves_original_and_enforces_limits(tmp_path):
     with mock.patch.object(thumbnail, "MAX_THUMBNAIL_PIXELS", 10):
         with pytest.raises(ValueError, match="Pillow limits"):
             thumbnail._open_bounded_image(str(source_thumbnail))
+
+
+# ── V183: the summarize provider transport ──────────────────────────
+
+def test_an_http_summary_endpoint_is_refused_before_the_key_is_attached():
+    """A cleartext base URL must never receive the API key.
+
+    ``intelligence/summarize.py`` used to build the URL and attach
+    ``Authorization: Bearer`` with no scheme check, so a configured
+    ``http://`` endpoint sent the key over a plaintext socket (V183).
+    """
+    from streamkeep.intelligence import summarize
+
+    attempted = []
+
+    def _fail_if_called(*args, **kwargs):
+        attempted.append((args, kwargs))
+        raise AssertionError("the request must not be issued at all")
+
+    with mock.patch.object(summarize, "guarded_json_post", _fail_if_called):
+        logged = []
+        result = summarize._query_openai_compat(
+            "prompt", api_url="http://10.0.0.5:8080", api_key="sk-secret",
+            log_fn=logged.append,
+        )
+
+    assert result == ""
+    assert not attempted, "a cleartext endpoint was contacted"
+    assert any("https://" in line for line in logged), logged
+    assert not any("sk-secret" in line for line in logged), (
+        "the API key must not be echoed into the log"
+    )
+
+
+def test_the_summary_providers_go_through_the_guarded_transport():
+    """Both cloud providers must post through ``net_guard.guarded_json_post``."""
+    from streamkeep.intelligence import summarize
+
+    calls = []
+
+    def _capture(url, *, data, headers, timeout, **kwargs):
+        calls.append((url, headers, kwargs.get("subject", "")))
+        if "anthropic" in url:
+            return {"content": [{"text": "anthropic-summary"}]}
+        return {"choices": [{"message": {"content": "openai-summary"}}]}
+
+    with mock.patch.object(summarize, "guarded_json_post", _capture):
+        openai_text = summarize._query_openai_compat(
+            "prompt", api_url="https://api.example.invalid",
+            api_key="k", log_fn=None,
+        )
+        anthropic_text = summarize._query_anthropic(
+            "prompt", api_key="k", log_fn=None,
+        )
+
+    assert openai_text == "openai-summary"
+    assert anthropic_text == "anthropic-summary"
+    assert calls[0][0] == "https://api.example.invalid/v1/chat/completions"
+    assert calls[1][0] == summarize.ANTHROPIC_ENDPOINT
+    assert len(calls) == 2, "every cloud provider must use the guarded transport"
+
+
+def test_an_oversized_ollama_answer_is_refused_rather_than_parsed():
+    """The local endpoint is unauthenticated, so its answer must be bounded."""
+    from streamkeep.intelligence import summarize
+
+    class _Response:
+        def read(self, size=-1):
+            # More than the cap, whatever the cap is.
+            return b"x" * (summarize.MAX_PROVIDER_RESPONSE_BYTES + 64)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    logged = []
+    with mock.patch.object(
+        summarize.urllib.request, "urlopen", lambda *a, **k: _Response()
+    ):
+        result = summarize._query_ollama("prompt", log_fn=logged.append)
+
+    assert result == ""
+    assert any("larger than" in line for line in logged), logged

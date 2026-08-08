@@ -8,12 +8,15 @@ returned address is checked, so a public hostname that resolves to an
 internal IP is still rejected.
 """
 
+import contextlib
 import ipaddress
+import json
 import select
 import socket
 import socketserver
 import threading
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -449,3 +452,85 @@ class GuardedHTTPProxy:
 
     def __exit__(self, _exc_type, _exc, _traceback):
         self.stop()
+
+
+# ── Shared guarded JSON transport ───────────────────────────────────
+#
+# Every caller that posts JSON to a user-configured LLM-style provider needs
+# the same three things: an https-only base URL, the request issued through the
+# address-validating proxy, and a bounded read of the answer. That was
+# implemented once in ``translation.py`` and not in ``intelligence/summarize.py``,
+# which shipped an API key over cleartext http and three unbounded reads
+# (V183). It lives here so there is one implementation to get right.
+
+#: A provider answer carries a little text. Reading without a cap lets anything
+#: squatting a local port — or a hostile endpoint reached through a mistyped
+#: base URL — stream an unbounded body into the caller.
+MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+class GuardedRequestError(RuntimeError):
+    """A guarded provider request was refused, or its answer was too large."""
+
+
+def require_https_endpoint(value, *, subject="provider"):
+    """Return *value* as a trimmed https base URL, or raise.
+
+    The scheme is checked before any header is attached so an API key is never
+    written to a cleartext socket. Credentials embedded in the URL are refused
+    because they would be logged by any intermediary.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not text.lower().startswith("https://"):
+        raise GuardedRequestError(
+            f"The {subject} URL must use https:// so credentials are not sent "
+            "in cleartext."
+        )
+    parsed = urllib.parse.urlsplit(text)
+    if not parsed.hostname:
+        raise GuardedRequestError(f"The {subject} URL has no host.")
+    if parsed.username or parsed.password:
+        raise GuardedRequestError(
+            f"The {subject} URL must not contain credentials."
+        )
+    return text.rstrip("/")
+
+
+def read_bounded(response, limit=MAX_PROVIDER_RESPONSE_BYTES, *, subject="provider"):
+    """Return at most *limit* bytes from *response*, refusing anything larger."""
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise GuardedRequestError(
+            f"The {subject} returned a response larger than {limit} bytes."
+        )
+    return payload
+
+
+def guarded_json_post(
+    url, *, data, headers, timeout,
+    limit=MAX_PROVIDER_RESPONSE_BYTES, subject="provider",
+):
+    """POST JSON to a validated remote endpoint through the guarded proxy.
+
+    The address policy is applied to the resolved host, the connection is
+    pinned through a short-lived loopback proxy, and the answer is read under
+    *limit* before being parsed.
+    """
+    try:
+        target = validate_remote_url(url)
+    except RemoteURLPolicyError as error:
+        raise GuardedRequestError(
+            f"The {subject} endpoint was refused by network policy: {error}"
+        ) from error
+    with GuardedHTTPProxy(connect_timeout=timeout) as proxy:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy.url, "https": proxy.url})
+        )
+        request = urllib.request.Request(
+            target.url, data=data, headers=headers, method="POST",
+        )
+        with contextlib.closing(opener.open(request, timeout=timeout)) as response:
+            payload = read_bounded(response, limit, subject=subject)
+    return json.loads(payload.decode("utf-8"))

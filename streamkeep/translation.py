@@ -14,8 +14,12 @@ from types import SimpleNamespace
 
 from .metadata import MAX_METADATA_BYTES, MetadataSaver, load_metadata_sidecar
 from .net_guard import (
-    GuardedHTTPProxy,
+    MAX_PROVIDER_RESPONSE_BYTES,
+    GuardedRequestError,
     RemoteURLPolicyError,
+    guarded_json_post,
+    read_bounded,
+    require_https_endpoint,
     validate_remote_url,
 )
 
@@ -24,11 +28,6 @@ TRANSLATION_SCHEMA_VERSION = 1
 TRANSLATION_PROVIDER_VERSION = "translation-contract-v1"
 MAX_TRANSLATION_CHARS = 100_000
 MAX_CHAPTERS = 500
-# A provider answer only has to carry a title, a description and chapter
-# titles. Reading without a cap let anything squatting the local Ollama port —
-# or a hostile endpoint reached through a mistyped base URL — stream an
-# unbounded body straight into the finalize path.
-MAX_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 _CLOUD_PROVIDERS = frozenset({"openai", "anthropic"})
 # The local default. Ollama listens unauthenticated on loopback, so it is
 # addressed directly rather than through the address-validating proxy, which
@@ -59,25 +58,12 @@ def normalize_provider_api_url(value, *, resolve=True):
     is briefly unresolvable. The full policy check still runs at request time,
     where the connection is actually made.
     """
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if not text.lower().startswith("https://"):
-        raise TranslationError(
-            "The translation provider URL must use https:// so the API key is "
-            "not sent in cleartext."
-        )
-    if not resolve:
-        parsed = urllib.parse.urlsplit(text)
-        if not parsed.hostname:
-            raise TranslationError(
-                "The translation provider URL has no host."
-            )
-        if parsed.username or parsed.password:
-            raise TranslationError(
-                "The translation provider URL must not contain credentials."
-            )
-        return text.rstrip("/")
+    try:
+        text = require_https_endpoint(value, subject="translation provider")
+    except GuardedRequestError as error:
+        raise TranslationError(str(error)) from error
+    if not text or not resolve:
+        return text
     try:
         return validate_remote_url(text).url.rstrip("/")
     except RemoteURLPolicyError as error:
@@ -88,32 +74,21 @@ def normalize_provider_api_url(value, *, resolve=True):
 
 def _read_bounded(response, limit=MAX_PROVIDER_RESPONSE_BYTES):
     """Return at most *limit* bytes, refusing anything larger."""
-    payload = response.read(limit + 1)
-    if len(payload) > limit:
-        raise TranslationError(
-            "The translation provider returned a response larger than "
-            f"{limit} bytes."
-        )
-    return payload
+    try:
+        return read_bounded(response, limit, subject="translation provider")
+    except GuardedRequestError as error:
+        raise TranslationError(str(error)) from error
 
 
 def _guarded_json_request(url, *, data, headers, timeout):
     """POST JSON to a validated remote endpoint through the guarded proxy."""
     try:
-        target = validate_remote_url(url)
-    except RemoteURLPolicyError as error:
-        raise TranslationError(
-            f"The translation endpoint was refused by network policy: {error}"
-        ) from error
-    with GuardedHTTPProxy(connect_timeout=timeout) as proxy:
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy.url, "https": proxy.url})
+        return guarded_json_post(
+            url, data=data, headers=headers, timeout=timeout,
+            limit=MAX_PROVIDER_RESPONSE_BYTES, subject="translation",
         )
-        request = urllib.request.Request(
-            target.url, data=data, headers=headers, method="POST",
-        )
-        with contextlib.closing(opener.open(request, timeout=timeout)) as response:
-            return json.loads(_read_bounded(response).decode("utf-8"))
+    except GuardedRequestError as error:
+        raise TranslationError(str(error)) from error
 
 
 def is_cloud_provider(provider):
