@@ -246,7 +246,8 @@ def test_the_settings_form_preserves_media_server_keys_it_has_no_widget_for():
         "playlist_name": "Keep",
         "watched_user_id": "u1",
         "watched_user_name": "Alex",
-        # No widget exists for these three.
+        # ``sidecar_profile`` is still import/API-only; upload delivery has
+        # explicit Settings controls (V191).
         "sidecar_profile": "jellyfin",
         "upload_profile_id": "profile-42",
         "upload_after_import": True,
@@ -287,6 +288,8 @@ def test_the_settings_form_preserves_media_server_keys_it_has_no_widget_for():
     form.ms_native_playlist_check = _Widget(False)
     form.ms_playlist_name_input = _Widget("Keep")
     form.ms_users_combo = _Widget("u1")
+    form.ms_upload_profile_combo = _Widget("profile-42")
+    form.ms_upload_after_import_check = _Widget(True)
 
     produced = SettingsPreferencesMixin._media_server_form_config(form)
 

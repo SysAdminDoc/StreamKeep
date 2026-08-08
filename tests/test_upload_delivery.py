@@ -5,7 +5,9 @@ from streamkeep import db
 from streamkeep.integrations import media_server
 from streamkeep.models import StreamInfo
 from streamkeep.upload.ftp import FTPDestination
-from streamkeep.upload.runtime import UploadRuntime, profile_view, resolve_profile, save_profile
+from streamkeep.upload.runtime import (
+    UploadRuntime, delete_profile, profile_view, resolve_profile, save_profile,
+)
 from streamkeep.upload.webdav import WebDAVDestination
 
 
@@ -56,6 +58,18 @@ def test_profile_keeps_credentials_out_of_sqlite(monkeypatch, tmp_path):
     ):
         assert resolve_profile("dav-prod")["config"]["password"] == "not-in-sqlite"
     assert profile_view("dav-prod")["config"] == {"url": "https://dav.example/root"}
+
+
+def test_delete_profile_removes_the_secure_credential_reference(monkeypatch, tmp_path):
+    _init_db(tmp_path, monkeypatch)
+    deleted = []
+    with mock.patch("streamkeep.upload.runtime.set_secret_value", return_value="secretref:upload-profile:dav"), \
+         mock.patch("streamkeep.upload.runtime.delete_secret_value", side_effect=deleted.append):
+        save_profile("dav", "WebDAV", {"url": "https://dav.example", "password": "secret"})
+        assert delete_profile("dav") is True
+
+    assert db.load_upload_profile("dav") is None
+    assert deleted == ["upload-profile:dav"]
 
 
 def test_interrupted_upload_is_recoverable_without_false_completion(monkeypatch, tmp_path):

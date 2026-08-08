@@ -2319,6 +2319,122 @@ def _run_intelligence(args):
     _print_line("Use 'intelligence --help' for available commands.")
 
 
+def _parse_upload_values(values):
+    """Parse repeatable ``KEY=VALUE`` fields without leaking secret values."""
+    parsed = {}
+    for item in values or []:
+        text = str(item or "")
+        if "=" not in text:
+            raise ValueError("upload fields must use KEY=VALUE")
+        key, raw_value = text.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("upload field names cannot be empty")
+        try:
+            value = json.loads(raw_value)
+        except (TypeError, json.JSONDecodeError):
+            value = raw_value
+        if isinstance(value, (dict, list)):
+            raise ValueError(f"upload field {key!r} must be scalar")
+        parsed[key] = value
+    return parsed
+
+
+def _run_upload(args):
+    """Manage secure upload destination profiles and connection checks."""
+    from .upload.runtime import (
+        delete_profile, list_profiles, resolve_profile, save_profile,
+        test_profile,
+    )
+
+    action = getattr(args, "upload_profile_command", "") or "list"
+    as_json = bool(getattr(args, "json", False))
+    if action == "list":
+        profiles = list_profiles()
+        if as_json:
+            _print_line(json.dumps({"profiles": profiles}, indent=2))
+        elif not profiles:
+            _print_line("No upload profiles configured.")
+        else:
+            for profile in profiles:
+                label = profile.get("label") or profile["profile_id"]
+                state = "credentials" if profile.get("has_credentials") else "no credentials"
+                _print_line(
+                    f"  {label:<24s} {profile['profile_id']}  "
+                    f"{profile['adapter']}  [{state}]"
+                )
+        return
+
+    profile_id = str(getattr(args, "profile_id", "") or "").strip()
+    if action in {"save", "create", "edit"}:
+        try:
+            existing = resolve_profile(profile_id) if profile_id else None
+            public = _parse_upload_values(getattr(args, "config", []))
+            secret = _parse_upload_values(getattr(args, "secret", []))
+            if getattr(args, "secret_stdin", False):
+                secret.update(_parse_upload_values(sys.stdin.read().splitlines()))
+            if existing is not None:
+                merged = dict(existing.get("config", {}))
+                merged.update(public)
+                merged.update(secret)
+                config = merged
+                adapter = str(getattr(args, "adapter", "") or existing["adapter"])
+                label_value = getattr(args, "label", None)
+                label = str(
+                    label_value if label_value is not None
+                    else existing.get("label", "")
+                )
+            else:
+                config = {**public, **secret}
+                adapter = str(getattr(args, "adapter", "") or "")
+                label = str(getattr(args, "label", "") or "")
+            profile = save_profile(profile_id, adapter, config, label=label)
+        except (ValueError, OSError, RuntimeError) as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        if as_json:
+            _print_line(json.dumps({"profile": profile}, indent=2))
+        else:
+            _print_line(
+                f"Saved upload profile {profile['profile_id']} "
+                f"({profile['adapter']})."
+            )
+        return
+
+    if action == "test":
+        try:
+            ok, message = test_profile(profile_id)
+        except ValueError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        if as_json:
+            _print_line(json.dumps({
+                "profile_id": profile_id, "ok": ok, "message": message,
+            }, indent=2))
+        else:
+            _print_line(f"{profile_id}: {message}")
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "delete":
+        try:
+            deleted = delete_profile(profile_id)
+        except ValueError as error:
+            _print_line(f"Error: {error}")
+            sys.exit(2)
+        if not deleted:
+            _print_line(f"Error: no upload profile named {profile_id!r}")
+            sys.exit(2)
+        if as_json:
+            _print_line(json.dumps({"deleted": True, "profile_id": profile_id}))
+        else:
+            _print_line(f"Deleted upload profile {profile_id} and its stored credentials.")
+        return
+
+    _print_line("Use 'upload profiles --help' for available commands.")
+
+
 def _run_protocol_register(args):
     """Register the per-user streamkeep:// handler on the current OS."""
     from .protocol import register_protocol
@@ -3078,6 +3194,74 @@ def build_parser():
     auth_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                         help="Override the config/database directory")
 
+    # -- upload destinations --
+    upload_p = sub.add_parser(
+        "upload", aliases=["uploads"],
+        help="Create, test, edit, list, or delete secure upload profiles",
+    )
+    upload_p.add_argument("--config-dir", default=argparse.SUPPRESS,
+                          help="Override the config/database directory")
+    upload_sub = upload_p.add_subparsers(dest="upload_command")
+    upload_sub.required = False
+    upload_profiles = upload_sub.add_parser(
+        "profiles", aliases=["profile"],
+        help="Manage upload destination profiles",
+    )
+    upload_profiles.add_argument("--config-dir", default=argparse.SUPPRESS,
+                                 help="Override the config/database directory")
+    upload_profiles.add_argument("--json", action="store_true",
+                                 help="Emit redacted results as JSON")
+    upload_profile_sub = upload_profiles.add_subparsers(
+        dest="upload_profile_command"
+    )
+    upload_profile_sub.required = False
+
+    upload_list = upload_profile_sub.add_parser(
+        "list", help="List redacted upload profiles",
+    )
+    upload_list.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="Emit redacted results as JSON")
+
+    upload_save = upload_profile_sub.add_parser(
+        "save", aliases=["create", "edit"],
+        help="Create or update an upload profile",
+    )
+    upload_save.add_argument("profile_id", help="Stable profile ID")
+    upload_save.add_argument(
+        "--adapter", default="",
+        help="Adapter name (FTP / SFTP, S3 / B2 / MinIO, or WebDAV)",
+    )
+    upload_save.add_argument("--label", default=None,
+                             help="Human-readable profile label")
+    upload_save.add_argument(
+        "--config", "--set", dest="config", action="append", default=[],
+        metavar="KEY=VALUE", help="Set a non-secret adapter field (repeatable)",
+    )
+    upload_save.add_argument(
+        "--secret", action="append", default=[], metavar="KEY=VALUE",
+        help="Set a secret adapter field (prefer --secret-stdin)",
+    )
+    upload_save.add_argument(
+        "--secret-stdin", action="store_true",
+        help="Read secret KEY=VALUE fields from stdin, one per line",
+    )
+    upload_save.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="Emit the redacted profile as JSON")
+
+    upload_test = upload_profile_sub.add_parser(
+        "test", help="Test one profile's adapter connection",
+    )
+    upload_test.add_argument("profile_id", help="Profile ID")
+    upload_test.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="Emit the result as JSON")
+
+    upload_delete = upload_profile_sub.add_parser(
+        "delete", help="Delete a profile and its stored credentials",
+    )
+    upload_delete.add_argument("profile_id", help="Profile ID")
+    upload_delete.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                               help="Emit the result as JSON")
+
     # -- local-first intelligence --
     intelligence_p = sub.add_parser(
         "intelligence",
@@ -3323,6 +3507,8 @@ def run_cli(argv=None):
         _run_health_check(args)
     elif args.command == "auth":
         _run_auth(args, p)
+    elif args.command in ("upload", "uploads"):
+        _run_upload(args)
     elif args.command == "youtube-health":
         _run_youtube_health(args)
     elif args.command == "intelligence":
@@ -3349,7 +3535,7 @@ def has_cli_args():
         "snapshot", "backup", "bagit", "tokens", "startup-check", "import-har", "import-library",
         "retemplate",
         "adopt", "podcast-sidecars", "collections",
-        "credentials", "health", "auth", "youtube-health", "mse-capture", "register-protocol",
+        "credentials", "health", "auth", "upload", "uploads", "youtube-health", "mse-capture", "register-protocol",
         "unregister-protocol", "bookmarklet", "intelligence",
         "--url", "--server", "--list-extractors", "--version", "--help", "-h",
     }

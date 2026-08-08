@@ -1705,6 +1705,45 @@ class LocalServerTests(unittest.TestCase):
         self.assertTrue(any(item["kind"] == "media" for item in exported["files"]))
         self.assertTrue(exported["upload_jobs"])
 
+    def test_authenticated_upload_profile_delete_removes_profile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database = Path(tmpdir) / "library.db"
+            server = LocalCompanionServer()
+            with mock.patch.object(db, "DB_PATH", database), \
+                 mock.patch(
+                     "streamkeep.upload.runtime.set_secret_value",
+                     return_value="secretref:upload-profile:dav",
+                 ), mock.patch("streamkeep.upload.runtime.delete_secret_value"):
+                db.init_db()
+                server.start()
+                try:
+                    _profile, create_status = self._open_json(
+                        "/api/uploads/profiles",
+                        server=server,
+                        token=server.token,
+                        method="POST",
+                        data={
+                            "profile_id": "dav",
+                            "adapter": "WebDAV",
+                            "config": {"url": "https://dav.example"},
+                        },
+                    )
+                    deleted, delete_status = self._open_json(
+                        "/api/uploads/profiles/dav",
+                        server=server,
+                        token=server.token,
+                        method="DELETE",
+                        data={},
+                    )
+                    remaining = db.load_upload_profile("dav")
+                finally:
+                    server.stop()
+
+        self.assertEqual(create_status, 201)
+        self.assertEqual(delete_status, 200)
+        self.assertTrue(deleted["deleted"])
+        self.assertIsNone(remaining)
+
     def test_authenticated_intelligence_preview_and_summary(self):
         from streamkeep.intelligence import runtime as intelligence_runtime
 

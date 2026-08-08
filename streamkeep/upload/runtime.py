@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import threading
 from typing import Any
 
@@ -109,10 +110,31 @@ def list_profiles() -> list[dict[str, Any]]:
 
 def delete_profile(profile_id: str) -> bool:
     profile_id = _validate_profile_id(profile_id)
-    deleted = db.delete_upload_profile(profile_id)
+    try:
+        deleted = db.delete_upload_profile(profile_id)
+    except sqlite3.IntegrityError as error:
+        raise ValueError(
+            "Upload profile has persisted jobs; cancel or finish them before deleting"
+        ) from error
     if deleted:
         delete_secret_value(_profile_secret_id(profile_id))
     return deleted
+
+
+def test_profile(profile_id: str) -> tuple[bool, str]:
+    """Run an adapter's bounded connection check without exposing secrets."""
+    profile = resolve_profile(profile_id)
+    if profile is None:
+        raise ValueError("Upload profile was not found")
+    adapter_cls = UploadDestination.all_adapters().get(profile["adapter"])
+    if adapter_cls is None:
+        return False, "Upload adapter is unavailable"
+    try:
+        destination = adapter_cls(profile["config"])
+        ok, message = destination.test_connection()
+    except Exception as error:
+        ok, message = False, f"Upload connection test crashed: {error}"
+    return bool(ok), sanitize_upload_message(message, profile["config"])
 
 
 def resolve_profile(profile_id: str) -> dict[str, Any] | None:

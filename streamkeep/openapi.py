@@ -57,6 +57,7 @@ DOCUMENTED_OPERATIONS = frozenset({
     "POST /api/shares/feed/revoke",
     "POST /api/uploads",
     "POST /api/uploads/profiles",
+    "DELETE /api/uploads/profiles/{id}",
     "POST /api/uploads/retry",
     "POST /api/uploads/cancel",
     "POST /api/media-server/preview",
@@ -741,6 +742,27 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
                         "400": {"description": "Invalid profile.", "content": error_content},
                         "401": unauthorized,
                         "403": forbidden,
+                    },
+                },
+            },
+            "/api/uploads/profiles/{id}": {
+                "delete": {
+                    "summary": "Delete an upload profile and its stored credentials.",
+                    "tags": ["uploads"],
+                    "security": bearer,
+                    "parameters": [{
+                        "name": "id", "in": "path", "required": True,
+                        "schema": {"type": "string"},
+                    }],
+                    "requestBody": {"required": True, "content": {
+                        "application/json": {"schema": {"type": "object"}}
+                    }},
+                    "responses": {
+                        "200": json_ok("Profile deleted.", {"type": "object"}),
+                        "400": {"description": "Invalid profile ID.", "content": error_content},
+                        "401": unauthorized,
+                        "403": forbidden,
+                        "404": {"description": "Profile not found.", "content": error_content},
                     },
                 },
             },

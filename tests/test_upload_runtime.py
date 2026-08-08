@@ -1,14 +1,14 @@
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from PyQt6.QtCore import QCoreApplication, Qt
-
+from streamkeep import db
 from streamkeep.upload.base import UploadDestination
-from streamkeep.upload.upload_worker import UploadWorker
+from streamkeep.upload.runtime import UploadRuntime, save_profile
 
 
 class UploadRuntimeTests(unittest.TestCase):
@@ -35,11 +35,7 @@ class UploadRuntimeTests(unittest.TestCase):
             ["FTP / SFTP", "S3 / B2 / MinIO", "WebDAV"],
         )
 
-    def test_upload_worker_emits_failure_when_adapter_crashes(self):
-        app = QCoreApplication.instance() or QCoreApplication([])
-        done_events = []
-        log_events = []
-
+    def test_runtime_persists_failure_when_adapter_crashes(self):
         class BrokenAdapter:
             def __init__(self, config):
                 self.config = config
@@ -47,25 +43,23 @@ class UploadRuntimeTests(unittest.TestCase):
             def upload(self, file_path, metadata=None, progress_cb=None):
                 raise RuntimeError("boom")
 
-        worker = UploadWorker("Broken", {}, "C:/tmp/file.bin")
-        worker.done.connect(
-            lambda ok, msg: done_events.append((ok, msg)),
-            type=Qt.ConnectionType.DirectConnection,
-        )
-        worker.log.connect(log_events.append, type=Qt.ConnectionType.DirectConnection)
-
-        with mock.patch.object(
-            UploadDestination,
-            "all_adapters",
-            return_value={"Broken": BrokenAdapter},
-        ):
-            worker.run()
-
-        app.processEvents()
-        self.assertEqual(len(done_events), 1)
-        self.assertFalse(done_events[0][0])
-        self.assertIn("upload crashed", done_events[0][1])
-        self.assertTrue(any("[UPLOAD] FAIL:" in msg for msg in log_events))
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.object(db, "DB_PATH", Path(folder) / "library.db"), \
+                 mock.patch.object(
+                    UploadDestination,
+                    "all_adapters",
+                    return_value={"Broken": BrokenAdapter},
+                 ), mock.patch("streamkeep.upload.runtime.delete_secret_value"), \
+                 mock.patch("streamkeep.upload.runtime.set_secret_value", return_value=""):
+                db.init_db()
+                save_profile("broken", "Broken", {})
+                source = Path(folder) / "clip.bin"
+                source.write_bytes(b"payload")
+                job = db.create_upload_job("broken", "Broken", str(source))
+                UploadRuntime()._run(job["upload_id"])
+                result = db.load_upload_job(job["upload_id"])
+            self.assertEqual(result["status"], "retryable")
+            self.assertIn("Upload crashed: boom", result["last_error"])
 
 
 if __name__ == "__main__":

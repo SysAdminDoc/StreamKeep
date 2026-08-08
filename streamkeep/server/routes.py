@@ -1,5 +1,7 @@
 """Canonical Browser Companion REST route table."""
 
+from urllib.parse import unquote
+
 PRODUCT_REST_PATHS = frozenset({
     "POST /pair",
     "POST /api/validate",
@@ -17,6 +19,7 @@ PRODUCT_REST_PATHS = frozenset({
     "GET /api/intelligence/profiles",
     "POST /api/uploads",
     "POST /api/uploads/profiles",
+    "DELETE /api/uploads/profiles/{id}",
     "POST /api/uploads/retry",
     "POST /api/uploads/cancel",
     "POST /api/media-server/preview",
@@ -39,7 +42,49 @@ PRODUCT_REST_PATHS = frozenset({
 })
 ROUTE_TABLE = tuple(sorted(PRODUCT_REST_PATHS))
 
-__all__ = ["PRODUCT_REST_PATHS", "ROUTE_TABLE", "build_handler"]
+__all__ = [
+    "PRODUCT_REST_PATHS", "ROUTE_TABLE", "build_handler",
+    "handle_delete", "handle_upload_profile_delete",
+]
+
+
+def handle_upload_profile_delete(handler, profile_id):
+    """Delete one upload profile through an already-authenticated handler."""
+    from ..upload.runtime import delete_profile
+
+    try:
+        deleted = delete_profile(profile_id)
+    except ValueError as error:
+        handler._json_response(400, {
+            "ok": False,
+            "err": "upload_profile_invalid",
+            "message": str(error),
+        })
+        return
+    if not deleted:
+        handler._json_response(404, {
+            "ok": False,
+            "err": "upload_profile_not_found",
+        })
+        return
+    handler._json_response(200, {
+        "ok": True, "deleted": True, "profile_id": profile_id,
+    })
+
+
+def handle_delete(handler, path):
+    """Dispatch authenticated DELETE routes outside the legacy monolith."""
+    if path.startswith("/api/uploads/profiles/") and path.count("/") == 4:
+        profile_id = unquote(path.rsplit("/", 1)[-1])
+        if handler._require_auth("queue", mutating=True):
+            handle_upload_profile_delete(handler, profile_id)
+        return True
+    if path.startswith("/api/tokens/") and path.count("/") == 3:
+        token_id = path.removeprefix("/api/tokens/")
+        if handler._require_auth(mutating=True, master_only=True):
+            handler._handle_api_token_revoke(token_id)
+        return True
+    return False
 
 
 def build_handler(*args, **kwargs):

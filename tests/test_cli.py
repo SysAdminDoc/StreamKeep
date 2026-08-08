@@ -266,6 +266,72 @@ def test_health_parser_exposes_json_timeout_and_config_dir():
     assert args.config_dir == "isolated"
 
 
+def test_upload_profile_cli_lifecycle_keeps_secret_out_of_output(tmp_path, monkeypatch):
+    from streamkeep import db
+    import streamkeep.upload.runtime as upload_runtime
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "library.db")
+    db.init_db()
+    secrets = {}
+    monkeypatch.setattr(
+        upload_runtime,
+        "set_secret_value",
+        lambda key, value: secrets.__setitem__(key, value) or f"secretref:{key}",
+    )
+    monkeypatch.setattr(
+        upload_runtime, "get_secret_value", lambda key: secrets.get(key),
+    )
+    deleted = []
+    monkeypatch.setattr(
+        upload_runtime, "delete_secret_value",
+        lambda key: deleted.append(key) or secrets.pop(key, None),
+    )
+    output = []
+    monkeypatch.setattr(cli, "_print_line", output.append)
+    parser = cli.build_parser()
+
+    cli._run_upload(parser.parse_args([
+        "upload", "profiles", "save", "dav", "--adapter", "WebDAV",
+        "--label", "Production DAV", "--config", "url=https://dav.example/root",
+        "--secret", "password=never-print",
+    ]))
+    assert "never-print" not in "\n".join(output)
+    assert secrets["upload-profile:dav"]["password"] == "never-print"
+
+    output.clear()
+    cli._run_upload(parser.parse_args([
+        "upload", "profiles", "edit", "dav", "--set", "remote_dir=Archive",
+    ]))
+    assert db.load_upload_profile("dav")["config"]["url"] == "https://dav.example/root"
+    assert secrets["upload-profile:dav"]["password"] == "never-print"
+
+    output.clear()
+    monkeypatch.setattr(upload_runtime, "test_profile", lambda _profile: (True, "Connection OK"))
+    cli._run_upload(parser.parse_args([
+        "upload", "profiles", "test", "dav",
+    ]))
+    assert output[-1] == "dav: Connection OK"
+
+    output.clear()
+    cli._run_upload(parser.parse_args([
+        "upload", "profiles", "delete", "dav",
+    ]))
+    assert db.load_upload_profile("dav") is None
+    assert deleted == ["upload-profile:dav"]
+
+
+def test_upload_command_is_registered_in_both_trigger_sets():
+    import re
+
+    launcher = (ROOT / "StreamKeep.py").read_text(encoding="utf-8")
+    module = (ROOT / "streamkeep" / "cli.py").read_text(encoding="utf-8")
+    for source in (launcher, module):
+        trigger_block = re.search(
+            r"cli_triggers = \{(.*?)\}", source, re.DOTALL,
+        ).group(1)
+        assert '"upload"' in trigger_block
+
+
 def test_youtube_health_command_emits_report(tmp_path):
     config_dir = tmp_path / "isolated"
     result = _run_launcher(

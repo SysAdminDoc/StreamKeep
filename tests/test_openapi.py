@@ -92,6 +92,8 @@ class OpenApiRouteConsistencyTests(unittest.TestCase):
                     ops.add(f"{method} /feed/{{id}}.xml")
                 elif 'path.startswith("/api/tokens/")' in line:
                     ops.add(f"{method} /api/tokens/{{id}}")
+                elif 'path.startswith("/api/uploads/profiles/")' in line:
+                    ops.add(f"{method} /api/uploads/profiles/{{id}}")
         # "/" is served in do_GET via _serve_web_ui without an explicit ``==``.
         ops.add("GET /")
         return ops

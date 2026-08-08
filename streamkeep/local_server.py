@@ -153,6 +153,7 @@ def do_POST(self):
     elif path == "/api/operations/export":
 
 def do_DELETE(self):
+    if path.startswith("/api/uploads/profiles/") and path.count("/") == 4:
     if path.startswith("/api/tokens/") and path.count("/") == 3:
 
 def _handle_pair(self):

@@ -228,13 +228,9 @@ class SettingsPreferencesMixin:
         """Read the media-server controls without mutating persisted config.
 
         Starts from the persisted section and overlays only the keys this form
-        owns. ``upload_profile_id``, ``upload_after_import`` and
-        ``sidecar_profile`` are schema-allowed but have no widget here -- they
-        are set through the REST API or a config import -- and rebuilding the
-        section from widgets alone destroyed them on every Settings save
-        (V182). ``tests/test_media_server.py`` derives the expected key set
-        from ``config.MEDIA_SERVER_KEYS`` so a key added to the schema without
-        a widget fails loudly instead of being dropped.
+        owns. ``sidecar_profile`` remains a schema-only import setting; the
+        upload destination and post-import toggle are explicit controls so a
+        Settings save cannot silently destroy the delivery path (V191).
         """
         from ...integrations.media_server import SERVER_TYPES
         persisted = self._config.get("media_server")
@@ -257,7 +253,54 @@ class SettingsPreferencesMixin:
             self.ms_users_combo.currentText().strip()
             if selected else ""
         )
+        upload_combo = getattr(self, "ms_upload_profile_combo", None)
+        if upload_combo is not None:
+            config["upload_profile_id"] = str(upload_combo.currentData() or "")
+        upload_check = getattr(self, "ms_upload_after_import_check", None)
+        if upload_check is not None:
+            config["upload_after_import"] = bool(upload_check.isChecked())
         return config
+
+    def _refresh_upload_profiles(self):
+        """Reload redacted upload destinations without reading credentials."""
+        combo = getattr(self, "ms_upload_profile_combo", None)
+        if combo is None:
+            return
+        selected = str(combo.currentData() or "")
+        persisted = self._config.get("media_server", {})
+        selected = str(
+            persisted.get("upload_profile_id", selected) or selected
+        )
+        try:
+            from ...upload.runtime import list_profiles
+            profiles = list_profiles()
+        except Exception as error:
+            profiles = []
+            status = getattr(self, "ms_upload_status", None)
+            if status is not None:
+                status.setText(f"Upload profiles unavailable: {error}")
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("No upload destination", userData="")
+            for profile in profiles:
+                profile_id = str(profile.get("profile_id") or "")
+                if not profile_id:
+                    continue
+                label = str(profile.get("label") or profile_id)
+                combo.addItem(
+                    f"{label} ({profile.get('adapter', 'adapter')})",
+                    userData=profile_id,
+                )
+            if selected and combo.findData(selected) < 0:
+                combo.addItem(f"Unavailable: {selected}", userData=selected)
+            index = combo.findData(selected)
+            combo.setCurrentIndex(max(0, index))
+        finally:
+            combo.blockSignals(False)
+        status = getattr(self, "ms_upload_status", None)
+        if status is not None and profiles:
+            status.setText(f"{len(profiles)} upload profile(s) available.")
 
     def _on_media_server_load_users(self):
         worker = getattr(self, "_media_server_worker", None)

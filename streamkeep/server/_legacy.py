@@ -26,6 +26,7 @@ REST API endpoints (F37):
   GET  /api/shares    — published recordings/feed definitions     [status]
   GET  /api/uploads   — persisted upload progress and retry state  [status]
   GET  /api/uploads/profiles — redacted upload profiles           [status]
+  DELETE /api/uploads/profiles/{id} — remove a profile and its secret [queue]
   GET  /api/intelligence — persisted summary/thumbnail jobs       [status]
   GET  /api/intelligence/profiles — redacted AI profiles          [status]
   POST /api/uploads   — queue one completed file for delivery      [queue]
@@ -1069,12 +1070,9 @@ def _build_handler(
             if self._reject_bad_host():
                 return
             path = self.path.split("?", 1)[0]
-            if path.startswith("/api/tokens/") and path.count("/") == 3:
-                token_id = path.removeprefix("/api/tokens/")
-                if self._require_auth(mutating=True, master_only=True):
-                    self._handle_api_token_revoke(token_id)
-                return
-            self._json_response(404, {"ok": False, "err": "not_found"})
+            from .routes import handle_delete
+            if not handle_delete(self, path):
+                self._json_response(404, {"ok": False, "err": "not_found"})
 
         def _handle_pair(self):
             origin_header = self.headers.get("Origin", "")

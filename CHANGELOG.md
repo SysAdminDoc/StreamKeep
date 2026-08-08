@@ -32,6 +32,11 @@ The seven desktop routes now share one archive-control-room visual system.
 - History exposes portable recording-note sidecars through its context menu and
   global search, while Monitor now records live/offline transitions through the
   shared database facade and renders Channel Insights summaries.
+- Upload destinations are now manageable end to end: CLI profiles can be
+  created, listed, edited, connection-tested, and deleted with secure
+  credentials removed from the OS store; Settings exposes the selected upload
+  profile and post-import queue toggle, and the REST surface can delete a
+  profile too.
 
 ## [4.57.0] - 2026-08-08
 

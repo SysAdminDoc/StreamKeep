@@ -2808,6 +2808,45 @@ def build_settings_tab(win):
     win.ms_enable_check.setChecked(bool(ms_cfg.get("enabled")))
     ms_lay.addWidget(win.ms_enable_check)
 
+    upload_row = QHBoxLayout()
+    upload_row.setSpacing(8)
+    upload_row.addWidget(QLabel("Upload destination:"))
+    win.ms_upload_profile_combo = QComboBox()
+    win.ms_upload_profile_combo.setMinimumWidth(240)
+    set_accessible(
+        win.ms_upload_profile_combo,
+        "Upload destination",
+        "Choose the secure upload profile used after media-server import.",
+    )
+    upload_row.addWidget(win.ms_upload_profile_combo, 1)
+    win.ms_upload_refresh_btn = QPushButton("Refresh profiles")
+    win.ms_upload_refresh_btn.setObjectName("secondary")
+    set_accessible(
+        win.ms_upload_refresh_btn,
+        "Refresh upload profiles",
+        "Reload upload destinations from the local secure profile store.",
+    )
+    win.ms_upload_refresh_btn.clicked.connect(win._refresh_upload_profiles)
+    upload_row.addWidget(win.ms_upload_refresh_btn)
+    ms_lay.addLayout(upload_row)
+    win.ms_upload_after_import_check = QCheckBox(
+        "Upload imported files after media-server export"
+    )
+    win.ms_upload_after_import_check.setChecked(
+        bool(ms_cfg.get("upload_after_import", False))
+    )
+    set_accessible(
+        win.ms_upload_after_import_check,
+        "Upload after media-server import",
+        "Queue exported media and sidecars for the selected upload destination.",
+    )
+    ms_lay.addWidget(win.ms_upload_after_import_check)
+    win.ms_upload_status = QLabel("No upload profile selected.")
+    win.ms_upload_status.setObjectName("fieldHint")
+    win.ms_upload_status.setWordWrap(True)
+    ms_lay.addWidget(win.ms_upload_status)
+    win._refresh_upload_profiles()
+
     ms_type_row = QHBoxLayout()
     ms_type_row.setSpacing(8)
     ms_type_row.addWidget(QLabel("Server type:"))
