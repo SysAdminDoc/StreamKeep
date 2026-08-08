@@ -37,7 +37,7 @@ _BOILERPLATE_BUDGET = {
     "streamkeep/chat/kick_ws.py": 1,
     "streamkeep/cli.py": 1,
     "streamkeep/clipboard.py": 1,
-    "streamkeep/crash_log.py": 2,
+    "streamkeep/crash_log.py": 1,
     "streamkeep/http.py": 7,
     "streamkeep/i18n/compile_translations.py": 1,
     "streamkeep/integrations/streamlink.py": 3,
