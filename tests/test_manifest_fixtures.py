@@ -18,6 +18,9 @@ from streamkeep.dash import (
     validate_dash_manifest,
 )
 from streamkeep.hls import (
+    HLSPlaylistError,
+    HLSUnsupportedVersionError,
+    HLSVariableError,
     parse_hls_duration,
     parse_hls_master,
     parse_hls_media_playlist,
@@ -332,6 +335,53 @@ class HLSMasterPlaylistTests(unittest.TestCase):
             [("video", ""), ("audio", "en"), ("subtitle", "en")],
         )
 
+    def test_playlist_variables_expand_master_uris_and_attributes(self):
+        body = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:8\n"
+            '#EXT-X-DEFINE:NAME="host",VALUE="cdn.example.com"\n'
+            '#EXT-X-DEFINE:NAME="lang",VALUE="en"\n'
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",'
+            'URI="audio/{$lang}.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=8000000,AUDIO="a"\n'
+            'https://{$host}/video.m3u8\n'
+        )
+        qualities = parse_hls_master(body, "https://origin.example.com/master.m3u8")
+        self.assertEqual(qualities[0].url, "https://cdn.example.com/video.m3u8")
+        self.assertEqual(
+            next(track.url for track in qualities[0].tracks if track.kind == "audio"),
+            "https://origin.example.com/audio/en.m3u8",
+        )
+
+    def test_undefined_playlist_variable_is_a_named_error(self):
+        body = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=1\n"
+            "https://cdn.example.com/{$missing}.m3u8\n"
+        )
+        with self.assertRaisesRegex(HLSVariableError, "undefined HLS playlist variable"):
+            parse_hls_master(body, "https://origin.example.com/master.m3u8")
+
+    def test_playlist_variables_require_explicit_import_in_media_playlist(self):
+        body = (
+            "#EXTM3U\n#EXT-X-VERSION:8\n"
+            "#EXTINF:4,\nseg-{$token}.ts\n"
+        )
+        with self.assertRaisesRegex(HLSVariableError, "undefined HLS playlist variable"):
+            parse_hls_media_playlist(
+                body,
+                "https://origin.example.com/live/media.m3u8",
+                variables={"token": "inherited"},
+            )
+
+    def test_playlist_variable_substitution_requires_protocol_version(self):
+        with self.assertRaisesRegex(HLSPlaylistError, "requires EXT-X-VERSION"):
+            parse_hls_media_playlist(
+                "#EXTM3U\n#EXT-X-DEFINE:NAME=\"token\",VALUE=\"value\"\n"
+                "#EXTINF:4,\nseg-{$token}.ts\n",
+                "https://origin.example.com/live/media.m3u8",
+            )
+
 
     def test_frame_rate_hdr_and_average_bandwidth_reach_selection(self):
         qualities = parse_hls_master(
@@ -353,6 +403,112 @@ class HLSMasterPlaylistTests(unittest.TestCase):
 
 
 class HLSManifestPolicyTests(unittest.TestCase):
+    def test_media_import_and_queryparam_variables_expand_segments(self):
+        imported = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:8\n"
+            '#EXT-X-DEFINE:IMPORT="token"\n'
+            "#EXTINF:4,\nseg-{$token}.ts\n"
+        )
+        playlist = parse_hls_media_playlist(
+            imported,
+            "https://origin.example.com/live/media.m3u8",
+            variables={"token": "imported"},
+        )
+        self.assertEqual(
+            playlist.segments[0].uri,
+            "https://origin.example.com/live/seg-imported.ts",
+        )
+
+        queryparam = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:11\n"
+            '#EXT-X-DEFINE:QUERYPARAM="token"\n'
+            "#EXTINF:4,\nseg-{$token}.ts\n"
+        )
+        playlist = parse_hls_media_playlist(
+            queryparam,
+            "https://origin.example.com/live/media.m3u8?token=query-value",
+        )
+        self.assertEqual(
+            playlist.segments[0].uri,
+            "https://origin.example.com/live/seg-query-value.ts",
+        )
+
+    def test_queryparam_is_percent_decoded_and_empty_is_rejected(self):
+        playlist = parse_hls_media_playlist(
+            "#EXTM3U\n#EXT-X-VERSION:11\n"
+            '#EXT-X-DEFINE:QUERYPARAM="token"\n'
+            "#EXTINF:4,\nseg-{$token}.ts\n",
+            "https://origin.example.com/live/media.m3u8?token=one%2Ftwo",
+        )
+        self.assertEqual(
+            playlist.segments[0].uri,
+            "https://origin.example.com/live/seg-one/two.ts",
+        )
+        with self.assertRaisesRegex(HLSVariableError, "query parameter is missing"):
+            parse_hls_media_playlist(
+                "#EXTM3U\n#EXT-X-VERSION:11\n"
+                '#EXT-X-DEFINE:QUERYPARAM="token"\n'
+                "#EXTINF:4,\nseg-{$token}.ts\n",
+                "https://origin.example.com/live/media.m3u8?token=",
+            )
+
+    def test_playlist_type_vod_is_complete_without_endlist(self):
+        playlist = parse_hls_media_playlist(
+            "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:2,\nseg.ts\n",
+            "https://origin.example.com/live/media.m3u8",
+        )
+        self.assertEqual(playlist.playlist_type, "VOD")
+        self.assertTrue(playlist.is_endlist)
+
+    def test_playlist_version_above_supported_floor_is_named_error(self):
+        with self.assertRaisesRegex(HLSUnsupportedVersionError, "unsupported HLS"):
+            parse_hls_media_playlist(
+                "#EXTM3U\n#EXT-X-VERSION:14\n",
+                "https://origin.example.com/live/media.m3u8",
+            )
+
+    def test_master_variables_are_inherited_by_recursive_media_validation(self):
+        documents = {
+            "https://origin.example.com/master.m3u8": (
+                "#EXTM3U\n#EXT-X-VERSION:8\n"
+                '#EXT-X-DEFINE:NAME="token",VALUE="abc"\n'
+                "#EXT-X-STREAM-INF:BANDWIDTH=1\nmedia.m3u8\n"
+            ),
+            "https://origin.example.com/media.m3u8": (
+                "#EXTM3U\n#EXT-X-VERSION:8\n"
+                '#EXT-X-DEFINE:IMPORT="token"\n'
+                "#EXTINF:4,\nseg-{$token}.ts\n"
+            ),
+        }
+        fetched = []
+        contexts = []
+
+        def fetch(url):
+            fetched.append(url)
+            return documents.get(url)
+
+        with mock.patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_resolved_addresses,
+        ):
+            manifests = preflight_hls_manifest_tree(
+                "https://origin.example.com/master.m3u8",
+                fetch,
+                on_manifest_context=(
+                    lambda url, _body, variables:
+                    contexts.append((url, variables))
+                ),
+            )
+        self.assertEqual(
+            manifests,
+            ("https://origin.example.com/master.m3u8", "https://origin.example.com/media.m3u8"),
+        )
+        self.assertEqual(fetched, list(manifests))
+        self.assertEqual(contexts[0][1], {"token": "abc"})
+        self.assertEqual(contexts[1][1], {"token": "abc"})
+
     def test_variants_renditions_keys_maps_parts_and_cdn_changes_are_checked(self):
         manifest = """\
 #EXTM3U

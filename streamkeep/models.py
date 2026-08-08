@@ -59,6 +59,8 @@ class HLSSegment:
 @dataclass
 class HLSMediaPlaylist:
     """A parsed HLS media (segment) playlist with sequence identity."""
+    version: int = 0
+    playlist_type: str = ""       # EVENT or VOD when declared
     target_duration: float = 0.0
     media_sequence: int = 0
     discontinuity_sequence: int = 0

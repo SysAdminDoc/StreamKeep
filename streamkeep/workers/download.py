@@ -389,7 +389,7 @@ class DownloadWorker(QThread):
             seen.add(key)
             self.hls_markers.append(marker)
 
-    def _record_hls_manifest(self, url, body, root_url):
+    def _record_hls_manifest(self, url, body, root_url, variables=None):
         """Observe guarded HLS bodies for identity and marker metadata."""
         text = str(body or "")
         if not text.lstrip().startswith("#EXTM3U"):
@@ -407,7 +407,10 @@ class DownloadWorker(QThread):
 
         previous = self._hls_playlist if str(url) == str(root_url) else None
         playlist = parse_hls_media_playlist(
-            text, str(url), previous_playlist=previous,
+            text,
+            str(url),
+            previous_playlist=previous,
+            variables=variables,
         )
         if str(url) == str(root_url) or self._hls_playlist is None:
             self.set_hls_playlist_identity(playlist)
@@ -1476,8 +1479,12 @@ class DownloadWorker(QThread):
                     preflight_hls_manifest_tree(
                         safe_url,
                         fetch_text,
-                        on_manifest=lambda current, body, root=safe_url:
-                        self._record_hls_manifest(current, body, root),
+                        on_manifest_context=(
+                            lambda current, body, variables, root=safe_url:
+                            self._record_hls_manifest(
+                                current, body, root, variables,
+                            )
+                        ),
                         on_schedule=self._record_hls_schedule,
                         on_schedule_markers=self._record_hls_schedule,
                     )

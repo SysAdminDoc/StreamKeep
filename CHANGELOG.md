@@ -37,6 +37,10 @@ The seven desktop routes now share one archive-control-room visual system.
   credentials removed from the OS store; Settings exposes the selected upload
   profile and post-import queue toggle, and the REST surface can delete a
   profile too.
+- Native HLS validation now resolves RFC 8216bis `EXT-X-DEFINE` NAME/VALUE,
+  IMPORT, and QUERYPARAM variables across recursive master/media playlists,
+  rejects undefined references with named errors, records playlist version and
+  VOD/EVENT metadata, and refuses protocol versions above the supported floor.
 
 ## [4.57.0] - 2026-08-08
 

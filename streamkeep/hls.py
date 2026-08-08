@@ -4,13 +4,28 @@ import json
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 
 from .models import HLSMediaPlaylist, HLSSegment, MediaTrackInfo, QualityInfo
 from .net_guard import RemoteURLPolicyError, validate_remote_url
 
 
 _ATTR_RE = re.compile(r'([A-Z0-9-]+)=("(?:[^"\\]|\\.)*"|[^,]*)')
+_HLS_VARIABLE_RE = re.compile(r"\{\$([A-Za-z0-9_-]+)\}")
+_HLS_VARIABLE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_HLS_MAX_SUPPORTED_VERSION = 13
+
+
+class HLSPlaylistError(ValueError):
+    """A named HLS playlist parsing or conformance failure."""
+
+
+class HLSVariableError(HLSPlaylistError):
+    """A playlist variable was malformed, undefined, or duplicated."""
+
+
+class HLSUnsupportedVersionError(HLSPlaylistError):
+    """The playlist advertises a version this parser cannot interpret."""
 
 
 def _to_int(value, default=0):
@@ -42,6 +57,182 @@ def _resolve(base_url, value):
     return urljoin(base_url, value) if value else ""
 
 
+def _hls_playlist_kind(body):
+    """Infer whether *body* is a Multivariant or Media Playlist."""
+    lines = str(body or "").splitlines()
+    if any(line.strip().startswith((
+        "#EXT-X-STREAM-INF", "#EXT-X-I-FRAME-STREAM-INF",
+    )) for line in lines):
+        return "master"
+    return "media"
+
+
+def _query_parameter(url, name):
+    """Return the first percent-decoded query parameter value, if present."""
+    for pair in urlsplit(str(url or "")).query.split("&"):
+        if not pair:
+            continue
+        key, separator, value = pair.partition("=")
+        if separator and unquote(key) == name:
+            return unquote(value)
+    return None
+
+
+def _validate_hls_playlist_metadata(
+    body, *, uses_variables=False, playlist_kind="media",
+):
+    """Validate version/type tags and return ``(version, playlist_type)``."""
+    version = 0
+    playlist_type = ""
+    version_count = 0
+    playlist_type_count = 0
+    has_queryparam = False
+    for raw_line in str(body or "").splitlines():
+        line = raw_line.strip()
+        if line.startswith("#EXT-X-VERSION:"):
+            version_count += 1
+            if version_count > 1:
+                raise HLSPlaylistError(
+                    "HLS playlist contains duplicate EXT-X-VERSION tags"
+                )
+            try:
+                version = int(line.split(":", 1)[1].strip())
+            except (TypeError, ValueError):
+                raise HLSPlaylistError("invalid HLS EXT-X-VERSION") from None
+            if version < 1:
+                raise HLSPlaylistError("invalid HLS EXT-X-VERSION")
+            if version > _HLS_MAX_SUPPORTED_VERSION:
+                raise HLSUnsupportedVersionError(
+                    f"unsupported HLS EXT-X-VERSION: {version} "
+                    f"(maximum {_HLS_MAX_SUPPORTED_VERSION})"
+                )
+        elif line.startswith("#EXT-X-PLAYLIST-TYPE:"):
+            playlist_type_count += 1
+            if playlist_type_count > 1:
+                raise HLSPlaylistError(
+                    "HLS playlist contains duplicate EXT-X-PLAYLIST-TYPE tags"
+                )
+            playlist_type = line.split(":", 1)[1].strip().upper()
+            if playlist_type not in {"EVENT", "VOD"}:
+                raise HLSPlaylistError(
+                    f"invalid HLS EXT-X-PLAYLIST-TYPE: {playlist_type!r}"
+                )
+        elif line.startswith("#EXT-X-DEFINE:"):
+            has_queryparam = has_queryparam or (
+                "QUERYPARAM" in _parse_attributes(line.split(":", 1)[1])
+            )
+    if playlist_type and playlist_kind == "master":
+        raise HLSPlaylistError(
+            "EXT-X-PLAYLIST-TYPE is only valid in a Media Playlist"
+        )
+    if uses_variables and version < 8:
+        raise HLSPlaylistError(
+            "HLS variable substitution requires EXT-X-VERSION 8 or newer"
+        )
+    if has_queryparam and version < 11:
+        raise HLSPlaylistError(
+            "HLS EXT-X-DEFINE QUERYPARAM requires EXT-X-VERSION 11 or newer"
+        )
+    return version, playlist_type
+
+
+def _expand_hls_variables(body, base_url, *, variables=None, playlist_kind="media"):
+    """Expand preceding EXT-X-DEFINE declarations in a playlist body."""
+    inherited_values = dict(variables or {})
+    values = {}
+    local_names = set()
+    expanded = []
+    source = str(body or "")
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+        if line.startswith("#EXT-X-DEFINE:"):
+            attrs = _parse_attributes(line.split(":", 1)[1])
+            declaration_keys = [
+                key for key in ("NAME", "IMPORT", "QUERYPARAM")
+                if key in attrs
+            ]
+            if len(declaration_keys) != 1:
+                raise HLSVariableError(
+                    "EXT-X-DEFINE requires exactly one of NAME, IMPORT, or QUERYPARAM"
+                )
+            declaration = declaration_keys[0]
+            name = str(attrs.get(declaration, "") or "")
+            if not _HLS_VARIABLE_NAME_RE.fullmatch(name):
+                raise HLSVariableError(
+                    f"invalid HLS playlist variable name: {name!r}"
+                )
+            if name in local_names:
+                raise HLSVariableError(
+                    f"duplicate HLS playlist variable: {name}"
+                )
+            if declaration == "NAME":
+                if "VALUE" not in attrs:
+                    raise HLSVariableError(
+                        f"HLS variable {name!r} is missing VALUE"
+                    )
+                value = attrs["VALUE"]
+            elif declaration == "IMPORT":
+                if playlist_kind == "master":
+                    raise HLSVariableError(
+                        "EXT-X-DEFINE IMPORT is only valid in a Media Playlist"
+                    )
+                if name not in inherited_values:
+                    raise HLSVariableError(
+                        f"undefined imported HLS playlist variable: {name}"
+                    )
+                value = inherited_values[name]
+            else:
+                value = _query_parameter(base_url, name)
+                if value is None or value == "":
+                    raise HLSVariableError(
+                        f"HLS playlist query parameter is missing: {name}"
+                    )
+            value = str(value)
+            if any(char in value for char in ('"', "\\", "\r", "\n")):
+                raise HLSVariableError(
+                    f"HLS playlist variable {name!r} contains a disallowed character"
+                )
+            local_names.add(name)
+            values[name] = value
+            expanded.append(raw_line)
+            continue
+
+        def substitute(match):
+            name = match.group(1)
+            if name not in values:
+                raise HLSVariableError(
+                    f"undefined HLS playlist variable: {name}"
+                )
+            return str(values[name])
+
+        if line.startswith("#"):
+            tag, separator, value = raw_line.partition(":")
+            if not separator:
+                expanded.append(raw_line)
+                continue
+
+            def substitute_attribute(match):
+                key, raw_value = match.group(1), match.group(2)
+                if raw_value.startswith('"') and raw_value.endswith('"'):
+                    inner = raw_value[1:-1]
+                    return f'{key}="{_HLS_VARIABLE_RE.sub(substitute, inner)}"'
+                if raw_value.lower().startswith(("0x", "0X")):
+                    return f"{key}={_HLS_VARIABLE_RE.sub(substitute, raw_value)}"
+                return match.group(0)
+
+            expanded.append(
+                tag + separator + _ATTR_RE.sub(substitute_attribute, value)
+            )
+        else:
+            expanded.append(_HLS_VARIABLE_RE.sub(substitute, raw_line))
+    _validate_hls_playlist_metadata(
+        source,
+        uses_variables=("#EXT-X-DEFINE:" in source or "{$" in source),
+        playlist_kind=playlist_kind,
+    )
+    return "\n".join(expanded), values
+
+
 @dataclass(frozen=True)
 class HLSManifestReferences:
     """Policy-checked resources and child playlists in one HLS document."""
@@ -57,6 +248,7 @@ class HLSManifestReferences:
     schedule_contexts: tuple = ()
     preload_keys: tuple = ()
     preload_parts: tuple = ()
+    variables: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -98,6 +290,7 @@ def validate_hls_manifest(
     *,
     allow_private_network=False,
     max_references=10_000,
+    variables=None,
 ):
     """Normalize and policy-check every URI carried by an HLS document.
 
@@ -108,6 +301,12 @@ def validate_hls_manifest(
     base = validate_remote_url(
         base_url, allow_private_network=allow_private_network,
     ).url
+    body, resolved_variables = _expand_hls_variables(
+        body,
+        base,
+        variables=variables,
+        playlist_kind=_hls_playlist_kind(body),
+    )
     resources = []
     playlists = []
     resource_seen = set()
@@ -209,6 +408,7 @@ def validate_hls_manifest(
         schedule_contexts=tuple(schedule_contexts),
         preload_keys=tuple(preload_keys),
         preload_parts=tuple(preload_parts),
+        variables=tuple(resolved_variables.items()),
     )
 
 
@@ -222,23 +422,26 @@ def preflight_hls_manifest_tree(
     max_schedule_depth=8,
     max_schedules=128,
     on_manifest=None,
+    on_manifest_context=None,
     on_schedule=None,
     on_schedule_markers=None,
 ):
     """Fetch and validate a bounded recursive HLS playlist graph.
 
     ``on_manifest`` receives ``(url, body)`` after the body has passed the
-    URI policy.  Daterange schedules are fetched through the same guarded
-    ``fetch_text`` callback and delivered to ``on_schedule`` as
-    ``(url, body)``. ``on_schedule_markers`` receives ``(url, body,
-    markers)`` after a JSON schedule has been parsed. All callbacks are
+    URI policy.  ``on_manifest_context``, when supplied, receives
+    ``(url, body, variables)`` with the inherited and locally declared
+    variables needed to parse a child Media Playlist.  Daterange schedules
+    are fetched through the same guarded ``fetch_text`` callback and delivered to ``on_schedule`` as
+    ``(url, body)``. ``on_schedule_markers`` receives ``(url, body, markers)``
+    after a JSON schedule has been parsed. All callbacks are
     observation hooks; they cannot widen the set of URLs that the graph
     walker will fetch.
     """
     root = validate_remote_url(
         url, allow_private_network=allow_private_network,
     ).url
-    pending = [(root, 0)]
+    pending = [(root, 0, {})]
     seen = []
     seen_set = set()
     pending_schedules = []
@@ -286,7 +489,7 @@ def preflight_hls_manifest_tree(
                 )
 
     while pending:
-        current, depth = pending.pop(0)
+        current, depth, inherited_variables = pending.pop(0)
         if current in seen_set:
             continue
         if len(seen) >= max_manifests:
@@ -304,9 +507,14 @@ def preflight_hls_manifest_tree(
             body,
             current,
             allow_private_network=allow_private_network,
+            variables=inherited_variables,
         )
         if on_manifest is not None:
             on_manifest(current, body)
+        if on_manifest_context is not None:
+            on_manifest_context(
+                current, body, dict(references.variables),
+            )
         contexts = dict(references.schedule_contexts)
         for schedule_url in references.schedule_uris:
             queue_schedule(schedule_url, contexts.get(schedule_url, ""), 0)
@@ -316,7 +524,7 @@ def preflight_hls_manifest_tree(
                 "HLS playlist graph exceeds the recursion limit"
             )
         pending.extend(
-            (playlist, depth + 1)
+            (playlist, depth + 1, dict(references.variables))
             for playlist in references.playlists
             if playlist not in seen_set
         )
@@ -325,6 +533,9 @@ def preflight_hls_manifest_tree(
 
 def parse_hls_master(body, base_url):
     """Parse HLS variants with their alternate audio/subtitle renditions."""
+    body, _variables = _expand_hls_variables(
+        body, base_url, playlist_kind="master",
+    )
     qualities = []
     # urljoin expects a resource URL, not a directory. If base_url looks
     # like a directory (no trailing file), append a / so relative variants
@@ -730,7 +941,7 @@ def merge_hls_delta_playlist(previous_playlist, current_playlist):
 
 
 def parse_hls_media_playlist(
-    body, base_url="", *, previous_playlist=None,
+    body, base_url="", *, previous_playlist=None, variables=None,
 ):
     """Parse an HLS media (segment) playlist into a typed model.
 
@@ -745,7 +956,22 @@ def parse_hls_media_playlist(
     preserved with their full attribute map, including interstitial and
     vendor-specific fields.
     """
-    playlist = HLSMediaPlaylist()
+    source = str(body or "")
+    body, _resolved_variables = _expand_hls_variables(
+        source,
+        base_url,
+        variables=variables,
+        playlist_kind="media",
+    )
+    version, playlist_type = _validate_hls_playlist_metadata(
+        source,
+        uses_variables=("#EXT-X-DEFINE:" in source or "{$" in source),
+    )
+    playlist = HLSMediaPlaylist(
+        version=version,
+        playlist_type=playlist_type,
+        is_endlist=playlist_type == "VOD",
+    )
     media_sequence = 0
     discontinuity_sequence = 0
     for raw in body.splitlines():
