@@ -46,6 +46,7 @@ HOOK_EVENTS = [
     "health_archive_offline",
     "health_extractor_failures",
     "health_disk_pressure",
+    "health_unattended_failed",
 ]
 
 HOOK_CONTEXT_KEYS = frozenset({

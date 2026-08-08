@@ -22,6 +22,12 @@ from . import paths
 
 HEALTH_SCHEMA_VERSION = 1
 HEALTH_FILE_NAME = "health.json"
+#: Failures recorded by unattended work (auto-record, retention) so the
+#: next health check can raise them. Probes cannot rediscover these: the
+#: moment has passed by the time anyone looks (V184).
+UNATTENDED_FILE_NAME = "unattended-failures.json"
+#: Bounded so a repeatedly failing channel cannot grow the ledger.
+MAX_UNATTENDED_ENTRIES = 200
 DEFAULT_INTERVAL_MINUTES = 15
 DEFAULT_FAILURE_THRESHOLD = 3
 
@@ -34,6 +40,7 @@ HEALTH_EVENT_BY_CATEGORY = {
     "archive": "health_archive_offline",
     "extractor": "health_extractor_failures",
     "disk": "health_disk_pressure",
+    "unattended": "health_unattended_failed",
 }
 
 _REQUIRED_RUNTIME = frozenset({
@@ -48,6 +55,130 @@ _LOCK = threading.RLock()
 def health_path(path=None) -> Path:
     """Return the persistent health path, resolving the current config root."""
     return Path(path) if path else paths.CONFIG_DIR / HEALTH_FILE_NAME
+
+
+def unattended_path(path=None) -> Path:
+    """Return the unattended-failure ledger path for the current config root."""
+    return Path(path) if path else paths.CONFIG_DIR / UNATTENDED_FILE_NAME
+
+
+def _read_unattended(path=None) -> list[dict]:
+    target = unattended_path(path)
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    entries = raw.get("entries") if isinstance(raw, dict) else raw
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def _write_unattended(entries, path=None) -> None:
+    target = unattended_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    payload = {
+        "schema_version": HEALTH_SCHEMA_VERSION,
+        "entries": list(entries)[-MAX_UNATTENDED_ENTRIES:],
+    }
+    encoded = json.dumps(payload, indent=2, ensure_ascii=False)
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, target)
+
+
+def record_unattended_failure(
+    kind, subject, detail, *, repair="", severity="error",
+    now=None, storage_path=None,
+) -> dict:
+    """Persist a failure from work that ran with nobody watching.
+
+    Auto-record and retention run on a timer. When they fail the only previous
+    trace was a log line, so an unattended capture that never happened, or a
+    retention pass that silently stopped pruning, looked identical to normal
+    operation. Recording it here means the next health check raises it and it
+    stays raised until the same *kind* and *subject* succeed.
+    """
+    kind = _safe_text(kind, 64) or "unattended"
+    subject = _safe_text(subject, 240)
+    entry = {
+        "kind": kind,
+        "subject": subject,
+        "detail": _safe_text(detail),
+        "repair": _safe_text(repair, 500),
+        "severity": _severity(severity),
+        "recorded_at": _now_iso(now),
+    }
+    with _LOCK:
+        entries = [
+            existing for existing in _read_unattended(storage_path)
+            if not (existing.get("kind") == kind
+                    and existing.get("subject") == subject)
+        ]
+        entries.append(entry)
+        _write_unattended(entries, storage_path)
+    return entry
+
+
+def clear_unattended_failure(kind, subject, *, storage_path=None) -> bool:
+    """Drop a recorded failure because the same work has now succeeded."""
+    kind = _safe_text(kind, 64) or "unattended"
+    subject = _safe_text(subject, 240)
+    with _LOCK:
+        entries = _read_unattended(storage_path)
+        remaining = [
+            existing for existing in entries
+            if not (existing.get("kind") == kind
+                    and existing.get("subject") == subject)
+        ]
+        if len(remaining) == len(entries):
+            return False
+        _write_unattended(remaining, storage_path)
+    return True
+
+
+def load_unattended_failures(storage_path=None) -> list[dict]:
+    """Return the recorded unattended failures, newest last."""
+    with _LOCK:
+        return _read_unattended(storage_path)
+
+
+_UNATTENDED_TITLES = {
+    "auto_record": "Automatic recording failed",
+    "retention": "Retention cleanup stopped",
+    "chat_capture": "Chat capture did not start",
+}
+
+
+def _unattended_conditions(now, entries=None, storage_path=None) -> list[dict]:
+    """Raise one standing condition per recorded unattended failure."""
+    if entries is None:
+        entries = _read_unattended(storage_path)
+    conditions = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        kind = _safe_text(entry.get("kind") or "unattended", 64)
+        subject = _safe_text(entry.get("subject") or "", 240)
+        title = _UNATTENDED_TITLES.get(kind, "Unattended work failed")
+        if subject:
+            title = f"{title}: {subject}"
+        conditions.append(_condition(
+            f"unattended:{kind}:{subject}", "unattended",
+            entry.get("severity") or "error",
+            title,
+            entry.get("detail") or "the operation did not complete",
+            entry.get("repair") or (
+                "Fix the underlying cause; this clears once the same work "
+                "succeeds."
+            ),
+            target=subject, event=HEALTH_EVENT_BY_CATEGORY["unattended"],
+            now=now,
+        ))
+    return conditions
 
 
 def _empty_snapshot() -> dict:
@@ -527,6 +658,8 @@ def run_health_check(
     retry_circuits=None,
     disk_usage=None,
     adapter_diagnostics=None,
+    unattended_failures=None,
+    unattended_storage_path=None,
     now=None,
     credential_timeout=8,
     storage_path=None,
@@ -584,6 +717,9 @@ def run_health_check(
     conditions.extend(_disk_conditions(config, roots, disk_usage, now_iso))
     conditions.extend(_extractor_conditions(config, retry_circuits, now_iso, now_epoch))
     conditions.extend(_source_adapter_conditions(now_iso, adapter_diagnostics))
+    conditions.extend(_unattended_conditions(
+        now_iso, unattended_failures, storage_path=unattended_storage_path,
+    ))
     conditions.sort(key=lambda item: (
         _SEVERITY_RANK.get(item.get("severity"), len(SEVERITY_ORDER)),
         item.get("title", ""),
@@ -640,6 +776,9 @@ def public_snapshot(snapshot=None) -> dict:
 __all__ = [
     "DEFAULT_FAILURE_THRESHOLD", "DEFAULT_INTERVAL_MINUTES",
     "HEALTH_EVENT_BY_CATEGORY", "HEALTH_FILE_NAME", "HEALTH_SCHEMA_VERSION",
+    "MAX_UNATTENDED_ENTRIES", "UNATTENDED_FILE_NAME",
+    "clear_unattended_failure", "load_unattended_failures",
+    "record_unattended_failure", "unattended_path",
     "SEVERITY_ORDER", "dispatch_health_events", "health_path",
     "load_health_snapshot", "public_snapshot", "run_health_check",
 ]

@@ -1017,6 +1017,37 @@ class MonitorTabMixin:
 
     # ── Retention ───────────────────────────────────────────────────
 
+    def _report_unattended_failure(
+        self, kind, subject, detail, *, repair="", severity="error",
+    ):
+        """Surface a failure from work that ran with nobody watching (V184).
+
+        Auto-record, retention and chat capture all run on the monitor timer.
+        A log line is invisible for them by definition, so each failure gets a
+        notification-centre entry the operator will see on their next visit and
+        a durable health condition that stays raised until the same work
+        succeeds.
+        """
+        try:
+            self._notify_center(detail, "error" if severity == "error" else "warning")
+        except Exception as error:
+            self._log(f"[MONITOR] Could not notify: {error}")
+        try:
+            from ... import health
+            health.record_unattended_failure(
+                kind, subject, detail, repair=repair, severity=severity,
+            )
+        except Exception as error:
+            self._log(f"[MONITOR] Could not record health condition: {error}")
+
+    def _clear_unattended_failure(self, kind, subject):
+        """Drop a standing condition because this work has now succeeded."""
+        try:
+            from ... import health
+            health.clear_unattended_failure(kind, subject)
+        except Exception as error:
+            self._log(f"[MONITOR] Could not clear health condition: {error}")
+
     def _apply_retention_for_channel(self, entry, out_dir):
         """If the entry has a retention limit, recycle-bin the oldest
         recordings in `out_dir` beyond the keep-last count. Logs what it
@@ -1061,9 +1092,27 @@ class MonitorTabMixin:
                     "retention cleanup (would otherwise recycle "
                     f"{os.path.basename(path)})."
                 )
+                self._report_unattended_failure(
+                    "retention", str(entry.channel_id),
+                    "Retention cleanup stopped: send2trash is not installed, "
+                    "so recordings cannot be moved to the Recycle Bin.",
+                    repair=(
+                        "Install send2trash to resume retention. Recordings "
+                        "are never deleted permanently, so nothing was "
+                        "removed."
+                    ),
+                )
                 break
             except Exception as e:
                 self._log(f"[RETENTION] Could not recycle {path}: {e}")
+                self._report_unattended_failure(
+                    "retention", str(entry.channel_id),
+                    f"Could not recycle {os.path.basename(path)}: {e}",
+                    repair=(
+                        "Check that the recording is not open in another "
+                        "program and that its folder is writable."
+                    ),
+                )
                 continue
             try:
                 _db.delete_history_for_paths([path], reason="retention")
@@ -1075,6 +1124,7 @@ class MonitorTabMixin:
                 f"[RETENTION] {entry.channel_id}: recycled {removed} old "
                 f"recording(s), keeping last {keep}."
             )
+            self._clear_unattended_failure("retention", str(entry.channel_id))
 
     # ── Auto-record pipeline ────────────────────────────────────────
 
@@ -1200,6 +1250,17 @@ class MonitorTabMixin:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as e:
             self._log(f"[AUTO-RECORD] Cannot create output folder: {e}")
+            # Nobody is watching an auto-record, so a log line means the
+            # capture simply never happens and the monitor keeps reporting
+            # normal operation. Say so, and leave a standing condition (V184).
+            self._report_unattended_failure(
+                "auto_record", channel_id,
+                f"Cannot create the output folder for {channel_id}: {e}",
+                repair=(
+                    "Check the output folder path and its permissions in "
+                    "Settings, then the next go-live will record."
+                ),
+            )
             target.is_recording = False
             self._refresh_monitor_summary()
             self._refresh_active_recordings_panel()
@@ -1344,7 +1405,17 @@ class MonitorTabMixin:
                 chat.start()
             except Exception as e:
                 self._log(f"[CHAT] Could not start chat capture: {e}")
+                self._report_unattended_failure(
+                    "chat_capture", str(channel_id),
+                    f"Chat capture did not start for {channel_id}: {e}",
+                    repair=(
+                        "The recording itself is unaffected; only the chat "
+                        "log is missing for this capture."
+                    ),
+                    severity="warning",
+                )
         self._refresh_active_recordings_panel()
+        self._clear_unattended_failure("auto_record", str(channel_id))
         self._set_status(
             f"Auto-record started for {channel_id}"
             + (f" ({self._active_autorecord_count()} parallel)."
