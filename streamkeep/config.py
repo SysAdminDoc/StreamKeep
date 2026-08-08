@@ -161,7 +161,7 @@ _DICT_CONFIG_KEYS = frozenset({
     "ytdlp_arg_templates", "reviewed_source_adapters",
 })
 _LIST_CONFIG_KEYS = frozenset({
-    "recent_urls", "proxy_pool", "smart_profiles", "source_adapters",
+    "recent_urls", "proxy_pool", "smart_profiles", "source_adapters", "rules",
 })
 _FORBIDDEN_IMPORT_KEYS = frozenset({
     "history", "monitor_channels", "download_queue", "accounts", "cookies",
@@ -439,6 +439,7 @@ def _validate_config_schema(config):
     _validate_lifecycle_schema(config.get("lifecycle", {}))
     _validate_ytdlp_templates_schema(config.get("ytdlp_arg_templates", {}))
     _validate_smart_profiles_schema(config.get("smart_profiles", []))
+    _validate_rules_schema(config.get("rules", []))
     _validate_source_adapters_schema(config.get("source_adapters", []))
     _validate_translation_endpoint(config.get("translation_api_url", ""))
     _reject_imported_secret_handles(config)
@@ -593,6 +594,16 @@ def _validate_smart_profiles_schema(value):
     from .smart_mode import validate_profiles
     try:
         validate_profiles(value)
+    except ValueError as error:
+        raise ConfigImportError(str(error)) from error
+
+
+def _validate_rules_schema(value):
+    if not value:
+        return
+    from .rules import validate_rules
+    try:
+        validate_rules(value)
     except ValueError as error:
         raise ConfigImportError(str(error)) from error
 

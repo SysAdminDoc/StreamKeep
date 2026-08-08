@@ -284,8 +284,17 @@ PRODUCT_CAPABILITY_CLAIMS = (
         ),),
     ),
     ProductCapabilityClaim(
-        "recording-notes", "Recording note authoring", "experimental",
-        "Recording notes", reason="Note storage exists without a GUI, CLI, or REST editor.",
+        "recording-notes", "Recording note authoring", "shipped",
+        "Recording notes",
+        (ReachableProductPath(
+            "gui", "History notes editor and global search",
+            "tests/test_gui_smoke.py::test_main_window_tabs_dialogs_and_language_smoke",
+        ),),
+    ),
+    ProductCapabilityClaim(
+        "chat-capture", "Cross-platform chat capture", "experimental",
+        "Twitch/Kick chat capture",
+        reason="Chat capture remains an optional engine without a supported release-wide integration path.",
     ),
 )
 

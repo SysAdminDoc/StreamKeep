@@ -441,7 +441,9 @@ class DownloadQueueMixin:
             "progress", "speed", "eta", "size", "size_bytes",
             "output_dir", "folder_template", "file_template", "proxy",
             "auth_profile_id", "smart_profile", "media_item_id",
-            "media_item_type", "background_audio_id",
+            "media_item_type", "background_audio_id", "priority",
+            "auto_start", "_manual_start_requested", "_rule_actions",
+            "_rule_matched",
         ):
             value = item.get(key)
             if value not in (None, ""):
@@ -533,21 +535,22 @@ class DownloadQueueMixin:
             for q in self._download_queue
         ):
             return False
+        base_job = {
+            "url": url,
+            "webpage_url": webpage_url or url,
+            "platform": platform or "",
+            "title": title or vod_title or "",
+            "quality": quality or "",
+            "output_dir": "",
+            "folder_template": "",
+            "file_template": "",
+            "arg_template": ytdlp_template_name,
+            "proxy": "",
+            "auth_profile_id": "",
+        }
         try:
             from ...smart_mode import apply_smart_profile_to_job
-            smart_job = apply_smart_profile_to_job({
-                "url": url,
-                "webpage_url": webpage_url or url,
-                "platform": platform or "",
-                "title": title or vod_title or "",
-                "quality": quality or "",
-                "output_dir": "",
-                "folder_template": "",
-                "file_template": "",
-                "arg_template": ytdlp_template_name,
-                "proxy": "",
-                "auth_profile_id": "",
-            }, {
+            smart_job = apply_smart_profile_to_job(base_job, {
                 **self._config,
                 "smart_mode": bool(
                     self.smart_mode_download_check.isChecked()
@@ -558,12 +561,20 @@ class DownloadQueueMixin:
         except Exception:
             # Profile config is user-editable; an invalid entry must never
             # prevent a normal queue item from being added.
-            smart_job = {}
+            smart_job = dict(base_job)
+        try:
+            from ...rules import apply_rules_to_job
+            rule_job = apply_rules_to_job(smart_job, self._config)
+        except Exception:
+            # A malformed legacy rules value should never block a normal GUI
+            # enqueue. Config imports validate the schema; this guard keeps
+            # older local config files fail-open until they are re-exported.
+            rule_job = dict(smart_job)
         try:
             from ...download_options import resolve_ytdlp_arg_template
             resolve_ytdlp_arg_template(
                 self._config.get("ytdlp_arg_templates", {}),
-                smart_job.get("arg_template") or ytdlp_template_name,
+                rule_job.get("arg_template") or ytdlp_template_name,
             )
         except ValueError as error:
             self._set_status(str(error), "warning")
@@ -590,18 +601,22 @@ class DownloadQueueMixin:
                 if capture_comments is None else bool(capture_comments)
             ),
             "ytdlp_template_name": (
-                smart_job.get("arg_template") or ytdlp_template_name
+                rule_job.get("arg_template") or ytdlp_template_name
             ),
-            "quality": quality or smart_job.get("quality", ""),
+            "quality": quality or rule_job.get("quality", ""),
             "media_item_id": media_item_id,
             "media_item_type": media_item_type,
             "background_audio_id": background_audio_id,
-            "output_dir": smart_job.get("output_dir", ""),
-            "folder_template": smart_job.get("folder_template", ""),
-            "file_template": smart_job.get("file_template", ""),
-            "proxy": smart_job.get("proxy", ""),
-            "auth_profile_id": smart_job.get("auth_profile_id", ""),
-            "smart_profile": smart_job.get("_smart_profile", ""),
+            "output_dir": rule_job.get("output_dir", ""),
+            "folder_template": rule_job.get("folder_template", ""),
+            "file_template": rule_job.get("file_template", ""),
+            "proxy": rule_job.get("proxy", ""),
+            "auth_profile_id": rule_job.get("auth_profile_id", ""),
+            "smart_profile": rule_job.get("_smart_profile", ""),
+            "priority": rule_job.get("priority"),
+            "auto_start": rule_job.get("auto_start"),
+            "_rule_actions": rule_job.get("_rule_actions", {}),
+            "_rule_matched": rule_job.get("_rule_matched", []),
             "is_upgrade": is_upgrade,
             "upgrade_history_id": upgrade_history_id,
             "upgrade_existing_path": upgrade_existing_path,
@@ -612,6 +627,11 @@ class DownloadQueueMixin:
                 else {}
             ),
         }))
+        if rule_job.get("_rule_matched"):
+            self._log(
+                "[RULES] Applied: "
+                + ", ".join(str(name) for name in rule_job["_rule_matched"])
+            )
         if request_headers:
             from ...har import normalize_replay_headers
             safe_headers = normalize_replay_headers(request_headers)
@@ -720,6 +740,10 @@ class DownloadQueueMixin:
         for q in self._download_queue:
             if q.get("status") != "queued":
                 continue
+            if q.get("auto_start") is False and not q.get(
+                "_manual_start_requested", False
+            ):
+                continue
             tombstone = _db.find_tombstone_for_item(q)
             if tombstone is not None:
                 note = (
@@ -752,10 +776,12 @@ class DownloadQueueMixin:
                 except Exception:
                     pass  # safe: best-effort fallback; preserve the primary operation
             ready.append(q)
-            if active + len(ready) >= cap:
-                break
         if not ready:
             return
+        ready.sort(
+            key=lambda item: -_as_int(item.get("priority", 0), 0)
+        )
+        ready = ready[: max(0, cap - active)]
         for item in ready:
             self._start_queue_item(item)
 
@@ -1586,6 +1612,9 @@ class DownloadQueueMixin:
         for item in selected:
             if item.get("status") == "paused":
                 item["status"] = "queued"
+                changed = True
+            if item.get("auto_start") is False:
+                item["_manual_start_requested"] = True
                 changed = True
         if changed:
             self._queue_status_changed()

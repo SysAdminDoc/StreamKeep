@@ -3097,6 +3097,29 @@ class StreamKeep(
             item.setData(Qt.ItemDataRole.UserRole, ("history", h))
             items.append(item)
 
+        # Recording notes live as local sidecars so they remain portable with
+        # the media. Search the bounded history iterator and expose a direct
+        # editor entry alongside metadata/transcript results.
+        try:
+            from .. import notes as _notes
+            note_hits = _notes.search_notes(
+                (row.get("path", "") for row in _db.iter_history(newest_first=True)),
+                query,
+                limit=cap,
+            )
+            for recording_dir, matching_line in note_hits:
+                item = QListWidgetItem(
+                    f"[Note] {matching_line[:90]} ({recording_dir[-40:]})"
+                )
+                item.setData(
+                    Qt.ItemDataRole.UserRole,
+                    ("notes", {"path": recording_dir, "line": matching_line}),
+                )
+                items.append(item)
+        except Exception as error:
+            degraded = True
+            self._log(f"[SEARCH] Notes search unavailable: {error}")
+
         # Monitor search
         count = 0
         for e in self.monitor.entries:
@@ -3199,6 +3222,13 @@ class StreamKeep(
                 )
         elif source == "monitor":
             self._switch_tab(1)
+        elif source == "notes":
+            self._switch_tab(2)
+            path = str(entry.get("path", "") or "") if isinstance(entry, dict) else ""
+            if path:
+                rows = _db.query_history_page(recording_paths=[path], limit=1)
+                if rows and hasattr(self, "_edit_history_notes"):
+                    self._edit_history_notes(HistoryEntry.from_dict(rows[0]))
         elif source == "queue":
             self._switch_tab(0)
         elif source == "transcript":

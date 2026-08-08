@@ -12,8 +12,9 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
-    QGridLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QTableView,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
+    QFrame, QHBoxLayout, QGridLayout, QHeaderView, QLabel, QLineEdit, QMenu,
+    QPlainTextEdit, QPushButton, QTableView,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -28,6 +29,14 @@ from streamkeep.verify import (
 )
 from ..history_model import HistoryTableModel
 from ..widgets import ask_premium_confirmation, make_metric_card, style_table
+
+
+def _history_has_notes(path):
+    try:
+        from ...notes import has_notes
+        return has_notes(path)
+    except Exception:
+        return False
 
 
 class _ResponsiveHistoryMetrics(QWidget):
@@ -724,6 +733,10 @@ class HistoryTabMixin:
         menu = QMenu(self)
         open_act = menu.addAction("Open Folder")
         open_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
+        notes_act = menu.addAction(
+            "Edit Notes" + (" (saved)" if h.path and _history_has_notes(h.path) else "…")
+        )
+        notes_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         trim_act = menu.addAction("Trim / Clip...")
         trim_act.setEnabled(bool(h.path and os.path.isdir(h.path)))
         bundle_act = menu.addAction("Export share bundle (.zip)...")
@@ -840,6 +853,8 @@ class HistoryTabMixin:
             self._open_sync_viewer(sync_entries)
         elif chosen == open_act and h.path and os.path.isdir(h.path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(h.path))
+        elif chosen == notes_act and h.path and os.path.isdir(h.path):
+            self._edit_history_notes(h)
         elif chosen == trim_act and h.path and os.path.isdir(h.path):
             self._open_clip_dialog_for_dir(h.path)
         elif chosen == bundle_act and h.path and os.path.isdir(h.path):
@@ -920,6 +935,51 @@ class HistoryTabMixin:
             self._set_status(
                 f"Removed {removed} missing history entries.", "success"
             )
+
+    def _edit_history_notes(self, h):
+        """Open the sidecar note editor for one completed recording."""
+        if not h or not h.path or not os.path.isdir(h.path):
+            self._set_status("Recording folder is missing.", "warning")
+            return
+        from ... import notes
+        dialog = TranslatableDialog(self)
+        dialog.setWindowTitle("Recording Notes")
+        dialog.setMinimumSize(620, 460)
+        layout = QVBoxLayout(dialog)
+        heading = QLabel(h.title or "Recording notes")
+        heading.setObjectName("sectionTitle")
+        layout.addWidget(heading)
+        editor = QPlainTextEdit()
+        editor.setPlaceholderText("Write a note about this recording…")
+        current = notes.load_notes(h.path)
+        if not current:
+            current = notes.generate_template(
+                title=h.title,
+                channel=h.channel,
+                platform=h.platform,
+                date=h.date,
+                quality=h.quality,
+            )
+        editor.setPlainText(current)
+        layout.addWidget(editor, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        text = editor.toPlainText().rstrip()
+        if text:
+            saved = notes.save_notes(h.path, text + "\n")
+        else:
+            saved = notes.delete_notes(h.path)
+        if saved:
+            self._set_status("Recording notes saved.", "success")
+        else:
+            self._set_status("Could not save recording notes.", "warning")
 
     def _publishing_base_url(self):
         server = getattr(self, "_companion_server", None)

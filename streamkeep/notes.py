@@ -102,10 +102,12 @@ def generate_template(title="", channel="", platform="", date="",
     return "\n".join(lines)
 
 
-def search_notes(recording_dirs, query):
+def search_notes(recording_dirs, query, *, limit=0):
     """Search notes content across multiple recording directories.
 
-    Returns list of ``(recording_dir, matching_line)`` tuples.
+    Returns list of ``(recording_dir, matching_line)`` tuples. ``limit`` is a
+    soft cap for interactive global-search callers; zero keeps the historical
+    uncapped behavior.
     """
     if not query:
         return []
@@ -119,4 +121,6 @@ def search_notes(recording_dirs, query):
             if query_lower in line.lower():
                 results.append((d, line.strip()))
                 break  # one match per recording
+        if limit and len(results) >= int(limit):
+            break
     return results

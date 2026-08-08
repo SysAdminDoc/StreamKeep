@@ -52,6 +52,24 @@ def test_export_config_is_versioned_and_secret_free():
         "not allowed",
     ),
     (_envelope({"hf_token": "secretref:config:webhook_url"}), "local secret handles"),
+    (
+        _envelope({
+            "rules": [{
+                "match": {"site": "twitch.tv"},
+                "actions": {"priority": "urgent"},
+            }]
+        }),
+        r"rules\[0\]\.actions\.priority",
+    ),
+    (
+        _envelope({
+            "rules": [{
+                "match": {"site": "twitch.tv"},
+                "actions": {"bogus": "ignored"},
+            }]
+        }),
+        r"rules\[0\]\.actions has unsupported fields",
+    ),
 ])
 def test_import_rejects_unversioned_or_invalid_schema(payload, message):
     with pytest.raises(config.ConfigImportError, match=message):

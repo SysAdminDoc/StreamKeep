@@ -11,39 +11,51 @@ Usage::
     stats = get_channel_stats("xqc", weeks=8)
 """
 
-import time
 from datetime import datetime, timedelta
+from pathlib import Path
+import time
 
 from .paths import CONFIG_DIR
-from .sqlite_runtime import connect as sqlite_connect
+from . import db as _db
 
 DB_PATH = CONFIG_DIR / "library.db"
+_DEFAULT_CONFIG_DIR = Path(CONFIG_DIR)
+_DEFAULT_DB_PATH = Path(DB_PATH)
+
+
+def _sync_database_paths():
+    """Keep the historical test/config path overrides working.
+
+    All actual connections still go through ``streamkeep.db``; these aliases
+    only let older callers redirect the active profile during isolated tests.
+    """
+    redirected = (
+        Path(CONFIG_DIR).expanduser().resolve(strict=False) != _DEFAULT_CONFIG_DIR.resolve(strict=False)
+        or Path(DB_PATH).expanduser().resolve(strict=False) != _DEFAULT_DB_PATH.resolve(strict=False)
+    )
+    if redirected:
+        _db.CONFIG_DIR = Path(CONFIG_DIR)
+        _db.DB_PATH = Path(DB_PATH)
+    return redirected
+
+
+def _release_redirected_database(redirected):
+    if not redirected:
+        return
+    try:
+        _db.close_connections()
+    finally:
+        _db.CONFIG_DIR = _DEFAULT_CONFIG_DIR
+        _db.DB_PATH = _DEFAULT_DB_PATH
 
 
 def _ensure_table():
+    redirected = _sync_database_paths()
     try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        try:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS channel_polls (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_id TEXT NOT NULL,
-                    platform   TEXT NOT NULL DEFAULT '',
-                    timestamp  REAL NOT NULL,
-                    status     TEXT NOT NULL DEFAULT 'unknown',
-                    viewers    INTEGER NOT NULL DEFAULT 0,
-                    title      TEXT NOT NULL DEFAULT '',
-                    game       TEXT NOT NULL DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_cp_channel ON channel_polls(channel_id);
-                CREATE INDEX IF NOT EXISTS idx_cp_ts ON channel_polls(timestamp);
-            """)
-            db.commit()
-        finally:
-            db.close()
+        _db.ensure_channel_stats_table()
     except Exception:
         pass  # safe: best-effort fallback; preserve the primary operation
+    return redirected
 
 
 def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""):
@@ -51,20 +63,16 @@ def log_transition(channel_id, platform, status, *, viewers=0, title="", game=""
 
     Should only be called on actual state changes, not every poll.
     """
-    _ensure_table()
+    redirected = _ensure_table()
     try:
-        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        try:
-            db.execute(
-                "INSERT INTO channel_polls (channel_id, platform, timestamp, status, viewers, title, game) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (channel_id, platform, time.time(), status, viewers, title[:200], game[:100]),
-            )
-            db.commit()
-        finally:
-            db.close()
+        _db.log_channel_transition(
+            channel_id, platform, status,
+            viewers=viewers, title=title, game=game,
+        )
     except Exception:
         pass  # safe: best-effort fallback; preserve the primary operation
+    finally:
+        _release_redirected_database(redirected)
 
 
 def get_channel_stats(channel_id, weeks=8):
@@ -81,20 +89,14 @@ def get_channel_stats(channel_id, weeks=8):
             "last_live": str,  # ISO timestamp or ""
         }
     """
-    _ensure_table()
+    redirected = _ensure_table()
     cutoff = time.time() - weeks * 7 * 86400
     try:
-        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        try:
-            rows = db.execute(
-                "SELECT timestamp, status, viewers, title, game FROM channel_polls "
-                "WHERE channel_id=? AND timestamp>=? ORDER BY timestamp ASC",
-                (channel_id, cutoff),
-            ).fetchall()
-        finally:
-            db.close()
+        rows = _db.load_channel_polls(channel_id, cutoff=cutoff)
     except Exception:
         rows = []
+    finally:
+        _release_redirected_database(redirected)
 
     if not rows:
         return {
@@ -110,7 +112,10 @@ def get_channel_stats(channel_id, weeks=8):
     sessions = []
     live_start = None
     live_game = ""
-    for ts, status, viewers, title, game in rows:
+    for row in rows:
+        ts = row["timestamp"]
+        status = row["status"]
+        game = row.get("game", "")
         if status == "live" and live_start is None:
             live_start = ts
             live_game = game or ""
@@ -154,9 +159,11 @@ def get_channel_stats(channel_id, weeks=8):
 
     # Last live timestamp
     last_live = ""
-    live_rows = [r for r in rows if r[1] == "live"]
+    live_rows = [r for r in rows if r["status"] == "live"]
     if live_rows:
-        last_live = datetime.fromtimestamp(live_rows[-1][0]).isoformat(timespec="minutes")
+        last_live = datetime.fromtimestamp(
+            live_rows[-1]["timestamp"]
+        ).isoformat(timespec="minutes")
 
     return {
         "streams_total": streams_total,
@@ -170,15 +177,11 @@ def get_channel_stats(channel_id, weeks=8):
 
 def get_all_channel_summaries(weeks=4):
     """Return a dict of channel_id -> summary stats for all tracked channels."""
-    _ensure_table()
+    redirected = _ensure_table()
     try:
-        db = sqlite_connect(str(DB_PATH), check_same_thread=False, timeout=5)
-        try:
-            channels = db.execute(
-                "SELECT DISTINCT channel_id FROM channel_polls"
-            ).fetchall()
-        finally:
-            db.close()
+        channels = _db.list_channel_stat_channels()
     except Exception:
         return {}
-    return {ch[0]: get_channel_stats(ch[0], weeks) for ch in channels}
+    finally:
+        _release_redirected_database(redirected)
+    return {channel: get_channel_stats(channel, weeks) for channel in channels}

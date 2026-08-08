@@ -110,11 +110,14 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Transfer authentication state only with an explicit `.sksbackup` protected by Argon2id and AES-256-GCM; wrong passwords and modified backups fail authentication before restore.
 - Export/import preferences through a versioned, size-bounded JSON format. Imports show a redacted diff and keep hooks, webhooks, proxies, cookie sources, control servers, media-server auto-import, and lifecycle cleanup disabled until each capability is approved separately.
 
-### Experimental Modules (Not Release Claims)
+### Archive Extensions
 
-The source tree contains early engines and unit-tested helpers that are not yet wired to a supported GUI, CLI, or REST caller. They are excluded from the shipped-capability registry until the corresponding roadmap item adds a reachable integration path:
+The archive surface includes these supported extensions:
 
-- **Recording notes** — note storage exists without a GUI, CLI, or REST editor.
+- **Recording notes** — the History context menu and global search now provide a
+  supported sidecar editor/search path.
+- **Channel statistics** — the Monitor tab's Channel Insights table now reads
+  transition history through the shared database facade.
 
 **Native notifications** are shipped: notable events (download complete, channel live, automatic backup, update available) raise a native OS toast through the platform backend, falling back to the tray icon when no native backend is installed. Toasts are suppressed while the StreamKeep window is focused so they never interrupt a user already watching the in-app notification bell.
 

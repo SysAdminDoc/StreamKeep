@@ -13,6 +13,7 @@ import sys
 from types import ModuleType
 
 from . import _legacy as _implementation
+from . import channel_stats as _channel_stats
 from . import connection as _connection
 from . import history_actions as _history_actions
 from . import monitor as _monitor
@@ -28,7 +29,7 @@ from . import tombstones as _tombstones
 # first so a patched attribute there still wins, which is the contract the
 # existing tests and profile-switching tools rely on.
 _DOMAINS = (
-    _implementation, _connection, _schema, _history_actions, _tombstones,
+    _implementation, _connection, _schema, _channel_stats, _history_actions, _tombstones,
     _publishing, _monitor, _queue, _projections, _primitives,
 )
 

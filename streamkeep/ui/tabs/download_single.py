@@ -75,18 +75,30 @@ class DownloadSingleMixin:
     """One active fetch/download and its direct supporting workflows."""
 
     def _smart_job(self, job):
-        """Resolve a Smart Mode profile for a GUI job without mutating it."""
-        from ...smart_mode import apply_smart_profile_to_job
+        """Resolve Smart Mode and ordered rules for one GUI job.
 
+        Both layers fill only missing values, so explicit controls retain
+        precedence while direct downloads and queue enqueues share the same
+        resolver order as the headless service.
+        """
+        result = dict(job or {})
         if hasattr(self, "smart_mode_download_check"):
             enabled = self.smart_mode_download_check.isChecked()
         else:
             enabled = bool(self._config.get("smart_mode", False))
-        if not enabled:
-            return dict(job or {})
-        config = dict(self._config)
-        config["smart_mode"] = True
-        return apply_smart_profile_to_job(job, config)
+        if enabled:
+            from ...smart_mode import apply_smart_profile_to_job
+            config = dict(self._config)
+            config["smart_mode"] = True
+            result = apply_smart_profile_to_job(result, config)
+        try:
+            from ...rules import apply_rules_to_job
+            result = apply_rules_to_job(result, self._config)
+        except Exception:
+            # Config imports validate rules; this keeps an older hand-edited
+            # file from blocking a direct download before it is re-saved.
+            pass
+        return result
 
     def _refresh_smart_profile_for_url(self, url="", info=None):
         if not hasattr(self, "smart_profile_hint"):

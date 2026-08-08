@@ -705,7 +705,11 @@ class HeadlessJobService(QObject):
         )
         if available <= 0:
             return
-        for job in db.load_queue_by_status("queued"):
+        queued_jobs = db.load_queue_by_status("queued")
+        queued_jobs.sort(
+            key=HeadlessJobService._priority_value, reverse=True
+        )
+        for job in queued_jobs:
             if available <= 0:
                 break
             job_id = str(job.get("job_id", ""))
@@ -748,6 +752,10 @@ class HeadlessJobService(QObject):
 
     @staticmethod
     def _eligible(job: dict[str, Any]) -> bool:
+        if job.get("auto_start") is False and not job.get(
+            "_manual_start_requested", False
+        ):
+            return False
         start_at = str(job.get("start_at", "") or "").strip()
         if not start_at:
             return True
@@ -758,6 +766,13 @@ class HeadlessJobService(QObject):
             return target <= datetime.now(timezone.utc)
         except ValueError:
             return True
+
+    @staticmethod
+    def _priority_value(job: dict[str, Any]) -> int:
+        try:
+            return int(job.get("priority", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def _start_fetch(self, job: dict[str, Any]) -> None:
         from .governor import host_key

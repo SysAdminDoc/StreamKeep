@@ -170,6 +170,23 @@ class NormalizeRuleTests(unittest.TestCase):
         })
         self.assertEqual(norm["actions"], {"arg_template": "Archive headers"})
 
+    def test_import_schema_rejects_unknown_action(self):
+        with self.assertRaisesRegex(ValueError, "unsupported fields"):
+            rules.validate_rules([{
+                "match": {"site": "twitch.tv"},
+                "actions": {"not_an_action": "x"},
+            }])
+
+    def test_import_schema_accepts_canonical_rule(self):
+        self.assertTrue(rules.validate_rules([{
+            "name": "Twitch archive",
+            "enabled": True,
+            "match": {"site": "twitch.tv", "type": "live"},
+            "match_mode": "all",
+            "actions": {"output_dir": "D:/Streams", "priority": 10},
+            "stop": False,
+        }]))
+
 
 class ApplyRulesToJobTests(unittest.TestCase):
     def test_no_rules_returns_copy_unchanged(self):
@@ -220,6 +237,40 @@ class ApplyRulesToJobTests(unittest.TestCase):
         out = rules.apply_rules_to_job(job, config)
         self.assertNotIn("output_dir", out)
         self.assertNotIn("_rule_actions", out)
+
+    def test_direct_gui_resolver_applies_rules_when_smart_mode_is_off(self):
+        from streamkeep.ui.tabs.download_single import DownloadSingleMixin
+
+        class _Window:
+            _config = {"rules": [_rule(
+                "archive twitch", match={"site": "twitch.tv"},
+                actions={"output_dir": "D:/Streams", "priority": 4},
+            )]}
+
+        result = DownloadSingleMixin._smart_job(
+            _Window(), {"url": "https://twitch.tv/foo", "output_dir": ""}
+        )
+        self.assertEqual(result["output_dir"], "D:/Streams")
+        self.assertEqual(result["priority"], 4)
+
+    def test_queue_projection_keeps_rule_metadata_for_durable_resume(self):
+        from streamkeep.ui.tabs.download_queue import DownloadQueueMixin
+
+        item = DownloadQueueMixin._normalize_queue_item(
+            DownloadQueueMixin.__new__(DownloadQueueMixin),
+            {
+                "url": "https://twitch.tv/foo",
+                "title": "x",
+                "platform": "Twitch",
+                "priority": 7,
+                "auto_start": False,
+                "_rule_actions": {"priority": 7},
+                "_rule_matched": ["archive"],
+            },
+        )
+        self.assertEqual(item["priority"], 7)
+        self.assertIs(item["auto_start"], False)
+        self.assertEqual(item["_rule_matched"], ["archive"])
 
 
 if __name__ == "__main__":

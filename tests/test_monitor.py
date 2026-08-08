@@ -176,6 +176,24 @@ class ChannelMonitorDedupTests(unittest.TestCase):
         signals.went_live.emit.assert_called_once_with("channel")
         signals.finished.emit.assert_called_once_with("channel", "live")
 
+    def test_status_changes_are_logged_once_for_channel_insights(self):
+        self.monitor.entries.append(MonitorEntry(
+            platform="Twitch", channel_id="channel",
+        ))
+        with mock.patch(
+            "streamkeep.channel_stats.log_transition"
+        ) as log_transition:
+            self.monitor._on_poll_finished("channel", "live")
+            self.monitor._on_poll_finished("channel", "live")
+            self.monitor._on_poll_finished("channel", "offline")
+
+        self.assertEqual(log_transition.call_count, 2)
+        self.assertEqual(
+            [call.args[:3] for call in log_transition.call_args_list],
+            [("channel", "Twitch", "live"),
+             ("channel", "Twitch", "offline")],
+        )
+
     def test_db_roundtrip_preserves_auth_profile_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = f"{tmpdir}/library.db"

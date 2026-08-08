@@ -54,6 +54,17 @@ _LEGACY_ACTION_ALIASES = {"filename_template": "arg_template"}
 
 _MATCH_MODES = ("all", "any")
 _KNOWN_TYPES = frozenset({"video", "audio", "live", "playlist", "image", ""})
+MAX_RULES = 128
+MAX_RULE_NAME_CHARS = 128
+MAX_RULE_TEXT_CHARS = 4096
+_ALLOWED_RULE_KEYS = frozenset({
+    "name", "enabled", "match", "match_mode", "actions", "stop",
+})
+_ALLOWED_MATCH_KEYS = frozenset({
+    "site", "url_regex", "uploader", "title_regex", "type",
+    "duration_min", "duration_max",
+})
+_ALLOWED_ACTION_KEYS = frozenset(ACTION_KEYS) | set(_LEGACY_ACTION_ALIASES)
 
 
 def site_from_url(url):
@@ -255,6 +266,108 @@ def normalize_rule(rule):
         "actions": _coerce_actions(rule.get("actions")),
         "stop": bool(rule.get("stop", False)),
     }
+
+
+def validate_rules(raw):
+    """Validate the config/import schema for ``rules``.
+
+    Runtime normalization is intentionally forgiving so one old hand-edited
+    rule cannot stop a queue. Imports are a different boundary: rejecting a
+    malformed ruleset with its exact path is safer than accepting it and then
+    silently dropping it in :func:`load_rules`.
+    """
+    if not isinstance(raw, list):
+        raise ValueError("rules must be a list")
+    if len(raw) > MAX_RULES:
+        raise ValueError(f"rules contains more than {MAX_RULES} entries")
+
+    def _short_text(value, path, *, allow_empty=True):
+        if not isinstance(value, str):
+            raise ValueError(f"{path} must be a string")
+        if len(value) > MAX_RULE_TEXT_CHARS:
+            raise ValueError(f"{path} is too long")
+        if not allow_empty and not value.strip():
+            raise ValueError(f"{path} must not be empty")
+        if any(ord(char) < 32 for char in value):
+            raise ValueError(f"{path} contains control characters")
+
+    for index, rule in enumerate(raw):
+        path = f"rules[{index}]"
+        if not isinstance(rule, dict):
+            raise ValueError(f"{path} must be an object")
+        unknown = set(rule) - _ALLOWED_RULE_KEYS
+        if unknown:
+            raise ValueError(
+                f"{path} has unsupported fields: "
+                + ", ".join(sorted(unknown))
+            )
+        if "name" in rule:
+            name = rule["name"]
+            if not isinstance(name, str) or len(name) > MAX_RULE_NAME_CHARS:
+                raise ValueError(f"{path}.name must be a short string")
+            if any(ord(char) < 32 for char in name):
+                raise ValueError(f"{path}.name contains control characters")
+        for key in ("enabled", "stop"):
+            if key in rule and not isinstance(rule[key], bool):
+                raise ValueError(f"{path}.{key} must be boolean")
+        mode = rule.get("match_mode", "all")
+        if not isinstance(mode, str) or mode.lower() not in _MATCH_MODES:
+            raise ValueError(f"{path}.match_mode must be all or any")
+
+        match = rule.get("match", {})
+        if not isinstance(match, dict):
+            raise ValueError(f"{path}.match must be an object")
+        unknown = set(match) - _ALLOWED_MATCH_KEYS
+        if unknown:
+            raise ValueError(
+                f"{path}.match has unsupported fields: "
+                + ", ".join(sorted(unknown))
+            )
+        for key in ("site", "url_regex", "uploader", "title_regex"):
+            if key in match:
+                _short_text(match[key], f"{path}.match.{key}")
+                if key in {"url_regex", "title_regex"} and match[key]:
+                    try:
+                        re.compile(match[key])
+                    except re.error as error:
+                        raise ValueError(
+                            f"{path}.match.{key} is invalid: {error}"
+                        ) from error
+        if "type" in match:
+            mtype = match["type"]
+            if not isinstance(mtype, str) or mtype.lower() not in _KNOWN_TYPES:
+                raise ValueError(
+                    f"{path}.match.type must be one of: "
+                    + ", ".join(sorted(value for value in _KNOWN_TYPES if value))
+                )
+        for key in ("duration_min", "duration_max"):
+            if key not in match:
+                continue
+            value = match[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{path}.match.{key} must be a number")
+
+        actions = rule.get("actions", {})
+        if not isinstance(actions, dict):
+            raise ValueError(f"{path}.actions must be an object")
+        unknown = set(actions) - _ALLOWED_ACTION_KEYS
+        if unknown:
+            raise ValueError(
+                f"{path}.actions has unsupported fields: "
+                + ", ".join(sorted(unknown))
+            )
+        for key in _STRING_ACTIONS | {"filename_template"}:
+            if key in actions:
+                _short_text(actions[key], f"{path}.actions.{key}", allow_empty=False)
+        if "priority" in actions:
+            value = actions["priority"]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{path}.actions.priority must be an integer")
+            if not -100 <= value <= 100:
+                raise ValueError(f"{path}.actions.priority must be between -100 and 100")
+        if "auto_start" in actions and not isinstance(actions["auto_start"], bool):
+            raise ValueError(f"{path}.actions.auto_start must be boolean")
+    return True
 
 
 def load_rules(config):

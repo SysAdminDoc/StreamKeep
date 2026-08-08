@@ -284,6 +284,57 @@ def build_monitor_tab(win):
 
     lay.addWidget(table_card, 1)
 
+    # Channel Insights — transition-backed history stays compact and useful
+    # even when a watch list has dozens of entries. The table is intentionally
+    # read-only; the monitor remains the source of truth for live state.
+    insights_card = QFrame()
+    insights_card.setObjectName("dataPane")
+    insights_lay = QVBoxLayout(insights_card)
+    insights_lay.setContentsMargins(14, 14, 14, 10)
+    insights_lay.setSpacing(6)
+    insights_header = QVBoxLayout()
+    insights_header.setSpacing(4)
+    insights_title = QLabel("Channel Insights")
+    insights_title.setObjectName("sectionTitle")
+    win.monitor_insights_hint = QLabel(
+        "Transition history for the last eight weeks."
+    )
+    win.monitor_insights_hint.setObjectName("sectionBody")
+    win.monitor_insights_hint.setWordWrap(True)
+    insights_header.addWidget(insights_title)
+    insights_header.addWidget(win.monitor_insights_hint)
+    insights_lay.addLayout(insights_header)
+    win.monitor_insights_table = QTableWidget()
+    win.monitor_insights_table.setColumnCount(5)
+    win.monitor_insights_table.setHorizontalHeaderLabels(
+        ["Channel", "Streams / 8w", "Avg Duration", "Top Game", "Last Live"]
+    )
+    ih = win.monitor_insights_table.horizontalHeader()
+    ih.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    ih.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+    ih.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+    ih.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+    ih.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+    win.monitor_insights_table.setColumnWidth(1, 100)
+    win.monitor_insights_table.setColumnWidth(2, 110)
+    win.monitor_insights_table.setColumnWidth(4, 142)
+    win.monitor_insights_table.verticalHeader().setVisible(False)
+    win.monitor_insights_table.setSelectionMode(
+        QAbstractItemView.SelectionMode.NoSelection
+    )
+    win.monitor_insights_table.setEditTriggers(
+        QAbstractItemView.EditTrigger.NoEditTriggers
+    )
+    style_table(
+        win.monitor_insights_table,
+        38,
+        accessible_name="Channel insights",
+        accessible_description="Recorded channel state transitions and stream summaries",
+    )
+    insights_lay.addWidget(win.monitor_insights_table)
+    win.monitor_insights_card = insights_card
+    lay.addWidget(insights_card)
+
     # ── Schedule Calendar (F39) ───────────────────────────────────
     from ..calendar_widget import ScheduleCalendar
     cal_card = QFrame()
@@ -397,7 +448,51 @@ class MonitorTabMixin:
                 self.monitor_table_hint.setText(
                     "Updates automatically."
                 )
+        self._refresh_channel_insights()
         self._refresh_shell_overview()
+
+    def _refresh_channel_insights(self):
+        """Render transition-backed channel summaries below the watch list."""
+        table = getattr(self, "monitor_insights_table", None)
+        if table is None:
+            return
+        try:
+            from ...channel_stats import get_channel_stats
+            entries = list(self.monitor.entries)
+            rows = []
+            for entry in entries:
+                stats = get_channel_stats(entry.channel_id, weeks=8)
+                top_games = stats.get("top_games", []) or []
+                top_game = str(top_games[0][0]) if top_games else "—"
+                streams = int(stats.get("streams_total", 0) or 0)
+                avg = int(stats.get("avg_duration_mins", 0) or 0)
+                rows.append((
+                    f"{entry.platform} / {entry.channel_id}",
+                    f"{streams}",
+                    f"{avg} min" if avg else "—",
+                    top_game,
+                    str(stats.get("last_live", "") or "—").replace("T", " "),
+                ))
+        except Exception as error:
+            table.setRowCount(0)
+            if hasattr(self, "monitor_insights_hint"):
+                self.monitor_insights_hint.setText(
+                    f"Insights unavailable: {error}"
+                )
+            return
+        table.setRowCount(len(rows))
+        for row_index, values in enumerate(rows):
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column in (1, 2, 4):
+                    item.setTextAlignment(int(Qt.AlignmentFlag.AlignCenter))
+                table.setItem(row_index, column, item)
+        if hasattr(self, "monitor_insights_hint"):
+            self.monitor_insights_hint.setText(
+                "Transition history for the last eight weeks. "
+                + ("New rows appear after each live/offline change." if rows
+                   else "Add a channel and let the monitor collect its first transition.")
+            )
 
     # ── Seed workers ────────────────────────────────────────────────
 

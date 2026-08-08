@@ -302,13 +302,32 @@ class ChannelMonitor(QObject):
 
     @pyqtSlot(str, str)
     def _on_poll_finished(self, channel_id, status):
+        transitioned = None
+        transition_entry = None
         with self._entries_lock:
             for e in self.entries:
                 if e.channel_id == channel_id:
+                    previous = e.last_status
                     e.last_status = status
                     e._cancel_requested = False
+                    if (
+                        status in {"live", "offline"}
+                        and status != previous
+                    ):
+                        transitioned = status
+                        transition_entry = e
                     break
             self._in_flight.discard(channel_id)
+        if transitioned and transition_entry is not None:
+            try:
+                from .channel_stats import log_transition
+                log_transition(
+                    transition_entry.channel_id,
+                    transition_entry.platform,
+                    transitioned,
+                )
+            except Exception:
+                pass  # Channel insights must never turn a poll result into a monitor failure.
         self.status_changed.emit()
 
     @pyqtSlot(str)

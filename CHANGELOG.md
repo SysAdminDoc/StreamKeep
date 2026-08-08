@@ -26,6 +26,12 @@ The seven desktop routes now share one archive-control-room visual system.
 - Qt test teardown now retires top-level widgets after each test, eliminating
   the V227 Windows access violation; the reproducer passed 10 consecutive
   times and the full suite completed with 2,223 passed and 1 skipped.
+- Ordered rules are schema-validated at import and now apply consistently to
+  desktop direct downloads, GUI queue enqueues, and the headless queue, with
+  priority/hold metadata preserved for durable resume.
+- History exposes portable recording-note sidecars through its context menu and
+  global search, while Monitor now records live/offline transitions through the
+  shared database facade and renders Channel Insights summaries.
 
 ## [4.57.0] - 2026-08-08
 
