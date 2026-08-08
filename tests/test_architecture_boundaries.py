@@ -45,6 +45,12 @@ _OWNED_BY = {
         "load_monitor_channels", "save_monitor_channel",
         "save_all_monitor_channels", "delete_monitor_channel",
     ),
+    "streamkeep.db.queue": (
+        "load_queue", "save_queue", "enqueue_queue_job", "claim_queue_job",
+        "transition_owned_queue_job", "recover_interrupted_queue_jobs",
+        "acquire_executor_lease", "release_executor_lease",
+        "skip_tombstoned_queue_jobs", "cancel_queue_job",
+    ),
     "streamkeep.server.auth": (
         "generate_bearer_token", "valid_bearer_token",
         "TokenGrant", "TokenStore", "PairingStore", "ReplayStore",
@@ -62,7 +68,7 @@ _OWNED_BY = {
 
 #: The monolith may only shrink. Lower this when work moves out of it; a
 #: KeyError-free pass with a smaller file means the ratchet needs updating.
-_LEGACY_LINE_CEILING = 4785
+_LEGACY_LINE_CEILING = 4013
 
 
 def test_each_domain_module_implements_what_it_exports():
@@ -122,7 +128,7 @@ def test_the_package_has_no_import_cycle_back_into_the_monolith():
 
     root = Path(db._implementation.__file__).parent
     for name in ("schema", "history_actions", "primitives", "projections",
-                 "tombstones", "publishing", "connection", "monitor"):
+                 "tombstones", "publishing", "connection", "monitor", "queue"):
         tree = ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level and node.module:
@@ -154,11 +160,13 @@ def test_every_table_family_serialises_behind_one_write_lock():
     import threading
 
     from streamkeep.db import _legacy, monitor, primitives
+    from streamkeep.db import queue as queue_family
 
     holders = {
         "primitives": primitives._write_lock,
         "_legacy": _legacy._write_lock,
         "monitor": monitor._write_lock,
+        "queue": queue_family._write_lock,
         "facade": db._write_lock,
     }
     identities = {name: id(lock) for name, lock in holders.items()}

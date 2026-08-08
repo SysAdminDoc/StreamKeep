@@ -19,6 +19,7 @@ from . import monitor as _monitor
 from . import primitives as _primitives
 from . import projections as _projections
 from . import publishing as _publishing
+from . import queue as _queue
 from . import schema as _schema
 from . import tombstones as _tombstones
 
@@ -28,7 +29,7 @@ from . import tombstones as _tombstones
 # existing tests and profile-switching tools rely on.
 _DOMAINS = (
     _implementation, _connection, _schema, _history_actions, _tombstones,
-    _publishing, _monitor, _projections, _primitives,
+    _publishing, _monitor, _queue, _projections, _primitives,
 )
 
 

@@ -101,3 +101,10 @@ def _upsert_tombstone_in_connection(
         ),
     )
     return int(existing["id"])
+
+
+#: Tombstone reasons that block a re-queue (V163).
+#:
+#: Policy, so it lives with the ledger rather than in the queue family --
+#: the queue asks whether a deletion blocks it, it does not decide.
+TOMBSTONE_BLOCKING_REASONS = frozenset({"user"})
