@@ -64,6 +64,9 @@ PROBE_FORBIDDEN = "forbidden"
 PROBE_ERROR = "error"
 
 #: Status codes that mean "you are not allowed", as opposed to "not here".
+#: A stream-listing page is a few hundred kilobytes at most (V188).
+MAX_RECOVERY_PAGE_BYTES = 4 * 1024 * 1024
+
 _GATED_STATUSES = frozenset({401, 403})
 
 
@@ -127,7 +130,11 @@ def _scrape_twitchtracker(channel, year, month, log_fn=None):
     req.add_header("User-Agent", _UA)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+            # A stream-listing page is well under this; reading without a cap
+            # let a rotated or hostile host stream an unbounded body (V188).
+            html = resp.read(MAX_RECOVERY_PAGE_BYTES).decode(
+                "utf-8", errors="replace",
+            )
     except Exception as e:
         if log_fn:
             log_fn(f"[RECOVER] Failed to fetch TwitchTracker: {e}")

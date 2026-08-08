@@ -248,6 +248,10 @@ def plan_media_import(
 #: deliberately NOT a fallback: duplicating the bytes is the problem V168
 #: exists to remove, so a home that can be neither linked nor pointed at is
 #: reported as refused instead.
+#: A library listing is kilobytes; anything larger is a misconfigured
+#: or hostile host rather than a library (V188).
+MAX_MEDIA_SERVER_RESPONSE_BYTES = 8 * 1024 * 1024
+
 HOME_STRATEGIES = ("hardlink", "strm")
 
 
@@ -702,7 +706,16 @@ def _request_bytes(
             headers["X-Emby-Token"] = token
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        # A library listing is JSON or XML measured in kilobytes. Reading
+        # without a cap let a misconfigured or hostile host at the configured
+        # address stream an unbounded body into the export path (V188).
+        payload = response.read(MAX_MEDIA_SERVER_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_MEDIA_SERVER_RESPONSE_BYTES:
+        raise ValueError(
+            "The media server returned more than "
+            f"{MAX_MEDIA_SERVER_RESPONSE_BYTES} bytes; refusing to parse it."
+        )
+    return payload
 
 
 def _is_xml_element(value: object) -> bool:
