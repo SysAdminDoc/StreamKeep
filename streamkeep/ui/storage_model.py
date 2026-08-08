@@ -5,6 +5,7 @@ from PyQt6.QtGui import QPixmap
 
 from ..utils import fmt_size
 from ..i18n import tr
+from .preview_art import preview_placeholder
 
 
 class StorageTableModel(QAbstractTableModel):
@@ -14,6 +15,7 @@ class StorageTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._groups = []
         self._thumbnails = {}
+        self._placeholders = {}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._groups)
@@ -39,10 +41,17 @@ class StorageTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.UserRole:
             return group
         if role == Qt.ItemDataRole.DecorationRole and column == 0:
-            return self._thumbnails.get(group.dir_path)
+            thumbnail = self._thumbnails.get(group.dir_path)
+            if thumbnail is not None:
+                return thumbnail
+            placeholder = self._placeholders.get(group.dir_path)
+            if placeholder is None:
+                placeholder = preview_placeholder(group.title, group.platform)
+                self._placeholders[group.dir_path] = placeholder
+            return placeholder
         if role == Qt.ItemDataRole.DisplayRole:
             values = (
-                "" if group.dir_path in self._thumbnails else "…",
+                "",
                 group.platform,
                 group.channel,
                 group.title,
@@ -54,6 +63,8 @@ class StorageTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.TextAlignmentRole and column in (0, 1, 4, 5):
             return int(Qt.AlignmentFlag.AlignCenter)
         if role == Qt.ItemDataRole.AccessibleTextRole:
+            if column == 0:
+                return f"{tr('Preview')}: {group.title}"
             return str(self.data(index, Qt.ItemDataRole.DisplayRole) or self.HEADERS[column])
         return None
 
@@ -61,6 +72,7 @@ class StorageTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._groups = list(groups or [])
         self._thumbnails = {}
+        self._placeholders = {}
         self.endResetModel()
 
     def group_at(self, row):
@@ -72,6 +84,7 @@ class StorageTableModel(QAbstractTableModel):
         for row, group in enumerate(self._groups):
             if group.dir_path == dir_path:
                 self._thumbnails[dir_path] = pixmap
+                self._placeholders.pop(dir_path, None)
                 index = self.index(row, 0)
                 self.dataChanged.emit(
                     index,

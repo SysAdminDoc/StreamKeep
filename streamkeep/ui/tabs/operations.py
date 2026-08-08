@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -27,6 +28,7 @@ from ...operations import (
     write_operations_report,
 )
 from ...i18n import tr
+from ...theme import CAT
 from ...utils import fmt_size
 from ..widgets import make_metric_card, set_accessible, style_table
 
@@ -74,7 +76,7 @@ def _update_operation_actions(win):
 def _refresh_operations(win):
     """Refresh one bounded page from the durable operations query."""
     try:
-        result = query_operations(_current_filters())
+        result = query_operations(_current_filters(win))
     except Exception as error:
         win.operations_table.setRowCount(0)
         win.operations_summary.setText("Operations state is temporarily unavailable.")
@@ -131,6 +133,25 @@ def _refresh_operations(win):
             item = QTableWidgetItem(str(value))
             if column == 1 and row.kind == "failure":
                 item.setData(Qt.ItemDataRole.UserRole, row.item_id)
+            if row.kind == "failure":
+                failure_tint = QColor(CAT["red"])
+                failure_tint.setAlpha(20)
+                item.setBackground(QBrush(failure_tint))
+            if column == 0:
+                item.setForeground(QBrush(QColor(
+                    CAT["red"] if row.kind == "failure" else CAT["accent"]
+                )))
+            elif column == 4:
+                state = str(row.state or "").casefold()
+                if state in {"active", "downloading", "running", "live"}:
+                    state_color = CAT["green"]
+                elif state in {"failed", "error"}:
+                    state_color = CAT["red"]
+                elif state in {"queued", "pending", "configured"}:
+                    state_color = CAT["yellow"]
+                else:
+                    state_color = CAT["subtext1"]
+                item.setForeground(QBrush(QColor(state_color)))
             table.setItem(row_index, column, item)
     table.setSortingEnabled(False)
     table.resizeRowsToContents()
@@ -182,7 +203,7 @@ def _export_operations(win):
     if not path:
         return
     try:
-        report = write_operations_report(path, _current_filters())
+        report = write_operations_report(path, _current_filters(win))
     except (OSError, ValueError) as error:
         message = f"Could not export operations: {error}"
         win.operations_status.setText(message)
@@ -201,7 +222,7 @@ def build_operations_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(12)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
@@ -216,20 +237,20 @@ def build_operations_tab(win):
     hero_lay.addWidget(title)
     hero_lay.addWidget(body)
     metrics = QHBoxLayout()
-    metrics.setSpacing(18)
+    metrics.setSpacing(12)
     total_card, win.operations_total_value, _ = make_metric_card("Total", "0", "items")
     active_card, win.operations_active_value, _ = make_metric_card("Active", "0", "running")
     failure_card, win.operations_failure_value, _ = make_metric_card("Failures", "0", "actionable")
     monitor_card, win.operations_monitor_value, _ = make_metric_card("Monitors", "0", "configured")
     for card in (total_card, active_card, failure_card, monitor_card):
-        metrics.addWidget(card)
+        metrics.addWidget(card, 1)
     hero_lay.addLayout(metrics)
     lay.addWidget(hero)
 
     filter_card = QFrame()
     filter_card.setObjectName("toolbar")
     filter_lay = QVBoxLayout(filter_card)
-    filter_lay.setContentsMargins(4, 6, 4, 6)
+    filter_lay.setContentsMargins(14, 12, 14, 12)
     filter_lay.setSpacing(6)
     filter_row = QHBoxLayout()
     filter_row.setSpacing(8)
@@ -305,10 +326,19 @@ def build_operations_tab(win):
     filter_lay.addLayout(action_row)
     lay.addWidget(filter_card)
 
+    table_card = QFrame()
+    table_card.setObjectName("dataPane")
+    table_lay = QVBoxLayout(table_card)
+    table_lay.setContentsMargins(16, 14, 16, 12)
+    table_lay.setSpacing(8)
+    table_title = QLabel("Durable operations")
+    table_title.setObjectName("sectionTitle")
+    table_lay.addWidget(table_title)
+
     win.operations_summary = QLabel("Loading durable operations state…")
     win.operations_summary.setObjectName("sectionBody")
     win.operations_summary.setWordWrap(True)
-    lay.addWidget(win.operations_summary)
+    table_lay.addWidget(win.operations_summary)
 
     win.operations_table = QTableWidget(0, 10)
     win.operations_table.setHorizontalHeaderLabels(
@@ -320,7 +350,9 @@ def build_operations_tab(win):
     win.operations_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
     win.operations_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     win.operations_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    win.operations_table.setAlternatingRowColors(True)
     win.operations_table.setMinimumHeight(230)
+    win.operations_table.verticalHeader().setVisible(False)
     header = win.operations_table.horizontalHeader()
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -339,7 +371,7 @@ def build_operations_tab(win):
         accessible_description="Paged queue, failure, and monitor state; select failed rows for actions",
     )
     win.operations_table.itemSelectionChanged.connect(lambda: _update_operation_actions(win))
-    lay.addWidget(win.operations_table, 1)
+    table_lay.addWidget(win.operations_table, 1)
 
     footer = QHBoxLayout()
     win.operations_page_label = QLabel("Page 1")
@@ -358,12 +390,13 @@ def build_operations_tab(win):
     set_accessible(win.operations_next_btn, "Next operations page")
     win.operations_next_btn.clicked.connect(lambda: _change_operations_page(win, 1))
     footer.addWidget(win.operations_next_btn)
-    lay.addLayout(footer)
+    table_lay.addLayout(footer)
 
     win.operations_status = QLabel("Select failed rows to retry or discard them.")
     win.operations_status.setObjectName("subtleText")
     win.operations_status.setWordWrap(True)
-    lay.addWidget(win.operations_status)
+    table_lay.addWidget(win.operations_status)
+    lay.addWidget(table_card, 1)
 
     win._operations_page = 0
     win._operations_filter_timer = QTimer(win)

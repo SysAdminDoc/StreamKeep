@@ -2,6 +2,8 @@ import json
 import time
 from unittest import mock
 
+from PyQt6.QtWidgets import QWidget
+
 from streamkeep import db, operations
 
 
@@ -146,3 +148,41 @@ def test_operations_page_stays_bounded_for_one_hundred_thousand_jobs(tmp_path):
         assert page.total_count == 100_000
         assert len(page.rows) == 50
         assert elapsed < 5.0
+
+
+def test_operations_tab_refresh_passes_the_window_filters(qt_application):
+    from streamkeep.ui.tabs import operations as operations_tab
+
+    filters = operations.OperationsFilters()
+    summary = operations.OperationsSummary(
+        total_count=0,
+        active_count=0,
+        failure_count=0,
+        monitor_count=0,
+        estimated_size_bytes=0,
+        estimated_duration_seconds=0.0,
+        last_success_at="",
+        next_run_at="",
+        retry_reason="",
+        source_health=(),
+    )
+    page = operations.OperationsPage(
+        filters=filters,
+        rows=(),
+        total_count=0,
+        summary=summary,
+    )
+    window = QWidget()
+    window._report_failure = lambda _message: None
+    with mock.patch.object(operations_tab, "query_operations", return_value=page) as query:
+        tab = operations_tab.build_operations_tab(window)
+        try:
+            requested_filters = query.call_args.args[0]
+            assert isinstance(requested_filters, operations.OperationsFilters)
+            assert requested_filters.page == 0
+            assert window.operations_summary.text() != (
+                "Operations state is temporarily unavailable."
+            )
+        finally:
+            tab.close()
+            window.close()

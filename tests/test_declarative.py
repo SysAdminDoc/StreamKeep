@@ -448,7 +448,11 @@ def test_an_oversized_definition_is_rejected_before_it_is_read(tmp_path, monkeyp
     real_read = type(path).read_text
 
     def counting_read(self, *args, **kwargs):
-        reads.append(str(self))
+        # Other suite-owned workers may legitimately read their isolated
+        # config while this assertion is active. The contract under test is
+        # narrower: the oversized adapter body itself must never be read.
+        if self == path:
+            reads.append(str(self))
         return real_read(self, *args, **kwargs)
 
     monkeypatch.setattr(type(path), "read_text", counting_read)

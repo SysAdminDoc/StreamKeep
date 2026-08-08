@@ -156,7 +156,7 @@ def build_download_tab(win):
     page = QWidget()
     root = QVBoxLayout(page)
     root.setContentsMargins(0, 0, 0, 0)
-    root.setSpacing(6)
+    root.setSpacing(12)
 
     hero = QFrame()
     hero.setObjectName("pageHeader")

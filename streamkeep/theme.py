@@ -9,18 +9,18 @@ dict is mutated in-place when the theme changes via ``apply_theme()``.
 """
 
 STREAMKEEP_DARK = {
-    "base": "#0d1219", "mantle": "#091019", "crust": "#060b11",
-    "surface0": "#1c2938", "surface1": "#26374a", "surface2": "#344960",
-    "overlay0": "#65758a", "overlay1": "#8795a8",
-    "text": "#f3f6fa", "subtext0": "#aeb9c8", "subtext1": "#cbd3df",
-    "lavender": "#9eabff", "blue": "#6aa6ff", "sapphire": "#66b7df",
-    "sky": "#78c7ed", "teal": "#65d6c2", "green": "#68d391",
-    "yellow": "#f2d27a", "peach": "#f4aa73", "maroon": "#e98d9b",
-    "red": "#f06f83", "mauve": "#bd9af7", "pink": "#ec9ed8",
-    "flamingo": "#eeb5b5", "rosewater": "#f1caca",
-    "panel": "#111923", "panelHi": "#172332", "panelSoft": "#0f1721",
-    "stroke": "#283648", "muted": "#98a6b8", "accent": "#5b8ff9",
-    "accentSoft": "#5ed3ad", "gold": "#e5b963",
+    "base": "#07111f", "mantle": "#050d18", "crust": "#030914",
+    "surface0": "#17283d", "surface1": "#213752", "surface2": "#304b6d",
+    "overlay0": "#687d96", "overlay1": "#8fa1b7",
+    "text": "#f4f7fb", "subtext0": "#9daec2", "subtext1": "#c4cfdd",
+    "lavender": "#a6b4ff", "blue": "#5b8cff", "sapphire": "#63b5e6",
+    "sky": "#79a8ff", "teal": "#5bd3bf", "green": "#65d6a0",
+    "yellow": "#f2b84b", "peach": "#f2a56f", "maroon": "#e8899a",
+    "red": "#f07186", "mauve": "#b99af2", "pink": "#e59dce",
+    "flamingo": "#efb2b4", "rosewater": "#f1c7c3",
+    "panel": "#0e1b2a", "panelHi": "#13243a", "panelSoft": "#0a1624",
+    "stroke": "#22364d", "muted": "#8fa0b5", "accent": "#5b8cff",
+    "accentSoft": "#65d6a0", "gold": "#f2b84b",
 }
 
 STREAMKEEP_LIGHT = {
@@ -228,12 +228,7 @@ def _bind_system_accessibility_observer(app):
     _system_accessibility_observers[key] = (hints, on_contrast_changed)
 
 def build_stylesheet(p=None):
-    """Build StreamKeep's restrained, text-led visual system.
-
-    Containers use spacing and hairline dividers for hierarchy. Borders are
-    reserved for editable controls, tables use open rows, and only primary
-    actions receive a saturated fill.
-    """
+    """Build StreamKeep's card-led local archive control-room visual system."""
     if p is None:
         p = CAT
     density = get_density()
@@ -259,6 +254,7 @@ QAbstractScrollArea#chrome > QWidget#chrome {{
 QFrame#appHeader {{
     background-color: transparent;
     border: none;
+    border-bottom: 1px solid {p['stroke']};
 }}
 QFrame#navRail {{
     background-color: {p['mantle']};
@@ -267,8 +263,8 @@ QFrame#navRail {{
 }}
 QFrame#brandMark {{
     background-color: {p['panelHi']};
-    border: 1px solid {p['stroke']};
-    border-radius: 8px;
+    border: 1px solid {p['accent']};
+    border-radius: 11px;
 }}
 QFrame#navRule {{
     background-color: {p['stroke']};
@@ -291,12 +287,13 @@ QFrame#appNav {{
 QFrame#composerCard {{
     background-color: {p['panel']};
     border: 1px solid {p['stroke']};
-    border-radius: 8px;
+    border-top: 2px solid {p['accent']};
+    border-radius: 12px;
 }}
 QFrame#sourceField {{
-    background-color: {p['base']};
+    background-color: {p['panelSoft']};
     border: 1px solid {p['stroke']};
-    border-radius: 6px;
+    border-radius: 9px;
 }}
 QFrame#paneToolbar {{
     background-color: transparent;
@@ -312,17 +309,48 @@ QFrame#queueName, QFrame#queueStatus, QFrame#queueProgress {{
     background-color: transparent;
     border: none;
 }}
-QFrame#optionsRow, QFrame#fieldBlock,
-QFrame#toolbar, QFrame#subtleCard, QFrame#metricCard {{
+QFrame#optionsRow {{
     background-color: transparent;
     border: none;
     border-radius: 0;
+}}
+QFrame#subtleCard {{
+    background-color: {p['panelSoft']};
+    border: 1px solid {p['stroke']};
+    border-radius: 10px;
+}}
+QFrame#toolbar {{
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-radius: 10px;
+}}
+QFrame#fieldBlock {{
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-radius: 10px;
+}}
+QFrame#composerCard QFrame#fieldBlock {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}}
+QFrame#metricCard {{
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-top: 2px solid {p['accent']};
+    border-radius: 11px;
+}}
+QFrame#metricCard[tone="success"] {{ border-top-color: {p['green']}; }}
+QFrame#metricCard[tone="warning"] {{ border-top-color: {p['yellow']}; }}
+QFrame#metricCard[tone="danger"] {{ border-top-color: {p['red']}; }}
+QFrame#fieldBlock QFrame#metricCard {{
+    background-color: {p['panelSoft']};
 }}
 QFrame#queuePane, QFrame#activityPane, QFrame#dataPane,
 QFrame#analyticsPanel, QFrame#archiveHealthPane {{
     background-color: {p['panel']};
     border: 1px solid {p['stroke']};
-    border-radius: 8px;
+    border-radius: 12px;
 }}
 QFrame#healthRow {{
     background-color: transparent;
@@ -330,14 +358,19 @@ QFrame#healthRow {{
     border-bottom: 1px solid {p['stroke']};
 }}
 QFrame#settingsNav {{
-    background-color: transparent;
-    border: none;
-    border-bottom: 1px solid {p['stroke']};
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-radius: 10px;
 }}
-QFrame#card, QFrame#heroCard {{
+QFrame#heroCard, QFrame#settingsBody {{
     background-color: transparent;
     border: none;
     border-radius: 0;
+}}
+QFrame#card {{
+    background-color: {p['panel']};
+    border: 1px solid {p['stroke']};
+    border-radius: 11px;
 }}
 QFrame#panel, QFrame#shellCard, QFrame#shellMetaCard, QFrame#footerBar {{
     background-color: {p['panelSoft']};
@@ -420,7 +453,7 @@ QLabel#brandCaption, QLabel#navFootnote {{
 }}
 QLabel#shellPageTitle {{
     color: {p['text']};
-    font-size: 27px;
+    font-size: 29px;
     font-weight: 750;
 }}
 QLabel#shellPageBody {{
@@ -448,7 +481,7 @@ QLabel#heroBody, QLabel#dialogBody {{
 }}
 QLabel#sectionTitle {{
     color: {p['text']};
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 700;
 }}
 QLabel#sectionBody, QLabel#tableHint, QLabel#fieldHint,
@@ -458,18 +491,18 @@ QLabel#subtleText, QLabel#statusBody {{
 }}
 QLabel#fieldLabel, QLabel#metricLabel {{
     color: {p['subtext0']};
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 650;
 }}
 QLabel#metricValue, QLabel#shellStatValue {{
     color: {p['text']};
-    font-size: 15px;
-    font-weight: 700;
+    font-size: 25px;
+    font-weight: 750;
 }}
 QLabel#metricSubvalue, QLabel#shellStatBody, QLabel#shellStatMeta,
 QLabel#footerMeta, QLabel#statusLabel {{
     color: {p['muted']};
-    font-size: 14px;
+    font-size: 12px;
 }}
 QLabel#toolbarMeta {{ color: {p['subtext0']}; font-size: 14px; }}
 QLabel#queueTitle {{ color: {p['text']}; font-size: 13px; font-weight: 600; }}
@@ -532,7 +565,7 @@ QLabel#templatePreview {{
 }}
 QLabel#templatePreview[tone="error"] {{ color: {p['red']}; }}
 QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
-    background-color: {p['base']};
+    background-color: {p['panelSoft']};
     color: {p['text']};
     border: 1px solid {p['stroke']};
     border-radius: {radius}px;
@@ -545,6 +578,7 @@ QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateEdit {{
 QLineEdit#globalSearch {{
     background-color: {p['panel']};
     font-size: 14px;
+    border-radius: 20px;
 }}
 QLineEdit#sourceComposer {{
     background-color: transparent;
@@ -573,8 +607,8 @@ QTimeEdit:focus, QDateEdit:focus {{ border-color: {p['accent']}; }}
 QPushButton {{
     background-color: {p['surface0']};
     color: {p['text']};
-    border: none;
-    border-radius: {radius}px;
+    border: 1px solid {p['stroke']};
+    border-radius: {radius + 2}px;
     padding: {padding}px {padding + 5}px;
     font-size: {font_size}px;
     font-weight: 600;
@@ -588,6 +622,7 @@ QPushButton:disabled {{ background-color: {p['panelSoft']}; color: {p['overlay0'
 QPushButton#primary {{
     background-color: {p['accent']};
     color: {on_accent};
+    border-color: {p['accent']};
     font-weight: 700;
 }}
 QPushButton#primary:hover {{ background-color: {p['sky']}; }}
@@ -595,7 +630,7 @@ QPushButton#primary:disabled {{
     background-color: {p['surface0']};
     color: {p['overlay0']};
 }}
-QPushButton#secondary {{ background-color: {p['surface0']}; }}
+QPushButton#secondary {{ background-color: {p['panelHi']}; border-color: {p['stroke']}; }}
 QPushButton#ghost {{ background-color: transparent; color: {p['subtext1']}; }}
 QPushButton#ghost:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
 QPushButton#commandGhost {{
@@ -621,7 +656,7 @@ QPushButton#systemStatus {{
     background-color: {p['panel']};
     color: {p['subtext1']};
     border: 1px solid {p['stroke']};
-    border-radius: 6px;
+    border-radius: 18px;
     padding: 7px 11px;
     font-size: 13px;
     font-weight: 650;
@@ -708,7 +743,7 @@ QTableWidget::item, QTableView::item, QTreeWidget::item {{
     border-bottom: 1px solid {p['stroke']};
 }}
 QHeaderView::section {{
-    background-color: {p['panelSoft']};
+    background-color: {p['panelHi']};
     color: {p['muted']};
     border: none;
     border-bottom: 1px solid {p['stroke']};

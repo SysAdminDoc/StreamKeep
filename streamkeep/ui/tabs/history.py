@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
+from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
@@ -39,8 +39,8 @@ class _ResponsiveHistoryMetrics(QWidget):
         self._compact = None
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setHorizontalSpacing(18)
-        self._grid.setVerticalSpacing(2)
+        self._grid.setHorizontalSpacing(12)
+        self._grid.setVerticalSpacing(12)
         self._relayout(compact=True)
 
     def _relayout(self, *, compact):
@@ -65,7 +65,7 @@ def build_history_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(12)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
@@ -155,7 +155,7 @@ def build_history_tab(win):
     search_card = QFrame()
     search_card.setObjectName("toolbar")
     search_wrap = QVBoxLayout(search_card)
-    search_wrap.setContentsMargins(0, 4, 0, 4)
+    search_wrap.setContentsMargins(14, 10, 14, 10)
     search_wrap.setSpacing(6)
 
     search_head = QHBoxLayout()
@@ -247,6 +247,7 @@ def build_history_tab(win):
     hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
     hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
     win.history_table.setColumnWidth(0, 112)
+    win.history_table.setIconSize(QSize(96, 54))
     win.history_table.setColumnWidth(1, 150)
     win.history_table.setColumnWidth(2, 84)
     win.history_table.setColumnWidth(4, 110)

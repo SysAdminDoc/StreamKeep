@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from PyQt6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import Qt, QRect
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import Qt, QRect, QRectF
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 
 from ...theme import CAT
 from ... import db as _db
@@ -21,7 +21,7 @@ from ..widgets import make_metric_card
 # ── Chart widgets ───────────────────────────────────────────────────
 
 class BarChartWidget(QWidget):
-    """Simple vertical bar chart rendered with QPainter."""
+    """Responsive vertical trend chart rendered with QPainter."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,29 +47,46 @@ class BarChartWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        margin_l, margin_b = 40, 24
-        chart_w = w - margin_l - 10
-        chart_h = h - margin_b - 20
-
-        # Title
-        p.setPen(QColor(CAT["text"]))
-        p.drawText(QRect(0, 0, w, 18), Qt.AlignmentFlag.AlignCenter, self._title)
-
+        margin_l, margin_r, margin_t, margin_b = 38, 16, 24, 30
+        chart_w = max(1, w - margin_l - margin_r)
+        chart_h = max(1, h - margin_t - margin_b)
         max_val = max((v for _, v in self._data), default=1) or 1
         n = len(self._data)
-        bar_w = max(4, min(30, chart_w // max(n, 1) - 2))
+        slot_w = chart_w / max(n, 1)
+        bar_w = max(12.0, min(44.0, slot_w * 0.48))
 
-        color = QColor(CAT["blue"])
+        p.setPen(QColor(CAT["muted"]))
+        p.drawText(QRect(0, 0, w - 8, 18), Qt.AlignmentFlag.AlignRight, self._title)
+        grid_pen = QPen(QColor(CAT["stroke"]))
+        grid_pen.setWidthF(1.0)
+        p.setPen(grid_pen)
+        for step in range(4):
+            y = margin_t + (chart_h * step / 3)
+            p.drawLine(int(margin_l), int(y), int(w - margin_r), int(y))
+
         for i, (label, val) in enumerate(self._data):
-            bar_h = int(val / max_val * chart_h) if max_val else 0
-            x = margin_l + i * (bar_w + 2)
-            y = 20 + chart_h - bar_h
-            p.fillRect(x, y, bar_w, bar_h, color)
-            # Label every Nth bar
+            bar_h = max(3.0, val / max_val * chart_h) if val else 3.0
+            x = margin_l + i * slot_w + (slot_w - bar_w) / 2
+            y = margin_t + chart_h - bar_h
+            gradient = QLinearGradient(0, y, 0, margin_t + chart_h)
+            gradient.setColorAt(0.0, QColor(CAT["sky"]))
+            gradient.setColorAt(1.0, QColor(CAT["accent"]))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(gradient)
+            p.drawRoundedRect(QRectF(x, y, bar_w, bar_h), 5, 5)
+            p.setPen(QColor(CAT["text"]))
+            p.drawText(
+                QRectF(x, max(margin_t, y - 18), bar_w, 16),
+                Qt.AlignmentFlag.AlignCenter,
+                str(val),
+            )
             if n <= 15 or i % max(1, n // 10) == 0:
                 p.setPen(QColor(CAT["subtext0"]))
-                p.drawText(QRect(x - 4, h - margin_b, bar_w + 8, margin_b),
-                           Qt.AlignmentFlag.AlignCenter, str(label)[:6])
+                p.drawText(
+                    QRectF(margin_l + i * slot_w, h - margin_b + 4, slot_w, 22),
+                    Qt.AlignmentFlag.AlignCenter,
+                    str(label)[:8],
+                )
         p.end()
 
 
@@ -100,30 +117,39 @@ class DonutChartWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        size = min(w, h) - 20
-        x0 = (w - size) // 2
-        y0 = (h - size) // 2 + 10
-        rect = QRect(x0, y0, size, size)
-
+        size = max(80.0, min(h - 42.0, w * 0.44, 154.0))
+        x0 = 18.0
+        y0 = 26.0 + max(0.0, (h - 36.0 - size) / 2)
+        rect = QRectF(x0, y0, size, size)
         total = sum(v for _, v, _ in self._data) or 1
-        start = 0
+        p.setPen(QColor(CAT["muted"]))
+        p.drawText(QRect(0, 0, w - 8, 18), Qt.AlignmentFlag.AlignRight, self._title)
+        start = 90 * 16
         for label, val, color_hex in self._data:
             span = int(val / total * 360 * 16)
+            arc_pen = QPen(QColor(color_hex))
+            arc_pen.setWidthF(16.0)
+            arc_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            p.setPen(arc_pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawArc(rect.adjusted(9, 9, -9, -9), start, -span)
+            start -= span
+
+        p.setPen(QColor(CAT["text"]))
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(total))
+        legend_x = x0 + size + 24
+        legend_y = max(30.0, y0 + 4)
+        for index, (label, value, color_hex) in enumerate(self._data[:5]):
+            y = legend_y + index * 25
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(color_hex))
-            p.drawPie(rect, start, span)
-            start += span
-
-        # Inner circle (donut hole)
-        inner = int(size * 0.5)
-        ix = x0 + (size - inner) // 2
-        iy = y0 + (size - inner) // 2
-        p.setBrush(QColor(CAT["base"]))
-        p.drawEllipse(ix, iy, inner, inner)
-
-        # Title
-        p.setPen(QColor(CAT["text"]))
-        p.drawText(QRect(0, 0, w, 16), Qt.AlignmentFlag.AlignCenter, self._title)
+            p.drawEllipse(QRectF(legend_x, y + 4, 8, 8))
+            p.setPen(QColor(CAT["subtext1"]))
+            p.drawText(
+                QRectF(legend_x + 15, y, max(40.0, w - legend_x - 16), 18),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                f"{label}  {value}",
+            )
         p.end()
 
 
@@ -154,38 +180,46 @@ class HBarChartWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        margin_l = 120
-        bar_h = max(10, min(18, (h - 24) // max(len(self._data), 1) - 2))
+        margin_l = 124
+        usable_h = max(40, h - 24)
+        slot_h = usable_h / max(len(self._data), 1)
+        bar_h = max(10.0, min(16.0, slot_h * 0.55))
         max_val = max((v for _, v in self._data), default=1) or 1
 
-        p.setPen(QColor(CAT["text"]))
-        p.drawText(QRect(0, 0, w, 16), Qt.AlignmentFlag.AlignCenter, self._title)
+        p.setPen(QColor(CAT["muted"]))
+        p.drawText(QRect(0, 0, w - 8, 18), Qt.AlignmentFlag.AlignRight, self._title)
 
-        color = QColor(CAT["green"])
+        colors = (CAT["accent"], CAT["green"], CAT["sky"], CAT["lavender"])
         for i, (label, val) in enumerate(self._data):
-            y = 20 + i * (bar_h + 3)
-            bar_w = int(val / max_val * (w - margin_l - 20))
-            # Label
+            y = 20 + i * slot_h + (slot_h - bar_h) / 2
+            track_w = max(20.0, w - margin_l - 34.0)
+            bar_w = max(4.0, val / max_val * track_w)
             p.setPen(QColor(CAT["subtext0"]))
-            p.drawText(QRect(0, y, margin_l - 4, bar_h),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       str(label)[:16])
-            # Bar
-            p.fillRect(margin_l, y, max(bar_w, 2), bar_h, color)
-            # Value
+            p.drawText(
+                QRectF(0, y, margin_l - 10, bar_h),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                str(label)[:16],
+            )
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(CAT["panelHi"]))
+            p.drawRoundedRect(QRectF(margin_l, y, track_w, bar_h), 5, 5)
+            p.setBrush(QColor(colors[i % len(colors)]))
+            p.drawRoundedRect(QRectF(margin_l, y, bar_w, bar_h), 5, 5)
             p.setPen(QColor(CAT["text"]))
-            p.drawText(QRect(margin_l + bar_w + 4, y, 60, bar_h),
-                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                       str(val))
+            p.drawText(
+                QRectF(margin_l + 8, y, track_w - 16, bar_h),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                str(val),
+            )
         p.end()
 
 
 # ── Tab builder ─────────────────────────────────────────────────────
 
 PLATFORM_COLORS = {
-    "twitch": "#9146ff", "kick": "#53fc18", "youtube": "#ff0000",
-    "rumble": "#85c742", "soundcloud": "#ff5500", "reddit": "#ff4500",
-    "direct": "#7dd3fc",
+    "twitch": "#a78bfa", "kick": "#65d6a0", "youtube": "#f07186",
+    "rumble": "#84cc78", "soundcloud": "#f2a56f", "reddit": "#ed8872",
+    "podcast": "#f2b84b", "vimeo": "#5b8cff", "direct": "#63b5e6",
 }
 
 
@@ -194,7 +228,7 @@ def build_analytics_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(12)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
@@ -223,19 +257,19 @@ def build_analytics_tab(win):
 
     # Metric cards row
     cards_row = QHBoxLayout()
-    cards_row.setSpacing(18)
+    cards_row.setSpacing(12)
     win.analytics_total_card, win.analytics_total_val, _ = make_metric_card(
         "Total Downloads", "0", "all time")
-    cards_row.addWidget(win.analytics_total_card)
+    cards_row.addWidget(win.analytics_total_card, 1)
     win.analytics_size_card, win.analytics_size_val, _ = make_metric_card(
         "Total Size", "0 GB", "estimated")
-    cards_row.addWidget(win.analytics_size_card)
+    cards_row.addWidget(win.analytics_size_card, 1)
     win.analytics_top_card, win.analytics_top_val, _ = make_metric_card(
         "Top Channel", "-", "by count")
-    cards_row.addWidget(win.analytics_top_card)
+    cards_row.addWidget(win.analytics_top_card, 1)
     win.analytics_plat_card, win.analytics_plat_val, _ = make_metric_card(
         "Top Platform", "-", "by count")
-    cards_row.addWidget(win.analytics_plat_card)
+    cards_row.addWidget(win.analytics_plat_card, 1)
     hero_lay.addLayout(cards_row)
     lay.addWidget(hero)
 
@@ -243,7 +277,7 @@ def build_analytics_tab(win):
     filter_card = QFrame()
     filter_card.setObjectName("toolbar")
     filter_row = QHBoxLayout(filter_card)
-    filter_row.setContentsMargins(0, 4, 0, 4)
+    filter_row.setContentsMargins(14, 10, 14, 10)
     filter_row.setSpacing(10)
     filter_copy = QVBoxLayout()
     filter_copy.setSpacing(2)
@@ -269,7 +303,7 @@ def build_analytics_tab(win):
     daily_card = QFrame()
     daily_card.setObjectName("analyticsPanel")
     daily_lay = QVBoxLayout(daily_card)
-    daily_lay.setContentsMargins(8, 10, 8, 8)
+    daily_lay.setContentsMargins(16, 14, 16, 12)
     daily_lay.setSpacing(6)
     daily_title = QLabel("Capture volume")
     daily_title.setObjectName("sectionTitle")
@@ -285,7 +319,7 @@ def build_analytics_tab(win):
     platform_card = QFrame()
     platform_card.setObjectName("analyticsPanel")
     platform_lay = QVBoxLayout(platform_card)
-    platform_lay.setContentsMargins(8, 10, 8, 8)
+    platform_lay.setContentsMargins(16, 14, 16, 12)
     platform_lay.setSpacing(6)
     platform_title = QLabel("Platform mix")
     platform_title.setObjectName("sectionTitle")
@@ -304,7 +338,7 @@ def build_analytics_tab(win):
     channels_card = QFrame()
     channels_card.setObjectName("analyticsPanel")
     channels_lay = QVBoxLayout(channels_card)
-    channels_lay.setContentsMargins(8, 10, 8, 8)
+    channels_lay.setContentsMargins(16, 14, 16, 12)
     channels_lay.setSpacing(6)
     channels_title = QLabel("Top channels")
     channels_title.setObjectName("sectionTitle")

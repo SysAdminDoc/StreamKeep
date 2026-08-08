@@ -2,6 +2,28 @@
 
 All notable changes to StreamKeep are recorded here. This file and `README.md` are the tracked root Markdown files; the planning documents (`ROADMAP.md`, `RESEARCH.md`, `Roadmap_Blocked.md`, `CLAUDE.md`, `AGENTS.md`) are gitignored working notes. Corrected 2026-08-07: this file previously claimed it was itself ignored, which it never has been.
 
+## Unreleased
+
+The seven desktop routes now share one archive-control-room visual system.
+
+- Download, Monitor, History, Analytics, Storage, Settings, and Operations use
+  raised ink-and-slate cards, a consistent blue/mint/amber state language,
+  roomier shell spacing, and clearer primary versus secondary actions.
+- Metric summaries are responsive cards instead of flat inline labels. Settings
+  groups, filters, tables, and the Download work surface use the same hierarchy.
+- Analytics has responsive grid-backed bars, a labelled platform ring, and
+  polished ranked-channel tracks instead of the previous primitive plots.
+- History and Storage show lightweight code-rendered preview art while a real
+  local thumbnail loads, including an explicit missing-file cue.
+- Storage keeps integrity scheduling and re-template controls available behind
+  compact reveal actions, leaving the recording table visible at normal window
+  sizes.
+- Operations now loads its durable filters correctly, highlights state and
+  failure rows without relying on colour alone, and presents its table in the
+  same data-pane treatment as the rest of the app.
+- The Windows bundle now includes the local web UI asset required by packaged
+  startup and artifact-smoke checks.
+
 ## [4.57.0] - 2026-08-08
 
 Failures now surface where you are looking, and keyboard focus is visible again.

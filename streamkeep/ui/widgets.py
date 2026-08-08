@@ -240,7 +240,7 @@ QPushButton#tab {{
     padding: {vertical}px 14px;
     font-weight: 600;
     font-size: {nav_font_size}px;
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: left;
 }}
 QPushButton#tab:hover {{
@@ -269,7 +269,7 @@ QPushButton#tabActive {{
     padding: {vertical}px 14px;
     font-weight: 700;
     font-size: {nav_font_size}px;
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: left;
 }}
 """
@@ -290,13 +290,24 @@ def path_label(path_text, fallback="Choose folder"):
 
 
 def make_metric_card(label_text, value_text="--", sub_text=""):
-    """Build a single-line metric for quiet operational context."""
+    """Build a compact raised metric card for operational context."""
     card = QFrame()
     card.setObjectName("metricCard")
-    card.setMinimumHeight(34)
-    lay = QHBoxLayout(card)
-    lay.setContentsMargins(0, 4, 16, 4)
-    lay.setSpacing(7)
+    normalized = str(label_text or "").casefold()
+    if any(word in normalized for word in ("failure", "error", "missing")):
+        tone = "danger"
+    elif any(word in normalized for word in ("live", "active", "ready", "protected")):
+        tone = "success"
+    elif any(word in normalized for word in ("attention", "queued", "pending")):
+        tone = "warning"
+    else:
+        tone = "accent"
+    card.setProperty("tone", tone)
+    card.setMinimumHeight(88)
+    card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    lay = QVBoxLayout(card)
+    lay.setContentsMargins(16, 12, 16, 12)
+    lay.setSpacing(2)
 
     label = QLabel(label_text)
     label.setObjectName("metricLabel")
@@ -321,8 +332,8 @@ def make_field_block(title, hint=""):
     card.setObjectName("fieldBlock")
     card.setMinimumHeight(0)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(4)
+    lay.setContentsMargins(14, 12, 14, 12)
+    lay.setSpacing(6)
 
     label = QLabel(title)
     label.setObjectName("fieldLabel")

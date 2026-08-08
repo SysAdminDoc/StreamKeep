@@ -54,7 +54,7 @@ def test_visual_state_applies_theme_density_accent_and_contrast(qt_application):
         assert "QTableWidget, QTableView" in stylesheet
         assert "font-size: 16px" in stylesheet
         assert "border-radius: 999px" not in stylesheet
-        assert "QFrame#card, QFrame#heroCard" in stylesheet
+        assert "QFrame#heroCard, QFrame#settingsBody" in stylesheet
         assert "background-color: transparent" in stylesheet
     finally:
         apply_visual_system("dark", "cozy", "", qt_application)
@@ -173,5 +173,34 @@ def test_cozy_density_uses_readable_type_and_compact_controls(qt_application):
         assert "QFrame#queuePane, QFrame#activityPane, QFrame#dataPane," in stylesheet
         assert "QFrame#settingsNav" in stylesheet
         assert "QPushButton#commandGhost" in stylesheet
+    finally:
+        apply_visual_system("dark", "cozy", "", qt_application)
+
+
+def test_dark_theme_uses_the_archive_control_room_tokens_and_raised_metrics(
+    qt_application,
+):
+    from PyQt6.QtWidgets import QVBoxLayout
+
+    from streamkeep.ui.widgets import make_metric_card
+
+    try:
+        apply_visual_system("dark", "cozy", "", qt_application)
+        assert CAT["base"] == "#07111f"
+        assert CAT["panel"] == "#0e1b2a"
+        assert CAT["accent"] == "#5b8cff"
+        assert CAT["accentSoft"] == "#65d6a0"
+        assert CAT["yellow"] == "#f2b84b"
+
+        card, value, detail = make_metric_card("Active", "3", "running")
+        assert isinstance(card.layout(), QVBoxLayout)
+        assert card.minimumHeight() == 88
+        assert card.property("tone") == "success"
+        assert value.text() == "3"
+        assert detail.text() == "running"
+
+        stylesheet = qt_application.styleSheet()
+        assert 'QFrame#metricCard[tone="success"]' in stylesheet
+        assert "border-top: 2px solid #5b8cff" in stylesheet
     finally:
         apply_visual_system("dark", "cozy", "", qt_application)

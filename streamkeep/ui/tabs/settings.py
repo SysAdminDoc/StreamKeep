@@ -101,7 +101,7 @@ def build_settings_tab(win):
     page.setProperty("responsiveLayout", True)
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(12)
     current_theme = str(win._config.get("theme", "dark") or "dark")
     current_density = str(win._config.get("visual_density", "cozy") or "cozy")
     current_accent = str(win._config.get("visual_accent", "") or "")
@@ -147,7 +147,7 @@ def build_settings_tab(win):
     hero_lay.addWidget(settings_meta)
 
     settings_metrics = QHBoxLayout()
-    settings_metrics.setSpacing(18)
+    settings_metrics.setSpacing(12)
     theme_card, win.settings_theme_value, win.settings_theme_sub = make_metric_card(
         "Appearance", theme_display, current_density.title()
     )
@@ -161,9 +161,9 @@ def build_settings_tab(win):
         "Protected",
         "OS credential store",
     )
-    settings_metrics.addWidget(theme_card)
+    settings_metrics.addWidget(theme_card, 1)
     settings_metrics.addWidget(config_card, 1)
-    settings_metrics.addWidget(secrets_card)
+    settings_metrics.addWidget(secrets_card, 1)
     config_card.setToolTip(str(CONFIG_FILE))
     hero_lay.addLayout(settings_metrics)
     lay.addWidget(hero)
@@ -171,7 +171,7 @@ def build_settings_tab(win):
     settings_nav = QFrame()
     settings_nav.setObjectName("settingsNav")
     settings_nav_lay = QHBoxLayout(settings_nav)
-    settings_nav_lay.setContentsMargins(0, 0, 0, 5)
+    settings_nav_lay.setContentsMargins(10, 8, 10, 8)
     settings_nav_lay.setSpacing(3)
     settings_nav_buttons = []
     for label in (
@@ -237,8 +237,8 @@ def build_settings_tab(win):
     win.health_table.horizontalHeader().setSectionResizeMode(
         3, QHeaderView.ResizeMode.ResizeToContents
     )
-    win.health_table.setMinimumHeight(88)
-    win.health_table.setMaximumHeight(260)
+    win.health_table.setFixedHeight(112)
+    win.health_table.verticalHeader().setVisible(False)
     style_table(
         win.health_table,
         row_height=40,
@@ -250,16 +250,16 @@ def build_settings_tab(win):
 
     # ── Card body ───────────────────────────────────────────────────
     card = QFrame()
-    card.setObjectName("card")
+    card.setObjectName("settingsBody")
     card_lay = QVBoxLayout(card)
-    card_lay.setContentsMargins(4, 8, 4, 4)
-    card_lay.setSpacing(8)
+    card_lay.setContentsMargins(0, 0, 0, 0)
+    card_lay.setSpacing(12)
 
     # Theme selector (F20)
     theme_bar = QFrame()
     theme_bar.setObjectName("toolbar")
     theme_lay = QVBoxLayout(theme_bar)
-    theme_lay.setContentsMargins(0, 4, 0, 6)
+    theme_lay.setContentsMargins(14, 12, 14, 12)
     theme_lay.setSpacing(6)
     theme_row = QHBoxLayout()
     theme_row.setContentsMargins(0, 0, 0, 0)
@@ -447,14 +447,15 @@ def build_settings_tab(win):
     ):
         runtime_card.setToolTip(str(detail or ""))
 
-    tools_metrics = QHBoxLayout()
-    tools_metrics.setSpacing(10)
-    tools_metrics.addWidget(ff_card)
-    tools_metrics.addWidget(yt_card)
-    tools_metrics.addWidget(curl_card)
-    tools_metrics.addWidget(pillow_card)
-    tools_metrics.addWidget(sqlite_card)
-    tools_metrics.addWidget(deno_card)
+    tools_metrics = QGridLayout()
+    tools_metrics.setHorizontalSpacing(10)
+    tools_metrics.setVerticalSpacing(10)
+    for index, runtime_card in enumerate(
+        (ff_card, yt_card, curl_card, pillow_card, sqlite_card, deno_card)
+    ):
+        tools_metrics.addWidget(runtime_card, index // 3, index % 3)
+    for column in range(3):
+        tools_metrics.setColumnStretch(column, 1)
     tools_lay.addLayout(tools_metrics)
     sections_top.addWidget(tools_block, 1)
 

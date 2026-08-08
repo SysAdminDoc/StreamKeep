@@ -44,7 +44,7 @@ def build_monitor_tab(win):
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
+    lay.setSpacing(12)
 
     hero = QFrame()
     hero.setObjectName("heroCard")
@@ -72,7 +72,7 @@ def build_monitor_tab(win):
     hero_lay.addLayout(hero_copy)
 
     monitor_metrics = QHBoxLayout()
-    monitor_metrics.setSpacing(18)
+    monitor_metrics.setSpacing(12)
     count_card, win.monitor_count_value, win.monitor_count_sub = make_metric_card(
         "Channels", "0", "active entries"
     )
@@ -82,9 +82,9 @@ def build_monitor_tab(win):
     live_card, win.monitor_live_value, win.monitor_live_sub = make_metric_card(
         "Live Now", "0", "currently live"
     )
-    monitor_metrics.addWidget(count_card)
-    monitor_metrics.addWidget(auto_card)
-    monitor_metrics.addWidget(live_card)
+    monitor_metrics.addWidget(count_card, 1)
+    monitor_metrics.addWidget(auto_card, 1)
+    monitor_metrics.addWidget(live_card, 1)
     hero_lay.addLayout(monitor_metrics)
     lay.addWidget(hero)
 
@@ -169,7 +169,7 @@ def build_monitor_tab(win):
     tools_bar = QFrame()
     tools_bar.setObjectName("toolbar")
     tools_lay = QHBoxLayout(tools_bar)
-    tools_lay.setContentsMargins(0, 6, 0, 6)
+    tools_lay.setContentsMargins(14, 10, 14, 10)
     tools_lay.setSpacing(10)
     tools_copy = QVBoxLayout()
     tools_copy.setSpacing(3)

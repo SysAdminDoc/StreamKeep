@@ -133,6 +133,7 @@ def test_pyinstaller_spec_includes_release_assets():
         "assets",
         "browser-extension",
         "streamkeep/i18n",
+        "streamkeep/server/web_ui.html",
         "packaging",
         "runtime_hook_mp.py",
     ):

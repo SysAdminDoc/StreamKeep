@@ -199,7 +199,7 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.findChild(QFrame, "queuePane") is not None
             assert window.findChild(QFrame, "activityPane") is not None
             assert window.findChild(QFrame, "archiveHealthPane") is not None
-            assert len(window.findChildren(QFrame, "dataPane")) == 4
+            assert len(window.findChildren(QFrame, "dataPane")) == 5
             assert len(window.findChildren(QFrame, "analyticsPanel")) == 3
             work_surface = window.findChild(QSplitter, "workSurface")
             assert work_surface is not None

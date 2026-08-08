@@ -11,6 +11,7 @@ from .. import db
 from ..i18n import tr
 from ..models import HistoryEntry
 from ..theme import CAT
+from .preview_art import preview_placeholder
 
 
 class HistoryTableModel(QAbstractTableModel):
@@ -25,6 +26,7 @@ class HistoryTableModel(QAbstractTableModel):
         self._rows: list[HistoryEntry] = []
         self._orphans: dict[int, bool] = {}
         self._thumbnails: dict[int, QPixmap] = {}
+        self._placeholders: dict[int, QPixmap] = {}
         self._transcript_hits: dict[str, list[dict]] = {}
         self._query = ""
         self._recording_paths: tuple[str, ...] | None = None
@@ -74,10 +76,19 @@ class HistoryTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.UserRole:
             return entry
         if role == Qt.ItemDataRole.DecorationRole and column == 0:
-            return self._thumbnails.get(entry.db_id)
+            thumbnail = self._thumbnails.get(entry.db_id)
+            if thumbnail is not None:
+                return thumbnail
+            placeholder = self._placeholders.get(entry.db_id)
+            if placeholder is None:
+                placeholder = preview_placeholder(
+                    entry.title, entry.platform, missing=orphan
+                )
+                self._placeholders[entry.db_id] = placeholder
+            return placeholder
         if role == Qt.ItemDataRole.DisplayRole:
             if column == 0:
-                return tr("Missing") if orphan else tr("Loading")
+                return ""
             if column == 1:
                 return entry.date
             if column == 2:
@@ -100,7 +111,7 @@ class HistoryTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.TextAlignmentRole and column in (0, 1, 2, 4, 5):
             return int(Qt.AlignmentFlag.AlignCenter)
         if role == Qt.ItemDataRole.ForegroundRole:
-            if orphan:
+            if orphan and column in (0, 6):
                 return QColor(CAT["overlay0"])
             if entry.watched and column == 3:
                 return QColor(CAT["overlay0"])
@@ -123,6 +134,9 @@ class HistoryTableModel(QAbstractTableModel):
             if lines:
                 return "\n".join(lines)
         if role == Qt.ItemDataRole.AccessibleTextRole:
+            if column == 0:
+                state = tr("Missing") if orphan else tr("Preview")
+                return f"{state}: {entry.title}"
             value = self.data(index, Qt.ItemDataRole.DisplayRole)
             return str(value or self.HEADERS[column])
         return None
@@ -161,6 +175,7 @@ class HistoryTableModel(QAbstractTableModel):
         self._rows = []
         self._orphans = {}
         self._thumbnails = {}
+        self._placeholders = {}
         self._snapshot_id = db.history_snapshot_id()
         self._total = db.count_history_query(
             query=self._query,
@@ -210,6 +225,7 @@ class HistoryTableModel(QAbstractTableModel):
         if row < 0 or not isinstance(pixmap, QPixmap) or pixmap.isNull():
             return False
         self._thumbnails[int(entry_id)] = pixmap
+        self._placeholders.pop(int(entry_id), None)
         index = self.index(row, 0)
         self.dataChanged.emit(
             index,
