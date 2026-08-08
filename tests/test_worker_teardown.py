@@ -9,12 +9,14 @@ assert the *sweep* instead: any worker the window holds is stopped, whether or
 not anyone remembered to name it.
 """
 
+import threading
 import time
 
 import pytest
 from PyQt6.QtCore import QThread
 
 from streamkeep.ui.main_window import StreamKeep
+from streamkeep.ui.worker_teardown import iter_owned_workers
 
 
 class _SleepingWorker(QThread):
@@ -126,3 +128,126 @@ def test_close_event_joins_workers_held_in_a_container(window):
     assert worker.observed_cancel
     assert worker.wait(3000)
     assert not worker.isRunning()
+
+
+# ── V186: the invariant must not stop at the window boundary ─────────
+
+class _DialogWorker(QThread):
+    """A worker whose run() ignores quit(), like the real ones."""
+
+    def __init__(self):
+        super().__init__()
+        self.observed_cancel = False
+        self._stop = threading.Event()
+
+    def cancel(self):
+        self.observed_cancel = True
+        self._stop.set()
+
+    def run(self):
+        self._stop.wait(10.0)
+
+
+def _dialog_workers(dialog):
+    return [label for label, _worker in iter_owned_workers(dialog)]
+
+
+def test_accepting_a_dialog_joins_its_workers(qt_application):
+    """Every dialog exit path must join owned threads, not just reject().
+
+    ClipDialog joined five workers in reject() only, so pressing Export while
+    the waveform, scene, thumbnail or preview worker ran left four live threads
+    -- and the main window's sweep walks its own attributes and cannot see a
+    dialog's (V186). Destroying a running QThread is a qFatal.
+    """
+    from PyQt6.QtWidgets import QDialog
+
+    from streamkeep.ui.worker_teardown import WorkerOwnerMixin
+
+    class _Dialog(WorkerOwnerMixin, QDialog):
+        pass
+
+    dialog = _Dialog()
+    worker = _DialogWorker()
+    dialog._scene_worker = worker
+    worker.start()
+    assert worker.isRunning()
+
+    dialog.accept()
+
+    assert worker.observed_cancel, "accept() never asked the worker to stop"
+    assert not worker.isRunning(), "accept() left a QThread running"
+
+
+def test_rejecting_a_dialog_joins_its_workers(qt_application):
+    from PyQt6.QtWidgets import QDialog
+
+    from streamkeep.ui.worker_teardown import WorkerOwnerMixin
+
+    class _Dialog(WorkerOwnerMixin, QDialog):
+        pass
+
+    dialog = _Dialog()
+    worker = _DialogWorker()
+    dialog._thumb_worker = worker
+    worker.start()
+
+    dialog.reject()
+
+    assert not worker.isRunning(), "reject() left a QThread running"
+
+
+def test_the_clip_dialog_inherits_the_sweep():
+    """The real dialogs must use the shared teardown, not a per-dialog list."""
+    from streamkeep.ui.clip_dialog import ClipDialog
+    from streamkeep.ui.recover_dialog import RecoverDialog
+    from streamkeep.ui.worker_teardown import WorkerOwnerMixin
+
+    for dialog_class in (ClipDialog, RecoverDialog):
+        assert issubclass(dialog_class, WorkerOwnerMixin), (
+            f"{dialog_class.__name__} owns QThreads and must join them on "
+            "every exit path"
+        )
+
+
+def test_every_dialog_that_owns_a_qthread_uses_the_mixin():
+    """Derived, not restated: a new thread-owning dialog fails this test.
+
+    A hand-kept list is the defect this pattern already replaced once, so the
+    set of dialogs is discovered from the source rather than enumerated here.
+    """
+    import ast
+    from pathlib import Path
+
+    import streamkeep.ui as ui_package
+    from streamkeep.ui.worker_teardown import WorkerOwnerMixin
+
+    ui_dir = Path(ui_package.__file__).parent
+    offenders = []
+    for path in sorted(ui_dir.glob("*_dialog.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        starts_worker = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "start"
+            and isinstance(node.func.value, ast.Attribute)
+            and "worker" in node.func.value.attr.lower()
+            for node in ast.walk(tree)
+        )
+        if not starts_worker:
+            continue
+        module = __import__(
+            f"streamkeep.ui.{path.stem}", fromlist=["*"],
+        )
+        classes = [
+            obj for name, obj in vars(module).items()
+            if isinstance(obj, type) and obj.__module__ == module.__name__
+            and name.endswith("Dialog")
+        ]
+        for cls in classes:
+            if not issubclass(cls, WorkerOwnerMixin):
+                offenders.append(f"{path.name}:{cls.__name__}")
+    assert not offenders, (
+        "these dialogs start workers but do not inherit WorkerOwnerMixin: "
+        + ", ".join(offenders)
+    )

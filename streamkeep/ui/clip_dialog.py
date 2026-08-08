@@ -34,6 +34,7 @@ from ..i18n import TranslatableDialog
 from ..postprocess import ClipWorker, HighlightWorker, ThumbWorker, probe_duration
 from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
+from .worker_teardown import WorkerOwnerMixin
 from .widgets import (
     bind_label,
     configure_accessibility,
@@ -607,7 +608,7 @@ class WaveformWidget(QWidget):
         super().keyPressEvent(event)
 
 
-class ClipDialog(TranslatableDialog):
+class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
     """Modal dialog that runs a ClipWorker with a visual scrubber."""
 
     def __init__(self, parent, source_path, *, default_end=None):
@@ -1500,16 +1501,11 @@ class ClipDialog(TranslatableDialog):
             return
         self.accept()
 
-    def reject(self):
-        for w in (self._worker, self._thumb_worker, self._preview_worker,
-                  self._waveform_worker, self._scene_worker):
-            try:
-                if w is not None and w.isRunning():
-                    w.cancel() if hasattr(w, "cancel") else None
-                    w.wait(1000)
-            except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
-        super().reject()
+    # Teardown is inherited from WorkerOwnerMixin, which hooks ``done`` -- the
+    # funnel both accept() and reject() route through. The previous
+    # reject()-only join left the waveform, scene, thumbnail and preview
+    # workers running when the dialog was accepted, and the main window's sweep
+    # cannot see a dialog's threads (V186).
 
 
 class _PreviewWorker(QThread):

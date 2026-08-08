@@ -73,38 +73,6 @@ NATIVE_PROXY = ""
 _LOGGER = logging.getLogger(__name__)
 
 
-def _stop_worker(
-    worker,
-    timeout=1500,
-    *,
-    cancel=False,
-    terminate_timeout=0,
-    label="worker",
-):
-    """Stop one Qt worker and report failures instead of hiding them."""
-    if worker is None:
-        return True
-    try:
-        if not worker.isRunning():
-            return True
-        stop = getattr(worker, "cancel", None) if cancel else None
-        if not callable(stop):
-            stop = getattr(worker, "requestInterruption", None)
-        if callable(stop):
-            stop()
-        if worker.wait(max(0, int(timeout))):
-            return True
-        if terminate_timeout:
-            terminate = getattr(worker, "terminate", None)
-            if callable(terminate):
-                terminate()
-            return bool(worker.wait(max(0, int(terminate_timeout))))
-        return False
-    except Exception as error:
-        _LOGGER.warning("[SHUTDOWN] Could not stop %s: %s", label, error)
-        return False
-
-
 class _HealthCheckWorker(QThread):
     """Run the persistent health probes away from the Qt event thread."""
 
@@ -243,6 +211,7 @@ def _status_icon(color_key="green"):
 # Imported here under legacy underscored names so the method bodies below
 # (which still use `self._make_field_block(...)` etc. in 50+ places) keep
 # working until a future pass switches each call site.
+from .worker_teardown import iter_owned_workers, stop_worker as _stop_worker
 from .widgets import (
     TAB_STYLE,
     configure_accessibility,
@@ -1473,32 +1442,11 @@ class StreamKeep(
     def _owned_workers(self):
         """Yield ``(label, worker)`` for every running QThread this window owns.
 
-        Discovered by inspecting the window's own attributes rather than by
-        registration, so a worker added later is covered the day its attribute
-        is assigned instead of the day someone remembers to add it to a
-        teardown list. Dict and list containers are searched one level deep,
-        which is how the per-job worker maps are held.
+        Delegates to the shared discovery so dialogs get the same behaviour --
+        the window sweep could not see a dialog's workers, which is how four
+        live threads survived accepting the clip dialog (V186).
         """
-        seen = set()
-
-        def collect(label, value):
-            if isinstance(value, QThread):
-                if id(value) in seen:
-                    return
-                seen.add(id(value))
-                if value.isRunning():
-                    yield label, value
-                return
-            if isinstance(value, dict):
-                for key, item in list(value.items()):
-                    yield from collect(f"{label}[{key}]", item)
-                return
-            if isinstance(value, (list, tuple, set)):
-                for index, item in enumerate(value):
-                    yield from collect(f"{label}[{index}]", item)
-
-        for name, value in list(vars(self).items()):
-            yield from collect(name.lstrip("_") or name, value)
+        return iter_owned_workers(self)
 
     def _resume_queue_or_report(self):
         """Resume the queue, saying so when it cannot be resumed.

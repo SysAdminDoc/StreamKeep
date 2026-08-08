@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from ..theme import CAT
 from ..i18n import TranslatableDialog
+from .worker_teardown import WorkerOwnerMixin
 from .widgets import (
     bind_label,
     configure_accessibility,
@@ -49,7 +50,7 @@ class _RecoverWorker(QThread):
         self.done.emit(results)
 
 
-class RecoverDialog(TranslatableDialog):
+class RecoverDialog(WorkerOwnerMixin, TranslatableDialog):
     """VOD recovery dialog."""
 
     download_requested = pyqtSignal(str)  # M3U8 URL
@@ -328,6 +329,8 @@ class RecoverDialog(TranslatableDialog):
                 pass  # safe: best-effort fallback; preserve the primary operation
             self._worker.quit()
             self._worker.wait(2000)
+        # WorkerOwnerMixin.done sweeps whatever is left; the disconnects above
+        # are an ordering refinement, not the whole teardown (V186).
         super().reject()
 
     def _on_download(self, url):

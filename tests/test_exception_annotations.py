@@ -54,7 +54,6 @@ _BOILERPLATE_BUDGET = {
     "streamkeep/scrape.py": 9,
     "streamkeep/secrets.py": 2,
     "streamkeep/server/_legacy.py": 1,
-    "streamkeep/ui/clip_dialog.py": 1,
     "streamkeep/ui/intelligence_dialog.py": 1,
     "streamkeep/ui/main_window.py": 14,
     "streamkeep/ui/main_window_jobs.py": 2,
