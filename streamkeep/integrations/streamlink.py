@@ -390,6 +390,7 @@ def remux_capture(raw_path, output_path, *, ffmpeg="ffmpeg") -> bool:
         result = subprocess.run(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, check=False, creationflags=_CREATE_NO_WINDOW,
+            encoding="utf-8", errors="replace",
         )
     except (OSError, ValueError):
         return False

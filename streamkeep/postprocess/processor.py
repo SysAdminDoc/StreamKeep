@@ -206,6 +206,7 @@ class PostProcessor:
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=3600,
                 creationflags=_CREATE_NO_WINDOW,
+                encoding="utf-8", errors="replace",
             )
             if r.returncode == 0:
                 if log_fn:
@@ -444,6 +445,7 @@ class PostProcessor:
                 ],
                 capture_output=True, text=True, timeout=15,
                 creationflags=_CREATE_NO_WINDOW,
+                encoding="utf-8", errors="replace",
             )
             dur = float((r.stdout or "0").strip() or 0)
         except Exception:
@@ -522,6 +524,7 @@ class PostProcessor:
             r = subprocess.run(
                 detect_cmd, capture_output=True, text=True, timeout=600,
                 creationflags=_CREATE_NO_WINDOW,
+                encoding="utf-8", errors="replace",
             )
         except (
             CapabilityUnavailableError, FileNotFoundError,
@@ -556,6 +559,7 @@ class PostProcessor:
                  "-of", "default=noprint_wrappers=1:nokey=1", src],
                 capture_output=True, text=True, timeout=15,
                 creationflags=_CREATE_NO_WINDOW,
+                encoding="utf-8", errors="replace",
             )
             total_dur = float((dur_r.stdout or "0").strip() or 0)
         except Exception:
@@ -591,7 +595,13 @@ class PostProcessor:
                 if log_fn:
                     log_fn("[POST] No valid segments extracted — silence removal aborted.")
                 return
-            with open(concat_path, "w") as f:
+            # ffmpeg's concat demuxer expects UTF-8, and these lines are
+            # media paths: the locale encoding both refuses to encode a
+            # non-cp1252 filename and mis-encodes the ones it accepts
+            # (V218). The two other concat writers already do this.
+            with open(
+                concat_path, "w", encoding="utf-8", newline="\n",
+            ) as f:
                 for sf in seg_files:
                     escaped = sf.replace("'", "'\\''")
                     f.write(f"file '{escaped}'\n")

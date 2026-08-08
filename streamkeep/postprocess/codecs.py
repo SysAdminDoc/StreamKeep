@@ -63,6 +63,7 @@ def detect_ffmpeg_encoders():
             [resolve_tool_command("ffmpeg"), "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=15,
             creationflags=_CREATE_NO_WINDOW,
+            encoding="utf-8", errors="replace",
         )
         encoders = set()
         for line in r.stdout.splitlines():
@@ -92,6 +93,7 @@ def _probe_hw_encoder(encoder_name):
             ],
             capture_output=True, text=True, timeout=10,
             creationflags=_CREATE_NO_WINDOW,
+            encoding="utf-8", errors="replace",
         )
         return r.returncode == 0
     except Exception:

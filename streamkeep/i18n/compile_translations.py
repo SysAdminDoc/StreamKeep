@@ -57,6 +57,7 @@ def compile_all():
         r = subprocess.run(
             [lrelease, str(ts), "-qm", str(qm)],
             capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace",
         )
         if r.returncode != 0:
             print(f"    FAILED: {r.stderr.strip()}")

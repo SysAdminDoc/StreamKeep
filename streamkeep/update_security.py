@@ -161,6 +161,7 @@ def get_authenticode_info(path):
             creationflags=creationflags,
             env=environment,
             check=False,
+            encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise UpdateSecurityError(f"Windows signature verification failed: {exc}") from exc

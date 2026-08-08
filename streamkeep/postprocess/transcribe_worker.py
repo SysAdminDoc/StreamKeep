@@ -346,6 +346,7 @@ class TranscribeWorker(QThread):
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
                 creationflags=_CREATE_NO_WINDOW, timeout=60 * 60,
+                encoding="utf-8", errors="replace",
             )
             if proc.returncode != 0:
                 raise RuntimeError(proc.stderr.strip()[:200] or "non-zero exit")
@@ -404,6 +405,7 @@ class TranscribeWorker(QThread):
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
                 creationflags=_CREATE_NO_WINDOW, timeout=60 * 60,
+                encoding="utf-8", errors="replace",
             )
             if proc.returncode != 0:
                 raise RuntimeError(

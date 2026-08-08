@@ -104,7 +104,9 @@ def _sign_asset(path, pfx_path, password):
     if password:
         command.extend(["/p", password])
     command.append(str(path))
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
+    )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "unknown signing error").strip()
         raise RuntimeError(f"Authenticode signing failed for {path.name}: {detail}")

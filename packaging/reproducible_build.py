@@ -61,6 +61,7 @@ def _run(command, *, env=None, capture=False):
         text=True,
         capture_output=capture,
         creationflags=CREATE_NO_WINDOW,
+        encoding="utf-8", errors="replace",
     )
 
 

@@ -59,6 +59,7 @@ def version():
             ["auto-editor", "-V"],
             capture_output=True, text=True, timeout=10,
             creationflags=_CREATE_NO_WINDOW,
+            encoding="utf-8", errors="replace",
         )
         return (r.stdout or "").strip()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -96,6 +97,7 @@ def export_timeline(src, method="audio", threshold="4%", margin="0.2s",
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=600,
             creationflags=_CREATE_NO_WINDOW,
+            encoding="utf-8", errors="replace",
         )
         if r.returncode != 0:
             if log_fn:
@@ -196,7 +198,11 @@ def remove_silence(src, dst, method="audio", threshold="4%", margin="0.2s",
             return False
 
         concat_path = os.path.join(tmpdir, "concat.txt")
-        with open(concat_path, "w") as f:
+        # ffmpeg's concat demuxer expects UTF-8, and these lines are media
+        # paths: the locale encoding both refuses to encode a non-cp1252
+        # filename and mis-encodes the ones it accepts (V218). The other
+        # concat writers already do this.
+        with open(concat_path, "w", encoding="utf-8", newline="\n") as f:
             for sf in seg_files:
                 escaped = sf.replace("'", "'\\''")
                 f.write(f"file '{escaped}'\n")

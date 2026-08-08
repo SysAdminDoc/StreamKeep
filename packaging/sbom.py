@@ -51,6 +51,7 @@ def _installed_packages():
     result = subprocess.run(
         [sys.executable, "-m", "pip", "list", "--format=json"],
         capture_output=True, text=True, timeout=30,
+        encoding="utf-8", errors="replace",
     )
     if result.returncode != 0:
         return []
@@ -195,6 +196,7 @@ def run_advisory_audit(requirements=None):
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=300,
+            encoding="utf-8", errors="replace",
         )
     except FileNotFoundError:
         return False, "pip-audit not installed (pip install pip-audit)"
