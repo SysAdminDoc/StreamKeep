@@ -8,6 +8,7 @@ could not proceed simply did nothing at all (V196).
 """
 
 import pytest
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QLabel, QWidget
 
 from streamkeep.ui.widgets import ToastOverlay
@@ -44,6 +45,15 @@ def window(qt_application):
         yield win
     finally:
         win.close()
+        win.deleteLater()
+        # Closing a QMainWindow only queues its children for deletion.  This
+        # module deliberately constructs several real windows, so leave each
+        # one fully retired before the next test builds another QApplication
+        # subtree; otherwise Qt can tear down a hidden window underneath a
+        # later widget and abort the interpreter with an access violation.
+        for _ in range(3):
+            qt_application.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            qt_application.processEvents()
 
 
 # ── the surface itself ───────────────────────────────────────────────

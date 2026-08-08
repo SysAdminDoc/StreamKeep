@@ -99,9 +99,7 @@ def _retire_qt_objects(app):
     intermittent and load-dependent because the load is only what makes the
     thread slow enough to still be running.
     """
-    for widget in app.topLevelWidgets():
-        widget.close()
-    app.processEvents()
+    _retire_qt_widgets(app)
 
     gc.collect()
     for obj in gc.get_objects():
@@ -122,11 +120,32 @@ def _retire_qt_objects(app):
         except RuntimeError:  # C++ side already gone
             pass
 
-    for widget in app.topLevelWidgets():
-        widget.deleteLater()
-    for _ in range(5):
+    _retire_qt_widgets(app)
+
+
+def _retire_qt_widgets(app):
+    """Close and destroy top-level test widgets before they can accumulate."""
+    for widget in list(app.topLevelWidgets()):
+        try:
+            widget.close()
+        except RuntimeError:  # C++ object already retired
+            continue
+    app.processEvents()
+    for widget in list(app.topLevelWidgets()):
+        try:
+            widget.deleteLater()
+        except RuntimeError:
+            continue
+    for _ in range(3):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def _retire_test_widgets(qt_application):
+    """Keep each Qt test from handing hidden top-level widgets to the next."""
+    yield
+    _retire_qt_widgets(qt_application)
 
 
 @pytest.fixture(autouse=True)

@@ -23,6 +23,9 @@ The seven desktop routes now share one archive-control-room visual system.
   same data-pane treatment as the rest of the app.
 - The Windows bundle now includes the local web UI asset required by packaged
   startup and artifact-smoke checks.
+- Qt test teardown now retires top-level widgets after each test, eliminating
+  the V227 Windows access violation; the reproducer passed 10 consecutive
+  times and the full suite completed with 2,223 passed and 1 skipped.
 
 ## [4.57.0] - 2026-08-08
 
