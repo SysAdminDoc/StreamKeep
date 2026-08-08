@@ -216,3 +216,83 @@ def test_monitor_media_server_layout_override_survives_sqlite_round_trip(tmp_pat
         })
         rows = db.load_monitor_channels()
     assert rows[0]["media_server_layout"] == "flat"
+
+
+def test_the_settings_form_preserves_media_server_keys_it_has_no_widget_for():
+    """A Settings save must not drop a schema-allowed key the form cannot edit.
+
+    ``upload_profile_id``, ``upload_after_import`` and ``sidecar_profile`` are
+    set through the REST API or a config import. The form used to rebuild the
+    whole section from its widgets, so saving Settings destroyed them (V182).
+
+    The expected set is derived from ``config.MEDIA_SERVER_KEYS`` rather than
+    restated here, so a key added to the schema without a widget fails this
+    test instead of being silently dropped.
+    """
+    from streamkeep.ui.tabs.settings_preferences import (
+        SettingsPreferencesMixin,
+    )
+
+    persisted = {
+        "enabled": True,
+        "server_type": "plex",
+        "url": "https://plex.invalid",
+        "token": "tok",
+        "library_id": "3",
+        "library_path": "/srv/media",
+        "layout_mode": "flat",
+        "portable_m3u": True,
+        "native_playlist": False,
+        "playlist_name": "Keep",
+        "watched_user_id": "u1",
+        "watched_user_name": "Alex",
+        # No widget exists for these three.
+        "sidecar_profile": "jellyfin",
+        "upload_profile_id": "profile-42",
+        "upload_after_import": True,
+    }
+    assert set(persisted) == set(config.MEDIA_SERVER_KEYS), (
+        "fixture must cover every schema key so the diff below is meaningful"
+    )
+
+    class _Widget:
+        def __init__(self, value):
+            self._value = value
+
+        def isChecked(self):
+            return bool(self._value)
+
+        def text(self):
+            return str(self._value)
+
+        def currentIndex(self):
+            return 0
+
+        def currentData(self):
+            return self._value
+
+        def currentText(self):
+            return str(self._value)
+
+    form = SettingsPreferencesMixin.__new__(SettingsPreferencesMixin)
+    form._config = {"media_server": dict(persisted)}
+    form.ms_enable_check = _Widget(True)
+    form.ms_type_combo = _Widget(media_server.SERVER_TYPES[0])
+    form.ms_url_input = _Widget("https://plex.invalid")
+    form.ms_token_input = _Widget("tok")
+    form.ms_library_id_input = _Widget("3")
+    form.ms_path_input = _Widget("/srv/media")
+    form.ms_layout_combo = _Widget("flat")
+    form.ms_portable_check = _Widget(True)
+    form.ms_native_playlist_check = _Widget(False)
+    form.ms_playlist_name_input = _Widget("Keep")
+    form.ms_users_combo = _Widget("u1")
+
+    produced = SettingsPreferencesMixin._media_server_form_config(form)
+
+    dropped = set(persisted) - set(produced)
+    assert not dropped, f"a Settings save dropped: {sorted(dropped)}"
+    for key in ("sidecar_profile", "upload_profile_id", "upload_after_import"):
+        assert produced[key] == persisted[key], f"{key} was not preserved"
+    # The result must still satisfy the schema it will be persisted under.
+    config._validate_media_server_schema(produced)

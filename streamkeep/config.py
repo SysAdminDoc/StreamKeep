@@ -509,15 +509,23 @@ def _validate_proxy_pool_schema(entries):
             raise ConfigImportError(f"proxy_pool[{index}].label must be a string")
 
 
+#: Every key the ``media_server`` config section may hold. Named at module
+#: scope rather than inside the validator so the Settings form can be checked
+#: against it: three of these keys have no widget and are set only through the
+#: REST API or a config import, and a form that rebuilds the section from its
+#: widgets silently dropped them (V182).
+MEDIA_SERVER_KEYS = frozenset({
+    "enabled", "server_type", "url", "token", "library_id", "library_path",
+    "layout_mode", "portable_m3u", "native_playlist", "playlist_name",
+    "sidecar_profile", "upload_profile_id", "upload_after_import",
+    "watched_user_id", "watched_user_name",
+})
+
+
 def _validate_media_server_schema(value):
     if not value:
         return
-    allowed = {
-        "enabled", "server_type", "url", "token", "library_id", "library_path",
-        "layout_mode", "portable_m3u", "native_playlist", "playlist_name",
-        "sidecar_profile", "upload_profile_id", "upload_after_import",
-        "watched_user_id", "watched_user_name",
-    }
+    allowed = MEDIA_SERVER_KEYS
     unknown = set(value) - allowed
     if unknown:
         raise ConfigImportError(

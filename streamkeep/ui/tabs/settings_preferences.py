@@ -225,9 +225,21 @@ class SettingsPreferencesMixin:
         )
 
     def _media_server_form_config(self):
-        """Read the media-server controls without mutating persisted config."""
+        """Read the media-server controls without mutating persisted config.
+
+        Starts from the persisted section and overlays only the keys this form
+        owns. ``upload_profile_id``, ``upload_after_import`` and
+        ``sidecar_profile`` are schema-allowed but have no widget here -- they
+        are set through the REST API or a config import -- and rebuilding the
+        section from widgets alone destroyed them on every Settings save
+        (V182). ``tests/test_media_server.py`` derives the expected key set
+        from ``config.MEDIA_SERVER_KEYS`` so a key added to the schema without
+        a widget fails loudly instead of being dropped.
+        """
         from ...integrations.media_server import SERVER_TYPES
-        config = {
+        persisted = self._config.get("media_server")
+        config = dict(persisted) if isinstance(persisted, dict) else {}
+        config.update({
             "enabled": bool(self.ms_enable_check.isChecked()),
             "server_type": SERVER_TYPES[self.ms_type_combo.currentIndex()],
             "url": self.ms_url_input.text().strip(),
@@ -238,7 +250,7 @@ class SettingsPreferencesMixin:
             "portable_m3u": bool(self.ms_portable_check.isChecked()),
             "native_playlist": bool(self.ms_native_playlist_check.isChecked()),
             "playlist_name": self.ms_playlist_name_input.text().strip() or "StreamKeep",
-        }
+        })
         selected = self.ms_users_combo.currentData()
         config["watched_user_id"] = str(selected or "")
         config["watched_user_name"] = (
