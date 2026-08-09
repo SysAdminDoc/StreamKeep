@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from streamkeep.dash import (
     parse_mpd_xml,
     preflight_dash_manifest,
@@ -44,6 +46,15 @@ def _resolved_addresses(host, _port):
         return (ipaddress.ip_address(host),)
     except ValueError:
         return (ipaddress.ip_address("93.184.216.34"),)
+
+
+@pytest.fixture(autouse=True)
+def _public_fixture_dns(monkeypatch):
+    """Keep parser URL-policy tests deterministic and offline."""
+    monkeypatch.setattr(
+        "streamkeep.net_guard.resolve_host_addresses",
+        _resolved_addresses,
+    )
 
 
 class DashStaticMPDTests(unittest.TestCase):
@@ -407,6 +418,20 @@ class HLSMasterPlaylistTests(unittest.TestCase):
 
 
 class HLSManifestPolicyTests(unittest.TestCase):
+    def test_direct_hls_parsers_reject_unsafe_child_uris(self):
+        master = (
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n"
+            "file:///tmp/segment.m3u8\n"
+        )
+        with self.assertRaises(RemoteURLPolicyError):
+            parse_hls_master(master, "https://origin.example.com/master.m3u8")
+
+        media = "#EXTM3U\n#EXTINF:4,\nhttp://127.0.0.1/segment.ts\n"
+        with self.assertRaises(RemoteURLPolicyError):
+            parse_hls_media_playlist(
+                media, "https://origin.example.com/live/media.m3u8"
+            )
+
     def test_media_import_and_queryparam_variables_expand_segments(self):
         imported = (
             "#EXTM3U\n"

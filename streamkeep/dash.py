@@ -167,21 +167,31 @@ def preflight_dash_manifest(
     return manifest_url
 
 
-def parse_mpd(url, log_fn=None):
+def parse_mpd(url, log_fn=None, *, allow_private_network=False):
     """Fetch and parse a DASH MPD manifest.
 
     Returns a list of ``QualityInfo`` entries, or an empty list on error.
     """
-    body = curl(url, timeout=15)
+    manifest_url = validate_remote_url(
+        url, allow_private_network=allow_private_network,
+    ).url
+    body = curl(manifest_url, timeout=15)
     if not body:
         if log_fn:
             log_fn("[DASH] Failed to fetch MPD manifest.")
         return []
 
-    return parse_mpd_xml(body, url, log_fn)
+    return parse_mpd_xml(
+        body,
+        manifest_url,
+        log_fn,
+        allow_private_network=allow_private_network,
+    )
 
 
-def parse_mpd_xml(xml_text, base_url, log_fn=None):
+def parse_mpd_xml(
+    xml_text, base_url, log_fn=None, *, allow_private_network=False,
+):
     """Parse MPD XML text into ``QualityInfo`` entries."""
     try:
         root = ET.fromstring(xml_text)
@@ -189,6 +199,19 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
         if log_fn:
             log_fn(f"[DASH] MPD parse error: {e}")
         return []
+
+    base_url = validate_remote_url(
+        base_url, allow_private_network=allow_private_network,
+    ).url
+    # Validate the complete URI graph before any parser-specific URL is
+    # materialized.  The individual resolvers below repeat the check at each
+    # construction point so this function remains safe if the graph walker
+    # and parser support diverge in the future.
+    validate_dash_manifest(
+        xml_text,
+        base_url,
+        allow_private_network=allow_private_network,
+    )
 
     # Detect namespace — some manifests don't declare it
     ns = ""
@@ -207,8 +230,15 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
     )
 
     qualities = []
-    manifest_dir = urllib.parse.urljoin(base_url, "./")
-    root_base = _child_base_url(root, manifest_dir, ns)
+    manifest_dir = _resolve_dash_url(
+        "./", base_url, allow_private_network=allow_private_network,
+    )
+    root_base = _child_base_url(
+        root,
+        manifest_dir,
+        ns,
+        allow_private_network=allow_private_network,
+    )
     fmt = "dash-live" if is_dynamic else "dash"
     root_template = _find(root, "SegmentTemplate", ns)
     root_list = _find(root, "SegmentList", ns)
@@ -217,7 +247,12 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
 
     for period_index, period in enumerate(periods):
         period_id = period.attrib.get("id", "") or f"period-{period_index + 1}"
-        period_base = _child_base_url(period, root_base, ns)
+        period_base = _child_base_url(
+            period,
+            root_base,
+            ns,
+            allow_private_network=allow_private_network,
+        )
         period_duration_secs = _parse_duration(
             period.attrib.get("duration", "")
         )
@@ -242,7 +277,12 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 if log_fn:
                     log_fn("[DASH] Skipping DRM-protected AdaptationSet.")
                 continue
-            adapt_base = _child_base_url(adapt_set, period_base, ns)
+            adapt_base = _child_base_url(
+                adapt_set,
+                period_base,
+                ns,
+                allow_private_network=allow_private_network,
+            )
             adapt_mime = adapt_set.attrib.get("mimeType", "")
             adapt_type = adapt_set.attrib.get("contentType", "")
             adapt_lang = adapt_set.attrib.get("lang", "")
@@ -279,7 +319,12 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 stream_index = kind_indexes[kind]
                 kind_indexes[kind] += 1
 
-                rep_base = _child_base_url(rep, adapt_base, ns)
+                rep_base = _child_base_url(
+                    rep,
+                    adapt_base,
+                    ns,
+                    allow_private_network=allow_private_network,
+                )
                 seg_template = _first_element(
                     _find(rep, "SegmentTemplate", ns), adapt_template
                 )
@@ -314,6 +359,7 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                             bandwidth=bandwidth,
                             period_duration_units=period_duration_units,
                             ns=ns,
+                            allow_private_network=allow_private_network,
                         )
                     initialization_template = seg_template.attrib.get(
                         "initialization", ""
@@ -333,6 +379,7 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                             number=start_number,
                             time=0,
                             bandwidth=bandwidth,
+                            allow_private_network=allow_private_network,
                         )
                 if seg_list is not None:
                     (
@@ -346,6 +393,7 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                         representation_id=rid,
                         bandwidth=bandwidth,
                         ns=ns,
+                        allow_private_network=allow_private_network,
                     )
                 if seg_base is not None:
                     timescale = max(
@@ -363,7 +411,11 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                             initialization.attrib.get("sourceURL", "") or ""
                         )
                         initialization_url = (
-                            urllib.parse.urljoin(rep_base, source_url)
+                            _resolve_dash_url(
+                                source_url,
+                                rep_base,
+                                allow_private_network=allow_private_network,
+                            )
                             if source_url else rep_base
                         )
                         initialization_range = str(
@@ -402,8 +454,10 @@ def parse_mpd_xml(xml_text, base_url, log_fn=None):
                 elif segmented:
                     rep_url = base_url
                 elif has_rep_base:
-                    rep_url = urllib.parse.urljoin(
-                        adapt_base, rep_base_el.text.strip()
+                    rep_url = _resolve_dash_url(
+                        rep_base_el.text.strip(),
+                        adapt_base,
+                        allow_private_network=allow_private_network,
                     )
                 elif adapt_base != period_base:
                     rep_url = adapt_base
@@ -533,11 +587,29 @@ def _first_element(*elements):
     return None
 
 
-def _child_base_url(element, parent_url, ns):
+def _resolve_dash_url(value, base_url, *, allow_private_network=False):
+    """Resolve one DASH URI only after it crosses the remote URL policy."""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    return validate_remote_url(
+        value,
+        base_url=base_url,
+        allow_private_network=allow_private_network,
+    ).url
+
+
+def _child_base_url(
+    element, parent_url, ns, *, allow_private_network=False,
+):
     base_el = _find(element, "BaseURL", ns)
     if base_el is None or not (base_el.text or "").strip():
         return parent_url
-    return urllib.parse.urljoin(parent_url, base_el.text.strip())
+    return _resolve_dash_url(
+        base_el.text,
+        parent_url,
+        allow_private_network=allow_private_network,
+    )
 
 
 def _parse_int_value(value, default=None):
@@ -585,7 +657,14 @@ def _substitute_segment_template(
 
 
 def _resolve_segment_template(
-    template, base_url, *, representation_id, number, time, bandwidth,
+    template,
+    base_url,
+    *,
+    representation_id,
+    number,
+    time,
+    bandwidth,
+    allow_private_network=False,
 ):
     value = _substitute_segment_template(
         template,
@@ -594,7 +673,11 @@ def _resolve_segment_template(
         time=time,
         bandwidth=bandwidth,
     )
-    return urllib.parse.urljoin(base_url, value) if value else ""
+    return _resolve_dash_url(
+        value,
+        base_url,
+        allow_private_network=allow_private_network,
+    )
 
 
 def _expand_segment_timeline(
@@ -607,6 +690,7 @@ def _expand_segment_timeline(
     period_duration_units=None,
     ns="",
     max_segments=_DASH_MAX_TIMELINE_SEGMENTS,
+    allow_private_network=False,
 ):
     """Expand ``SegmentTimeline/S`` rows into a bounded resolved snapshot."""
     if template is None or timeline is None:
@@ -665,6 +749,7 @@ def _expand_segment_timeline(
                     number=number,
                     time=start,
                     bandwidth=bandwidth,
+                    allow_private_network=allow_private_network,
                 ),
                 number=number,
                 start=start,
@@ -678,7 +763,13 @@ def _expand_segment_timeline(
 
 
 def _expand_segment_list(
-    segment_list, base_url, *, representation_id, bandwidth, ns="",
+    segment_list,
+    base_url,
+    *,
+    representation_id,
+    bandwidth,
+    ns="",
+    allow_private_network=False,
 ):
     """Resolve explicit SegmentList rows into the DASH segment model."""
     del representation_id, bandwidth  # reserved for future template parity
@@ -701,7 +792,12 @@ def _expand_segment_list(
     if initialization is not None:
         source_url = str(initialization.attrib.get("sourceURL", "") or "")
         initialization_url = (
-            urllib.parse.urljoin(base_url, source_url) if source_url else base_url
+            _resolve_dash_url(
+                source_url,
+                base_url,
+                allow_private_network=allow_private_network,
+            )
+            if source_url else base_url
         )
         initialization_range = str(
             initialization.attrib.get("range", "") or ""
@@ -713,7 +809,11 @@ def _expand_segment_list(
             continue
         number = start_number + index
         segments.append(DASHSegment(
-            uri=urllib.parse.urljoin(base_url, media),
+            uri=_resolve_dash_url(
+                media,
+                base_url,
+                allow_private_network=allow_private_network,
+            ),
             number=number,
             start=index * duration,
             duration=duration,

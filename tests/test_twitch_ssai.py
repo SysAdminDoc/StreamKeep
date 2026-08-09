@@ -1,7 +1,10 @@
+import ipaddress
 from pathlib import Path
 import time
 from types import SimpleNamespace
 from unittest import mock
+
+import pytest
 
 from streamkeep.twitch_ssai import (
     TwitchSSAIPlaylistRefresher,
@@ -15,6 +18,20 @@ FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
 
 def _fixture(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _public_fixture_dns(monkeypatch):
+    """Keep parser URL-policy tests deterministic and offline."""
+    def resolve(host, _port):
+        try:
+            return (ipaddress.ip_address(host),)
+        except ValueError:
+            return (ipaddress.ip_address("93.184.216.34"),)
+
+    monkeypatch.setattr(
+        "streamkeep.net_guard.resolve_host_addresses", resolve,
+    )
 
 
 def test_stitched_ad_daterange_removes_ads_and_keeps_resume_discontinuity():

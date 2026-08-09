@@ -10,6 +10,7 @@ PyQt6 (the test VM lacks it).
 
 import json
 import importlib
+import ipaddress
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -61,6 +62,13 @@ _REDDIT = "streamkeep.extractors.reddit"
 _AUDIUS = "streamkeep.extractors.audius"
 _PODCAST = "streamkeep.extractors.podcast"
 _YTDLP = "streamkeep.extractors.ytdlp"
+
+
+def _public_fixture_dns(host, _port):
+    try:
+        return (ipaddress.ip_address(host),)
+    except ValueError:
+        return (ipaddress.ip_address("93.184.216.34"),)
 
 
 # ===================================================================
@@ -158,6 +166,12 @@ class TestKickExtractorResolve(unittest.TestCase):
     """
 
     def setUp(self):
+        dns = patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_public_fixture_dns,
+        )
+        dns.start()
+        self.addCleanup(dns.stop)
         self.ext = KickExtractor()
         playback = patch(f"{_KICK}.curl_post_json", return_value=None)
         self.mock_playback = playback.start()
@@ -393,6 +407,12 @@ class TestKickReworkedApi(unittest.TestCase):
     PERMALINK = f"https://kick.com/xqc/videos/{VOD_ID}"
 
     def setUp(self):
+        dns = patch(
+            "streamkeep.net_guard.resolve_host_addresses",
+            side_effect=_public_fixture_dns,
+        )
+        dns.start()
+        self.addCleanup(dns.stop)
         self.ext = KickExtractor()
 
     def _playback(self, vod_url="https://vod.kick.com/master.m3u8"):

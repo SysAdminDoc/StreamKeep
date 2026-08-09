@@ -153,6 +153,20 @@ def test_non_http_scheme_and_credentials_blocked():
     assert "credential" in reason.lower()
 
 
+def test_manifest_child_url_rejects_non_http_scheme_before_dns(monkeypatch):
+    resolver = mock.Mock()
+    monkeypatch.setattr(net_guard, "resolve_host_addresses", resolver)
+
+    with pytest.raises(
+        net_guard.RemoteURLPolicyError, match=r"HTTP\(S\)",
+    ):
+        net_guard.validate_remote_url(
+            "file:///tmp/segment.m4s",
+            base_url="https://cdn.example.com/main.mpd",
+        )
+    resolver.assert_not_called()
+
+
 def test_dns_failure_is_blocked(monkeypatch):
     monkeypatch.setattr(
         net_guard, "resolve_host_addresses",

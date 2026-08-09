@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from .models import HLSMediaPlaylist, HLSSegment, MediaTrackInfo, QualityInfo
 from .net_guard import RemoteURLPolicyError, validate_remote_url
@@ -52,9 +52,32 @@ def _parse_attributes(value):
     return attrs
 
 
-def _resolve(base_url, value):
+def _validated_hls_base_url(base_url, *, allow_private_network=False):
+    """Normalize a remote playlist base before resolving child URIs."""
+    if not str(base_url or "").strip():
+        return ""
+    return validate_remote_url(
+        base_url, allow_private_network=allow_private_network,
+    ).url
+
+
+def _resolve(base_url, value, *, allow_private_network=False):
+    """Resolve one HLS URI only after it crosses the remote URL policy."""
     value = str(value or "").strip()
-    return urljoin(base_url, value) if value else ""
+    if not value:
+        return ""
+    if not base_url:
+        parsed = urlsplit(value)
+        if parsed.scheme or value.startswith("//"):
+            return validate_remote_url(
+                value, allow_private_network=allow_private_network,
+            ).url
+        return value
+    return validate_remote_url(
+        value,
+        base_url=base_url,
+        allow_private_network=allow_private_network,
+    ).url
 
 
 def _hls_playlist_kind(body):
@@ -531,15 +554,18 @@ def preflight_hls_manifest_tree(
     return tuple(seen)
 
 
-def parse_hls_master(body, base_url):
+def parse_hls_master(body, base_url, *, allow_private_network=False):
     """Parse HLS variants with their alternate audio/subtitle renditions."""
+    base_url = _validated_hls_base_url(
+        base_url, allow_private_network=allow_private_network,
+    )
     body, _variables = _expand_hls_variables(
         body, base_url, playlist_kind="master",
     )
     qualities = []
-    # urljoin expects a resource URL, not a directory. If base_url looks
-    # like a directory (no trailing file), append a / so relative variants
-    # resolve under it instead of replacing the last segment.
+    # If base_url looks like a directory (no trailing file), append a / so
+    # relative variants resolve under it instead of replacing the last
+    # segment.
     if base_url and not base_url.endswith("/") and "/" in base_url.split("://", 1)[-1]:
         tail = base_url.rsplit("/", 1)[-1]
         if "." not in tail:
@@ -579,7 +605,11 @@ def parse_hls_master(body, base_url):
             kind=kind,
             label=label,
             language=attrs.get("LANGUAGE", ""),
-            url=_resolve(base_url, attrs.get("URI", "")),
+            url=_resolve(
+                base_url,
+                attrs.get("URI", ""),
+                allow_private_network=allow_private_network,
+            ),
             group_id=group_id,
             stream_index=stream_index if not attrs.get("URI") else 0,
             default=attrs.get("DEFAULT", "").upper() == "YES",
@@ -595,7 +625,11 @@ def parse_hls_master(body, base_url):
         if line.startswith("#EXT-X-STREAM-INF"):
             pending = _parse_attributes(line.split(":", 1)[1])
         elif pending is not None and line and not line.startswith("#"):
-            q_url = _resolve(base_url, line)
+            q_url = _resolve(
+                base_url,
+                line,
+                allow_private_network=allow_private_network,
+            )
             res = pending.get("RESOLUTION", "?")
             # BANDWIDTH is the required peak; AVERAGE-BANDWIDTH is optional.
             peak_bw = _to_int(pending.get("BANDWIDTH"))
@@ -776,6 +810,9 @@ def parse_hls_schedule_document(
     except (TypeError, ValueError):
         return HLSScheduleDocument()
 
+    base_url = _validated_hls_base_url(
+        base_url, allow_private_network=allow_private_network,
+    )
     markers = []
     references = []
     reference_seen = set()
@@ -799,7 +836,11 @@ def parse_hls_schedule_document(
             )
             if not start_date:
                 continue
-        marker = _parse_daterange(attrs, base_url)
+        marker = _parse_daterange(
+            attrs,
+            base_url,
+            allow_private_network=allow_private_network,
+        )
         if marker is None:
             continue
         if has_offset:
@@ -825,7 +866,9 @@ def parse_hls_schedule_document(
 parse_hls_daterange_schedule = parse_hls_schedule_document
 
 
-def _parse_daterange(value, base_url=""):
+def _parse_daterange(
+    value, base_url="", *, allow_private_network=False,
+):
     """Return a lossless, sidecar-ready representation of DATERANGE."""
     attrs = _normalize_daterange_attributes(value)
     if not attrs:
@@ -852,10 +895,18 @@ def _parse_daterange(value, base_url=""):
         "planned_duration": planned_duration,
         "scte35_out": _attribute_text(attrs, "SCTE35-OUT"),
         "scte35_in": _attribute_text(attrs, "SCTE35-IN"),
-        "asset_uri": _resolve(base_url, asset_uri_raw),
+        "asset_uri": _resolve(
+            base_url,
+            asset_uri_raw,
+            allow_private_network=allow_private_network,
+        ),
         "asset_uri_raw": asset_uri_raw,
         "asset_list": asset_list,
-        "x_uri": _resolve(base_url, _attribute_text(attrs, "X-URI")),
+        "x_uri": _resolve(
+            base_url,
+            _attribute_text(attrs, "X-URI"),
+            allow_private_network=allow_private_network,
+        ),
         "x_uri_raw": _attribute_text(attrs, "X-URI"),
         "is_schedule": class_name.casefold()
         == "com.apple.hls.daterange-schedule",
@@ -941,7 +992,12 @@ def merge_hls_delta_playlist(previous_playlist, current_playlist):
 
 
 def parse_hls_media_playlist(
-    body, base_url="", *, previous_playlist=None, variables=None,
+    body,
+    base_url="",
+    *,
+    previous_playlist=None,
+    variables=None,
+    allow_private_network=False,
 ):
     """Parse an HLS media (segment) playlist into a typed model.
 
@@ -957,6 +1013,9 @@ def parse_hls_media_playlist(
     vendor-specific fields.
     """
     source = str(body or "")
+    base_url = _validated_hls_base_url(
+        base_url, allow_private_network=allow_private_network,
+    )
     body, _resolved_variables = _expand_hls_variables(
         source,
         base_url,
@@ -992,6 +1051,7 @@ def parse_hls_media_playlist(
         elif line.startswith("#EXT-X-DATERANGE:"):
             marker = _parse_daterange(
                 line.split(":", 1)[1], base_url,
+                allow_private_network=allow_private_network,
             )
             if marker is not None:
                 playlist.dateranges.append(marker)
@@ -1033,7 +1093,11 @@ def parse_hls_media_playlist(
                 pending_gap = False
                 continue
             playlist.segments.append(HLSSegment(
-                uri=_resolve(base_url, line) if base_url else line,
+                uri=_resolve(
+                    base_url,
+                    line,
+                    allow_private_network=allow_private_network,
+                ) if base_url else line,
                 duration=pending_duration,
                 media_sequence=next_seq,
                 discontinuity_sequence=disc_seq,

@@ -1,6 +1,9 @@
+import ipaddress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+import pytest
 
 from streamkeep.twitch_unmute import rewrite_twitch_vod_playlist
 from streamkeep.workers.download import DownloadWorker
@@ -11,6 +14,20 @@ FIXTURES = Path(__file__).parent / "fixtures" / "manifests"
 
 def _fixture(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _public_fixture_dns(monkeypatch):
+    """Keep parser URL-policy tests deterministic and offline."""
+    def resolve(host, _port):
+        try:
+            return (ipaddress.ip_address(host),)
+        except ValueError:
+            return (ipaddress.ip_address("93.184.216.34"),)
+
+    monkeypatch.setattr(
+        "streamkeep.net_guard.resolve_host_addresses", resolve,
+    )
 
 
 def test_reachable_unmuted_fragment_is_substituted_and_query_is_preserved():

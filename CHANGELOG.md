@@ -66,6 +66,9 @@ The seven desktop routes now share one archive-control-room visual system.
 - Monitor schedule refresh now runs through a Qt worker, so cached Twitch
   schedules, log messages, errors, and the calendar's refreshing state return
   reliably to the GUI thread.
+- DASH and HLS parser URL resolution now routes manifest-derived targets
+  through the shared remote URL policy, rejecting unsafe schemes and private
+  addresses before they enter the playable model.
 
 ## [4.57.0] - 2026-08-08
 
