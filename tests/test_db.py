@@ -15,6 +15,19 @@ def _enqueue_queue_job_process(db_path, url, result_queue):
     result_queue.put(process_db.enqueue_queue_job({"url": url})["job_id"])
 
 
+def _concurrent_enqueue_process(db_path, url, start_event, result_queue):
+    from streamkeep import db as process_db
+    process_db.DB_PATH = Path(db_path)
+    process_db.init_db()
+    start_event.wait(10)
+    try:
+        job = process_db.enqueue_queue_job({"url": url})
+    except BaseException as error:
+        result_queue.put(("error", repr(error)))
+    else:
+        result_queue.put(("ok", job["job_id"]))
+
+
 def _claim_queue_job_process(
     db_path, job_id, owner_id, start_event, result_queue,
 ):
@@ -533,6 +546,50 @@ class DbTombstoneTests(unittest.TestCase):
 
 
 class DbQueueNormalizationTests(unittest.TestCase):
+    def test_concurrent_enqueues_have_unique_contiguous_positions(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "library.db"
+            with mock.patch.object(db, "DB_PATH", db_path):
+                db.init_db()
+                context = multiprocessing.get_context("spawn")
+                start_event = context.Event()
+                result_queue = context.Queue()
+                processes = [
+                    context.Process(
+                        target=_concurrent_enqueue_process,
+                        args=(
+                            str(db_path),
+                            f"https://parallel-{index}.example/video",
+                            start_event,
+                            result_queue,
+                        ),
+                    )
+                    for index in range(2)
+                ]
+                for process in processes:
+                    process.start()
+                start_event.set()
+                for process in processes:
+                    process.join(20)
+                results = [result_queue.get(timeout=5) for _ in processes]
+                durable = db.load_queue()
+                raw = sqlite3.connect(str(db_path))
+                try:
+                    positions = [
+                        row[0] for row in raw.execute(
+                            "SELECT position FROM download_queue ORDER BY position"
+                        ).fetchall()
+                    ]
+                finally:
+                    raw.close()
+
+            self.assertTrue(all(process.exitcode == 0 for process in processes))
+            self.assertTrue(all(result[0] == "ok" for result in results), results)
+            self.assertEqual(len(durable), 2)
+            self.assertEqual(positions, [0, 1])
+
     def test_executor_lease_takeover_recovers_only_expired_owner(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "library.db"
@@ -760,7 +817,7 @@ class DbQueueNormalizationTests(unittest.TestCase):
             duplicate = json.dumps({"job_id": "legacy", "url": "https://example.com"})
             conn.executemany(
                 "INSERT INTO download_queue (position, url, data) VALUES (?, ?, ?)",
-                [(0, "https://a.example", duplicate), (1, "https://b.example", duplicate)],
+                [(0, "https://a.example", duplicate), (0, "https://b.example", duplicate)],
             )
             conn.execute("PRAGMA user_version = 4")
             conn.commit()
@@ -769,9 +826,24 @@ class DbQueueNormalizationTests(unittest.TestCase):
             with mock.patch.object(db, "DB_PATH", db_path):
                 db.init_db()
                 jobs = db.load_queue()
+                raw = sqlite3.connect(str(db_path))
+                try:
+                    positions = raw.execute(
+                        "SELECT position FROM download_queue ORDER BY position"
+                    ).fetchall()
+                    indexes = {
+                        row[1]
+                        for row in raw.execute(
+                            "PRAGMA index_list(download_queue)"
+                        ).fetchall()
+                    }
+                finally:
+                    raw.close()
 
             self.assertEqual(len({job["job_id"] for job in jobs}), 2)
             self.assertIn("legacy", {job["job_id"] for job in jobs})
+            self.assertEqual([row[0] for row in positions], [0, 1])
+            self.assertIn("idx_queue_position", indexes)
 
     def test_save_and_load_queue_preserves_typed_columns(self):
         with tempfile.TemporaryDirectory() as tmpdir:

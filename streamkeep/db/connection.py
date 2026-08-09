@@ -24,7 +24,7 @@ from ..sqlite_runtime import connect as sqlite_connect
 
 
 DB_PATH = CONFIG_DIR / "library.db"
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 _connection_pool_lock = threading.RLock()
 _connection_pools: weakref.WeakSet = weakref.WeakSet()

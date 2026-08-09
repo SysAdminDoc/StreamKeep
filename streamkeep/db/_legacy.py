@@ -41,11 +41,12 @@ from .connection import (  # noqa: F401
     _check_schema_version,
     _connect,
 )
+from .config_migration import migrate_from_config as _migrate_from_config
 # V163: the monitor-channel family lives in ``monitor`` and the shared
 # write lock in ``primitives``. Imported, not re-exported -- the
 # definitions are there and nothing here redefines them.
 from .monitor import (  # noqa: F401
-    save_all_monitor_channels,
+    save_all_monitor_channels as _save_all_monitor_channels,
 )
 from . import recovery as _recovery
 from .primitives import _write_lock  # noqa: F401
@@ -54,12 +55,18 @@ from .primitives import _write_lock  # noqa: F401
 # definitions are there and nothing here redefines them.
 from .queue import (  # noqa: F401
     load_queue_job,
-    save_queue,
+    save_queue as _save_queue,
 )
 from .primitives import (  # noqa: F401
     _iso_epoch,
     _utc_iso,
 )
+
+# Preserve the historical ``streamkeep.db._legacy`` names for callers that
+# imported the implementation module directly. The facade also exposes the
+# owning domain-module bindings, but this compatibility surface is deliberate.
+save_all_monitor_channels = _save_all_monitor_channels
+save_queue = _save_queue
 from .projections import (  # noqa: F401
     _normalize_backup_state,
 )
@@ -1208,6 +1215,7 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 f"UPDATE history SET {', '.join(parts)} WHERE id=?",
                 vals,
@@ -1222,6 +1230,9 @@ def update_history_entry(entry_id: int, fields: dict[str, Any]) -> None:
                     )
                     _maybe_compact_history_actions_in_connection(db)
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -1448,10 +1459,12 @@ def publish_recording(history_id: int) -> dict[str, Any] | None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT * FROM history WHERE id=?", (history_id,)
             ).fetchone()
             if row is None:
+                db.rollback()
                 return None
             existing = db.execute(
                 "SELECT share_id, created_at FROM published_recordings "
@@ -1463,6 +1476,7 @@ def publish_recording(history_id: int) -> dict[str, Any] | None:
                     "share_id": str(existing[0]),
                     "created_at": str(existing[1] or ""),
                 })
+                db.rollback()
                 return result
             share_id = _new_publishing_id(db)
             created_at = _utc_now_iso()
@@ -1475,6 +1489,9 @@ def publish_recording(history_id: int) -> dict[str, Any] | None:
             result = dict(row)
             result.update({"share_id": share_id, "created_at": created_at})
             return result
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -1572,12 +1589,14 @@ def publish_feed(*, channel: Any = "", title: Any = "") -> dict[str, Any]:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute(
                 "SELECT feed_id, channel, title, created_at FROM published_feeds "
                 "WHERE channel=? COLLATE NOCASE",
                 (channel,),
             ).fetchone()
             if existing is not None:
+                db.rollback()
                 return {
                     "feed_id": str(existing[0]),
                     "channel": str(existing[1] or ""),
@@ -1598,6 +1617,9 @@ def publish_feed(*, channel: Any = "", title: Any = "") -> dict[str, Any]:
                 "title": title,
                 "created_at": created_at,
             }
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -3085,12 +3107,16 @@ def mark_failed_job_discarded(job_id: int) -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""
                 UPDATE failed_jobs SET status='discarded', auto_retry=0,
                        next_attempt_at='', updated_at=?
                  WHERE id=?
             """, (_utc_now_iso(), int(job_id)))
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -3102,6 +3128,7 @@ def mark_failed_job_resolved(job_id: int) -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT source_key FROM failed_jobs WHERE id=?",
                 (int(job_id),),
@@ -3117,6 +3144,9 @@ def mark_failed_job_resolved(job_id: int) -> None:
                     (str(row["source_key"]),),
                 )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -3129,6 +3159,7 @@ def mark_failed_jobs_resolved_for_url(url: str) -> None:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             source_rows = db.execute(
                 "SELECT DISTINCT source_key FROM failed_jobs "
                 "WHERE url=? AND source_key<>''",
@@ -3147,6 +3178,9 @@ def mark_failed_jobs_resolved_for_url(url: str) -> None:
                     (str(row["source_key"]),),
                 )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -3899,108 +3933,5 @@ def db_diagnostics() -> dict[str, Any]:
 # ── Migration from config.json ──────────────────────────────────────
 
 def migrate_from_config(cfg: dict[str, Any]) -> bool:
-    """One-time migration: move history, monitor_channels, and download_queue
-    from the JSON config dict into SQLite.  Returns True if migration ran,
-    False if already done or nothing to migrate.
-
-    The caller should remove the migrated keys from cfg and re-save it
-    so they don't persist in JSON.
-    """
-    if not any(k in cfg for k in ("history", "monitor_channels", "download_queue")):
-        return False
-
-    init_db()
-    db = _connect(readonly=True)
-    try:
-        existing_history = db.execute("SELECT COUNT(*) FROM history").fetchone()[0]
-        existing_channels = db.execute("SELECT COUNT(*) FROM monitor_channels").fetchone()[0]
-        existing_queue = db.execute("SELECT COUNT(*) FROM download_queue").fetchone()[0]
-    finally:
-        db.close()
-
-    if existing_history > 0 or existing_channels > 0 or existing_queue > 0:
-        # DB already has data — don't re-migrate.  Strip keys from config.
-        for k in ("history", "monitor_channels", "download_queue"):
-            cfg.pop(k, None)
-        return False
-
-    # Migrate history
-    history = cfg.get("history", [])
-    if isinstance(history, list):
-        with _write_lock:
-            db = _connect()
-            try:
-                for h in history:
-                    if not isinstance(h, dict):
-                        continue
-                    h = _canonical_history_entry(h)
-                    db.execute("""
-                        INSERT INTO history
-                            (date, platform, source_id, webpage_url, title,
-                             channel, quality, size, path, url, favorite, watched,
-                             watch_position_secs, bookmarks)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
-                        str(h.get("date", "")),
-                        str(h.get("platform", "")),
-                        str(h.get("source_id", "")),
-                        str(h.get("webpage_url", "")),
-                        str(h.get("title", "")),
-                        str(h.get("channel", "")),
-                        str(h.get("quality", "")),
-                        str(h.get("size", "")),
-                        str(h.get("path", "")),
-                        str(h.get("url", "")),
-                        int(bool(h.get("favorite", False))),
-                        int(bool(h.get("watched", False))),
-                        float(h.get("watch_position_secs", 0) or 0),
-                        json.dumps(h.get("bookmarks", []) or []),
-                    ))
-                db.commit()
-            finally:
-                db.close()
-
-    # Migrate monitor channels
-    channels = cfg.get("monitor_channels", [])
-    if isinstance(channels, list):
-        entries = []
-        for ch in channels:
-            if not isinstance(ch, dict) or "url" not in ch:
-                continue
-            entries.append({
-                "url": ch.get("url", ""),
-                "platform": ch.get("platform", ""),
-                "channel_id": ch.get("channel_id", ""),
-                "interval_secs": ch.get("interval", 120),
-                "auto_record": ch.get("auto_record", False),
-                "subscribe_vods": ch.get("subscribe_vods", False),
-                "capture_comments": ch.get("capture_comments", False),
-                "archive_ids": ch.get("archive_ids", []),
-                "override_output_dir": ch.get("override_output_dir", ""),
-                "override_quality_pref": ch.get("override_quality_pref", ""),
-                "override_filename_template": ch.get("override_filename_template", ""),
-                "schedule_start_hhmm": ch.get("schedule_start_hhmm", ""),
-                "schedule_end_hhmm": ch.get("schedule_end_hhmm", ""),
-                "schedule_days_mask": ch.get("schedule_days_mask", 0),
-                "retention_keep_last": ch.get("retention_keep_last", 0),
-                "filter_keywords": ch.get("filter_keywords", ""),
-                "override_pp_preset": ch.get("override_pp_preset", ""),
-                "ytdlp_template_name": ch.get("ytdlp_template_name", ""),
-                "auto_upgrade": ch.get("auto_upgrade", False),
-                "min_upgrade_quality": ch.get("min_upgrade_quality", ""),
-                "auth_profile_id": ch.get("auth_profile_id", ""),
-                "media_server_layout": ch.get("media_server_layout", ""),
-            })
-        if entries:
-            save_all_monitor_channels(entries)
-
-    # Migrate download queue
-    queue = cfg.get("download_queue", [])
-    if isinstance(queue, list) and queue:
-        save_queue(queue)
-
-    # Strip migrated keys so they don't persist in JSON
-    for k in ("history", "monitor_channels", "download_queue"):
-        cfg.pop(k, None)
-
-    return True
+    """Move legacy library sections into SQLite atomically."""
+    return _migrate_from_config(cfg, init_db)

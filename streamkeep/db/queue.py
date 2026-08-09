@@ -40,6 +40,34 @@ def load_queue() -> list[dict[str, Any]]:
     finally:
         db.close()
 
+def _save_queue_in_connection(db, items: list[dict[str, Any]]) -> None:
+    now = _utc_now_iso()
+    db.execute("DELETE FROM download_queue")
+    for i, item in enumerate(items):
+        job_id = str(item.get("job_id", "")).strip() or uuid.uuid4().hex
+        item["job_id"] = job_id
+        db.execute(
+            "INSERT INTO download_queue "
+            "(job_id, position, url, title, platform, quality, status, "
+            " recurrence, failure_id, created_at, updated_at, data) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                job_id,
+                i,
+                str(item.get("url", "")),
+                str(item.get("title", "")),
+                str(item.get("platform", "")),
+                str(item.get("quality", "")),
+                str(item.get("status", "queued")),
+                str(item.get("recurrence", "")),
+                int(item.get("failure_id", 0) or 0),
+                str(item.get("created_at", "") or now),
+                now,
+                json.dumps(item, ensure_ascii=False),
+            ),
+        )
+
+
 def save_queue(items: list[dict[str, Any]]) -> None:
     """Replace the queue for one-time migration and isolated fixtures only.
 
@@ -47,35 +75,15 @@ def save_queue(items: list[dict[str, Any]]) -> None:
     replacing a stale process-local snapshot can otherwise erase work added by
     another process.
     """
-    now = _utc_now_iso()
     with _write_lock:
         db = _connect()
         try:
-            db.execute("DELETE FROM download_queue")
-            for i, item in enumerate(items):
-                job_id = str(item.get("job_id", "")).strip() or uuid.uuid4().hex
-                item["job_id"] = job_id
-                db.execute(
-                    "INSERT INTO download_queue "
-                    "(job_id, position, url, title, platform, quality, status, "
-                    " recurrence, failure_id, created_at, updated_at, data) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        job_id,
-                        i,
-                        str(item.get("url", "")),
-                        str(item.get("title", "")),
-                        str(item.get("platform", "")),
-                        str(item.get("quality", "")),
-                        str(item.get("status", "queued")),
-                        str(item.get("recurrence", "")),
-                        int(item.get("failure_id", 0) or 0),
-                        str(item.get("created_at", "") or now),
-                        now,
-                        json.dumps(item, ensure_ascii=False),
-                    ),
-                )
+            db.execute("BEGIN IMMEDIATE")
+            _save_queue_in_connection(db, items)
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -106,6 +114,41 @@ def load_queue_job(job_id: str) -> dict[str, Any] | None:
         return _queue_row_to_dict(row) if row else None
     finally:
         db.close()
+
+
+def _shift_queue_positions(conn) -> int:
+    """Move every position above the final range and return a new-row base."""
+    rows = conn.execute(
+        "SELECT position FROM download_queue"
+    ).fetchall()
+    if not rows:
+        return 0
+    positions = [int(row[0] or 0) for row in rows]
+    minimum = min(positions)
+    maximum = max(positions)
+    offset = max(
+        1 - minimum,
+        maximum + 1,
+        len(positions) + 1,
+    )
+    conn.execute(
+        "UPDATE download_queue SET position=position+?",
+        (offset,),
+    )
+    return offset + maximum + 1
+
+
+def _resequence_queue_positions(conn) -> None:
+    """Compact all queue positions without violating the unique index."""
+    _shift_queue_positions(conn)
+    rows = conn.execute(
+        "SELECT job_id FROM download_queue ORDER BY position ASC, id ASC"
+    ).fetchall()
+    for position, row in enumerate(rows):
+        conn.execute(
+            "UPDATE download_queue SET position=? WHERE job_id=?",
+            (position, str(row[0])),
+        )
 
 def skip_tombstoned_queue_jobs(
     *, statuses=("queued", "failed", "retrying"),
@@ -169,6 +212,7 @@ def enqueue_queue_job(item: dict[str, Any]) -> dict[str, Any]:
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             position = int(db.execute(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM download_queue"
             ).fetchone()[0])
@@ -195,6 +239,9 @@ def enqueue_queue_job(item: dict[str, Any]) -> dict[str, Any]:
                 ),
             )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
     result = load_queue_job(job_id)
@@ -227,6 +274,7 @@ def sync_queue_items(
                 "FROM download_queue ORDER BY position ASC"
             ).fetchall()
             existing = {str(row[0]): row for row in existing_rows}
+            temporary_base = _shift_queue_positions(conn)
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -259,7 +307,9 @@ def sync_queue_items(
                         " recurrence, failure_id, created_at, updated_at, data) "
                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
-                            job_id, len(ordered_ids), str(data.get("url", "")),
+                            job_id,
+                            temporary_base + len(ordered_ids),
+                            str(data.get("url", "")),
                             str(data.get("title", "")),
                             str(data.get("platform", "")),
                             str(data.get("quality", "")), status,
@@ -299,6 +349,9 @@ def sync_queue_items(
                     (position, job_id),
                 )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
     return load_queue()
@@ -318,6 +371,7 @@ def delete_queue_jobs(
     with _write_lock:
         conn = _connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 f"SELECT job_id FROM download_queue WHERE job_id IN ({placeholders}) "
                 "AND status NOT IN "
@@ -332,16 +386,12 @@ def delete_queue_jobs(
                     f"DELETE FROM download_queue WHERE job_id IN ({delete_marks})",
                     sorted(removed),
                 )
-                remaining = conn.execute(
-                    "SELECT job_id FROM download_queue ORDER BY position ASC"
-                ).fetchall()
-                for position, row in enumerate(remaining):
-                    conn.execute(
-                        "UPDATE download_queue SET position=? WHERE job_id=?",
-                        (position, str(row[0])),
-                    )
+                _resequence_queue_positions(conn)
             conn.commit()
             return removed
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -371,11 +421,13 @@ def update_queue_job(
     with _write_lock:
         db = _connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT data, revision FROM download_queue WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
             if row is None:
+                db.rollback()
                 return None
             try:
                 data = json.loads(row[0]) if row[0] else {}
@@ -409,6 +461,9 @@ def update_queue_job(
                 db.rollback()
                 return None
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
     return load_queue_job(job_id)
@@ -420,13 +475,16 @@ def cancel_queue_job(job_id: str) -> dict[str, Any] | None:
     with _write_lock:
         conn = _connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT status, data FROM download_queue WHERE job_id=?",
                 (job_id,),
             ).fetchone()
             if row is None:
+                conn.rollback()
                 return None
             if str(row[0]) in {"done", "failed", "cancelled"}:
+                conn.rollback()
                 return load_queue_job(job_id)
             try:
                 data = json.loads(row[1]) if row[1] else {}
@@ -444,6 +502,9 @@ def cancel_queue_job(job_id: str) -> dict[str, Any] | None:
                 (now, json.dumps(data, ensure_ascii=False), job_id),
             )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
     return load_queue_job(job_id)

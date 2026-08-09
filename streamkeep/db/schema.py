@@ -75,6 +75,8 @@ def migrate_database(connection, version: int, target_version: int) -> None:
         _migrate_circuit_engine_v23(connection)
     if version < 24:
         _migrate_retry_classification_v24(connection)
+    if version < 25:
+        _migrate_queue_v25(connection)
 
     _apply_schema(connection)
     if version == 0:
@@ -93,6 +95,10 @@ def migrate_database(connection, version: int, target_version: int) -> None:
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id "
         "ON download_queue(job_id) WHERE job_id <> ''"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_position "
+        "ON download_queue(position)"
     )
     connection.execute(f"PRAGMA user_version = {target_version}")
 
@@ -212,6 +218,8 @@ def _apply_schema(db):
             ON download_queue(execution_owner);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_job_id
             ON download_queue(job_id) WHERE job_id <> '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_position
+            ON download_queue(position);
 
         CREATE TABLE IF NOT EXISTS executor_leases (
             profile_id   TEXT PRIMARY KEY,
@@ -922,6 +930,28 @@ def _migrate_retry_classification_v24(db):
             "ALTER TABLE retry_circuits ADD COLUMN last_classification "
             "TEXT NOT NULL DEFAULT ''"
         )
+
+
+def _migrate_queue_v25(db):
+    """Normalize queue order and enforce one row per position."""
+    if not _sqlite_table_exists(db, "download_queue"):
+        return
+
+    # Older writers could commit duplicate positions. Preserve their visible
+    # order by the old position and stable row id before installing the index.
+    db.execute("DROP INDEX IF EXISTS idx_queue_position")
+    rows = db.execute(
+        "SELECT id FROM download_queue ORDER BY position ASC, id ASC"
+    ).fetchall()
+    for position, row in enumerate(rows):
+        db.execute(
+            "UPDATE download_queue SET position=? WHERE id=?",
+            (position, int(row[0])),
+        )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_position "
+        "ON download_queue(position)"
+    )
 
 
 def _migrate_failure_codes_v22(db):

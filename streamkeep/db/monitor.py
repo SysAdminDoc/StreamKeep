@@ -82,57 +82,67 @@ def save_monitor_channel(entry_dict: dict[str, Any]) -> int | None:
         finally:
             db.close()
 
+def _save_all_monitor_channels_in_connection(
+    db, entries_dicts: list[dict[str, Any]],
+) -> None:
+    db.execute("DELETE FROM monitor_channels")
+    for d in entries_dicts:
+        db.execute("""
+            INSERT INTO monitor_channels
+                (url, platform, channel_id, interval_secs, auto_record,
+                 subscribe_vods, capture_comments, archive_ids,
+                 override_output_dir, override_quality_pref,
+                 override_filename_template,
+                 schedule_start_hhmm, schedule_end_hhmm,
+                 schedule_days_mask, retention_keep_last,
+                 filter_keywords, override_pp_preset,
+                 ytdlp_template_name, auto_upgrade, min_upgrade_quality,
+                 upgrade_profile_json,
+                 auth_profile_id, media_server_layout)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            str(d.get("url", "")),
+            str(d.get("platform", "")),
+            str(d.get("channel_id", "")),
+            int(d.get("interval_secs", 120) or 120),
+            int(bool(d.get("auto_record", False))),
+            int(bool(d.get("subscribe_vods", False))),
+            int(bool(d.get("capture_comments", False))),
+            json.dumps(d.get("archive_ids", []) or []),
+            str(d.get("override_output_dir", "") or ""),
+            str(d.get("override_quality_pref", "") or ""),
+            str(d.get("override_filename_template", "") or ""),
+            str(d.get("schedule_start_hhmm", "") or ""),
+            str(d.get("schedule_end_hhmm", "") or ""),
+            int(d.get("schedule_days_mask", 0) or 0),
+            int(d.get("retention_keep_last", 0) or 0),
+            str(d.get("filter_keywords", "") or ""),
+            str(d.get("override_pp_preset", "") or ""),
+            str(d.get("ytdlp_template_name", "") or ""),
+            int(bool(d.get("auto_upgrade", False))),
+            str(d.get("min_upgrade_quality", "") or ""),
+            json.dumps(
+                d.get("upgrade_profile", {})
+                if isinstance(d.get("upgrade_profile", {}), dict)
+                else {},
+                ensure_ascii=False, sort_keys=True,
+            ),
+            str(d.get("auth_profile_id", "") or ""),
+            str(d.get("media_server_layout", "") or ""),
+        ))
+
+
 def save_all_monitor_channels(entries_dicts: list[dict[str, Any]]) -> None:
     """Replace all monitor channels atomically."""
     with _write_lock:
         db = _connect()
         try:
-            db.execute("DELETE FROM monitor_channels")
-            for d in entries_dicts:
-                db.execute("""
-                    INSERT INTO monitor_channels
-                        (url, platform, channel_id, interval_secs, auto_record,
-                         subscribe_vods, capture_comments, archive_ids,
-                         override_output_dir, override_quality_pref,
-                         override_filename_template,
-                         schedule_start_hhmm, schedule_end_hhmm,
-                         schedule_days_mask, retention_keep_last,
-                         filter_keywords, override_pp_preset,
-                         ytdlp_template_name, auto_upgrade, min_upgrade_quality,
-                         upgrade_profile_json,
-                         auth_profile_id, media_server_layout)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    str(d.get("url", "")),
-                    str(d.get("platform", "")),
-                    str(d.get("channel_id", "")),
-                    int(d.get("interval_secs", 120) or 120),
-                    int(bool(d.get("auto_record", False))),
-                    int(bool(d.get("subscribe_vods", False))),
-                    int(bool(d.get("capture_comments", False))),
-                    json.dumps(d.get("archive_ids", []) or []),
-                    str(d.get("override_output_dir", "") or ""),
-                    str(d.get("override_quality_pref", "") or ""),
-                    str(d.get("override_filename_template", "") or ""),
-                    str(d.get("schedule_start_hhmm", "") or ""),
-                    str(d.get("schedule_end_hhmm", "") or ""),
-                    int(d.get("schedule_days_mask", 0) or 0),
-                    int(d.get("retention_keep_last", 0) or 0),
-                    str(d.get("filter_keywords", "") or ""),
-                    str(d.get("override_pp_preset", "") or ""),
-                    str(d.get("ytdlp_template_name", "") or ""),
-                    int(bool(d.get("auto_upgrade", False))),
-                    str(d.get("min_upgrade_quality", "") or ""),
-                    json.dumps(
-                        d.get("upgrade_profile", {})
-                        if isinstance(d.get("upgrade_profile", {}), dict)
-                        else {},
-                        ensure_ascii=False, sort_keys=True,
-                    ),
-                    str(d.get("auth_profile_id", "") or ""),
-                    str(d.get("media_server_layout", "") or ""),
-                ))
+            db.execute("BEGIN IMMEDIATE")
+            _save_all_monitor_channels_in_connection(db, entries_dicts)
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

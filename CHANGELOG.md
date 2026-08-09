@@ -69,6 +69,10 @@ The seven desktop routes now share one archive-control-room visual system.
 - DASH and HLS parser URL resolution now routes manifest-derived targets
   through the shared remote URL policy, rejecting unsafe schemes and private
   addresses before they enter the playable model.
+- Queue position allocation now runs inside SQLite write transactions and a
+  schema migration normalizes legacy duplicates before enforcing uniqueness.
+  Queue snapshots, deletes, cancellations, publishing updates, failed-job
+  resolution, and config migration now share the same cross-process safety.
 
 ## [4.57.0] - 2026-08-08
 
