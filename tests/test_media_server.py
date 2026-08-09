@@ -7,6 +7,7 @@ from streamkeep import config
 from streamkeep import db
 from streamkeep.integrations import media_server
 from streamkeep.models import StreamInfo
+from streamkeep.net_guard import RemoteURLPolicyError
 from streamkeep.utils import MAX_PATH_COMPONENT_BYTES, OutputPathError
 
 
@@ -179,6 +180,17 @@ def test_jellyfin_user_and_watched_payloads_are_normalized(monkeypatch):
             "played": True,
         }
     ]
+
+
+@pytest.mark.parametrize("url", ["file:///tmp/library", "gopher://example.com/library"])
+def test_media_server_rejects_unsafe_url_before_attaching_token(monkeypatch, url):
+    request = mock.Mock()
+    monkeypatch.setattr(media_server.urllib.request, "Request", request)
+
+    with pytest.raises(RemoteURLPolicyError, match=r"HTTP\(S\)"):
+        media_server._request_bytes(url, token="secret", server_type="plex")
+
+    request.assert_not_called()
 
 
 def test_media_server_config_import_accepts_layout_and_playlist_controls():

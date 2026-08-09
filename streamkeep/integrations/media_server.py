@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterable
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
+from ..net_guard import validate_remote_url
 from ..utils import (
     MAX_PATH_COMPONENT_BYTES,
     truncate_utf8_bytes,
@@ -750,6 +751,7 @@ def _request_bytes(
     payload: object | None = None,
     timeout: int = 15,
 ) -> bytes:
+    target = validate_remote_url(url, allow_private_network=True)
     data = None
     headers = {"Accept": "application/json, application/xml, text/xml"}
     if payload is not None:
@@ -760,7 +762,9 @@ def _request_bytes(
             headers["X-Plex-Token"] = token
         else:
             headers["X-Emby-Token"] = token
-    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    request = urllib.request.Request(
+        target.url, data=data, headers=headers, method=method,
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         # A library listing is JSON or XML measured in kilobytes. Reading
         # without a cap let a misconfigured or hostile host at the configured

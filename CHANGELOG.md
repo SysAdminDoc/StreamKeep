@@ -73,6 +73,8 @@ The seven desktop routes now share one archive-control-room visual system.
   schema migration normalizes legacy duplicates before enforcing uniqueness.
   Queue snapshots, deletes, cancellations, publishing updates, failed-job
   resolution, and config migration now share the same cross-process safety.
+- Media-server requests now validate configured URLs with the private-LAN
+  policy before constructing token-bearing Plex, Emby, or Jellyfin requests.
 
 ## [4.57.0] - 2026-08-08
 
