@@ -191,6 +191,19 @@ def test_command_export_escapes_cmd_metacharacters_for_windows():
     assert "^>" in unquoted
 
 
+@pytest.mark.parametrize(("argv", "metachar_is_escaped"), [
+    (["tool", 'a"b', "&calc"], True),
+    (["tool", 'a\\"b', "&calc"], True),
+    (["tool", "a b\\", "&calc"], True),
+    (["tool", "a b &calc"], False),
+])
+def test_command_export_tracks_list2cmdline_backslash_quote_rules(
+    argv, metachar_is_escaped,
+):
+    command = format_command_argv(argv, windows=True)
+    assert ("^&calc" in command) is metachar_is_escaped
+
+
 def test_command_export_round_trips_through_cmd_and_posix_parsers():
     url = "https://example.com/a b?x=one&y=two|three^four>five"
     argv = ["yt-dlp", url]

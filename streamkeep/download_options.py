@@ -352,12 +352,23 @@ def format_command_argv(argv, *, windows=None):
     command = subprocess.list2cmdline(values)
     escaped = []
     quoted = False
+    backslashes = 0
     for character in command:
+        if character == "\\":
+            backslashes += 1
+            escaped.append(character)
+            continue
         if character == '"':
-            quoted = not quoted
+            # list2cmdline emits an odd run of backslashes before a literal
+            # quote. Only an even run marks the opening or closing quote of
+            # an argument; counting every quote desynchronizes on ``\"``.
+            if backslashes % 2 == 0:
+                quoted = not quoted
+            backslashes = 0
         if not quoted and character in "&|<>^()":
             escaped.append("^")
         escaped.append(character)
+        backslashes = 0
     return "".join(escaped)
 
 

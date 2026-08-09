@@ -75,6 +75,8 @@ The seven desktop routes now share one archive-control-room visual system.
   resolution, and config migration now share the same cross-process safety.
 - Media-server requests now validate configured URLs with the private-LAN
   policy before constructing token-bearing Plex, Emby, or Jellyfin requests.
+- Windows command exports now track `list2cmdline` backslash-quote rules, so
+  embedded quotes cannot hide later shell metacharacters from caret escaping.
 
 ## [4.57.0] - 2026-08-08
 
