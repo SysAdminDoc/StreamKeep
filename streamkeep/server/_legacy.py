@@ -103,6 +103,7 @@ from .origins import (  # noqa: F401
     _normalize_origin,
     _validate_external_origin,
 )
+from .request_log import RequestLogMixin as _RequestLogMixin
 from .static_assets import (  # noqa: F401
     _render_web_ui,
     _select_web_language,
@@ -494,9 +495,8 @@ def _build_handler(
     )
     security_event_limiter = _SecurityEventRateLimiter()
 
-    class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_args, **_kwargs):
-            return
+    class _Handler(_RequestLogMixin, BaseHTTPRequestHandler):
+        _request_log_secrets = (master_token,)
 
         def _request_route(self):
             raw_path = str(self.path or "/").split("?", 1)[0]

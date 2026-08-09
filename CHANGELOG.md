@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- The local companion server now keeps a bounded, rotating JSONL request log
+  with method, route, status, byte count, and duration while excluding bearer
+  tokens, query values, and signed URLs.
+
 - Theme changes now rebuild palette-driven widget surfaces through the central
   stylesheet, including the shell, clip editor, queue/status indicators, and
   player canvas, so open windows no longer retain colors from the previous

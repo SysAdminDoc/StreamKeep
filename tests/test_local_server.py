@@ -11,7 +11,7 @@ from unittest import mock
 
 from PyQt6.QtCore import QCoreApplication, Qt
 
-from streamkeep import db
+from streamkeep import db, paths
 import streamkeep.notifications as notifications_mod
 from streamkeep.local_server import (
     SECURITY_EVENT_PER_CLIENT_LIMIT,
@@ -334,6 +334,47 @@ class LocalServerTests(unittest.TestCase):
             self.assertEqual(response.headers["Content-Language"], "en")
             self.assertIn('<html lang="en">', html)
             self.assertIn(">Status<", html)
+
+    def test_request_log_records_safe_request_details_and_rotates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "server-requests.jsonl"
+            with mock.patch.object(paths, "SERVER_REQUEST_LOG", log_path), \
+                    mock.patch.object(paths, "SERVER_REQUEST_LOG_MAX_BYTES", 300), \
+                    mock.patch.object(paths, "SERVER_REQUEST_LOG_BACKUP_COUNT", 2):
+                for _ in range(4):
+                    payload, status = self._open_json(
+                        "/ping?token=QUERYSECRET&signed=https%3A%2F%2Fexample.com%2Fv%3Fsig%3DSIGNEDSECRET",
+                        token=self.server.token,
+                    )
+                    self.assertEqual(payload["ok"], True)
+                    self.assertEqual(status, 200)
+
+            log_files = sorted(Path(tmpdir).glob("server-requests.jsonl*"))
+            self.assertLessEqual(len(log_files), 3)
+            self.assertTrue(log_path.is_file())
+            self.assertTrue(
+                any(path.name == "server-requests.jsonl.1" for path in log_files)
+            )
+            self.assertTrue(all(path.stat().st_size <= 300 for path in log_files))
+            records = [
+                json.loads(line)
+                for path in log_files
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertGreaterEqual(len(records), 1)
+            record = records[-1]
+            self.assertEqual(record["method"], "GET")
+            self.assertEqual(record["path"], "/ping")
+            self.assertEqual(record["status"], 200)
+            self.assertGreater(record["bytes"], 0)
+            self.assertGreaterEqual(record["duration_ms"], 0)
+            log_text = "\n".join(
+                path.read_text(encoding="utf-8") for path in log_files
+            )
+            self.assertNotIn(self.server.token, log_text)
+            self.assertNotIn("QUERYSECRET", log_text)
+            self.assertNotIn("SIGNEDSECRET", log_text)
 
     def test_auth_rejections_are_audited_without_token_or_query_and_rate_limited(self):
         with tempfile.TemporaryDirectory() as tmpdir:

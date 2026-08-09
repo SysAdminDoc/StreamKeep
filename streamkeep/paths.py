@@ -104,6 +104,9 @@ LOG_FILE = CONFIG_DIR / "streamkeep.log"
 LOG_FILE_BACKUP = CONFIG_DIR / "streamkeep.log.1"
 LOG_FILE_MAX_BYTES = 2_000_000  # rotate at ~2 MB
 CRASH_LOG = CONFIG_DIR / "crash.log"
+SERVER_REQUEST_LOG = CONFIG_DIR / "server-requests.jsonl"
+SERVER_REQUEST_LOG_MAX_BYTES = 2_000_000
+SERVER_REQUEST_LOG_BACKUP_COUNT = 3
 
 
 def bind_config_dir(path):
@@ -115,6 +118,7 @@ def bind_config_dir(path):
     imports rather than mutating only ``CONFIG_DIR`` later.
     """
     global CONFIG_DIR, CONFIG_FILE, LOG_FILE, LOG_FILE_BACKUP, CRASH_LOG
+    global SERVER_REQUEST_LOG
 
     config_dir = Path(path).expanduser().resolve()
     CONFIG_DIR = config_dir
@@ -122,6 +126,7 @@ def bind_config_dir(path):
     LOG_FILE = config_dir / "streamkeep.log"
     LOG_FILE_BACKUP = config_dir / "streamkeep.log.1"
     CRASH_LOG = config_dir / "crash.log"
+    SERVER_REQUEST_LOG = config_dir / "server-requests.jsonl"
     return config_dir
 
 
