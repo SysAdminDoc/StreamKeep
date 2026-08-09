@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 
 # Ordered for display; "none" is the safe default.
@@ -36,6 +37,226 @@ _SOFT_ACTIONS = frozenset({"none", "notify", "run-hook"})
 # Default grace period before a destructive OS action, giving the user a
 # window to cancel (Windows: `shutdown /a`).
 DEFAULT_SHUTDOWN_DELAY_SECS = 60
+
+# Win32 power-request constants.  These are intentionally kept here instead
+# of using ``SetThreadExecutionState``: PowerCreateRequest/PowerSetRequest
+# publishes the owner and reason through ``powercfg /requests`` and lets the
+# shell show why a shutdown is blocked.
+POWER_REQUEST_SYSTEM_REQUIRED = 1
+POWER_REQUEST_EXECUTION_REQUIRED = 3
+POWER_REQUEST_CONTEXT_SIMPLE_STRING = 0x1
+
+
+class _PowerRequestReason(ctypes.Union):
+    _fields_ = [("SimpleReasonString", ctypes.c_wchar_p)]
+
+
+class _PowerRequestContext(ctypes.Structure):
+    _fields_ = [
+        ("Version", ctypes.c_uint32),
+        ("Flags", ctypes.c_uint32),
+        ("Reason", _PowerRequestReason),
+    ]
+
+
+def _clean_power_reasons(reasons: Iterable[str] | None) -> tuple[str, ...]:
+    """Bound untrusted job labels before they reach a Win32 reason string."""
+    cleaned = []
+    seen = set()
+    for value in reasons or ():
+        text = " ".join(str(value or "").split())
+        if not text:
+            continue
+        text = text[:128]
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+        if len(cleaned) >= 24:
+            break
+    return tuple(cleaned)
+
+
+def power_request_reason(reasons: Iterable[str] | None) -> str:
+    """Return the human-readable label shown by ``powercfg /requests``."""
+    clean = _clean_power_reasons(reasons)
+    if not clean:
+        return ""
+    return "StreamKeep active work: " + "; ".join(clean)
+
+
+class _WindowsPowerRequestBackend:
+    """Small ctypes wrapper kept separate so lifecycle tests can use a fake."""
+
+    available = False
+
+    def __init__(self):
+        self._kernel32 = None
+        self._user32 = None
+        self._reason_buffers = {}
+        self._blocked_hwnd = None
+        if os.name != "nt":
+            return
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self._create = self._kernel32.PowerCreateRequest
+        self._create.argtypes = [
+            ctypes.POINTER(_PowerRequestContext),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        self._create.restype = ctypes.c_long
+        self._set = self._kernel32.PowerSetRequest
+        self._set.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self._set.restype = ctypes.c_int
+        self._clear = self._kernel32.PowerClearRequest
+        self._clear.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self._clear.restype = ctypes.c_int
+        self._close = self._kernel32.CloseHandle
+        self._close.argtypes = [ctypes.c_void_p]
+        self._close.restype = ctypes.c_int
+        self._block = self._user32.ShutdownBlockReasonCreate
+        self._block.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        self._block.restype = ctypes.c_int
+        self._unblock = self._user32.ShutdownBlockReasonDestroy
+        self._unblock.argtypes = [ctypes.c_void_p]
+        self._unblock.restype = ctypes.c_int
+        self.available = True
+
+    @staticmethod
+    def _win_error(prefix):
+        error = ctypes.get_last_error()
+        return OSError(error, f"{prefix} ({error})")
+
+    def create(self, reason):
+        if not self.available:
+            return None
+        buffer = ctypes.create_unicode_buffer(str(reason)[:512])
+        context = _PowerRequestContext(
+            0,
+            POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+            _PowerRequestReason(ctypes.cast(buffer, ctypes.c_wchar_p)),
+        )
+        handle = ctypes.c_void_p()
+        result = self._create(ctypes.byref(context), ctypes.byref(handle))
+        if result != 0 or not handle.value:
+            raise self._win_error("PowerCreateRequest failed")
+        key = int(handle.value)
+        self._reason_buffers[key] = buffer
+        return handle
+
+    def set(self, handle, request_type):
+        if not self._set(handle, request_type):
+            raise self._win_error("PowerSetRequest failed")
+
+    def clear(self, handle, request_type):
+        if not self._clear(handle, request_type):
+            raise self._win_error("PowerClearRequest failed")
+
+    def close(self, handle):
+        key = int(getattr(handle, "value", handle) or 0)
+        self._reason_buffers.pop(key, None)
+        if not self._close(handle):
+            raise self._win_error("CloseHandle failed")
+
+    def block_shutdown(self, hwnd, reason):
+        if not hwnd:
+            return
+        if not self._block(ctypes.c_void_p(int(hwnd)), str(reason)[:512]):
+            raise self._win_error("ShutdownBlockReasonCreate failed")
+        self._blocked_hwnd = int(hwnd)
+
+    def unblock_shutdown(self, hwnd):
+        target = int(hwnd or self._blocked_hwnd or 0)
+        self._blocked_hwnd = None
+        if target and not self._unblock(ctypes.c_void_p(target)):
+            raise self._win_error("ShutdownBlockReasonDestroy failed")
+
+
+class PowerRequestLease:
+    """Own one process-wide Windows power request for active work.
+
+    ``set_reasons`` is idempotent and recreates the request only when the
+    active labels or shutdown-blocking window change.  The object is a no-op
+    on non-Windows hosts and accepts an injected backend for deterministic
+    lifecycle tests.
+    """
+
+    def __init__(self, *, backend=None):
+        self._backend = backend if backend is not None else _WindowsPowerRequestBackend()
+        self._handle = None
+        self._set_types = []
+        self._blocked_hwnd = None
+        self._reasons = ()
+        self._hwnd = None
+        self.reason = ""
+        self.last_error = ""
+
+    @property
+    def active(self):
+        return self._handle is not None
+
+    @property
+    def reasons(self):
+        return self._reasons
+
+    def _release_current(self):
+        if self._blocked_hwnd:
+            try:
+                self._backend.unblock_shutdown(self._blocked_hwnd)
+            except Exception as error:  # cleanup must continue for the handle
+                self.last_error = str(error)
+            self._blocked_hwnd = None
+        if self._handle is not None:
+            for request_type in reversed(self._set_types):
+                try:
+                    self._backend.clear(self._handle, request_type)
+                except Exception as error:  # cleanup must continue to CloseHandle
+                    self.last_error = str(error)
+            self._set_types = []
+            try:
+                self._backend.close(self._handle)
+            except Exception as error:
+                self.last_error = str(error)
+            self._handle = None
+
+    def set_reasons(self, reasons, *, hwnd=None):
+        clean = _clean_power_reasons(reasons)
+        target_hwnd = int(hwnd or 0) or None
+        if clean == self._reasons and target_hwnd == self._hwnd:
+            return self.active
+        self._release_current()
+        self._reasons = clean
+        self._hwnd = target_hwnd
+        self.reason = power_request_reason(clean)
+        self.last_error = ""
+        if not clean or not bool(getattr(self._backend, "available", False)):
+            return False
+        try:
+            self._handle = self._backend.create(self.reason)
+            if self._handle is None:
+                raise OSError("PowerCreateRequest returned no handle")
+            for request_type in (
+                POWER_REQUEST_SYSTEM_REQUIRED,
+                POWER_REQUEST_EXECUTION_REQUIRED,
+            ):
+                self._backend.set(self._handle, request_type)
+                self._set_types.append(request_type)
+            if target_hwnd:
+                self._backend.block_shutdown(target_hwnd, self.reason)
+                self._blocked_hwnd = target_hwnd
+        except Exception as error:  # fail open for capture, but report visibly
+            self.last_error = str(error)
+            self._release_current()
+            return False
+        return True
+
+    def release(self):
+        self._release_current()
+        self._reasons = ()
+        self._hwnd = None
+        self.reason = ""
+        return True
 
 
 @dataclass(frozen=True)

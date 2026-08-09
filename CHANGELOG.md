@@ -49,6 +49,10 @@ The seven desktop routes now share one archive-control-room visual system.
   fails over across declared sources, preserves and verifies publisher
   integrity declarations, renders locked/source metadata in published feeds,
   and turns pending `liveItem` entries into scheduled queue captures.
+- Active foreground downloads, queue jobs, and auto-record captures now publish
+  a readable Windows power request, keep the system awake for long captures,
+  block OS shutdown with the active-work reason, and release every request on
+  completion or app close.
 
 ## [4.57.0] - 2026-08-08
 

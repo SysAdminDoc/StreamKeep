@@ -60,6 +60,7 @@ from streamkeep.postprocess import (
 )
 from streamkeep.monitor import ChannelMonitor
 from streamkeep.clipboard import ClipboardMonitor
+from streamkeep.power import PowerRequestLease
 from streamkeep import db as _db
 from streamkeep.workers import ScheduledBackupWorker
 from streamkeep.windows_integration import (
@@ -329,6 +330,14 @@ class StreamKeep(
         self._taskbar_progress = None
         self._power_pause_active = False
         self._power_state = None
+        # One OS-visible request covers every active foreground, queue, and
+        # auto-record capture.  The lease is refreshed from the same timer and
+        # state transitions that drive the tray badge, then released on close.
+        self._power_request_lease = PowerRequestLease()
+        self._power_request_last_error = ""
+        self._power_request_timer = QTimer(self)
+        self._power_request_timer.setInterval(5_000)
+        self._power_request_timer.timeout.connect(self._sync_power_requests)
         self._parallel_autorecords = 2      # cap; overridden from config below
         self._chunk_long_captures = False
         self._chunk_length_secs = 7200      # 2 hours default
@@ -399,6 +408,9 @@ class StreamKeep(
         self._init_disk_monitor()
         self._init_health_monitor()
         self._init_windows_integration()
+        if not self._startup_check:
+            self._power_request_timer.start()
+            self._sync_power_requests()
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
@@ -1201,6 +1213,7 @@ class StreamKeep(
         """Redraw the tray icon with a badge showing the count of live
         channels + active downloads. Called whenever monitor status or
         download state changes."""
+        self._sync_power_requests()
         if self._tray_icon is None:
             return
         live = sum(1 for e in self.monitor.entries if e.last_status == "live")
@@ -1235,6 +1248,83 @@ class StreamKeep(
         if parts:
             tip += " — " + ", ".join(parts)
         self._tray_icon.setToolTip(tip)
+
+    def _active_power_reasons(self):
+        """Return bounded labels for work that must keep the system awake."""
+        reasons = []
+
+        def add(label, value):
+            text = str(value or "").strip()
+            if text:
+                reasons.append(f"{label}: {text}")
+
+        worker = getattr(self, "download_worker", None)
+        if worker is not None and worker.isRunning():
+            info = getattr(self, "_active_stream_info", None)
+            add(
+                "Download",
+                getattr(info, "title", "")
+                or getattr(self, "_active_quality_name", "")
+                or "foreground transfer",
+            )
+
+        seen_queue = set()
+        active_queue_ids = set(getattr(self, "_queue_workers", {}).keys()) | set(
+            getattr(self, "_queue_fetch_workers", {}).keys()
+        )
+        for item in getattr(self, "_download_queue", []) or []:
+            if not isinstance(item, dict):
+                continue
+            item_id = id(item)
+            if (
+                item_id not in active_queue_ids
+                and item.get("status") not in {
+                    "fetching", "downloading", "finalizing",
+                }
+            ):
+                continue
+            key = str(item.get("job_id") or item.get("url") or item_id)
+            if key in seen_queue:
+                continue
+            seen_queue.add(key)
+            add("Queue", item.get("title") or item.get("url") or "active job")
+
+        active_item = getattr(self, "_queue_active_item", None)
+        if isinstance(active_item, dict):
+            add(
+                "Queue",
+                active_item.get("title") or active_item.get("url") or "active job",
+            )
+
+        for channel_id, capture in getattr(self, "_autorecord_workers", {}).items():
+            if capture is None or not capture.isRunning():
+                continue
+            context = getattr(self, "_autorecord_contexts", {}).get(channel_id, {})
+            add(
+                "Capture",
+                context.get("title") or context.get("channel") or channel_id,
+            )
+        return reasons
+
+    def _sync_power_requests(self):
+        """Publish active work to Windows power policy and shutdown UI."""
+        lease = getattr(self, "_power_request_lease", None)
+        if lease is None:
+            return
+        reasons = self._active_power_reasons()
+        hwnd = None
+        if reasons:
+            try:
+                hwnd = int(self.winId())
+            except (TypeError, ValueError, RuntimeError):
+                hwnd = None
+        lease.set_reasons(reasons, hwnd=hwnd)
+        error = str(getattr(lease, "last_error", "") or "")
+        if error and error != getattr(self, "_power_request_last_error", ""):
+            self._power_request_last_error = error
+            self._log(f"[POWER] Could not publish active-work request: {error}")
+        elif not error:
+            self._power_request_last_error = ""
 
     def _present_main_window(self, tab_idx=None):
         """Reveal the main window and optionally switch to a specific tab."""
@@ -1619,6 +1709,7 @@ class StreamKeep(
             (getattr(self, "_config_save_timer", None), "config timer"),
             (getattr(self, "_executor_lease_timer", None), "executor lease timer"),
             (getattr(self, "_health_timer", None), "health timer"),
+            (getattr(self, "_power_request_timer", None), "power request timer"),
         ):
             if timer is None:
                 continue
@@ -1664,6 +1755,10 @@ class StreamKeep(
                 _db.release_backup_claim(self._executor_owner_id)
         except Exception as error:
             _LOGGER.warning("[SHUTDOWN] Could not finish backup cleanup: %s", error)
+        try:
+            self._power_request_lease.release()
+        except Exception as error:
+            _LOGGER.warning("[SHUTDOWN] Could not release power request: %s", error)
         self._persist_config()
         if self._queue_execution_enabled:
             _db.release_executor_lease(self._executor_owner_id)

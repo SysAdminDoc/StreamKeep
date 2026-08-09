@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from streamkeep.power import (
@@ -219,3 +221,90 @@ def test_hibernate_remains_a_plain_command():
     from streamkeep.power import build_power_command
 
     assert build_power_command("hibernate", windows=True) == ["shutdown", "/h"]
+
+
+class _FakePowerBackend:
+    available = True
+
+    def __init__(self):
+        self.calls = []
+
+    def create(self, reason):
+        self.calls.append(("create", reason))
+        return object()
+
+    def set(self, _handle, request_type):
+        self.calls.append(("set", request_type))
+
+    def clear(self, _handle, request_type):
+        self.calls.append(("clear", request_type))
+
+    def close(self, _handle):
+        self.calls.append(("close",))
+
+    def block_shutdown(self, hwnd, reason):
+        self.calls.append(("block", hwnd, reason))
+
+    def unblock_shutdown(self, hwnd):
+        self.calls.append(("unblock", hwnd))
+
+
+def test_power_request_lease_publishes_and_releases_every_request_type():
+    from streamkeep.power import (
+        POWER_REQUEST_EXECUTION_REQUIRED,
+        POWER_REQUEST_SYSTEM_REQUIRED,
+        PowerRequestLease,
+    )
+
+    backend = _FakePowerBackend()
+    lease = PowerRequestLease(backend=backend)
+    assert lease.set_reasons(["Capture: Studio", "Capture: Studio"], hwnd=42)
+    assert lease.active is True
+    assert lease.reason == "StreamKeep active work: Capture: Studio"
+    # Idempotent refreshes do not churn the OS request.
+    assert lease.set_reasons(["Capture: Studio"], hwnd=42) is True
+    assert [call[0] for call in backend.calls] == ["create", "set", "set", "block"]
+    lease.release()
+    assert lease.active is False
+    assert backend.calls[-4:] == [
+        ("unblock", 42),
+        ("clear", POWER_REQUEST_EXECUTION_REQUIRED),
+        ("clear", POWER_REQUEST_SYSTEM_REQUIRED),
+        ("close",),
+    ]
+
+
+def test_power_request_reason_is_bounded_and_control_free():
+    from streamkeep.power import power_request_reason
+
+    reason = power_request_reason([" A\nB ", "a b", "x" * 500])
+    assert "A B" in reason
+    assert "a b" not in reason
+    assert len(reason) < 512
+
+
+def test_main_window_power_reasons_cover_foreground_queue_and_capture():
+    from streamkeep.ui.main_window import StreamKeep
+
+    class Running:
+        def isRunning(self):
+            return True
+
+    queue_item = {"job_id": "job-1", "title": "Queued capture", "status": "queued"}
+    window = SimpleNamespace(
+        download_worker=Running(),
+        _active_stream_info=SimpleNamespace(title="Foreground download"),
+        _active_quality_name="",
+        _download_queue=[queue_item],
+        _queue_workers={id(queue_item): Running()},
+        _queue_fetch_workers={},
+        _queue_active_item=None,
+        _autorecord_workers={"studio": Running()},
+        _autorecord_contexts={"studio": {"title": "Studio live"}},
+    )
+    reasons = StreamKeep._active_power_reasons(window)
+    assert reasons == [
+        "Download: Foreground download",
+        "Queue: Queued capture",
+        "Capture: Studio live",
+    ]
