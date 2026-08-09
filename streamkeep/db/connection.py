@@ -51,7 +51,7 @@ class _ConnectionState:
         # Existing callers treated close() as the end of a short operation.
         # Preserve that rollback-on-close behavior while retaining the handle.
         try:
-            if self.connection.in_transaction:
+            if self.leases == 0 and self.connection.in_transaction:
                 self.connection.rollback()
         except sqlite3.Error:
             self.closed = True
@@ -105,7 +105,11 @@ class _PooledConnection:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        result = self._connection.__exit__(exc_type, exc_value, traceback)
+        # All leases share one physical transaction. An inner context must not
+        # commit or roll it back while an outer lease still owns the scope.
+        result = False
+        if self._state.leases == 1:
+            result = self._connection.__exit__(exc_type, exc_value, traceback)
         self.close()
         return result
 

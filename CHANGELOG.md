@@ -77,6 +77,8 @@ The seven desktop routes now share one archive-control-room visual system.
   policy before constructing token-bearing Plex, Emby, or Jellyfin requests.
 - Windows command exports now track `list2cmdline` backslash-quote rules, so
   embedded quotes cannot hide later shell metacharacters from caret escaping.
+- Pooled SQLite leases now defer transaction commit and rollback to the
+  outermost context, preventing nested helpers from partially committing work.
 
 ## [4.57.0] - 2026-08-08
 
