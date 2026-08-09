@@ -45,6 +45,7 @@ from ..widgets import (
 from .settings_companion import SettingsCompanionMixin
 from . import settings_presets as _settings_presets
 from .settings_preferences import SettingsPreferencesMixin
+from .settings_search import SettingsSearchController
 from .settings_tools import SettingsToolsMixin
 
 
@@ -183,8 +184,20 @@ def build_settings_tab(win):
         settings_nav_lay.addWidget(button)
         settings_nav_buttons.append(button)
     settings_nav_lay.addStretch(1)
+    settings_search = QLineEdit()
+    settings_search.setObjectName("settingsSearch")
+    settings_search.setPlaceholderText("Search settings…")
+    settings_search.setToolTip(
+        "Search setting labels, help text, and configuration keys"
+    )
+    settings_search.setAccessibleName("Search settings")
+    settings_search.setClearButtonEnabled(True)
+    settings_search.setMinimumWidth(190)
+    settings_search.setMaximumWidth(300)
+    settings_nav_lay.addWidget(settings_search)
     win.settings_nav = settings_nav
     win.settings_nav_buttons = settings_nav_buttons
+    win.settings_search = settings_search
     lay.addWidget(settings_nav)
 
     # Persistent scheduled health conditions (V96)
@@ -3335,6 +3348,39 @@ def build_settings_tab(win):
                 0, lambda target=target: _ensure_visible(target)
             )
         )
+
+    settings_sections = (
+        ("Health", health_block),
+        ("Appearance", theme_bar),
+        ("General", general_block),
+        ("Toolchain", tools_block),
+        ("JavaScript runtime", deno_block),
+        ("YouTube", ytdlp_block),
+        ("Plugins", plugin_block),
+        ("Source adapters", adapter_block),
+        ("Source engines", engine_block),
+        ("Rate governance", governor_block),
+        ("Cookies", cookies_block),
+        ("Authentication", auth_block),
+        ("Accounts", accounts_block),
+        ("Network", network_block),
+        ("Templates", tpl_block),
+        ("Webhooks", hook_block),
+        ("Smart mode", smart_block),
+        ("Events", evt_block),
+        ("Duplicate handling", dup_block),
+        ("Library lifecycle", lc_block),
+        ("Backups", backup_block),
+        ("Library", lib_block),
+        ("Media server", ms_block),
+        ("Processing", pp_block),
+    )
+    win.settings_search_controller = SettingsSearchController(
+        page,
+        settings_sections,
+        owner=win,
+    )
+    settings_search.textChanged.connect(win.settings_search_controller.filter)
 
     lay.addWidget(card, 1)
     return page

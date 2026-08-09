@@ -314,6 +314,17 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             ]
             settings_page = window._stack.widget(5).widget()
             assert settings_page.property("responsiveLayout") is True
+            window.settings_search.setText("rate_limit")
+            qt_application.processEvents()
+            assert not window.rate_limit_input.isHidden()
+            assert window.settings_output.isHidden()
+            assert window.settings_search_controller.visible_section_names == (
+                "Network",
+            )
+            window.settings_search.clear()
+            qt_application.processEvents()
+            assert not window.settings_output.isHidden()
+            assert not window.rate_limit_input.isHidden()
             assert [
                 window.companion_scope_sub.text(),
                 window.companion_remote_sub.text(),

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Settings now has a searchable section rail: labels, help text, and setting
+  keys filter the large form to matching controls, and clearing the search
+  restores every setting.
+
 - The local companion server now keeps a bounded, rotating JSONL request log
   with method, route, status, byte count, and duration while excluding bearer
   tokens, query values, and signed URLs.
