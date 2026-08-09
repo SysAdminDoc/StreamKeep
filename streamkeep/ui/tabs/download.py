@@ -167,10 +167,10 @@ def build_download_tab(win):
     hero_outer.setSpacing(12)
 
     win.download_thumb_label = QLabel()
+    win.download_thumb_label.setObjectName("downloadThumb")
     win.download_thumb_label.setFixedSize(80, 60)
     win.download_thumb_label.setScaledContents(True)
     win.download_thumb_label.setVisible(False)
-    win.download_thumb_label.setStyleSheet("border-radius: 4px;")
     hero_outer.addWidget(win.download_thumb_label)
 
     hero_lay = QVBoxLayout()
@@ -1423,6 +1423,7 @@ def build_download_tab(win):
         row_lay.setSpacing(10)
         state = QLabel("●")
         state.setObjectName("healthState")
+        state.setProperty("tone", "checking")
         state.setFixedWidth(18)
         state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         state.setAccessibleName(

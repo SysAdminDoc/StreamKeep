@@ -133,7 +133,7 @@ class ScrubberView(QGraphicsView):
             "Press Space to choose the start or end handle, then use arrow keys to adjust it",
         )
         set_accessible_role(self, "slider", orientation="horizontal")
-        self.setStyleSheet("background: transparent;")
+        self.setObjectName("clipScrubber")
         self._thumb_items = []
         self._start_ratio = 0.0
         self._end_ratio = 1.0
@@ -672,17 +672,14 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         preview_col = QVBoxLayout()
         preview_col.setSpacing(4)
         self.preview_label = QLabel()
+        self.preview_label.setObjectName("clipPreview")
         self.preview_label.setFixedSize(260, 146)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet(
-            f"background-color: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
-            f"border-radius: 8px; color: {CAT['overlay0']};"
-        )
         self.preview_label.setText("Drag the handles")
         preview_col.addWidget(self.preview_label)
         self.preview_time_label = QLabel("—")
+        self.preview_time_label.setObjectName("clipPreviewTime")
         self.preview_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_time_label.setStyleSheet(f"color: {CAT['subtext0']};")
         preview_col.addWidget(self.preview_time_label)
         strip_row.addLayout(preview_col, 0)
         timeline_content.addLayout(strip_row)
@@ -703,9 +700,7 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._story_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._story_scroll.setStyleSheet(
-            f"QScrollArea {{ background: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
-            f"border-radius: 6px; }}")
+        self._story_scroll.setObjectName("clipStoryScroll")
         self._story_widget = QWidget()
         self._story_lay = QHBoxLayout(self._story_widget)
         self._story_lay.setContentsMargins(4, 2, 4, 2)
@@ -758,7 +753,7 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         dur_col.setSpacing(4)
         dur_col.addWidget(QLabel("Clip length"))
         self.dur_label = QLabel(format_hhmmss(default_end))
-        self.dur_label.setStyleSheet(f"color: {CAT['green']}; font-weight: 600;")
+        self.dur_label.setObjectName("clipDuration")
         dur_col.addWidget(self.dur_label)
         range_row.addLayout(dur_col, 0)
         ranges_content.addLayout(range_row)
@@ -1111,25 +1106,11 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
             self._refresh_status_summary()
 
     def refresh_theme(self):
-        """Refresh clip-specific paints and inline styles after a palette change."""
+        """Refresh clip-specific paints after the central QSS rebuild."""
         if hasattr(self, "scrubber"):
             self.scrubber.refresh_theme()
         if hasattr(self, "waveform"):
             self.waveform.refresh_theme()
-        if hasattr(self, "preview_label"):
-            self.preview_label.setStyleSheet(
-                f"background-color: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
-                f"border-radius: 8px; color: {CAT['overlay0']};"
-            )
-        if hasattr(self, "preview_time_label"):
-            self.preview_time_label.setStyleSheet(f"color: {CAT['subtext0']};")
-        if hasattr(self, "_story_scroll"):
-            self._story_scroll.setStyleSheet(
-                f"QScrollArea {{ background: {CAT['mantle']}; border: 1px solid {CAT['surface0']}; "
-                f"border-radius: 6px; }}"
-            )
-        if hasattr(self, "dur_label"):
-            self.dur_label.setStyleSheet(f"color: {CAT['green']}; font-weight: 600;")
         if getattr(self, "_last_preview_pix", None):
             self._refresh_crop_overlay()
 
@@ -1364,7 +1345,7 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
             img.mousePressEvent = lambda ev, ts=t: self._on_story_click(ts)
             col.addWidget(img)
             lbl = QLabel(format_hhmmss(t)[:8])
-            lbl.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 10px;")
+            lbl.setObjectName("clipStoryTimestamp")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             col.addWidget(lbl)
             self._story_lay.addWidget(frame)

@@ -51,6 +51,7 @@ def test_healthy_space_emits_no_alert(_app):
     assert criticals == []
     assert changes and changes[0][0] == "/data"
     assert mon.get_color() == "#a6e3a1"
+    assert mon.get_state() == "ok"
 
 
 def test_warning_then_critical_transitions_fire_once(_app):
@@ -63,11 +64,13 @@ def test_warning_then_critical_transitions_fire_once(_app):
     _poll_with_free(mon, 11)          # still warning — must NOT re-emit
     assert len(warnings) == 1
     assert mon.get_color() == "#f9e2af"
+    assert mon.get_state() == "warning"
 
     _poll_with_free(mon, 3)           # below 5 GB critical
     _poll_with_free(mon, 2)           # still critical — must NOT re-emit
     assert len(criticals) == 1
     assert mon.get_color() == "#f38ba8"
+    assert mon.get_state() == "critical"
 
 
 def test_recovery_re_arms_alerts(_app):

@@ -243,6 +243,7 @@ class DownloadSingleMixin:
     # History tab handlers → streamkeep.ui.tabs.history.HistoryTabMixin
 
     def _update_badge(self, platform_name=None):
+        self._platform_badge_name = platform_name or ""
         if platform_name and platform_name in PLATFORM_BADGES:
             badge = PLATFORM_BADGES[platform_name]
             self.platform_badge.setText(f" {badge['text']} ")
@@ -252,7 +253,13 @@ class DownloadSingleMixin:
             )
             self.platform_badge.setVisible(True)
         else:
+            self.platform_badge.setStyleSheet("")
             self.platform_badge.setVisible(False)
+
+    def _refresh_download_theme(self):
+        """Refresh the platform badge after the central QSS is rebuilt."""
+        if hasattr(self, "platform_badge"):
+            self._update_badge(getattr(self, "_platform_badge_name", ""))
 
 
     # ── URL input / clipboard ───────────────────────────────────
@@ -700,6 +707,7 @@ class DownloadSingleMixin:
             self.table.setItem(i, 2, t_item)
 
             pbar = QProgressBar()
+            pbar.setObjectName("segmentProgress")
             pbar.setAccessibleName(f"Segment {i + 1} download progress")
             if total_secs <= 0:
                 pbar.setMaximum(0)
@@ -1379,9 +1387,9 @@ class DownloadSingleMixin:
         if idx < len(self._segment_progress):
             self._segment_progress[idx].setMaximum(100)
             self._segment_progress[idx].setValue(100)
-            self._segment_progress[idx].setStyleSheet(
-                f"QProgressBar::chunk {{ background-color: {CAT['green']}; border-radius: 6px; }}"
-            )
+            self._segment_progress[idx].setProperty("segmentState", "success")
+            self._segment_progress[idx].style().unpolish(self._segment_progress[idx])
+            self._segment_progress[idx].style().polish(self._segment_progress[idx])
         size_item = QTableWidgetItem(size_str)
         size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setItem(idx, 4, size_item)
@@ -1412,9 +1420,9 @@ class DownloadSingleMixin:
             out_dir=self._active_output_dir,
         )
         if idx < len(self._segment_progress):
-            self._segment_progress[idx].setStyleSheet(
-                f"QProgressBar::chunk {{ background-color: {CAT['red']}; border-radius: 6px; }}"
-            )
+            self._segment_progress[idx].setProperty("segmentState", "error")
+            self._segment_progress[idx].style().unpolish(self._segment_progress[idx])
+            self._segment_progress[idx].style().polish(self._segment_progress[idx])
         fail_item = QTableWidgetItem("FAILED")
         fail_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setItem(idx, 4, fail_item)
@@ -1567,7 +1575,9 @@ class DownloadSingleMixin:
         # the previous run's success/fail colors.
         for pbar in getattr(self, "_segment_progress", []):
             try:
-                pbar.setStyleSheet("")
+                pbar.setProperty("segmentState", "")
+                pbar.style().unpolish(pbar)
+                pbar.style().polish(pbar)
                 pbar.setValue(0)
             except Exception:
                 pass  # safe: best-effort fallback; preserve the primary operation

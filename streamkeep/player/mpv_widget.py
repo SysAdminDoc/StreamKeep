@@ -55,8 +55,8 @@ class MpvWidget(TranslatableWidget):
         if native_guard is not None:
             self.setAttribute(native_guard, False)
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setObjectName("mpvWidget")
         self.setMinimumSize(320, 180)
-        self.setStyleSheet("background: #000;")
 
         self._mpv = None
         self._duration = 0.0

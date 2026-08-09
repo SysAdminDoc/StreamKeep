@@ -1547,7 +1547,19 @@ class DownloadQueueMixin:
         status_row = QHBoxLayout()
         status_row.setSpacing(7)
         dot = QLabel("●")
-        dot.setStyleSheet(f"color: {color}; font-size: 11px;")
+        dot.setObjectName("queueStatusDot")
+        tone = {
+            "fetching": "working",
+            "downloading": "working",
+            "done": "success",
+            "ready": "success",
+            "failed": "error",
+            "cancelled": "error",
+            "paused": "muted",
+        }.get(status, "queued")
+        if display_status == "Scheduled":
+            tone = "scheduled"
+        dot.setProperty("tone", tone)
         text = QLabel(display_status)
         text.setObjectName("queueStatusText")
         text.setToolTip(status.replace("_", " ").strip().title())

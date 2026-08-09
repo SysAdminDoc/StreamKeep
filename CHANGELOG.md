@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Theme changes now rebuild palette-driven widget surfaces through the central
+  stylesheet, including the shell, clip editor, queue/status indicators, and
+  player canvas, so open windows no longer retain colors from the previous
+  theme.
+
 - YouTube diagnostics now compare the installed yt-dlp build with the newest
   known release, show release age and stale warnings in Settings and
   `youtube-health`, and point to an external executable without downloading or

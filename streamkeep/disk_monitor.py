@@ -139,3 +139,12 @@ class DiskMonitor(QObject):
         if "warning" in states:
             return "#f9e2af"   # yellow
         return "#a6e3a1"      # green
+
+    def get_state(self):
+        """Return the worst current state for palette-driven UI styling."""
+        states = list(self._last_state.values())
+        if "critical" in states:
+            return "critical"
+        if "warning" in states:
+            return "warning"
+        return "ok"

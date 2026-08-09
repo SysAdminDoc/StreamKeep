@@ -214,7 +214,6 @@ def _status_icon(color_key="green"):
 # working until a future pass switches each call site.
 from .worker_teardown import iter_owned_workers, stop_worker as _stop_worker
 from .widgets import (
-    TAB_STYLE,
     ToastOverlay,
     configure_accessibility,
     make_metric_card,
@@ -1794,23 +1793,23 @@ class StreamKeep(
 
     def _set_status(self, message, tone="idle"):
         tones = {
-            "idle": ("Ready", CAT["muted"]),
-            "working": ("Working", CAT["accent"]),
-            "processing": ("Finalizing", CAT["accent"]),
-            "success": ("Ready", CAT["accentSoft"]),
-            "warning": ("Attention", CAT["gold"]),
-            "error": ("Error", CAT["red"]),
+            "idle": "Ready",
+            "working": "Working",
+            "processing": "Finalizing",
+            "success": "Ready",
+            "warning": "Attention",
+            "error": "Error",
         }
-        label, color = tones.get(tone, tones["idle"])
+        tone = tone if tone in tones else "idle"
+        label = tones[tone]
         translated_label = tr(label, context="Status")
         translated_message = tr(message, context="Status")
         self.status_pill._streamkeep_i18n_source = {"text": label}
         self.status_pill._streamkeep_i18n_last = {"text": translated_label}
         self.status_pill.setText(translated_label)
-        self.status_pill.setStyleSheet(
-            f"color: {color}; background: transparent; border: none; "
-            "padding: 0; font-size: 13px; font-weight: 700;"
-        )
+        self.status_pill.setProperty("tone", tone)
+        self.status_pill.style().unpolish(self.status_pill)
+        self.status_pill.style().polish(self.status_pill)
         self.status_label._streamkeep_i18n_source = {
             "text": message,
             "toolTip": message,
@@ -1938,6 +1937,14 @@ class StreamKeep(
             pass  # safe: best-effort fallback; preserve the primary operation
         self._refresh_runtime_health()
 
+    def refresh_theme(self):
+        """Reapply stateful widget details after the central QSS rebuild."""
+        self._refresh_shell_chrome()
+        self._refresh_notif_badge()
+        refresh_download_theme = getattr(self, "_refresh_download_theme", None)
+        if callable(refresh_download_theme):
+            refresh_download_theme()
+
     def _refresh_runtime_health(self):
         """Synchronize the header and Download health rail with live probes."""
         registry = getattr(self, "_runtime_registry_snapshot", {}) or {}
@@ -1958,9 +1965,11 @@ class StreamKeep(
                 else tr("FFmpeg ready" if ffmpeg_ready else "FFmpeg needs attention")
             )
             self.archive_runtime_state.setText("●" if ffmpeg_ready else "!")
-            self.archive_runtime_state.setStyleSheet(
-                f"color: {CAT['green' if ffmpeg_ready else 'gold']};"
+            self.archive_runtime_state.setProperty(
+                "tone", "ready" if ffmpeg_ready else "warning"
             )
+            self.archive_runtime_state.style().unpolish(self.archive_runtime_state)
+            self.archive_runtime_state.style().polish(self.archive_runtime_state)
             set_accessible(
                 self.archive_runtime_state,
                 tr("Runtime ready" if ffmpeg_ready else "Runtime needs attention"),
@@ -1975,9 +1984,11 @@ class StreamKeep(
                 else (tr("yt-dlp ready") if yt_ready else fallback)
             )
             self.archive_downloader_state.setText("●" if yt_ready else "!")
-            self.archive_downloader_state.setStyleSheet(
-                f"color: {CAT['green' if yt_ready else 'gold']};"
+            self.archive_downloader_state.setProperty(
+                "tone", "ready" if yt_ready else "warning"
             )
+            self.archive_downloader_state.style().unpolish(self.archive_downloader_state)
+            self.archive_downloader_state.style().polish(self.archive_downloader_state)
             set_accessible(
                 self.archive_downloader_state,
                 tr("Downloader ready" if yt_ready else "Downloader needs attention"),
@@ -2082,7 +2093,6 @@ class StreamKeep(
                 f"Switch to {name}; keyboard shortcut Ctrl+{i + 1}",
             )
             btn.setObjectName("tabActive" if i == 0 else "tab")
-            btn.setStyleSheet(TAB_STYLE())
             btn.clicked.connect(lambda checked, idx=i: self._switch_tab(idx))
             tab_lay.addWidget(btn)
             self._tab_btns.append(btn)
@@ -2248,6 +2258,8 @@ class StreamKeep(
         footer_lay.setSpacing(10)
 
         self.status_pill = QLabel("Ready")
+        self.status_pill.setObjectName("statusPill")
+        self.status_pill.setProperty("tone", "idle")
         set_accessible(self.status_pill, "Application state: Ready")
         footer_lay.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -2393,7 +2405,6 @@ class StreamKeep(
                 f"{'Current tab' if i == idx else 'Switch to ' + self._tab_names[i]}; "
                 f"keyboard shortcut Ctrl+{i + 1}"
             )
-            btn.setStyleSheet(TAB_STYLE())
         self._refresh_shell_chrome()
         if focus_page:
             targets = (
@@ -2938,9 +2949,9 @@ class StreamKeep(
             if hasattr(self, "archive_storage_detail"):
                 self.archive_storage_detail.setText(tr("Storage monitoring off"))
                 self.archive_storage_state.setText("—")
-                self.archive_storage_state.setStyleSheet(
-                    f"color: {CAT['muted']};"
-                )
+                self.archive_storage_state.setProperty("tone", "muted")
+                self.archive_storage_state.style().unpolish(self.archive_storage_state)
+                self.archive_storage_state.style().polish(self.archive_storage_state)
             self._power_pause_active = False
             if resume_power_queue:
                 self._resume_queue_or_report()
@@ -2958,9 +2969,9 @@ class StreamKeep(
             if hasattr(self, "archive_storage_detail"):
                 self.archive_storage_detail.setText(tr("Storage monitoring off"))
                 self.archive_storage_state.setText("—")
-                self.archive_storage_state.setStyleSheet(
-                    f"color: {CAT['muted']};"
-                )
+                self.archive_storage_state.setProperty("tone", "muted")
+                self.archive_storage_state.style().unpolish(self.archive_storage_state)
+                self.archive_storage_state.style().polish(self.archive_storage_state)
 
     def _refresh_disk_monitor_paths(self):
         """Point the monitor at the current output drive."""
@@ -2982,9 +2993,9 @@ class StreamKeep(
             free_gb = free_bytes / 1024 ** 3
             self.disk_status.setText(f"{free_gb:.0f} GB free")
             self.disk_status.setToolTip(f"Free space on {path}")
-            self.disk_status.setStyleSheet(
-                f"color: {self._disk_monitor.get_color()};"
-            )
+            self.disk_status.setProperty("tone", self._disk_monitor.get_state())
+            self.disk_status.style().unpolish(self.disk_status)
+            self.disk_status.style().polish(self.disk_status)
             self.disk_status.setVisible(True)
             if hasattr(self, "archive_storage_detail"):
                 self.archive_storage_detail.setText(
@@ -2992,9 +3003,11 @@ class StreamKeep(
                 )
                 healthy = free_bytes >= self._disk_critical_bytes
                 self.archive_storage_state.setText("●" if healthy else "!")
-                self.archive_storage_state.setStyleSheet(
-                    f"color: {CAT['green' if healthy else 'red']};"
+                self.archive_storage_state.setProperty(
+                    "tone", "ready" if healthy else "error"
                 )
+                self.archive_storage_state.style().unpolish(self.archive_storage_state)
+                self.archive_storage_state.style().polish(self.archive_storage_state)
                 set_accessible(
                     self.archive_storage_state,
                     (
@@ -3085,11 +3098,13 @@ class StreamKeep(
         if unread > 0:
             self.notif_button.setText(str(unread))
             self.notif_button.setToolTip(f"Recent notifications ({unread} unread)")
-            self.notif_button.setStyleSheet(f"color: {CAT['accent']}; font-weight: 700;")
+            self.notif_button.setProperty("unread", "true")
         else:
             self.notif_button.setText("")
             self.notif_button.setToolTip("Recent notifications")
-            self.notif_button.setStyleSheet("")
+            self.notif_button.setProperty("unread", "false")
+        self.notif_button.style().unpolish(self.notif_button)
+        self.notif_button.style().polish(self.notif_button)
 
     def _on_show_notifications(self):
         """Build a transient QMenu popping down from the bell with the

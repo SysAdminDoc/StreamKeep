@@ -1,7 +1,8 @@
 import hashlib
 
 from PyQt6.QtWidgets import (
-    QFrame, QLineEdit, QPushButton, QTableWidget, QVBoxLayout, QWidget,
+    QFrame, QLabel, QLineEdit, QProgressBar, QPushButton, QTableWidget,
+    QVBoxLayout, QWidget,
 )
 
 from streamkeep.theme import (
@@ -57,6 +58,45 @@ def test_visual_state_applies_theme_density_accent_and_contrast(qt_application):
         assert "QFrame#heroCard, QFrame#settingsBody" in stylesheet
         assert "background-color: transparent" in stylesheet
     finally:
+        apply_visual_system("dark", "cozy", "", qt_application)
+
+
+def test_theme_switch_rebuilds_palette_driven_widget_surfaces(qt_application):
+    from streamkeep.ui.tabs.download_single import DownloadSingleMixin
+
+    root = QWidget()
+    preview = QLabel(root)
+    preview.setObjectName("clipPreview")
+    progress = QProgressBar(root)
+    progress.setObjectName("segmentProgress")
+    progress.setProperty("segmentState", "success")
+    tab = QPushButton("Download", root)
+    tab.setObjectName("tabActive")
+    badge_host = DownloadSingleMixin()
+    badge_host.platform_badge = QLabel(root)
+    try:
+        apply_visual_system("dark", "cozy", "", qt_application)
+        dark_sheet = qt_application.styleSheet()
+        assert "#0e1b2a" in dark_sheet
+        assert preview.styleSheet() == ""
+        assert progress.styleSheet() == ""
+        assert tab.styleSheet() == ""
+        badge_host._update_badge("Twitch")
+        dark_badge = badge_host.platform_badge.styleSheet()
+        assert CAT["mauve"] in dark_badge
+
+        apply_visual_system("light", "cozy", "", qt_application)
+        light_sheet = qt_application.styleSheet()
+        assert "#ffffff" in light_sheet
+        assert "#0e1b2a" not in light_sheet
+        assert preview.styleSheet() == ""
+        assert progress.styleSheet() == ""
+        assert tab.styleSheet() == ""
+        badge_host._refresh_download_theme()
+        assert CAT["mauve"] in badge_host.platform_badge.styleSheet()
+        assert dark_badge != badge_host.platform_badge.styleSheet()
+    finally:
+        root.close()
         apply_visual_system("dark", "cozy", "", qt_application)
 
 

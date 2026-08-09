@@ -241,6 +241,7 @@ def build_stylesheet(p=None):
 QMainWindow, QDialog {{
     background-color: {p['base']};
 }}
+QWidget#mpvWidget {{ background-color: #000000; }}
 QWidget {{
     color: {p['text']};
     font-family: 'Segoe UI', 'Arial', sans-serif;
@@ -504,6 +505,24 @@ QLabel#footerMeta, QLabel#statusLabel {{
     color: {p['muted']};
     font-size: 12px;
 }}
+QLabel#statusPill {{
+    color: {p['muted']};
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+    font-weight: 700;
+}}
+QLabel#statusPill[tone="working"], QLabel#statusPill[tone="processing"] {{
+    color: {p['accent']};
+}}
+QLabel#statusPill[tone="success"] {{ color: {p['accentSoft']}; }}
+QLabel#statusPill[tone="warning"] {{ color: {p['gold']}; }}
+QLabel#statusPill[tone="error"] {{ color: {p['red']}; }}
+QLabel#diskStatus {{ color: {p['green']}; font-size: 12px; }}
+QLabel#diskStatus[tone="warning"] {{ color: {p['yellow']}; }}
+QLabel#diskStatus[tone="critical"] {{ color: {p['red']}; }}
+QLabel#diskStatus[tone="muted"] {{ color: {p['muted']}; }}
 QLabel#toolbarMeta {{ color: {p['subtext0']}; font-size: 14px; }}
 QLabel#queueTitle {{ color: {p['text']}; font-size: 13px; font-weight: 600; }}
 QLabel#queueMeta {{ color: {p['muted']}; font-size: 12px; }}
@@ -522,6 +541,21 @@ QLabel#dialogEyebrow, QLabel#eyebrow {{
     font-size: 12px;
     font-weight: 700;
 }}
+QLabel#clipPreview {{
+    background-color: {p['mantle']};
+    border: 1px solid {p['surface0']};
+    border-radius: 8px;
+    color: {p['muted']};
+}}
+QLabel#clipPreviewTime {{ color: {p['subtext0']}; }}
+QScrollArea#clipStoryScroll {{
+    background: {p['mantle']};
+    border: 1px solid {p['surface0']};
+    border-radius: 6px;
+}}
+QLabel#clipDuration {{ color: {p['green']}; font-weight: 600; }}
+QLabel#clipStoryTimestamp {{ color: {p['subtext0']}; font-size: 10px; }}
+QGraphicsView#clipScrubber {{ background: transparent; }}
 QLabel#dialogTitle {{
     color: {p['text']};
     font-size: 23px;
@@ -534,6 +568,10 @@ QLabel#statusTitle, QLabel#emptyStateTitle {{
 }}
 QLabel#emptyStateBody {{ color: {p['muted']}; font-size: 13px; }}
 QLabel#healthState {{ color: {p['green']}; font-size: 14px; font-weight: 700; }}
+QLabel#healthState[tone="checking"] {{ color: {p['accent']}; }}
+QLabel#healthState[tone="warning"] {{ color: {p['yellow']}; }}
+QLabel#healthState[tone="error"] {{ color: {p['red']}; }}
+QLabel#healthState[tone="muted"] {{ color: {p['muted']}; }}
 QLabel#healthTitle {{ color: {p['text']}; font-size: 14px; font-weight: 650; }}
 QLabel#healthDetail {{ color: {p['muted']}; font-size: 12px; }}
 QLabel#pillBadge, QLabel#playerBadgeMuted {{
@@ -652,6 +690,43 @@ QPushButton#headerIcon {{
     font-weight: 500;
 }}
 QPushButton#headerIcon:hover {{ background-color: {p['panelHi']}; color: {p['text']}; }}
+QPushButton#headerIcon[unread="true"] {{ color: {p['accent']}; font-weight: 700; }}
+QPushButton#tab {{
+    background-color: transparent;
+    color: {p['subtext1']};
+    border: none;
+    border-left: 3px solid transparent;
+    padding: {padding + 5}px 14px;
+    font-weight: 600;
+    font-size: {max(13, font_size - 2)}px;
+    border-radius: 8px;
+    text-align: left;
+}}
+QPushButton#tab:hover {{
+    color: {p['text']};
+    background-color: {p['panelHi']};
+}}
+QPushButton#tab:focus {{
+    background-color: {p['panelHi']};
+    border: 1px solid {p['accent']};
+    border-left: 3px solid transparent;
+}}
+QPushButton#tabActive:focus {{
+    background-color: {p['panelHi']};
+    border: 1px solid {p['accent']};
+    border-left: 3px solid {p['accent']};
+}}
+QPushButton#tabActive {{
+    background-color: {p['panelHi']};
+    color: {p['text']};
+    border: none;
+    border-left: 3px solid {p['accent']};
+    padding: {padding + 5}px 14px;
+    font-weight: 700;
+    font-size: {max(13, font_size - 2)}px;
+    border-radius: 8px;
+    text-align: left;
+}}
 QPushButton#systemStatus {{
     background-color: {p['panel']};
     color: {p['subtext1']};
@@ -811,6 +886,16 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background-color: {p['accent']}; border-radius: 4px; }}
 QProgressBar#queueProgressBar {{ height: 8px; min-height: 8px; max-height: 8px; }}
+QProgressBar#segmentProgress::chunk {{ background-color: {p['accent']}; border-radius: 6px; }}
+QProgressBar#segmentProgress[segmentState="success"]::chunk {{ background-color: {p['green']}; }}
+QProgressBar#segmentProgress[segmentState="error"]::chunk {{ background-color: {p['red']}; }}
+QLabel#queueStatusDot {{ color: {p['gold']}; font-size: 11px; }}
+QLabel#queueStatusDot[tone="scheduled"] {{ color: {p['peach']}; }}
+QLabel#queueStatusDot[tone="working"] {{ color: {p['accent']}; }}
+QLabel#queueStatusDot[tone="success"] {{ color: {p['accentSoft']}; }}
+QLabel#queueStatusDot[tone="error"] {{ color: {p['red']}; }}
+QLabel#queueStatusDot[tone="muted"] {{ color: {p['muted']}; }}
+QLabel#downloadThumb {{ border-radius: 4px; }}
 QCheckBox:focus, QRadioButton:focus, QSlider:focus {{
     border: 1px solid {p['accent']};
     border-radius: 4px;
