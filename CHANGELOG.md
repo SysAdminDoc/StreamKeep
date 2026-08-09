@@ -63,6 +63,9 @@ The seven desktop routes now share one archive-control-room visual system.
   with reciprocal-rank fusion so paraphrases can match without shared words.
   The derived vector table is a bounded rebuildable cache; source checkouts
   without the optional runtime retain a clearly labelled hashed fallback.
+- Monitor schedule refresh now runs through a Qt worker, so cached Twitch
+  schedules, log messages, errors, and the calendar's refreshing state return
+  reliably to the GUI thread.
 
 ## [4.57.0] - 2026-08-08
 

@@ -301,9 +301,9 @@ Archive workstation</source>
         <message>
             <location filename="streamkeep/ui/tabs/analytics.py" line="261" />
             <location filename="streamkeep/ui/tabs/history.py" line="104" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="76" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="79" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="82" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="105" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="108" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="111" />
             <location filename="streamkeep/ui/tabs/operations.py" line="241" />
             <location filename="streamkeep/ui/tabs/operations.py" line="242" />
             <location filename="streamkeep/ui/tabs/operations.py" line="243" />
@@ -530,17 +530,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="76" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="105" />
             <source>active entries</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="99" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="128" />
             <source>Active recordings</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1032" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1066" />
             <source>Active recordings ({len(rows)})</source>
             <translation type="unfinished" />
         </message>
@@ -570,13 +570,13 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="265" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="294" />
             <source>Add a channel above, choose an interval, and optionally arm live auto-record.</source>
             <translation>Añada un canal arriba, elija un intervalo y active opcionalmente la grabación automática.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="163" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="419" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="192" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="448" />
             <source>Add a channel to start monitoring.</source>
             <translation type="unfinished" />
         </message>
@@ -596,8 +596,8 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="115" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="157" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="144" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="186" />
             <source>Add channel</source>
             <translation type="unfinished" />
         </message>
@@ -628,7 +628,7 @@ Archive workstation</source>
             <translation>Añadir URL a la cola</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="272" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="301" />
             <source>Add your first channel</source>
             <translation>Añadir el primer canal</translation>
         </message>
@@ -1010,7 +1010,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="79" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="108" />
             <source>Auto Record</source>
             <translation type="unfinished" />
         </message>
@@ -1030,32 +1030,32 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="225" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="254" />
             <source>Auto-Record</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1554" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1588" />
             <source>Auto-record could not start for {channel_id}: {err}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="79" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="108" />
             <source>auto-record enabled</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1653" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1687" />
             <source>Auto-record finished for {channel_id}.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1625" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1659" />
             <source>Auto-record for {channel_id} ended with errors. Check the log.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1630" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1664" />
             <source>Auto-record for {channel_id} finished without saving media.</source>
             <translation type="unfinished" />
         </message>
@@ -1065,7 +1065,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="257" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="286" />
             <source>AUTOMATED CAPTURE</source>
             <translation>CAPTURA AUTOMATIZADA</translation>
         </message>
@@ -1100,7 +1100,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="147" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="176" />
             <source>Automation</source>
             <translation type="unfinished" />
         </message>
@@ -1110,7 +1110,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="309" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="338" />
             <source>Avg Duration</source>
             <translation type="unfinished" />
         </message>
@@ -1370,17 +1370,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="351" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="380" />
             <source>Calendar view plots cached Twitch schedule windows in your local time so you can spot conflicts, quiet days, and upcoming recording opportunities at a glance.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="431" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="460" />
             <source>Calendar view shows cached schedule windows for the channels in your watch list.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="435" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="464" />
             <source>Calendar view will show cached schedule windows after you add monitored channels.</source>
             <translation type="unfinished" />
         </message>
@@ -1484,34 +1484,34 @@ Archive workstation</source>
         <message>
             <location filename="streamkeep/ui/recover_dialog.py" line="86" />
             <location filename="streamkeep/ui/storage_model.py" line="12" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="225" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="309" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="254" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="338" />
             <location filename="streamkeep/ui/tabs/storage.py" line="574" />
             <source>Channel</source>
             <translation>Canal</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="905" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="939" />
             <source>Channel added to the watch list.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="903" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="937" />
             <source>Channel added. Existing VODs are being seeded in the background.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="908" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="942" />
             <source>Channel could not be added. It may already exist or be unsupported.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="297" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="326" />
             <source>Channel Insights</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="60" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="89" />
             <source>Channel monitoring</source>
             <translation>Monitoreo de canales</translation>
         </message>
@@ -1526,17 +1526,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1111" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1145" />
             <source>Channel removed from the watch list.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="126" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="155" />
             <source>Channel URL</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="131" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="160" />
             <source>Channel URL (kick.com/user, twitch.tv/user)…</source>
             <translation type="unfinished" />
         </message>
@@ -1546,7 +1546,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="76" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="105" />
             <location filename="streamkeep/ui/tabs/storage.py" line="249" />
             <source>Channels</source>
             <translation type="unfinished" />
@@ -1588,7 +1588,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="137" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="166" />
             <source>Check Every</source>
             <translation type="unfinished" />
         </message>
@@ -2050,7 +2050,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="615" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="644" />
             <source>Could not parse window.</source>
             <translation type="unfinished" />
         </message>
@@ -2124,7 +2124,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="82" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="111" />
             <source>currently live</source>
             <translation type="unfinished" />
         </message>
@@ -2329,7 +2329,7 @@ Produces a .nosilence copy — the original is preserved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="552" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="581" />
             <source>Disable auto-record</source>
             <translation type="unfinished" />
         </message>
@@ -2639,22 +2639,22 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="965" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="999" />
             <source>Edit</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="966" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1000" />
             <source>Edit monitored channel {e.channel_id or e.url}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="969" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1003" />
             <source>Edit per-channel profile: output folder, quality, schedule, retention.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="550" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="579" />
             <source>Edit profile...</source>
             <translation type="unfinished" />
         </message>
@@ -2705,12 +2705,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="551" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="580" />
             <source>Enable auto-record</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="150" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="179" />
             <source>Enable auto-record (live)</source>
             <translation type="unfinished" />
         </message>
@@ -2969,7 +2969,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="658" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="687" />
             <location filename="streamkeep/ui/tabs/settings_tools.py" line="1449" />
             <source>Export failed: {e}</source>
             <translation type="unfinished" />
@@ -3001,12 +3001,12 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="190" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="219" />
             <source>Export Watch List…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="656" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="685" />
             <source>Exported {len(data)} channels to {os.path.basename(path)}</source>
             <translation type="unfinished" />
         </message>
@@ -3647,8 +3647,8 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="679" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="738" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="708" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="767" />
             <location filename="streamkeep/ui/tabs/settings_tools.py" line="1469" />
             <source>Import failed: {e}</source>
             <translation type="unfinished" />
@@ -3663,17 +3663,17 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="185" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="214" />
             <source>Import Watch List…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="178" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="207" />
             <source>Import, export, or switch to the schedule.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="727" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="756" />
             <source>Imported {added} channels ({skipped} skipped as duplicates).</source>
             <translation type="unfinished" />
         </message>
@@ -3709,7 +3709,7 @@ https://youtu.be/*</source>
             <translation>Información</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="479" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="508" />
             <source>Insights unavailable: {error}</source>
             <translation type="unfinished" />
         </message>
@@ -3825,12 +3825,12 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="225" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="254" />
             <source>Interval</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="682" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="711" />
             <source>Invalid channel list — expected a JSON array.</source>
             <translation type="unfinished" />
         </message>
@@ -3951,7 +3951,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="309" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="338" />
             <source>Last Live</source>
             <translation type="unfinished" />
         </message>
@@ -4038,7 +4038,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="147" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="176" />
             <source>Live auto-record + VOD subscription</source>
             <translation type="unfinished" />
         </message>
@@ -4070,7 +4070,7 @@ https://youtu.be/*</source>
         </message>
         <message>
             <location filename="streamkeep/ui/main_window.py" line="1378" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="82" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="111" />
             <source>Live Now</source>
             <translation type="unfinished" />
         </message>
@@ -4085,7 +4085,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="214" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="243" />
             <source>Live state and recording automation.</source>
             <translation type="unfinished" />
         </message>
@@ -4408,7 +4408,7 @@ rate limit is set.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="57" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="86" />
             <source>Monitor</source>
             <translation>Monitor</translation>
         </message>
@@ -4616,12 +4616,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="261" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="290" />
             <source>No channels on watch</source>
             <translation>No hay canales vigilados</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="635" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="664" />
             <source>No channels to export.</source>
             <translation type="unfinished" />
         </message>
@@ -5202,7 +5202,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="755" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="784" />
             <source>OPML: {added} channels added, {report['duplicates']} duplicates skipped.{errors_text}</source>
             <translation type="unfinished" />
         </message>
@@ -5421,7 +5421,7 @@ On: frame-exact trim using the selected codec — slower.</source>
             <translation>Pegar desde el portapapeles</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="126" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="155" />
             <source>Paste the channel link you want StreamKeep to poll.</source>
             <translation type="unfinished" />
         </message>
@@ -5554,7 +5554,7 @@ Saves your settings first.</source>
             <location filename="streamkeep/ui/history_model.py" line="21" />
             <location filename="streamkeep/ui/storage_model.py" line="12" />
             <location filename="streamkeep/ui/tabs/download.py" line="476" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="225" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="254" />
             <location filename="streamkeep/ui/tabs/settings.py" line="738" />
             <location filename="streamkeep/ui/tabs/settings_companion.py" line="526" />
             <location filename="streamkeep/ui/tabs/storage.py" line="565" />
@@ -5705,7 +5705,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="137" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="166" />
             <source>Polling interval</source>
             <translation type="unfinished" />
         </message>
@@ -6426,7 +6426,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="555" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="584" />
             <source>Remove selected</source>
             <translation type="unfinished" />
         </message>
@@ -6971,7 +6971,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="802" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="836" />
             <source>Schedule cache refreshed.</source>
             <translation type="unfinished" />
         </message>
@@ -6986,7 +6986,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="799" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="816" />
+            <source>Schedule refresh cancelled.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/monitor.py" line="833" />
             <source>Schedule refresh failed. See log for details.</source>
             <translation type="unfinished" />
         </message>
@@ -7369,7 +7374,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="553" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="582" />
             <source>Set schedule window for all selected...</source>
             <translation type="unfinished" />
         </message>
@@ -7420,7 +7425,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="195" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="224" />
             <source>Show calendar</source>
             <translation type="unfinished" />
         </message>
@@ -7763,7 +7768,7 @@ http://fallback:3128||Global fallback</source>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="1326" />
-            <location filename="streamkeep/ui/tabs/monitor.py" line="225" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="254" />
             <location filename="streamkeep/ui/tabs/storage.py" line="380" />
             <source>Status</source>
             <translation type="unfinished" />
@@ -7819,7 +7824,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="980" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1014" />
             <source>Stops the active auto-recording first, then removes this channel.</source>
             <translation type="unfinished" />
         </message>
@@ -7870,7 +7875,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="348" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="377" />
             <source>Stream schedule</source>
             <translation type="unfinished" />
         </message>
@@ -7956,7 +7961,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="309" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="338" />
             <source>Streams / 8w</source>
             <translation type="unfinished" />
         </message>
@@ -7972,7 +7977,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="152" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="181" />
             <source>Subscribe — queue new VODs</source>
             <translation type="unfinished" />
         </message>
@@ -8022,7 +8027,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="117" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="146" />
             <source>Supported examples: kick.com/user or twitch.tv/user</source>
             <translation type="unfinished" />
         </message>
@@ -8377,7 +8382,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="309" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="338" />
             <source>Top Game</source>
             <translation type="unfinished" />
         </message>
@@ -8413,7 +8418,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="63" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="92" />
             <source>Track channels and automate capture.</source>
             <translation>Monitoree canales y automatice la captura.</translation>
         </message>
@@ -8453,7 +8458,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="299" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="328" />
             <source>Transition history for the last eight weeks.</source>
             <translation type="unfinished" />
         </message>
@@ -8563,12 +8568,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="448" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="477" />
             <source>Updates automatically.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="444" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="473" />
             <source>Updates automatically; auto-record is ready.</source>
             <translation type="unfinished" />
         </message>
@@ -8832,17 +8837,17 @@ Download again?</source>
             <translation>Vigile canales y automatice capturas en directo fiables.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="212" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="241" />
             <source>Watch list</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="176" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="205" />
             <source>Watch list tools</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="440" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="469" />
             <source>Watch list updates automatically. {live} live now and {recording} currently recording.</source>
             <translation type="unfinished" />
         </message>
@@ -9143,7 +9148,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="973" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1007" />
             <source>{'Stop and remove' if e.is_recording else 'Remove'} monitored channel {e.channel_id or e.url}</source>
             <translation type="unfinished" />
         </message>
@@ -9163,12 +9168,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1578" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1612" />
             <source>{channel_id} is live. Auto-record will retry when the current job finishes.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="1567" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1601" />
             <source>{channel_id} went live.</source>
             <translation type="unfinished" />
         </message>
@@ -9233,7 +9238,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="991" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="1025" />
             <source>{e.interval_secs}s  ⏰ {e.schedule_start_hhmm}-{e.schedule_end_hhmm}</source>
             <translation type="unfinished" />
         </message>
@@ -9355,7 +9360,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/monitor.py" line="547" />
+            <location filename="streamkeep/ui/tabs/monitor.py" line="576" />
             <source>{len(sel_rows)} channel(s) selected</source>
             <translation type="unfinished" />
         </message>

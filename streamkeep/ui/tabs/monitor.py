@@ -6,7 +6,7 @@ import os
 import re
 from datetime import datetime
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox,
@@ -37,6 +37,35 @@ from ...upgrade import (
     default_upgrade_profile,
     evaluate_upgrade,
 )
+
+
+class _ScheduleRefreshWorker(QThread):
+    """Fetch Twitch schedule data without relying on a foreign event loop."""
+
+    completed = pyqtSignal(object, str, bool)
+    log_message = pyqtSignal(str)
+
+    def __init__(self, entries, cache, parent=None):
+        super().__init__(parent)
+        self._entries = list(entries)
+        self._cache = dict(cache or {})
+
+    def run(self):
+        from ...schedule import refresh_schedules
+
+        cache = dict(self._cache)
+        error = ""
+        try:
+            cache = refresh_schedules(
+                self._entries,
+                cache,
+                log_fn=self.log_message.emit,
+            )
+        except Exception as exc:
+            error = str(exc)
+            if not self.isInterruptionRequested():
+                self.log_message.emit(f"[SCHEDULE] Schedule refresh failed: {exc}")
+        self.completed.emit(cache, error, self.isInterruptionRequested())
 
 
 def build_monitor_tab(win):
@@ -760,41 +789,46 @@ class MonitorTabMixin:
     # ── Schedule ────────────────────────────────────────────────────
 
     def _on_refresh_schedules(self):
-        """Refresh stream schedules in a background thread (F39 audit fix)."""
-        import threading
-        from PyQt6.QtCore import QTimer
+        """Refresh stream schedules in a worker and marshal results safely."""
+        existing = getattr(self, "_schedule_refresh_worker", None)
+        if existing is not None and existing.isRunning():
+            return
 
         if hasattr(self, "schedule_calendar"):
             self.schedule_calendar.set_refreshing(True)
 
-        # Thread-safe log shim: marshal _log calls back to the GUI thread.
-        def _safe_log(msg, _self=self):
-            QTimer.singleShot(0, lambda: _self._log(msg))
+        worker = _ScheduleRefreshWorker(
+            list(self.monitor.entries),
+            dict(self._config.get("schedules", {})),
+            parent=self,
+        )
+        worker.log_message.connect(self._log)
+        worker.completed.connect(self._on_schedule_refresh_complete)
+        worker.finished.connect(worker.deleteLater)
+        self._schedule_refresh_worker = worker
+        worker.start()
 
-        def _bg():
-            from ...schedule import refresh_schedules
-            cache = dict(self._config.get("schedules", {}))
-            error = ""
-            try:
-                cache = refresh_schedules(
-                    list(self.monitor.entries), cache, log_fn=_safe_log,
-                )
-            except Exception as exc:
-                error = str(exc)
-                _safe_log(f"[SCHEDULE] Schedule refresh failed: {exc}")
-            QTimer.singleShot(0, lambda: self._apply_schedule_cache(cache, error))
-
-        threading.Thread(target=_bg, daemon=True).start()
+    def _on_schedule_refresh_complete(self, cache, error, cancelled):
+        self._schedule_refresh_worker = None
+        if cancelled:
+            if hasattr(self, "schedule_calendar"):
+                self.schedule_calendar.set_refreshing(False)
+            self._set_status("Schedule refresh cancelled.", "idle")
+            return
+        self._apply_schedule_cache(cache, error)
 
     def _apply_schedule_cache(self, cache, error=""):
         """Apply refreshed schedule cache on the main thread."""
         self._config["schedules"] = cache
         if hasattr(self, "schedule_calendar"):
+            self.schedule_calendar.set_cache(cache)
             if error:
                 self.schedule_calendar.set_refresh_error(error)
             else:
                 self.schedule_calendar.set_refreshing(False)
-            self.schedule_calendar.set_cache(cache)
+        persist = getattr(self, "_schedule_persist_config", None)
+        if callable(persist):
+            persist()
         if error:
             self._set_status("Schedule refresh failed. See log for details.", "error")
             return
