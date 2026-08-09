@@ -447,12 +447,12 @@ Archive workstation</translation>
             <translation>A .yaml definition dropped into the adapters directory stays inert until you read its contract and approve it here. Editing the hosts, method, URL, headers, or query parameters of an approved adapter makes it inert again until you review the change.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1455" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1461" />
             <source>A bundle is already in progress.</source>
             <translation>A bundle is already in progress.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1409" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1415" />
             <source>A chat render is already running.</source>
             <translation>A chat render is already running.</translation>
         </message>
@@ -483,7 +483,12 @@ Archive workstation</translation>
             <translation>A profile must declare at least one site.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1335" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1081" />
+            <source>A salvage pass is already running.</source>
+            <translation>A salvage pass is already running.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/history.py" line="1341" />
             <source>A transcription is already running.</source>
             <translation>A transcription is already running.</translation>
         </message>
@@ -589,7 +594,7 @@ Archive workstation</translation>
             <translation>Add at least one more recording to make sync comparison useful.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1181" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1187" />
             <source>Add Bookmark</source>
             <translation>Add Bookmark</translation>
         </message>
@@ -786,7 +791,7 @@ Archive workstation</translation>
             <translation>Analytics</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1617" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1623" />
             <source>Analyzing for highlights...</source>
             <translation>Analyzing for highlights...</translation>
         </message>
@@ -1332,12 +1337,12 @@ Archive workstation</translation>
             <translation>Building a read-only re-template preview…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1490" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1496" />
             <source>Bundle failed: {path_or_err}</source>
             <translation>Bundle failed: {path_or_err}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1486" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1492" />
             <source>Bundle ready: {path_or_err}</source>
             <translation>Bundle ready: {path_or_err}</translation>
         </message>
@@ -1347,12 +1352,12 @@ Archive workstation</translation>
             <translation>Bundled (recommended)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1470" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1476" />
             <source>Bundling {os.path.basename(src_dir)}...</source>
             <translation>Bundling {os.path.basename(src_dir)}...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1474" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1480" />
             <source>Bundling: {status} ({pct}%)</source>
             <translation>Bundling: {status} ({pct}%)</translation>
         </message>
@@ -1565,17 +1570,17 @@ Archive workstation</translation>
             <translation>Chapters &amp; Bookmarks</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1445" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1451" />
             <source>Chat render complete.</source>
             <translation>Chat render complete.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1449" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1455" />
             <source>Chat render failed: {path_or_err}</source>
             <translation>Chat render failed: {path_or_err}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1433" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1439" />
             <source>Chat render: {status} ({pct}%)</source>
             <translation>Chat render: {status} ({pct}%)</translation>
         </message>
@@ -2634,7 +2639,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>e.g. fragment:exp=1:20</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1185" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1191" />
             <source>e.g. Funny moment</source>
             <translation>e.g. Funny moment</translation>
         </message>
@@ -3328,7 +3333,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
             <translation>Found {len(links)} link(s). Queued {added} new ({len(links) - added} already in queue).</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1633" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1639" />
             <source>Found {len(results)} highlight(s). See log.</source>
             <translation>Found {len(results)} highlight(s). See log.</translation>
         </message>
@@ -3478,7 +3483,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</translation>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="576" />
             <location filename="streamkeep/ui/tabs/download.py" line="584" />
-            <location filename="streamkeep/ui/tabs/history.py" line="1188" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1194" />
             <source>HH:MM:SS</source>
             <translation>HH:MM:SS</translation>
         </message>
@@ -3771,7 +3776,7 @@ https://youtu.be/*</translation>
             <translation>Installing the pinned Deno runtime...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1160" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1166" />
             <source>Integrity manifest rescan failed.</source>
             <translation>Integrity manifest rescan failed.</translation>
         </message>
@@ -4647,12 +4652,12 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No channels to export.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1238" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1244" />
             <source>No chat spikes detected in this recording.</source>
             <translation>No chat spikes detected in this recording.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1406" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1412" />
             <source>No chat.jsonl found in that folder.</source>
             <translation>No chat.jsonl found in that folder.</translation>
         </message>
@@ -4690,7 +4695,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No existing media files were available to publish.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1623" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1629" />
             <source>No highlights found (needs chat/audio/scene data).</source>
             <translation>No highlights found (needs chat/audio/scene data).</translation>
         </message>
@@ -4751,11 +4756,6 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No media/manifest URLs found in the HAR capture.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1146" />
-            <source>No new salvage files were produced; the raw capture is unchanged.</source>
-            <translation>No new salvage files were produced; the raw capture is unchanged.</translation>
-        </message>
-        <message>
             <location filename="streamkeep/ui/main_window.py" line="3100" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="95" />
             <location filename="streamkeep/ui/notification_log_dialog.py" line="162" />
@@ -4763,7 +4763,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No notifications yet</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1608" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1614" />
             <source>No playable media found in selected entries.</source>
             <translation>No playable media found in selected entries.</translation>
         </message>
@@ -4797,6 +4797,11 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <location filename="streamkeep/ui/tabs/settings_preferences.py" line="977" />
             <source>No proxies configured to test.</source>
             <translation>No proxies configured to test.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/history.py" line="1085" />
+            <source>No raw captures are available to salvage.</source>
+            <translation>No raw captures are available to salvage.</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/download_single.py" line="1862" />
@@ -4840,7 +4845,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No scan yet</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1296" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1302" />
             <source>No scenes detected or scenedetect not installed.</source>
             <translation>No scenes detected or scenedetect not installed.</translation>
         </message>
@@ -4926,22 +4931,22 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No valid ranges to export</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1360" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1366" />
             <source>No video file to transcribe in that folder.</source>
             <translation>No video file to transcribe in that folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1312" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1318" />
             <source>No video files found in folder.</source>
             <translation>No video files found in folder.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1267" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1273" />
             <source>No video files found.</source>
             <translation>No video files found.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1506" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1512" />
             <source>No video/audio files found in that folder to trim.</source>
             <translation>No video/audio files found in that folder to trim.</translation>
         </message>
@@ -4951,7 +4956,7 @@ Set to 1 to disable and always use ffmpeg.</translation>
             <translation>No watched-state preview loaded.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1326" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1332" />
             <source>No Whisper runtime installed. Install `faster-whisper` or put whisper.cpp in PATH, or configure a local FFmpeg whisper model in Settings.</source>
             <translation>No Whisper runtime installed. Install `faster-whisper` or put whisper.cpp in PATH, or configure a local FFmpeg whisper model in Settings.</translation>
         </message>
@@ -5466,7 +5471,7 @@ Lines starting with # are comments and will be skipped.</translation>
             <translation>Path</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1545" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1551" />
             <source>Path missing and no saved URL to retry.</source>
             <translation>Path missing and no saved URL to retry.</translation>
         </message>
@@ -5993,7 +5998,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Published {len(published)} recording share(s).{suffix}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1600" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1606" />
             <source>python-mpv not available for sync viewer.</source>
             <translation>python-mpv not available for sync viewer.</translation>
         </message>
@@ -6152,7 +6157,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Re-encode video to H.265/HEVC (libx265, CRF 23 — slow)</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1540" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1546" />
             <source>Re-fetching {h.title or h.url}...</source>
             <translation>Re-fetching {h.title or h.url}...</translation>
         </message>
@@ -6268,7 +6273,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
         <message>
             <location filename="streamkeep/ui/tabs/history.py" line="944" />
             <location filename="streamkeep/ui/tabs/history.py" line="1052" />
-            <location filename="streamkeep/ui/tabs/history.py" line="1154" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1160" />
             <source>Recording folder is missing.</source>
             <translation>Recording folder is missing.</translation>
         </message>
@@ -6491,7 +6496,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Removed-media marker cleared; the identity may be downloaded again.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1317" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1323" />
             <source>Removing silence — this may take a minute…</source>
             <translation>Removing silence — this may take a minute…</translation>
         </message>
@@ -6521,7 +6526,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Render chat overlay...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1429" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1435" />
             <source>Rendering chat overlay ({label})...</source>
             <translation>Rendering chat overlay ({label})...</translation>
         </message>
@@ -6808,7 +6813,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Running a bounded archive integrity scrub; no repair or deletion is performed…</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1286" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1292" />
             <source>Running scene detection…</source>
             <translation>Running scene detection…</translation>
         </message>
@@ -6851,14 +6856,24 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Safe yt-dlp -S presets; a resolution cap prefers the best format at or below it</translation>
         </message>
         <message>
+            <location filename="streamkeep/ui/tabs/history.py" line="1120" />
+            <source>Salvage cancelled; raw captures were left unchanged.</source>
+            <translation>Salvage cancelled; raw captures were left unchanged.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/history.py" line="1116" />
+            <source>Salvage failed: {error}</source>
+            <translation>Salvage failed: {error}</translation>
+        </message>
+        <message>
             <location filename="streamkeep/ui/tabs/history.py" line="757" />
             <source>Salvage raw capture to a new file</source>
             <translation>Salvage raw capture to a new file</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1142" />
-            <source>Salvaged {built} raw capture(s) into new files.</source>
-            <translation>Salvaged {built} raw capture(s) into new files.</translation>
+            <location filename="streamkeep/ui/tabs/history.py" line="1092" />
+            <source>Salvaging {len(staging_dirs)} raw capture(s) in the background...</source>
+            <translation>Salvaging {len(staging_dirs)} raw capture(s) in the background...</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="3186" />
@@ -7490,7 +7505,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Sidecar</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1319" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1325" />
             <source>Silence removal complete.</source>
             <translation>Silence removal complete.</translation>
         </message>
@@ -7569,12 +7584,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</translat
             <translation>Smart profile: {profile['name']}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1715" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1721" />
             <source>Smart thumbnail not started: {error}</source>
             <translation>Smart thumbnail not started: {error}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1718" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1724" />
             <source>Smart thumbnail queued.</source>
             <translation>Smart thumbnail queued.</translation>
         </message>
@@ -7897,7 +7912,7 @@ http://fallback:3128||Global fallback</translation>
             <translation>Storyboard ready</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1292" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1298" />
             <source>Storyboard ready — {n} scenes. Open Trim dialog to view.</source>
             <translation>Storyboard ready — {n} scenes. Open Trim dialog to view.</translation>
         </message>
@@ -8046,7 +8061,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Summary model</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1690" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1696" />
             <source>Summary not started: {error}</source>
             <translation>Summary not started: {error}</translation>
         </message>
@@ -8056,7 +8071,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</translation>
             <translation>Summary provider profile</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1696" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1702" />
             <source>Summary queued.</source>
             <translation>Summary queued.</translation>
         </message>
@@ -8465,22 +8480,22 @@ Download again?</translation>
             <translation>Transcribe (Whisper)...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1391" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1397" />
             <source>Transcribe complete. SRT, VTT, and auto-chapters saved.</source>
             <translation>Transcribe complete. SRT, VTT, and auto-chapters saved.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1398" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1404" />
             <source>Transcribe failed: {path_or_err}</source>
             <translation>Transcribe failed: {path_or_err}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1372" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1378" />
             <source>Transcribing {os.path.basename(media)} with {runtime} ({model})...</source>
             <translation>Transcribing {os.path.basename(media)} with {runtime} ({model})...</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1379" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1385" />
             <source>Transcribing: {status} ({pct}%)</source>
             <translation>Transcribing: {status} ({pct}%)</translation>
         </message>
@@ -9320,12 +9335,12 @@ Download again?</translation>
             <translation>{label} ({profile.get('adapter', 'adapter')})</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1661" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1667" />
             <source>{label} cancelled.</source>
             <translation>{label} cancelled.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1653" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1659" />
             <source>{label} complete.</source>
             <translation>{label} complete.</translation>
         </message>
@@ -9335,7 +9350,7 @@ Download again?</translation>
             <translation>{label} copied to clipboard.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1656" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1662" />
             <source>{label} failed: {(job or {}).get('error', 'unknown error')}</source>
             <translation>{label} failed: {(job or {}).get('error', 'unknown error')}</translation>
         </message>
@@ -9367,7 +9382,7 @@ Download again?</translation>
             <translation>{label}: yt-dlp default</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1663" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1669" />
             <source>{label}: {int(float(job.get('progress', 0)) * 100)}%</source>
             <translation>{label}: {int(float(job.get('progress', 0)) * 100)}%</translation>
         </message>
@@ -9442,7 +9457,7 @@ Download again?</translation>
             <translation>{len(self._segments)} scheduled stream(s) across {len(channels)} channel(s), spread over {day_count} day(s). Click any block to inspect it or jump into that channel's profile.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1250" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1256" />
             <source>{len(spikes)} chat spike(s) found — see log.</source>
             <translation>{len(spikes)} chat spike(s) found — see log.</translation>
         </message>
@@ -9525,6 +9540,11 @@ Download again?</translation>
             <location filename="streamkeep/ui/tabs/settings_preferences.py" line="221" />
             <source>{status['plugin_id']} is reachable at {status['backend_url'] or 'the configured endpoint'}.</source>
             <translation>{status['plugin_id']} is reachable at {status['backend_url'] or 'the configured endpoint'}.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/ui/tabs/history.py" line="1099" />
+            <source>{status} ({int(index)}/{int(total)})</source>
+            <translation>{status} ({int(index)}/{int(total)})</translation>
         </message>
         <message>
             <location filename="streamkeep/ui/calendar_widget.py" line="577" />

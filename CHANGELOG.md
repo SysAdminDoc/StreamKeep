@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Raw-capture salvage now runs in an owned, cancellable background worker with
+  per-capture progress and visible failure/cancellation notifications, so
+  FFmpeg recovery no longer blocks the History window.
+
 The seven desktop routes now share one archive-control-room visual system.
 
 - Download, Monitor, History, Analytics, Storage, Settings, and Operations use

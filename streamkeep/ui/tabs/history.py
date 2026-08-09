@@ -1073,80 +1073,86 @@ class HistoryTabMixin:
             self._notify_center(f"Integrity drift: {title}", "warning")
 
     def _salvage_raw_captures(self, staging_dirs):
-        """Rebuild playable files from preserved raw capture fragments (V36).
+        """Start a cancellable background salvage pass (V234)."""
+        from ...workers import SalvageWorker
 
-        Idempotent: each staging directory produces one ``.salvaged.<ext>``
-        file. An existing salvage output is reported and left alone, and the
-        raw capture itself is never modified or removed.
-        """
-        import subprocess
-
-        from ...capabilities import CapabilityUnavailableError, resolve_tool_command
-        from ...live_capture import (
-            build_salvage_command,
-            load_report,
-            salvage_target,
-            write_concat_list,
-        )
-        from ...paths import _CREATE_NO_WINDOW
-
-        try:
-            ffmpeg = resolve_tool_command("ffmpeg")
-        except CapabilityUnavailableError as error:
-            self._set_status(str(error), "error")
+        worker = getattr(self, "_salvage_worker", None)
+        if worker is not None and worker.isRunning():
+            self._set_status("A salvage pass is already running.", "warning")
             return
+        staging_dirs = [str(path) for path in staging_dirs or ()]
+        if not staging_dirs:
+            self._set_status("No raw captures are available to salvage.", "warning")
+            return
+        worker = SalvageWorker(staging_dirs)
+        worker.progress.connect(self._on_salvage_progress)
+        worker.log.connect(self._log)
+        worker.done.connect(self._on_salvage_done)
+        self._salvage_worker = worker
+        self._set_status(
+            f"Salvaging {len(staging_dirs)} raw capture(s) in the background...",
+            "processing",
+        )
+        worker.start()
 
-        built = 0
-        for staging_dir in staging_dirs:
-            target = salvage_target(staging_dir)
-            report = load_report(staging_dir)
-            summary = str(
-                (report.get("gaps") or {}).get("summary", "") or ""
-            )
-            if os.path.isfile(target):
-                self._log(
-                    f"[SALVAGE] {os.path.basename(target)} already exists - "
-                    "leaving it untouched."
-                )
-                continue
-            listing = write_concat_list(staging_dir)
-            if not listing:
-                self._log(
-                    f"[SALVAGE] {os.path.basename(staging_dir)} holds no "
-                    "usable fragments."
-                )
-                continue
-            try:
-                cmd = build_salvage_command(
-                    staging_dir, target, ffmpeg=ffmpeg, concat_list=listing,
-                )
-            except ValueError as error:
-                self._log(f"[SALVAGE] {error}")
-                continue
-            if summary:
-                self._log(f"[SALVAGE] Known gaps: {summary}")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", creationflags=_CREATE_NO_WINDOW,
-            )
-            if result.returncode == 0 and os.path.isfile(target):
-                built += 1
-                self._log(f"[SALVAGE] Wrote {os.path.basename(target)}")
-            else:
-                tail = (result.stderr or "").strip().splitlines()[-3:]
-                self._log(
-                    "[SALVAGE] ffmpeg could not rebuild "
-                    f"{os.path.basename(staging_dir)}: {' '.join(tail)}"
-                )
-        if built:
-            self._set_status(
-                f"Salvaged {built} raw capture(s) into new files.", "success",
+    def _on_salvage_progress(self, index, total, status):
+        self._set_status(
+            f"{status} ({int(index)}/{int(total)})", "processing",
+        )
+
+    def _on_salvage_done(self, result):
+        result = dict(result or {})
+        worker = getattr(self, "_salvage_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.finished.connect(
+                lambda worker=worker: self._clear_salvage_worker(worker)
             )
         else:
+            self._clear_salvage_worker(worker)
+
+        error = str(result.get("error", "") or "")
+        if error:
+            self._log(f"[SALVAGE] {error}")
+            self._set_status(f"Salvage failed: {error}", "error")
+            self._notify_center(f"Salvage failed: {error}", "error")
+            return
+        if result.get("cancelled"):
             self._set_status(
-                "No new salvage files were produced; the raw capture is "
-                "unchanged.", "warning",
+                "Salvage cancelled; raw captures were left unchanged.", "info",
             )
+            self._notify_center("Raw-capture salvage was cancelled.", "info")
+            return
+
+        built = int(result.get("built", 0) or 0)
+        failed = int(result.get("failed", 0) or 0)
+        if built:
+            level = "warning" if failed else "success"
+            self._set_status(
+                f"Salvaged {built} raw capture(s) into new files."
+                + (f" {failed} failed; see the log." if failed else ""),
+                level,
+            )
+            if failed:
+                self._notify_center(
+                    f"Salvage completed with {failed} failure(s). See the log.",
+                    "error",
+                )
+            else:
+                self._notify_center(
+                    f"Salvaged {built} raw capture(s).", "success",
+                )
+            return
+        message = "No new salvage files were produced; raw captures are unchanged."
+        self._set_status(message, "warning")
+        if failed:
+            self._notify_center(
+                f"Salvage failed for {failed} raw capture(s). See the log.",
+                "error",
+            )
+
+    def _clear_salvage_worker(self, worker):
+        if getattr(self, "_salvage_worker", None) is worker:
+            self._salvage_worker = None
 
     def _rescan_archive_manifest(self, h):
         """Rebaseline a history row manifest to the current file state."""

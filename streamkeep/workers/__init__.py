@@ -9,6 +9,7 @@ from .monitor_ops import SeedArchiveWorker, AutoRecordResolveWorker
 from .backup import ScheduledBackupWorker
 from .raw_capture import RawCaptureWorker
 from .index import RecordingIndexWorker
+from .salvage import SalvageWorker
 
 __all__ = [
     "FetchWorker",
@@ -22,4 +23,5 @@ __all__ = [
     "ScheduledBackupWorker",
     "RawCaptureWorker",
     "RecordingIndexWorker",
+    "SalvageWorker",
 ]
