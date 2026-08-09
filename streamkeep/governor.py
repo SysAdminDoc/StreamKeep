@@ -33,6 +33,10 @@ DEFAULT_CONCURRENCY = 4
 MIN_CONCURRENCY = 1
 #: Delay ceiling. Past this the host is not rate-limiting, it is refusing.
 MAX_DELAY_SECONDS = 300.0
+# A server-provided Retry-After may legitimately exceed the computed local
+# ceiling. Keep a finite safety bound for malformed/untrusted input while
+# preserving the value the service actually requested.
+MAX_RETRY_AFTER_SECONDS = 7 * 24 * 60 * 60
 #: First delay applied when a host throttles with no Retry-After.
 BASE_DELAY_SECONDS = 5.0
 #: Consecutive successes before the governor gives back one step.
@@ -57,6 +61,7 @@ class HostGovernor:
     successes: int = 0
     updated_at: float = 0.0
     reason: str = ""
+    classification: str = ""
 
     @property
     def throttled(self) -> bool:
@@ -116,8 +121,11 @@ def _current(key, now) -> HostGovernor:
     return state
 
 
-def record_throttle(url_or_host, *, retry_after=None, now=None) -> HostGovernor:
-    """Register that a host pushed back. Halve concurrency, extend the delay."""
+def record_throttle(
+    url_or_host, *, retry_after=None, now=None,
+    reason="throttled by the host", classification="rate-limited",
+) -> HostGovernor:
+    """Register a host pushback and carry its operator-facing class."""
     key = host_key(url_or_host)
     if not key:
         return HostGovernor()
@@ -132,17 +140,23 @@ def record_throttle(url_or_host, *, retry_after=None, now=None) -> HostGovernor:
             requested = float(retry_after) if retry_after is not None else 0.0
         except (TypeError, ValueError):
             requested = 0.0
+        requested = min(MAX_RETRY_AFTER_SECONDS, max(0.0, requested))
         if requested > 0:
             # The host named a number; it outranks our guess when it is larger.
             delay = max(delay, requested)
+        # Keep a literal server directive even when it exceeds the normal
+        # computed ceiling. Without this exception a Retry-After: 600 was
+        # silently shortened to 300 and the next request could be rejected.
+        ceiling = max(MAX_DELAY_SECONDS, requested)
         updated = HostGovernor(
             host=key,
             concurrency=concurrency,
-            delay_seconds=min(MAX_DELAY_SECONDS, delay),
+            delay_seconds=min(ceiling, delay),
             throttles=state.throttles + 1,
             successes=0,
             updated_at=moment,
-            reason="throttled by the host",
+            reason=str(reason or "throttled by the host"),
+            classification=str(classification or "rate-limited"),
         )
         _HOSTS[key] = updated
         return updated
@@ -259,6 +273,7 @@ def public_view(*, now=None) -> dict:
                 "delay_seconds": round(float(state.delay_seconds), 3),
                 "throttles": int(state.throttles),
                 "reason": state.reason,
+                "classification": state.classification,
             }
             for state in states
         ],

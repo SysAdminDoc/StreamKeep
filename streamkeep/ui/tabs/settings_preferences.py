@@ -554,20 +554,33 @@ class SettingsPreferencesMixin:
     def _on_import_browser_cookies(self):
         """Extract cookies from the selected browser to cookies.txt (F47)."""
         from ...cookies import import_from_browser
+
+        self._import_selected_browser_cookies(import_from_browser, "Import")
+
+    def _on_refresh_cookies(self):
+        """Re-extract the selected browser's cookies into the shared jar."""
+        from ...cookies import refresh_from_browser
+
+        self._import_selected_browser_cookies(refresh_from_browser, "Refresh")
+
+    def _import_selected_browser_cookies(self, importer, action):
+        """Run one browser-cookie import while keeping status consistent."""
         browser_text = self.cookies_combo.currentText()
         browser_data = self.cookies_combo.currentData()
         if browser_text == "None" or not browser_data:
-            self._set_status("Select a browser first, then click Import.", "warning")
+            self._set_status(
+                f"Select a browser first, then click {action}.", "warning",
+            )
             return
         ytdlp_name = str(browser_data)
-        ok, msg = import_from_browser(ytdlp_name)
+        ok, msg = importer(ytdlp_name)
         self._update_cookies_status()
         if ok:
             self._set_status(msg, "success")
-            self._log(f"[COOKIES] {msg}")
+            self._log(f"[COOKIES] {action}: {msg}")
         else:
             self._set_status(msg, "error")
-            self._log(f"[COOKIES] Error: {msg}")
+            self._log(f"[COOKIES] {action} error: {msg}")
 
     # ── Authentication profiles (V50) ─────────────────────────────
 
@@ -618,7 +631,13 @@ class SettingsPreferencesMixin:
             else "no credentials imported yet"
         )
         source = view["browser"] or view["source"] or "unset"
-        label.setText(f"Scope: {scope}. Source: {source}. {state}.")
+        raw_age = view.get("age_secs", -1)
+        age = int(raw_age if raw_age is not None else -1)
+        freshness = self._cookie_age_text(age)
+        label.setText(
+            f"Scope: {scope}. Source: {source}. {state}."
+            + (f" Updated {freshness}." if freshness else "")
+        )
 
     def _on_auth_profile_new(self):
         """Create a profile from a name plus its declared site scope."""
@@ -748,24 +767,41 @@ class SettingsPreferencesMixin:
 
     def _update_cookies_status(self):
         """Refresh the cookies status label (F47)."""
-        from ...cookies import cookies_file_path, cookies_file_age_secs
+        from ...cookies import cookie_file_metadata
         label = getattr(self, "cookies_status_label", None)
         if label is None:
             return
-        cpath = cookies_file_path()
-        if not cpath:
+        metadata = cookie_file_metadata()
+        if not metadata.get("exists"):
             label.setText("No cookies.txt — authenticated content may fail.")
             return
-        age = cookies_file_age_secs()
+        source = str(metadata.get("source") or "manual file import")
+        raw_age = metadata.get("age_secs", -1)
+        age = int(raw_age if raw_age is not None else -1)
+        freshness = self._cookie_age_text(age)
+        if age >= 86400:
+            freshness += " — refresh recommended"
+        detail = f"cookies.txt from {source}"
+        if freshness:
+            detail += f" (updated {freshness})"
+        label.setText(detail + ".")
+
+    @staticmethod
+    def _cookie_age_text(age_secs):
+        """Format cookie freshness without exposing the local file path."""
+        try:
+            age = int(age_secs)
+        except (TypeError, ValueError):
+            return ""
         if age < 0:
-            label.setText("cookies.txt present.")
-        elif age < 3600:
-            label.setText(f"cookies.txt present (updated {age // 60}m ago).")
-        elif age < 86400:
-            label.setText(f"cookies.txt present (updated {age // 3600}h ago).")
-        else:
-            days = age // 86400
-            label.setText(f"cookies.txt present ({days}d old — consider refreshing).")
+            return ""
+        if age < 60:
+            return "just now"
+        if age < 3600:
+            return f"{age // 60}m ago"
+        if age < 86400:
+            return f"{age // 3600}h ago"
+        return f"{age // 86400}d ago"
 
     # ── Platform account tokens ──────────────────────────────────────
 

@@ -1,5 +1,7 @@
 import sys
+import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from streamkeep import cookies
@@ -9,6 +11,29 @@ class CookieTests(unittest.TestCase):
     def test_sanitize_cookie_field_strips_row_breakers(self):
         cleaned = cookies._sanitize_cookie_field("a\tb\r\nc")
         self.assertEqual(cleaned, "a b c")
+
+    def test_cookie_metadata_reports_source_and_age_without_reading_values(self):
+        path = Path(self._testMethodName + ".cookies.txt").resolve()
+        try:
+            path.write_text(
+                "# Netscape HTTP Cookie File\n"
+                "# Exported by StreamKeep from Google Chrome\n"
+                ".example.com\tTRUE\t/\tFALSE\t0\tsid\tsecret\n",
+                encoding="utf-8",
+            )
+            old = time.time() - 7200
+            import os
+            os.utime(path, (old, old))
+            metadata = cookies.cookie_file_metadata(path)
+            self.assertTrue(metadata["exists"])
+            self.assertEqual(metadata["source"], "Google Chrome")
+            self.assertGreaterEqual(metadata["age_secs"], 7190)
+            self.assertNotIn("secret", repr(metadata))
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
 
 class CookieFailureDiagnosisTests(unittest.TestCase):

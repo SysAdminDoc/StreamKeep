@@ -852,6 +852,13 @@ def build_settings_tab(win):
     )
     win.cookies_import_btn.clicked.connect(win._on_import_browser_cookies)
     row_import.addWidget(win.cookies_import_btn)
+    win.cookies_refresh_btn = QPushButton("Refresh")
+    win.cookies_refresh_btn.setObjectName("secondary")
+    win.cookies_refresh_btn.setToolTip(
+        "Re-import cookies from the selected browser and update cookies.txt"
+    )
+    win.cookies_refresh_btn.clicked.connect(win._on_refresh_cookies)
+    row_import.addWidget(win.cookies_refresh_btn)
     win.cookies_check_btn = QPushButton("Check")
     win.cookies_check_btn.setObjectName("secondary")
     win.cookies_check_btn.setFixedWidth(70)

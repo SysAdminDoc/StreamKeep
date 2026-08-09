@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 
 from streamkeep import credential_check as cc
 from streamkeep import health
@@ -129,6 +130,27 @@ def test_public_health_snapshot_removes_local_targets():
 
 def test_health_event_vocabulary_is_registered_with_structured_hooks():
     assert set(HEALTH_EVENT_BY_CATEGORY.values()).issubset(set(HOOK_EVENTS))
+
+
+def test_repeated_bot_checks_name_the_class_and_platform():
+    now = time.time()
+    condition = health._extractor_conditions(
+        {}, [{
+            "source_key": "bot-source",
+            "source_label": "Example",
+            "engine": "yt-dlp",
+            "failure_count": 3,
+            "opened_until": 0,
+            "last_category": "authentication",
+            "last_classification": "bot-check",
+            "last_reason": "challenge required",
+        }], health._now_iso(now), now,
+    )[0]
+
+    assert "Repeated bot-check failures" in condition["title"]
+    assert "Example" in condition["title"]
+    assert condition["classification"] == "bot-check"
+    assert "bot-check" in condition["detail"]
 
 
 # ── V184: unattended work reports its own failure ───────────────────

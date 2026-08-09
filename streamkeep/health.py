@@ -480,7 +480,18 @@ def _extractor_conditions(config, retry_circuits, now, now_epoch) -> list[dict]:
         severity = "error" if opened_until > now_epoch else "warning"
         reason = _safe_text(row.get("last_reason") or row.get("last_category"), 240)
         engine = _safe_text(row.get("engine"), 32)
+        classification = _safe_text(row.get("last_classification"), 64)
+        if not classification:
+            classification = {
+                "rate_limit": "rate-limited",
+                "missing_media": "genuinely-gone",
+                "authentication": "authentication",
+                "server": "server-error",
+                "network": "network-unreachable",
+            }.get(str(row.get("last_category") or "").strip(), "")
         detail = f"{count} consecutive extractor failures"
+        if classification:
+            detail += f" ({classification})"
         if engine:
             detail += f" using {engine}"
         if reason:
@@ -501,12 +512,16 @@ def _extractor_conditions(config, retry_circuits, now, now_epoch) -> list[dict]:
             )
         condition = _condition(
             f"extractor:{key}", "extractor", severity,
-            f"Repeated extractor failures: {label}"
+            (
+                f"Repeated {classification} failures: {label}"
+                if classification else f"Repeated extractor failures: {label}"
+            )
             + (f" ({engine})" if engine else ""),
             detail, remediation,
             target=label, event=HEALTH_EVENT_BY_CATEGORY["extractor"], now=now,
         )
         condition["engine"] = engine
+        condition["classification"] = classification
         condition["alternate_engines"] = alternates
         conditions.append(condition)
     return conditions

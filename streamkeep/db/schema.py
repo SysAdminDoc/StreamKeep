@@ -73,6 +73,8 @@ def migrate_database(connection, version: int, target_version: int) -> None:
         _migrate_failure_codes_v22(connection)
     if version < 23:
         _migrate_circuit_engine_v23(connection)
+    if version < 24:
+        _migrate_retry_classification_v24(connection)
 
     _apply_schema(connection)
     if version == 0:
@@ -298,6 +300,7 @@ def _apply_schema(db):
             window_started_at REAL   NOT NULL DEFAULT 0,
             opened_until     REAL    NOT NULL DEFAULT 0,
             last_category    TEXT    NOT NULL DEFAULT '',
+            last_classification TEXT NOT NULL DEFAULT '',
             last_reason      TEXT    NOT NULL DEFAULT '',
             updated_at       TEXT    NOT NULL DEFAULT ''
         );
@@ -907,6 +910,20 @@ def _migrate_circuit_engine_v23(db):
         )
 
 
+def _migrate_retry_classification_v24(db):
+    """Persist the cross-cutting extractor class for standing health (V201)."""
+    existing_cols = {
+        row[1] for row in db.execute("PRAGMA table_info(retry_circuits)").fetchall()
+    }
+    if not existing_cols:
+        return
+    if "last_classification" not in existing_cols:
+        db.execute(
+            "ALTER TABLE retry_circuits ADD COLUMN last_classification "
+            "TEXT NOT NULL DEFAULT ''"
+        )
+
+
 def _migrate_failure_codes_v22(db):
     """Add the machine-readable failure taxonomy (V154).
 
@@ -964,6 +981,7 @@ def _migrate_retry_v10(db):
             window_started_at REAL   NOT NULL DEFAULT 0,
             opened_until     REAL    NOT NULL DEFAULT 0,
             last_category    TEXT    NOT NULL DEFAULT '',
+            last_classification TEXT NOT NULL DEFAULT '',
             last_reason      TEXT    NOT NULL DEFAULT '',
             updated_at       TEXT    NOT NULL DEFAULT ''
         )
@@ -975,6 +993,7 @@ def _migrate_retry_v10(db):
     # both migrations are idempotent, so v22 running twice is a no-op.
     _migrate_failure_codes_v22(db)
     _migrate_circuit_engine_v23(db)
+    _migrate_retry_classification_v24(db)
 
     from ..retry import (
         classify_failure,

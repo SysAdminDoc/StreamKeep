@@ -176,6 +176,7 @@ FAILURE_CODES = {
     "disk_full": ("disk", False, False),
     "permission_denied": ("permission", False, False),
     "drm_protected": ("drm", False, True),
+    "bot_check": ("authentication", False, False),
     "geo_blocked": ("authentication", False, True),
     "members_only": ("authentication", False, False),
     "login_required": ("authentication", False, False),
@@ -190,10 +191,200 @@ FAILURE_CODES = {
     "unknown": ("unknown", False, False),
 }
 
+# The wording and status combinations emitted by remote services change more
+# often than the retry state machine. Keep those signals in one ordered data
+# table so a new bot wall or a renamed availability message is an edit to the
+# table, not another branch hidden in ``classify_failure``. Earlier rows win:
+# a deleted video with a Retry-After is still gone, and a members-only wall is
+# intervention rather than a generic 403/login failure.
+FAILURE_SIGNAL_RULES = (
+    {
+        "code": "geo_blocked",
+        "signals": (
+            "not available in your country", "not available in your location",
+            "geo-restricted", "geo restricted", "geoblocked", "geo-blocked",
+            "blocked in your country",
+        ),
+    },
+    {
+        "code": "members_only",
+        "signals": (
+            "members-only", "members only", "subscriber-only",
+            "subscriber only", "requires a channel subscription",
+            "join this channel",
+        ),
+    },
+    {
+        "code": "deleted",
+        "signals": (
+            "has been deleted", "removed by the uploader",
+            "video has been removed", "account has been terminated",
+            "no longer exists",
+        ),
+    },
+    {
+        "code": "scheduled_not_live",
+        "signals": (
+            "this live event will begin", "premieres in", "premiere will begin",
+            "scheduled to start", "stream has not started", "not started yet",
+            "waiting for the stream", "is offline", "channel is not live",
+        ),
+        "honor_retry_after": True,
+    },
+    {
+        "code": "disk_full",
+        "signals": (
+            "no space left", "disk full", "not enough space",
+            "insufficient disk", "low disk", "quota exceeded",
+        ),
+    },
+    {
+        "code": "permission_denied",
+        "signals": (
+            "permission denied", "access is denied", "read-only file system",
+            "operation not permitted", "winerror 5",
+        ),
+    },
+    {
+        "code": "drm_protected",
+        "signals": (
+            "drm", "content protection", "widevine", "fairplay", "playready",
+            "encrypted media extensions",
+        ),
+    },
+    {
+        "code": "bot_check",
+        "signals": (
+            "captcha", "verify you are human", "are you a human",
+            "bot detected", "bot check", "automated queries",
+            "automated request", "unusual traffic", "cloudflare",
+            "cf-chl-", "challenge required", "anti-bot", "antibot",
+            "turnstile",
+        ),
+    },
+    {
+        "code": "login_required",
+        "statuses": (401, 403),
+        "signals": (
+            "unauthorized", "forbidden", "authentication required",
+            "login required", "sign in to confirm", "cookies are required",
+            "private video",
+        ),
+    },
+    {
+        "code": "not_found",
+        "statuses": (404, 410),
+        "signals": (
+            "media is unavailable", "video unavailable", "not found",
+            "media is missing", "source is missing", "recording is missing",
+            "no longer available",
+        ),
+    },
+    {
+        "code": "invalid_config",
+        "signals": (
+            "invalid configuration", "invalid config", "invalid url",
+            "unsupported url", "no extractor found", "no suitable extractor",
+            "requested format is not available", "unsupported template",
+            "unknown option", "unrecognized option",
+        ),
+    },
+    {
+        "code": "throttled",
+        "statuses": (429,),
+        "signals": ("too many requests", "rate limit"),
+        "honor_retry_after": True,
+    },
+    {
+        "code": "server_error",
+        "statuses": (500, 502, 503, 504),
+        "signals": (
+            "internal server error", "bad gateway", "service unavailable",
+            "gateway timeout",
+        ),
+        "honor_retry_after": True,
+    },
+    {
+        "code": "timeout",
+        "signals": (
+            "timed out", "timeout", "deadline exceeded", "operation timed out",
+        ),
+        "honor_retry_after": True,
+    },
+    {
+        "code": "network_unreachable",
+        "signals": (
+            "temporary failure", "temporary network failure",
+            "temporarily unavailable", "connection reset", "connection refused",
+            "connection aborted", "remote disconnected", "network is unreachable",
+            "name resolution", "getaddrinfo failed", "network error",
+            "could not resolve host", "failed to connect", "broken pipe",
+            "curl: (6)", "curl: (7)", "curl: (18)", "curl: (28)",
+            "curl: (35)", "curl: (52)", "curl: (56)",
+        ),
+        "honor_retry_after": True,
+    },
+)
+
+# Human/API vocabulary for the cross-cutting failure classes in V201. The
+# original reason codes remain stable for existing queue/API consumers.
+FAILURE_CLASSIFICATIONS = {
+    "bot_check": "bot-check",
+    "throttled": "rate-limited",
+    "geo_blocked": "geo-blocked",
+    "members_only": "members-only",
+    "deleted": "genuinely-gone",
+    "not_found": "genuinely-gone",
+    "server_error": "server-error",
+    "network_unreachable": "network-unreachable",
+    "scheduled_not_live": "scheduled",
+    "disk_full": "disk-full",
+    "permission_denied": "permission-denied",
+    "drm_protected": "drm-protected",
+    "login_required": "login-required",
+    "invalid_config": "invalid-config",
+    "timeout": "timeout",
+    "unknown": "unknown",
+}
+
+# These failures should cool a host even when the individual job is not safe
+# to retry automatically. In particular, repeatedly probing a bot wall or a
+# known-gone URL makes the host look like a queue storm and hides the standing
+# condition from the operator.
+HOST_BACKOFF_CODES = frozenset({
+    "bot_check", "throttled", "server_error", "timeout", "network_unreachable",
+})
+
 
 def failure_code_policy(code: object) -> tuple[str, bool, bool]:
     """Return ``(category, retryable, terminal)`` for a reason code."""
     return FAILURE_CODES.get(str(code or "").strip().casefold(), FAILURE_CODES["unknown"])
+
+
+def failure_classification(code: object) -> str:
+    """Return the stable operator vocabulary for a reason code."""
+    normalized = str(code or "").strip().casefold()
+    return FAILURE_CLASSIFICATIONS.get(normalized, normalized or "unknown")
+
+
+def should_backoff_host(code: object) -> bool:
+    """Whether a failure should cool the source host in the governor."""
+    return str(code or "").strip().casefold() in HOST_BACKOFF_CODES
+
+
+def apply_host_backoff(url: object, decision: "RetryDecision") -> bool:
+    """Apply a classified host cooldown without coupling the DB to Qt policy."""
+    if not should_backoff_host(decision.code):
+        return False
+    from .governor import record_throttle
+
+    record_throttle(
+        url,
+        retry_after=decision.retry_after_seconds,
+        reason=f"{decision.classification} failure",
+        classification=decision.classification,
+    )
+    return True
 
 
 @dataclass(frozen=True)
@@ -209,6 +400,11 @@ class RetryDecision:
     code: str = "unknown"
     # True only when no retry and no operator action can make this URL work.
     terminal: bool = False
+
+    @property
+    def classification(self) -> str:
+        """Return the V201 class without changing the legacy reason code."""
+        return failure_classification(self.code)
 
 
 def sanitize_failure_reason(error: object, *, limit: int = 1000) -> str:
@@ -273,158 +469,13 @@ def classify_failure(error: object, *, now: float | None = None) -> RetryDecisio
             reason, code, terminal,
         )
 
-    # Checked ahead of the generic authentication and missing-media buckets:
-    # these read as "forbidden" or "unavailable" but are permanent for this
-    # URL, and retrying them forever is what poisons a queue.
-    if (
-        "not available in your country" in text
-        or "not available in your location" in text
-        or "geo-restricted" in text
-        or "geo restricted" in text
-        or "geoblocked" in text
-        or "geo-blocked" in text
-        or "blocked in your country" in text
-    ):
-        return decide("geo_blocked")
-    if (
-        "members-only" in text
-        or "members only" in text
-        or "subscriber-only" in text
-        or "subscriber only" in text
-        or "requires a channel subscription" in text
-        or "join this channel" in text
-    ):
-        return decide("members_only")
-    if (
-        "has been deleted" in text
-        or "removed by the uploader" in text
-        or "video has been removed" in text
-        or "account has been terminated" in text
-        or "no longer exists" in text
-    ):
-        return decide("deleted")
-    # A scheduled premiere or an announced stream is the canonical "come back
-    # later" case. It previously fell through to ``unknown`` and was therefore
-    # marked non-retryable, so the job stopped instead of waiting.
-    if (
-        "this live event will begin" in text
-        or "premieres in" in text
-        or "premiere will begin" in text
-        or "scheduled to start" in text
-        or "stream has not started" in text
-        or "not started yet" in text
-        or "waiting for the stream" in text
-        or "is offline" in text
-        or "channel is not live" in text
-    ):
-        return decide("scheduled_not_live", retry_after_seconds=retry_after)
-
-    if (
-        "no space left" in text
-        or "disk full" in text
-        or "not enough space" in text
-        or "insufficient disk" in text
-        or "low disk" in text
-        or "quota exceeded" in text
-    ):
-        return decide("disk_full")
-    if (
-        "permission denied" in text
-        or "access is denied" in text
-        or "read-only file system" in text
-        or "operation not permitted" in text
-        or "winerror 5" in text
-    ):
-        return decide("permission_denied")
-    if (
-        "drm" in text
-        or "content protection" in text
-        or "widevine" in text
-        or "fairplay" in text
-        or "playready" in text
-        or "encrypted media extensions" in text
-    ):
-        return decide("drm_protected")
-    if (
-        statuses.intersection({401, 403})
-        or "unauthorized" in text
-        or "forbidden" in text
-        or "authentication required" in text
-        or "login required" in text
-        or "sign in to confirm" in text
-        or "cookies are required" in text
-        or "members-only" in text
-        or "private video" in text
-    ):
-        return decide("login_required")
-    if (
-        statuses.intersection({404, 410})
-        or "media is unavailable" in text
-        or "video unavailable" in text
-        or "has been deleted" in text
-        or "removed by the uploader" in text
-        or "not found" in text
-        or "media is missing" in text
-        or "source is missing" in text
-        or "recording is missing" in text
-        or "no longer available" in text
-    ):
-        return decide("not_found")
-    if (
-        "invalid configuration" in text
-        or "invalid config" in text
-        or "invalid url" in text
-        or "unsupported url" in text
-        or "no extractor found" in text
-        or "no suitable extractor" in text
-        or "requested format is not available" in text
-        or "unsupported template" in text
-        or "unknown option" in text
-        or "unrecognized option" in text
-    ):
-        return decide("invalid_config")
-    if 429 in statuses or "too many requests" in text or "rate limit" in text:
-        return decide("throttled", retry_after_seconds=retry_after)
-    if any(status in {500, 502, 503, 504} for status in statuses):
-        return decide("server_error", retry_after_seconds=retry_after)
-    if (
-        "internal server error" in text
-        or "bad gateway" in text
-        or "service unavailable" in text
-        or "gateway timeout" in text
-    ):
-        return decide("server_error", retry_after_seconds=retry_after)
-    if (
-        "timed out" in text
-        or "timeout" in text
-        or "deadline exceeded" in text
-        or "operation timed out" in text
-    ):
-        return decide("timeout", retry_after_seconds=retry_after)
-    if (
-        "temporary failure" in text
-        or "temporary network failure" in text
-        or "temporarily unavailable" in text
-        or "connection reset" in text
-        or "connection refused" in text
-        or "connection aborted" in text
-        or "remote disconnected" in text
-        or "network is unreachable" in text
-        or "name resolution" in text
-        or "getaddrinfo failed" in text
-        or "network error" in text
-        or "could not resolve host" in text
-        or "failed to connect" in text
-        or "broken pipe" in text
-        or "curl: (6)" in text
-        or "curl: (7)" in text
-        or "curl: (18)" in text
-        or "curl: (28)" in text
-        or "curl: (35)" in text
-        or "curl: (52)" in text
-        or "curl: (56)" in text
-    ):
-        return decide("network_unreachable", retry_after_seconds=retry_after)
+    for rule in FAILURE_SIGNAL_RULES:
+        statuses_match = bool(statuses.intersection(rule.get("statuses", ())))
+        signal_match = any(signal in text for signal in rule.get("signals", ()))
+        if not statuses_match and not signal_match:
+            continue
+        delay = retry_after if rule.get("honor_retry_after") else 0
+        return decide(rule["code"], retry_after_seconds=delay)
     return decide("unknown")
 
 

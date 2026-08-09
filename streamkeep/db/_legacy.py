@@ -2814,6 +2814,7 @@ def save_failed_job(
         CIRCUIT_FAILURE_THRESHOLD,
         CIRCUIT_OPEN_SECONDS,
         CIRCUIT_WINDOW_SECONDS,
+        apply_host_backoff,
         classify_failure,
         retry_delay_seconds,
         retry_source,
@@ -2836,14 +2837,7 @@ def save_failed_job(
         queue_dict.get("source_id", ""),
     )
     circuit_engine = _circuit_engine(queue_dict, context or {})
-    if decision.category == "rate_limit":
-        # V162: every classified failure passes through here, which makes it
-        # the one place a throttle is guaranteed to be seen no matter which
-        # worker hit it. The governor is pure and in-process, so this cannot
-        # fail the ledger write it rides along with.
-        from ..governor import record_throttle
-
-        record_throttle(url, retry_after=decision.retry_after_seconds)
+    host_backoff = apply_host_backoff(url, decision)
     with _write_lock:
         conn = _connect()
         try:
@@ -2884,7 +2878,7 @@ def save_failed_job(
                 (source_key,),
             ).fetchone()
             opened_until = 0.0
-            if decision.retryable:
+            if decision.retryable or host_backoff:
                 if (
                     circuit is None
                     or current_time - float(circuit["window_started_at"] or 0)
@@ -2909,8 +2903,8 @@ def save_failed_job(
                     INSERT INTO retry_circuits
                         (source_key, source_label, engine, failure_count,
                          window_started_at, opened_until, last_category,
-                         last_reason, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                         last_classification, last_reason, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(source_key) DO UPDATE SET
                         source_label=excluded.source_label,
                         engine=excluded.engine,
@@ -2918,6 +2912,7 @@ def save_failed_job(
                         window_started_at=excluded.window_started_at,
                         opened_until=excluded.opened_until,
                         last_category=excluded.last_category,
+                        last_classification=excluded.last_classification,
                         last_reason=excluded.last_reason,
                         updated_at=excluded.updated_at
                 """, (
@@ -2928,6 +2923,7 @@ def save_failed_job(
                     window_started_at,
                     opened_until,
                     decision.category,
+                    decision.classification,
                     decision.reason,
                     now_iso,
                 ))
@@ -3451,7 +3447,7 @@ def load_retry_circuits() -> list[dict[str, Any]]:
     try:
         rows = db.execute(
             "SELECT source_key, source_label, engine, failure_count, "
-            "opened_until, last_category, last_reason, updated_at "
+            "opened_until, last_category, last_classification, last_reason, updated_at "
             "FROM retry_circuits ORDER BY updated_at DESC"
         ).fetchall()
         return [dict(row) for row in rows]

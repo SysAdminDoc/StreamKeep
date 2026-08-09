@@ -79,6 +79,17 @@ def test_conditions_get_their_own_code(text, code):
     assert _code(text) == code
 
 
+@pytest.mark.parametrize("text, classification", [
+    ("Cloudflare challenge required: verify you are human", "bot-check"),
+    ("HTTP Error 429: Too Many Requests", "rate-limited"),
+    ("This video is not available in your country", "geo-blocked"),
+    ("Join this channel for members-only access", "members-only"),
+    ("HTTP Error 404: Video unavailable", "genuinely-gone"),
+])
+def test_cross_cutting_classification_names_the_operator_condition(text, classification):
+    assert classify_failure(text).classification == classification
+
+
 @pytest.mark.parametrize("text", [
     "This live event will begin in 3 hours",
     "Premieres in 20 minutes",

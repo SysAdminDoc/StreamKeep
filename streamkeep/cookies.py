@@ -43,10 +43,52 @@ def cookies_file_path():
 
 def cookies_file_age_secs():
     """Return seconds since the cookies file was last written, or -1."""
+    return int(cookie_file_metadata().get("age_secs", -1))
+
+
+def cookie_file_metadata(path=None):
+    """Return safe provenance and freshness metadata for a Netscape jar.
+
+    The exporter writes its source into a comment rather than into cookie
+    values. Reading only that bounded header keeps the Settings surface useful
+    without exposing authentication material or the file contents.
+    """
+    destination = Path(path) if path else COOKIES_FILE
+    result = {
+        "path": str(destination),
+        "exists": False,
+        "size": 0,
+        "age_secs": -1,
+        "updated_at": 0.0,
+        "source": "manual file import",
+    }
     try:
-        return int(time.time() - COOKIES_FILE.stat().st_mtime)
+        stat = destination.stat()
     except (OSError, ValueError):
-        return -1
+        return result
+    result.update({
+        "exists": bool(destination.is_file() and stat.st_size > 0),
+        "size": int(stat.st_size),
+        "updated_at": float(stat.st_mtime),
+        "age_secs": max(0, int(time.time() - stat.st_mtime)),
+    })
+    if not result["exists"]:
+        return result
+    try:
+        with destination.open("r", encoding="utf-8", errors="replace") as handle:
+            for _ in range(12):
+                line = handle.readline()
+                if not line:
+                    break
+                marker = "# exported by streamkeep from "
+                if line.casefold().startswith(marker):
+                    source = _sanitize_cookie_field(line[len(marker):].strip())
+                    if source:
+                        result["source"] = source[:80]
+                    break
+    except (OSError, UnicodeError):
+        pass
+    return result
 
 
 _BROWSER_LABELS = {
@@ -219,6 +261,11 @@ def import_from_browser(browser_name, *, domains=None, target=None):
     return _write_cookies(cj, browser_name, target=target)
 
 
+def refresh_from_browser(browser_name, *, domains=None, target=None):
+    """Explicit refresh action used by Settings and automation callers."""
+    return import_from_browser(browser_name, domains=domains, target=target)
+
+
 def import_from_file(source_path):
     """Copy a Netscape cookies.txt file into the config dir.
 
@@ -256,8 +303,9 @@ def clear_cookies():
 def _write_cookies(cookie_list, source, *, target=None):
     """Write a list of cookie dicts to a Netscape cookie jar."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    source_label = _sanitize_cookie_field(_browser_label(source))[:80] or "unknown source"
     lines = ["# Netscape HTTP Cookie File",
-             f"# Exported by StreamKeep from {source}",
+             f"# Exported by StreamKeep from {source_label}",
              ""]
     count = 0
 
@@ -282,10 +330,10 @@ def _write_cookies(cookie_list, source, *, target=None):
         count += 1
 
     if count == 0:
-        return False, f"No relevant cookies found in {source} for supported platforms."
+        return False, f"No relevant cookies found in {source_label} for supported platforms."
 
     try:
-        _write_cookie_text_atomic("\n".join(lines) + "\n")
+        _write_cookie_text_atomic("\n".join(lines) + "\n", target=target)
     except OSError as e:
         return False, f"Failed to write cookies: {e}"
 

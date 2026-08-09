@@ -70,6 +70,17 @@ def test_a_retry_after_header_outranks_the_computed_delay():
     assert governor.delay_for(HOST) == 90
 
 
+def test_a_long_retry_after_is_honoured_literally_and_keeps_its_class():
+    state = governor.record_throttle(
+        HOST, retry_after=600, reason="bot-check failure",
+        classification="bot-check",
+    )
+
+    assert state.delay_seconds == 600
+    assert state.classification == "bot-check"
+    assert governor.public_view()["hosts"][0]["classification"] == "bot-check"
+
+
 def test_a_smaller_retry_after_does_not_shorten_an_earned_backoff():
     """A host asking for 1s after we already backed off 4 times is not a reset."""
     for _ in range(4):

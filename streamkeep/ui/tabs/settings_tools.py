@@ -375,6 +375,10 @@ class SettingsToolsMixin:
                 f", {entry['delay_seconds']:g}s between requests"
                 if entry["delay_seconds"] else ""
             )
+            + (
+                f" ({entry['classification']})"
+                if entry.get("classification") else ""
+            )
             for entry in hosts[:5]
         ]
         if len(hosts) > 5:

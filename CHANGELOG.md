@@ -49,6 +49,11 @@ The seven desktop routes now share one archive-control-room visual system.
   fails over across declared sources, preserves and verifies publisher
   integrity declarations, renders locked/source metadata in published feeds,
   and turns pending `liveItem` entries into scheduled queue captures.
+- Extraction failures now use an ordered, data-driven taxonomy for bot-check,
+  rate-limited, geo-blocked, members-only, and genuinely-gone conditions.
+  Host backoff carries the class and honors long `Retry-After` directives;
+  standing health rows name the affected platform, while Settings shows cookie
+  jar provenance/freshness and provides an explicit browser refresh action.
 - Active foreground downloads, queue jobs, and auto-record captures now publish
   a readable Windows power request, keep the system awake for long captures,
   block OS shutdown with the active-work reason, and release every request on

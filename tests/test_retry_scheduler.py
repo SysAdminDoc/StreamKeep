@@ -251,6 +251,34 @@ class PersistentRetrySchedulerTests(unittest.TestCase):
             self.assertEqual(failure["next_attempt_at"], "")
             self.assertEqual(due, [])
 
+    def test_bot_check_cools_the_host_and_persists_a_standing_class(self):
+        from streamkeep import governor
+
+        url = "https://example.com/private"
+        governor.reset()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with mock.patch.object(db, "DB_PATH", self._db_path(tmpdir)):
+                    db.init_db()
+                    failure_id = db.save_failed_job(
+                        url=url,
+                        platform="Example",
+                        stage="fetch",
+                        error="Cloudflare challenge required: verify you are human",
+                        now=1_700_000_000,
+                    )
+                    failure = db.load_failed_job(failure_id)
+                    circuit = db.load_retry_circuits()[0]
+
+            self.assertEqual(failure["status"], "intervention")
+            self.assertEqual(circuit["last_classification"], "bot-check")
+            self.assertEqual(
+                governor.state_for(url).classification, "bot-check",
+            )
+            self.assertEqual(governor.delay_for(url), governor.BASE_DELAY_SECONDS)
+        finally:
+            governor.reset()
+
     def test_three_site_failures_open_circuit_and_defer_earlier_jobs(self):
         now = 1_700_000_000.0
         with tempfile.TemporaryDirectory() as tmpdir:
