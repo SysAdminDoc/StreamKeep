@@ -3285,16 +3285,36 @@ class StreamKeep(
                 items.append(item)
                 count += 1
 
-        # Transcript and platform-comment FTS search (F27/V100)
+        # Transcript/comment search with optional semantic RRF fusion (F27/V100/V202)
         try:
-            from ..search import search_comments, search_moments, search_transcripts
-            hits = search_transcripts(query, limit=cap)
+            from ..search import (
+                hybrid_search_transcripts, search_comments, search_transcripts,
+            )
+            try:
+                from .. import semantic
+
+                semantic_enabled = semantic.is_enabled()
+            except Exception:
+                semantic_enabled = False
+            hits = (
+                hybrid_search_transcripts(query, limit=cap)
+                if semantic_enabled else search_transcripts(query, limit=cap)
+            )
             for hit in hits:
                 snippet = (hit.get("text", "") or "")[:80]
-                item = QListWidgetItem(
-                    f"[Transcript] {snippet}... ({hit.get('recording_path', '')[-40:]})"
+                source = (
+                    "semantic"
+                    if hit.get("search_source") in {"semantic", "hybrid"}
+                    else "transcript"
                 )
-                item.setData(Qt.ItemDataRole.UserRole, ("transcript", hit))
+                label = (
+                    f"[Moment:{hit.get('modality', 'transcript')}]"
+                    if source == "semantic" else "[Transcript]"
+                )
+                item = QListWidgetItem(
+                    f"{label} {snippet}... ({hit.get('recording_path', '')[-40:]})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, (source, hit))
                 items.append(item)
             for hit in search_comments(query, limit=cap):
                 snippet = (hit.get("text", "") or "")[:80]
@@ -3304,15 +3324,6 @@ class StreamKeep(
                     f"({hit.get('recording_path', '')[-40:]})"
                 )
                 item.setData(Qt.ItemDataRole.UserRole, ("comment", hit))
-                items.append(item)
-            for hit in search_moments(query, limit=cap):
-                snippet = (hit.get("text", "") or "")[:80]
-                modality = hit.get("modality", "moment") or "moment"
-                item = QListWidgetItem(
-                    f"[Moment:{modality}] {snippet}... "
-                    f"({hit.get('recording_path', '')[-40:]})"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, ("semantic", hit))
                 items.append(item)
         except Exception as error:
             # Degrading to history-only is fine; reporting "No results found."

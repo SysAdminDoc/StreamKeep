@@ -2,7 +2,10 @@ import array
 import json
 from pathlib import Path
 
+import pytest
+
 from streamkeep import semantic
+from streamkeep import search
 from streamkeep.backup import SQLITE_BACKUP_FILES
 from streamkeep.metadata import COMMENTS_SCHEMA, COMMENTS_SCHEMA_VERSION
 
@@ -89,3 +92,68 @@ def test_semantic_worker_prunes_missing_paths_and_backup_excludes_index(
     assert done and done[0]["recordings"] == 1
     assert semantic.index_status()["moments"] > 0
     assert semantic.DB_FILENAME not in SQLITE_BACKUP_FILES
+
+
+def test_minilm_paraphrase_retrieval_has_no_shared_query_terms(tmp_path, monkeypatch):
+    """The configured sentence model finds a transcript paraphrase."""
+    if not semantic.backend_status()["available"]:
+        pytest.skip("optional all-MiniLM-L6-v2 bundle is not installed")
+    recording = Path(tmp_path) / "paraphrase"
+    recording.mkdir()
+    (recording / "episode.transcript.json").write_text(
+        json.dumps({
+            "segments": [{
+                "start": 5, "end": 12,
+                "text": "Quarterly revenue grew after the launch.",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(semantic, "DB_PATH", Path(tmp_path) / "semantic.db")
+    semantic.index_recording(str(recording))
+
+    query = "Income increased following product rollout"
+    assert not ({"income", "increased", "following", "product", "rollout"}
+                 & {"quarterly", "revenue", "grew", "after", "the", "launch"})
+    hits = semantic.search_moments(query, threshold=0.08)
+    assert hits and hits[0]["recording_path"] == str(recording)
+    assert hits[0]["vector_version"] == semantic.VECTOR_VERSION
+
+
+def test_hybrid_search_fuses_fts_and_vector_ranks_with_rrf(monkeypatch):
+    lexical = [{
+        "recording_path": "C:/rec/exact",
+        "text": "alpha exact",
+        "start_sec": 1,
+        "end_sec": 2,
+    }]
+    semantic_hit = {
+        **lexical[0],
+        "modality": "transcript",
+        "provenance": "transcript:x.json",
+        "confidence": 0.95,
+        "score": 0.9,
+        "vector_version": semantic.VECTOR_VERSION,
+    }
+    vector_only = {
+        "recording_path": "C:/rec/paraphrase",
+        "text": "meaning without shared words",
+        "start_sec": 4,
+        "end_sec": 5,
+        "modality": "transcript",
+        "provenance": "transcript:y.json",
+        "confidence": 0.9,
+        "score": 0.8,
+    }
+    monkeypatch.setattr(search, "search_transcripts", lambda *_a, **_k: lexical)
+    monkeypatch.setattr(
+        semantic, "search_moments", lambda *_a, **_k: [semantic_hit, vector_only],
+    )
+
+    hits = search.hybrid_search_transcripts("paraphrase", limit=10)
+    assert [hit["recording_path"] for hit in hits] == [
+        "C:/rec/exact", "C:/rec/paraphrase",
+    ]
+    assert hits[0]["search_source"] == "hybrid"
+    assert hits[0]["rrf_score"] == pytest.approx(2 / (search.RRF_K + 1))
+    assert hits[1]["search_source"] == "semantic"

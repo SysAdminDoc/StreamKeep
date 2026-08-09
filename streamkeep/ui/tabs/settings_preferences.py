@@ -115,7 +115,15 @@ class SettingsPreferencesMixin:
                 "Enable local semantic moment search before rebuilding."
             )
             return
-        from ...semantic import SemanticIndexWorker
+        from ...semantic import SemanticIndexWorker, backend_status
+
+        backend = backend_status()
+        if not backend["available"]:
+            self.semantic_index_status_label.setText(
+                "MiniLM is not installed locally; rebuilding with the bounded "
+                "hashed fallback. Set STREAMKEEP_SEMANTIC_MODEL_PATH to a local "
+                "all-MiniLM-L6-v2 bundle for paraphrase recall."
+            )
 
         worker = SemanticIndexWorker(
             self._semantic_recording_paths(),
@@ -152,6 +160,15 @@ class SettingsPreferencesMixin:
             )
             if summary.get("truncated"):
                 status += " One or more per-recording bounds were reached."
+            try:
+                from ...semantic import backend_status
+
+                backend = backend_status()
+                status += f" Backend: {backend['backend']}."
+                if not backend["available"]:
+                    status += " Install a local MiniLM bundle for paraphrase recall."
+            except Exception:
+                status += " Backend status unavailable."
         self.semantic_index_status_label.setText(status)
         self.semantic_rebuild_btn.setEnabled(True)
         self.semantic_cancel_btn.setEnabled(False)

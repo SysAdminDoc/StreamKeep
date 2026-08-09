@@ -2721,8 +2721,10 @@ def build_settings_tab(win):
         bool(win._config.get("semantic_search_enabled", False))
     )
     win.semantic_search_check.setToolTip(
-        "No cloud model or network request is used. Exact transcript/comment FTS "
-        "remains available when this is disabled."
+        "Uses a local all-MiniLM-L6-v2 sentence model when installed; no cloud "
+        "request is made. A bounded hashed fallback keeps indexing available "
+        "when the optional model is absent. Exact transcript/comment FTS remains "
+        "available when this is disabled."
     )
     semantic_lay.addWidget(win.semantic_search_check)
     semantic_limits = QHBoxLayout()

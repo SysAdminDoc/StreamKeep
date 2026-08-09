@@ -552,12 +552,14 @@ class HistoryTabMixin:
         self._transcript_hits = {}  # path -> list of {text, start_sec, end_sec}
         recording_paths = ()
         if query and search_mode:
-            from ...search import search_comments, search_moments, search_transcripts
+            from ...search import (
+                hybrid_search_transcripts, search_comments, search_transcripts,
+            )
             try:
                 hits = (
                     search_comments(query, limit=200)
                     if comment_mode else (
-                        search_moments(query, limit=200)
+                        hybrid_search_transcripts(query, limit=200)
                         if semantic_mode else search_transcripts(query, limit=200)
                     )
                 )

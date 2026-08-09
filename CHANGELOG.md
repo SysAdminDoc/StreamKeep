@@ -58,6 +58,11 @@ The seven desktop routes now share one archive-control-room visual system.
   a readable Windows power request, keep the system awake for long captures,
   block OS shutdown with the active-work reason, and release every request on
   completion or app close.
+- Semantic moments now use local `all-MiniLM-L6-v2` sentence embeddings when
+  the optional bundle is available, and fuse vector and transcript FTS5 ranks
+  with reciprocal-rank fusion so paraphrases can match without shared words.
+  The derived vector table is a bounded rebuildable cache; source checkouts
+  without the optional runtime retain a clearly labelled hashed fallback.
 
 ## [4.57.0] - 2026-08-08
 

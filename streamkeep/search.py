@@ -458,6 +458,95 @@ def search_transcripts(query, limit=100):
     ]
 
 
+RRF_K = 60
+
+
+def _search_hit_key(hit):
+    """Stable identity shared by FTS rows and semantic transcript moments."""
+    try:
+        start = round(float(hit.get("start_sec", 0) or 0), 3)
+    except (TypeError, ValueError, OverflowError):
+        start = 0.0
+    try:
+        end = round(float(hit.get("end_sec", 0) or 0), 3)
+    except (TypeError, ValueError, OverflowError):
+        end = 0.0
+    return (
+        str(hit.get("recording_path", "") or ""),
+        start,
+        end,
+        str(hit.get("text", "") or "").strip().casefold(),
+    )
+
+
+def hybrid_search_transcripts(query, limit=100, *, lexical_limit=None,
+                              semantic_limit=None):
+    """Fuse exact transcript FTS and local vector rankings with RRF.
+
+    FTS5 remains the fast exact-match path. Semantic moments add paraphrase
+    recall, including queries with no shared terms, and the reciprocal-rank
+    score avoids pretending that BM25 and cosine values share a scale. The
+    returned rows retain the semantic modality/provenance fields when a
+    vector hit contributes them, so History can explain why a row matched.
+    """
+    query = str(query or "").strip()
+    if not query:
+        return []
+    try:
+        limit = max(1, min(500, int(limit or 100)))
+    except (TypeError, ValueError, OverflowError):
+        limit = 100
+    lexical_limit = max(limit, int(lexical_limit or limit))
+    semantic_limit = max(limit, int(semantic_limit or limit))
+    lexical_hits = search_transcripts(query, limit=lexical_limit)
+    try:
+        from . import semantic
+
+        semantic_hits = semantic.search_moments(query, limit=semantic_limit)
+    except Exception:
+        semantic_hits = []
+
+    fused = {}
+    for rank, hit in enumerate(lexical_hits, start=1):
+        key = _search_hit_key(hit)
+        row = dict(hit)
+        row.setdefault("modality", "transcript")
+        row.setdefault("provenance", "transcript_fts5")
+        row.setdefault("confidence", 1.0)
+        row["search_source"] = "fts"
+        row["rrf_score"] = 1.0 / (RRF_K + rank)
+        fused[key] = row
+    for rank, hit in enumerate(semantic_hits, start=1):
+        key = _search_hit_key(hit)
+        contribution = 1.0 / (RRF_K + rank)
+        row = fused.get(key)
+        if row is None:
+            row = dict(hit)
+            row["search_source"] = "semantic"
+            row["rrf_score"] = contribution
+            fused[key] = row
+            continue
+        row["rrf_score"] = row.get("rrf_score", 0.0) + contribution
+        row["search_source"] = "hybrid"
+        for field in ("modality", "provenance", "confidence", "score",
+                      "vector_version"):
+            if field in hit:
+                row[field] = hit[field]
+    rows = list(fused.values())
+    rows.sort(key=lambda item: (
+        -float(item.get("rrf_score", 0.0) or 0.0),
+        -float(item.get("score", 0.0) or 0.0),
+        str(item.get("recording_path", "")),
+        float(item.get("start_sec", 0.0) or 0.0),
+    ))
+    return rows[:limit]
+
+
+def search_hybrid(query, limit=100, **kwargs):
+    """Compatibility alias for callers that prefer the shorter name."""
+    return hybrid_search_transcripts(query, limit=limit, **kwargs)
+
+
 def _like_comment_filter(query):
     terms = [term for term in str(query or "").strip().split() if term]
     clauses = []
