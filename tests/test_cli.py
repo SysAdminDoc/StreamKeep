@@ -717,6 +717,84 @@ def test_tokens_cli_parser_supports_list_create_and_revoke():
     assert revoked.token_id == "opaque-id"
 
 
+def test_tokens_cli_rejects_argv_secret_and_exposes_stdin_source():
+    parser = cli.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["tokens", "list", "--token", "secret-in-argv"])
+
+    stdin_args = parser.parse_args([
+        "tokens", "list", "--master-token-stdin",
+    ])
+    assert stdin_args.master_token_stdin is True
+
+
+def test_tokens_cli_reads_master_token_from_environment_and_keeps_it_out_of_url(
+    monkeypatch,
+):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"tokens": []}'
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("STREAMKEEP_COMPANION_TOKEN", "environment-secret")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(cli, "_print_line", lambda *_args, **_kwargs: None)
+
+    args = cli.build_parser().parse_args([
+        "tokens", "list", "--server-url", "http://127.0.0.1:8787",
+    ])
+    cli._run_tokens(args)
+
+    request = captured["request"]
+    assert request.full_url == "http://127.0.0.1:8787/api/tokens"
+    assert request.get_header("Authorization") == "Bearer environment-secret"
+    assert "environment-secret" not in request.full_url
+    assert captured["timeout"] == 15
+
+
+def test_tokens_cli_reads_master_token_from_explicit_stdin(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"tokens": []}'
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return Response()
+
+    monkeypatch.delenv("STREAMKEEP_COMPANION_TOKEN", raising=False)
+    monkeypatch.setattr(cli.sys, "stdin", StringIO("stdin-secret\n"))
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(cli, "_print_line", lambda *_args, **_kwargs: None)
+
+    args = cli.build_parser().parse_args([
+        "tokens", "list", "--master-token-stdin",
+    ])
+    cli._run_tokens(args)
+
+    assert captured["request"].get_header("Authorization") == "Bearer stdin-secret"
+
+
 def test_plugins_json_includes_reviewable_contract_fields(monkeypatch):
     from streamkeep import plugins
 

@@ -210,6 +210,24 @@ class ReleaseClaimTests(unittest.TestCase):
         self.assertGreaterEqual(translated, 0)
         self.assertLessEqual(translated, total)
 
+    def test_reintroduced_argv_master_token_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "streamkeep").mkdir()
+            (root / "README.md").write_text(
+                "Releases are unsigned. The master bearer token is never accepted "
+                "in argv, printed, placed in URLs, or written to logs.\n",
+                encoding="utf-8",
+            )
+            (root / "streamkeep" / "cli.py").write_text(
+                "import argparse\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('--token')\n",
+                encoding="utf-8",
+            )
+            problems = gate.validate_release_claims(root)
+        self.assertTrue(any("still contains --token" in problem for problem in problems))
+
 
 class CapabilityClaimStageTests(unittest.TestCase):
     def test_native_notifications_is_a_shipped_claim_with_a_tested_path(self):

@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Companion-token CLI management no longer accepts master bearer tokens in
+  argv. It supports the secure desktop configuration, `STREAMKEEP_COMPANION_TOKEN`,
+  or one-line stdin input, and the release gate now checks the README's explicit
+  loopback, constant-time, and master-token security claims against source.
+
 - Raw-capture salvage now runs in an owned, cancellable background worker with
   per-capture progress and visible failure/cancellation notifications, so
   FFmpeg recovery no longer blocks the History window.

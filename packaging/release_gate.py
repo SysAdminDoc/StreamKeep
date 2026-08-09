@@ -194,7 +194,7 @@ def stage_capability_claims() -> tuple[bool, str]:
 
 
 def stage_release_claims() -> tuple[bool, str]:
-    """Docs must not promise a signing story this project does not have."""
+    """Docs must match the shipped signing and security boundaries."""
     problems = validate_release_claims(ROOT)
     return (not problems), "\n".join(problems)
 
@@ -361,6 +361,13 @@ _UNSIGNED_MARKERS = (
     "no code signing",
 )
 _PAGE_COUNT_CLAIM = re.compile(r"\b(\d+)-page\s+QStackedWidget\b", re.IGNORECASE)
+_LOOPBACK_CLAIM = "local server always binds to `127.0.0.1`"
+_CONSTANT_TIME_CLAIM = "validates bearer tokens in constant time"
+_MASTER_TOKEN_CLAIM = "never accepted in argv"
+_MASTER_TOKEN_CLAIM_PARTS = (
+    "placed in urls",
+    "written to logs",
+)
 
 
 def _read_tab_registry(root) -> tuple[str, ...] | None:
@@ -431,6 +438,143 @@ def _validate_page_count_claim(root) -> list[str]:
     return []
 
 
+def _ast_callable_name(node) -> str:
+    """Return the final name of a call target for small source invariants."""
+    target = getattr(node, "func", node)
+    return str(getattr(target, "attr", "") or getattr(target, "id", ""))
+
+
+def _ast_uses_names(node, names) -> bool:
+    return any(
+        isinstance(child, ast.Name) and child.id in names
+        for child in ast.walk(node)
+    )
+
+
+def _validate_companion_token_claim(root) -> list[str]:
+    """Check the source facts behind README's master-token security claim."""
+    source_path = Path(root) / "streamkeep" / "cli.py"
+    try:
+        source = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(source_path))
+    except (OSError, SyntaxError) as error:
+        return [f"streamkeep/cli.py could not be checked for token claims: {error}"]
+
+    problems: list[str] = []
+    argv_literals = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and node.value == "--token"
+    ]
+    if argv_literals:
+        lines = ", ".join(str(node.lineno) for node in argv_literals)
+        problems.append(
+            "README says the master bearer token is not accepted in argv, but "
+            f"streamkeep/cli.py still contains --token at line(s) {lines}"
+        )
+
+    if "_COMPANION_TOKEN_ENV" not in source or (
+        "STREAMKEEP_COMPANION_TOKEN" not in source
+        or "os.environ.get" not in source
+    ):
+        problems.append(
+            "README documents STREAMKEEP_COMPANION_TOKEN, but the CLI does not "
+            "read that environment variable"
+        )
+    if "sys.stdin.readline" not in source or "master_token_stdin" not in source:
+        problems.append(
+            "README documents --master-token-stdin, but the CLI does not read "
+            "one token line from stdin"
+        )
+
+    token_function = next(
+        (
+            node for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_run_tokens"
+        ),
+        None,
+    )
+    if token_function is None:
+        return problems + ["streamkeep/cli.py has no _run_tokens implementation"]
+
+    secret_names = {"token", "master_token"}
+    request_calls = [
+        node for node in ast.walk(token_function)
+        if isinstance(node, ast.Call) and _ast_callable_name(node) == "Request"
+    ]
+    if not request_calls:
+        problems.append(
+            "The token CLI has no inspectable Request construction for its URL guard"
+        )
+    for request in request_calls:
+        if not request.args:
+            problems.append("The token CLI constructs a Request without a URL")
+        elif _ast_uses_names(request.args[0], secret_names):
+            problems.append(
+                "README says the master bearer token is not placed in URLs, but "
+                "the token CLI uses it in a Request URL"
+            )
+
+    output_calls = {
+        "_print_line", "print", "write_log_line", "log", "debug", "info",
+        "warning", "error", "critical",
+    }
+    for call in ast.walk(token_function):
+        if isinstance(call, ast.Call) and _ast_callable_name(call) in output_calls:
+            if any(_ast_uses_names(argument, secret_names) for argument in call.args):
+                problems.append(
+                    "README says the master bearer token is not printed or logged, "
+                    "but _run_tokens sends it to an output/log call"
+                )
+                break
+    return problems
+
+
+def _validate_security_claims(root, readme) -> list[str]:
+    """Validate the README's explicit always/never security promises."""
+    lowered = readme.casefold()
+    problems: list[str] = []
+
+    if _LOOPBACK_CLAIM in lowered:
+        server_path = Path(root) / "streamkeep" / "server" / "_legacy.py"
+        try:
+            server_source = server_path.read_text(encoding="utf-8")
+        except OSError as error:
+            problems.append(f"loopback binding claim could not be checked: {error}")
+        else:
+            if '_bind_addr = "127.0.0.1"' not in server_source:
+                problems.append(
+                    "README says the local server always binds to 127.0.0.1, "
+                    "but the server source has no loopback bind invariant"
+                )
+
+    if _CONSTANT_TIME_CLAIM in lowered:
+        auth_path = Path(root) / "streamkeep" / "server" / "auth.py"
+        try:
+            auth_source = auth_path.read_text(encoding="utf-8")
+        except OSError as error:
+            problems.append(f"constant-time token claim could not be checked: {error}")
+        else:
+            if "def check(" not in auth_source or "secrets.compare_digest" not in auth_source:
+                problems.append(
+                    "README says bearer tokens are validated in constant time, "
+                    "but TokenStore.check has no compare_digest check"
+                )
+
+    if _MASTER_TOKEN_CLAIM not in lowered:
+        problems.append(
+            "README must state that the master bearer token is never accepted "
+            "in argv"
+        )
+    elif any(part not in lowered for part in _MASTER_TOKEN_CLAIM_PARTS):
+        problems.append(
+            "README's master-token claim must cover argv, URLs, and logs"
+        )
+    else:
+        problems.extend(_validate_companion_token_claim(root))
+    return problems
+
+
 def validate_release_claims(root) -> list[str]:
     """Return documentation claims that contradict the shipped product."""
     root = Path(root)
@@ -451,6 +595,8 @@ def validate_release_claims(root) -> list[str]:
             "README does not state that releases are unsigned and updated "
             "manually or by a package manager"
         )
+
+    problems.extend(_validate_security_claims(root, readme))
 
     # The Spanish catalog is partial; it must be labelled as such wherever the
     # product advertises language support.

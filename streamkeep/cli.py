@@ -30,6 +30,9 @@ from .extractors.base import Extractor as _ExtBase
 from .models import default_media_tracks
 
 
+_COMPANION_TOKEN_ENV = "STREAMKEEP_COMPANION_TOKEN"
+
+
 def _get_output_stream():
     """Return a writable console stream, or ``None`` for windowed launches.
 
@@ -729,6 +732,35 @@ def _run_collections(args):
     return 2
 
 
+def _read_companion_master_token(args, load_config):
+    """Read the companion master token without accepting it as an argv value."""
+    if getattr(args, "master_token_stdin", False):
+        try:
+            token = sys.stdin.readline().rstrip("\r\n").strip()
+        except (AttributeError, OSError):
+            token = ""
+        if token:
+            return token
+        _print_line("Error: --master-token-stdin did not provide a token")
+        sys.exit(2)
+
+    token = str(os.environ.get(_COMPANION_TOKEN_ENV, "") or "").strip()
+    if token:
+        return token
+
+    # Normal desktop use resolves the existing OS-secure config reference.
+    # Automation can use the environment or explicit stdin path above without
+    # exposing the bearer value to the process command line.
+    token = str(load_config().get("companion_token", "") or "").strip()
+    if token:
+        return token
+    _print_line(
+        "Error: configure the companion master token, set "
+        f"{_COMPANION_TOKEN_ENV}, or use --master-token-stdin"
+    )
+    sys.exit(2)
+
+
 def _run_tokens(args):
     """Manage scoped companion tokens through a running local server."""
     import secrets
@@ -742,12 +774,7 @@ def _run_tokens(args):
     if not base_url:
         _print_line("Error: --server-url is required")
         sys.exit(2)
-    token = str(getattr(args, "token", "") or "")
-    if not token:
-        token = str(load_config().get("companion_token", "") or "")
-    if not token:
-        _print_line("Error: pass --token or configure the companion master token")
-        sys.exit(2)
+    master_token = _read_companion_master_token(args, load_config)
 
     command = str(getattr(args, "tokens_command", "") or "")
     path = "/api/tokens"
@@ -780,7 +807,7 @@ def _run_tokens(args):
 
     headers = {
         "Accept": "application/json",
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {master_token}",
     }
     if payload is not None:
         headers.update({
@@ -2918,8 +2945,8 @@ def build_parser():
             help="Running StreamKeep companion URL (default: http://127.0.0.1:8787)",
         )
         parser.add_argument(
-            "--token", default="",
-            help="Master bearer token (defaults to the configured companion token)",
+            "--master-token-stdin", action="store_true",
+            help="Read the master bearer token from one line of stdin",
         )
         parser.add_argument("--json", action="store_true", help="Emit JSON")
 
