@@ -788,19 +788,26 @@ class SettingsToolsMixin:
             return
         from ...extractors.ytdlp import ytdlp_runtime_status
 
-        status = ytdlp_runtime_status(self._config)
+        status = ytdlp_runtime_status(self._config, check_updates=True)
         self._ytdlp_status_snapshot = status
         channel = status.get("yt_dlp_channel", "bundled")
         requested = status.get("yt_dlp_channel_requested", channel)
         version = status.get("yt_dlp_version") or "not available"
         text = f"Using the {channel} yt-dlp {version}."
+        update = status.get("yt_dlp_update") or {}
+        update_summary = str(update.get("summary") or "unknown")
+        text += f" Update: {update_summary}."
         detail = str(status.get("yt_dlp_channel_detail") or "").strip()
         if detail:
             text += f" {detail}"
         label.setText(text)
         fell_back = requested != channel
-        label.setObjectName("warningText" if fell_back else "subtleText")
-        label.setToolTip(str(status.get("yt_dlp_external_problem") or ""))
+        stale = update.get("state") == "stale"
+        label.setObjectName("warningText" if fell_back or stale else "subtleText")
+        label.setToolTip(" ".join(filter(None, (
+            str(status.get("yt_dlp_external_problem") or ""),
+            str(update.get("warning") or ""),
+        ))))
         # Re-polish: an object-name change does not restyle an existing widget.
         label.style().unpolish(label)
         label.style().polish(label)
@@ -810,6 +817,8 @@ class SettingsToolsMixin:
                 "still active. " + str(status.get("yt_dlp_external_problem") or ""),
                 "warning",
             )
+        elif stale:
+            self._set_status(str(update.get("warning") or ""), "warning")
         enabled = channel == "external" or requested == "external"
         for widget_name in ("ytdlp_external_input", "ytdlp_external_browse"):
             widget = getattr(self, widget_name, None)

@@ -460,15 +460,19 @@ class SettingsPreferencesMixin:
         result plus concrete remediation for SABR/PO-token gating."""
         from ...extractors.ytdlp import youtube_health_report
         preset = str(self._config.get("youtube_player_client", "") or "")
-        report = youtube_health_report(player_client=preset)
+        report = youtube_health_report(player_client=preset, check_updates=True)
         lines = [
             f"Status: {report['summary'] or report['state'] or 'unknown'}",
             f"yt-dlp: {report['yt_dlp_version'] or 'unknown'}",
+            f"yt-dlp update: {(report.get('yt_dlp_update') or {}).get('summary') or 'unknown'}",
             f"JS runtime: {(report.get('js_runtime') or {}).get('name') or 'none'}",
             f"player_client: {report['player_client']}",
             "PO-token provider: "
             + ("detected" if report['pot_provider']['available'] else "not detected"),
         ]
+        update_warning = (report.get("yt_dlp_update") or {}).get("warning")
+        if update_warning:
+            lines.append(f"Update warning: {update_warning}")
         ytse = report.get("ytse") or {}
         if ytse.get("available"):
             ytse_label = f"available ({ytse.get('version') or 'unknown'})"

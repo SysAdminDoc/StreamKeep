@@ -8,7 +8,9 @@ other tool rather than trusted, so a below-floor binary can never reach a
 download path.
 """
 
+from datetime import datetime, timezone
 import textwrap
+from unittest import mock
 
 import pytest
 
@@ -19,8 +21,10 @@ from streamkeep.extractors.ytdlp import ytdlp_runtime_status
 @pytest.fixture(autouse=True)
 def _isolate_capability_cache():
     capabilities.invalidate_runtime_capabilities_cache()
+    capabilities.clear_ytdlp_release_cache()
     yield
     capabilities.invalidate_runtime_capabilities_cache()
+    capabilities.clear_ytdlp_release_cache()
 
 
 def _stub_ytdlp(tmp_path, name, version):
@@ -183,6 +187,47 @@ def test_the_bundled_channel_is_still_named_when_nothing_is_configured():
     assert status["yt_dlp_channel"] == "bundled"
     assert status["yt_dlp_channel_requested"] == "bundled"
     assert not status["yt_dlp_external_problem"]
+
+
+def test_stale_ytdlp_release_reports_age_and_external_binary_remedy():
+    snapshot = {
+        "latest_version": "2026.08.01",
+        "latest_release_at": "2026-08-01T00:00:00+00:00",
+        "release_dates": {
+            "2026.07.04": "2026-07-04T00:00:00+00:00",
+            "2026.08.01": "2026-08-01T00:00:00+00:00",
+        },
+    }
+    with mock.patch.object(
+        capabilities, "_fetch_ytdlp_release_snapshot", return_value=snapshot,
+    ) as fetch:
+        status = capabilities.ytdlp_update_status(
+            "2026.07.04",
+            check_online=True,
+            now=datetime(2026, 8, 9, tzinfo=timezone.utc),
+        )
+
+    assert status["state"] == "stale"
+    assert status["latest_version"] == "2026.08.01"
+    assert status["behind_days"] == 28
+    assert status["age_days"] == 28
+    assert "external yt-dlp executable" in status["warning"]
+    fetch.assert_called_once_with()
+
+
+def test_ytdlp_release_check_is_unknown_when_offline():
+    with mock.patch.object(
+        capabilities,
+        "_fetch_ytdlp_release_snapshot",
+        side_effect=OSError("offline"),
+    ):
+        status = capabilities.ytdlp_update_status(
+            "2026.07.04", check_online=True,
+        )
+
+    assert status["state"] == "unknown"
+    assert status["summary"] == "unknown"
+    assert "unknown" in status["detail"].lower()
 
 
 # ── The download path resolves through the gate ─────────────────────

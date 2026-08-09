@@ -96,6 +96,31 @@ def test_health_report_aggregates_runtime_pot_and_client():
     assert any("PO-token" in w for w in report["warnings"])
 
 
+def test_health_report_warns_about_stale_ytdlp_without_blocking_runtime():
+    update_warning = "Point StreamKeep at an external yt-dlp executable in Settings."
+    fake_runtime = {
+        "state": "ready", "summary": "Ready", "yt_dlp_version": "2026.07.04",
+        "yt_dlp_update": {
+            "state": "stale", "summary": "Stale (2026.07.04 → 2026.08.01)",
+            "warning": update_warning,
+        },
+        "js_runtime": {"name": "deno"}, "ejs_available": True, "problems": [],
+    }
+    with mock.patch(
+        "streamkeep.extractors.ytdlp.ytdlp_runtime_status",
+        return_value=fake_runtime,
+    ) as runtime, mock.patch(
+        "streamkeep.extractors.ytdlp.importlib.util.find_spec",
+        return_value=object(),
+    ):
+        report = ytdlp.youtube_health_report(check_updates=True)
+
+    runtime.assert_called_once_with(config=None, check_updates=True)
+    assert report["healthy"] is True
+    assert report["yt_dlp_update"]["state"] == "stale"
+    assert update_warning in report["warnings"]
+
+
 def test_health_report_surfaces_runtime_problems():
     fake_runtime = {
         "state": "limited", "summary": "Limited", "yt_dlp_version": "2026.01.01",

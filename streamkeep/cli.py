@@ -2116,7 +2116,9 @@ def _run_youtube_health(args):
             sys.exit(1)
 
     preset = str(config.get("youtube_player_client", "") or "")
-    report = youtube_health_report(player_client=preset, config=config)
+    report = youtube_health_report(
+        player_client=preset, config=config, check_updates=True,
+    )
     if runtime_actions:
         report["runtime_actions"] = runtime_actions
 
@@ -2125,6 +2127,8 @@ def _run_youtube_health(args):
     else:
         _print_line(f"YouTube capability: {report['summary'] or report['state']}")
         _print_line(f"  yt-dlp version : {report['yt_dlp_version'] or 'unknown'}")
+        update = report.get("yt_dlp_update") or {}
+        _print_line(f"  yt-dlp update  : {update.get('summary') or 'unknown'}")
         runtime = report.get("js_runtime") or {}
         _print_line(f"  JS runtime     : {runtime.get('name') or 'none'}")
         _print_line(

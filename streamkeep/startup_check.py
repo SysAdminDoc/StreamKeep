@@ -137,6 +137,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
             MINIMUM_VERSIONS,
             get_runtime_capabilities,
             version_at_least,
+            ytdlp_update_status,
         )
         from .extractors.ytdlp import ytdlp_command
         from .ui.main_window import StreamKeep
@@ -174,6 +175,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
         command = ytdlp_command()
         runtime_registry = get_runtime_capabilities(refresh=True)
         ytdlp_record = runtime_registry["yt_dlp"]
+        ytdlp_update = ytdlp_update_status(ytdlp_version, check_online=False)
         ejs_record = runtime_registry["yt_dlp_ejs"]
         sqlite_record = runtime_registry["sqlite"]
 
@@ -228,6 +230,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
             "visible_top_level_widgets": len(visible_top_levels),
             "ytdlp_version": str(ytdlp_version),
             "ytdlp_minimum_version": MINIMUM_VERSIONS["yt_dlp"],
+            "ytdlp_update": ytdlp_update,
             "ytdlp_ejs_version": ejs_record.get("version", ""),
             "ytdlp_ejs_requirement": ejs_record.get("required_by_ytdlp", ""),
             "ytdlp_command": command,

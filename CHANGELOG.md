@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- YouTube diagnostics now compare the installed yt-dlp build with the newest
+  known release, show release age and stale warnings in Settings and
+  `youtube-health`, and point to an external executable without downloading or
+  installing anything; offline checks remain `unknown`.
+
 - Companion-token CLI management no longer accepts master bearer tokens in
   argv. It supports the secure desktop configuration, `STREAMKEEP_COMPANION_TOKEN`,
   or one-line stdin input, and the release gate now checks the README's explicit

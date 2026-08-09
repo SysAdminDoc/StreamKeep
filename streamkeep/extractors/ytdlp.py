@@ -101,9 +101,13 @@ def ytdlp_command():
     return resolve_command_prefix("yt_dlp")
 
 
-def ytdlp_runtime_status(config=None):
+def ytdlp_runtime_status(config=None, *, check_updates=False):
     """Return yt-dlp/EJS/JavaScript readiness from the shared registry."""
-    from ..capabilities import format_capability_problem, get_runtime_capabilities
+    from ..capabilities import (
+        format_capability_problem,
+        get_runtime_capabilities,
+        ytdlp_update_status,
+    )
     registry = get_runtime_capabilities(config=config)
     yt_dlp = registry["yt_dlp"]
     ejs = registry["yt_dlp_ejs"]
@@ -151,6 +155,9 @@ def ytdlp_runtime_status(config=None):
     channel_detail = str(yt_dlp.get("channel_detail") or "").strip()
     if channel_detail:
         detail += f" Channel: {channel} - {channel_detail}"
+    update = ytdlp_update_status(
+        yt_dlp.get("version", ""), check_online=check_updates,
+    )
     return {
         "state": state,
         "summary": summary,
@@ -161,6 +168,7 @@ def ytdlp_runtime_status(config=None):
         "yt_dlp_channel_requested": yt_dlp.get("channel_requested", channel),
         "yt_dlp_channel_detail": channel_detail,
         "yt_dlp_external_problem": yt_dlp.get("external_problem", ""),
+        "yt_dlp_update": update,
         "ejs_available": ejs.get("supported", False),
         "ejs_version": ejs.get("version", ""),
         "ejs_requirement": ejs.get("required_by_ytdlp", ""),
@@ -388,20 +396,23 @@ def youtube_pot_setup_guidance():
     }
 
 
-def youtube_health_report(player_client="", config=None):
+def youtube_health_report(player_client="", config=None, *, check_updates=False):
     """Aggregate the YouTube capability picture into one report.
 
     Combines the yt-dlp/EJS/JS-runtime readiness, the active player_client
     strategy, local PO-token provider presence, and the optional remote
     backend reachability, plus a list of plain-language warnings.
     """
-    runtime = ytdlp_runtime_status(config=config)
+    runtime = ytdlp_runtime_status(config=config, check_updates=check_updates)
     pot = youtube_pot_provider_status()
     client_value = youtube_player_client_value(player_client)
     warnings = list(runtime.get("problems") or [])
     runtime_warning = format_ytdlp_runtime_warning(runtime)
     if runtime_warning and runtime_warning not in warnings:
         warnings.append(runtime_warning)
+    update = runtime.get("yt_dlp_update") or {}
+    if update.get("warning") and update["warning"] not in warnings:
+        warnings.append(update["warning"])
     if not pot["available"]:
         warnings.append(pot["detail"])
     # V33: report whether the provider endpoint actually answers, not merely
@@ -431,6 +442,7 @@ def youtube_health_report(player_client="", config=None):
         "state": runtime.get("state", ""),
         "summary": runtime.get("summary", ""),
         "yt_dlp_version": runtime.get("yt_dlp_version", ""),
+        "yt_dlp_update": update,
         "js_runtime": runtime.get("js_runtime", {}),
         "ejs_available": runtime.get("ejs_available", False),
         "player_client": client_value or "default",

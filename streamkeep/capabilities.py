@@ -6,6 +6,7 @@ import ast
 import copy
 import ctypes
 import ctypes.util
+from datetime import datetime, timezone
 import importlib.metadata
 import importlib.util
 import json
@@ -15,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -424,6 +426,198 @@ def version_at_least(value, minimum):
     return current + (0,) * (length - len(current)) >= required + (0,) * (
         length - len(required)
     )
+
+
+YTDLP_RELEASE_METADATA_URL = "https://pypi.org/pypi/yt-dlp/json"
+YTDLP_RELEASE_CACHE_TTL_SECONDS = 6 * 60 * 60
+YTDLP_RELEASE_FETCH_TIMEOUT_SECONDS = 2.0
+_YTDLP_RELEASE_CACHE_LOCK = threading.Lock()
+_YTDLP_RELEASE_CACHE = {"checked_at": 0.0, "snapshot": None}
+
+
+def _parse_release_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _release_key_for(releases, version):
+    candidate = str(version or "").strip()
+    if candidate in releases:
+        return candidate
+    parsed = parse_version(candidate)
+    if not parsed:
+        return ""
+    for key in releases:
+        if parse_version(key) == parsed:
+            return key
+    return ""
+
+
+def _release_timestamp(release_files):
+    timestamps = []
+    for item in release_files if isinstance(release_files, list) else ():
+        if not isinstance(item, dict):
+            continue
+        for field in ("upload_time_iso_8601", "upload_time"):
+            parsed = _parse_release_timestamp(item.get(field))
+            if parsed is not None:
+                timestamps.append(parsed)
+                break
+    return min(timestamps).isoformat() if timestamps else ""
+
+
+def _fetch_ytdlp_release_snapshot():
+    """Fetch bounded PyPI release metadata; never downloads or installs yt-dlp."""
+    from urllib.request import Request, urlopen
+
+    request = Request(
+        YTDLP_RELEASE_METADATA_URL,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "StreamKeep yt-dlp update check",
+        },
+    )
+    with urlopen(request, timeout=YTDLP_RELEASE_FETCH_TIMEOUT_SECONDS) as response:
+        raw = response.read(2_000_000)
+    payload = json.loads(raw.decode("utf-8"))
+    info = payload.get("info") if isinstance(payload, dict) else None
+    releases = payload.get("releases") if isinstance(payload, dict) else None
+    if not isinstance(info, dict) or not isinstance(releases, dict):
+        raise ValueError("PyPI returned incomplete yt-dlp release metadata")
+    latest_version = str(info.get("version") or "").strip()
+    latest_key = _release_key_for(releases, latest_version)
+    if not latest_version or not latest_key:
+        raise ValueError("PyPI returned no current yt-dlp release")
+    return {
+        "latest_version": latest_version,
+        "latest_release_at": _release_timestamp(releases.get(latest_key)),
+        "release_dates": {
+            str(version): _release_timestamp(files)
+            for version, files in releases.items()
+        },
+    }
+
+
+def clear_ytdlp_release_cache():
+    """Clear cached update metadata for tests or an explicit re-check."""
+    with _YTDLP_RELEASE_CACHE_LOCK:
+        _YTDLP_RELEASE_CACHE.update(checked_at=0.0, snapshot=None)
+
+
+def _cached_ytdlp_release_snapshot(check_online):
+    now = time.monotonic()
+    with _YTDLP_RELEASE_CACHE_LOCK:
+        snapshot = _YTDLP_RELEASE_CACHE.get("snapshot")
+        checked_at = float(_YTDLP_RELEASE_CACHE.get("checked_at") or 0.0)
+        if snapshot is not None:
+            return snapshot
+        if not check_online and checked_at:
+            return None
+        if check_online and checked_at and (
+            now - checked_at < YTDLP_RELEASE_CACHE_TTL_SECONDS
+        ):
+            return None
+    if not check_online:
+        return None
+    try:
+        snapshot = _fetch_ytdlp_release_snapshot()
+    except (OSError, ValueError, TypeError):
+        snapshot = None
+    with _YTDLP_RELEASE_CACHE_LOCK:
+        _YTDLP_RELEASE_CACHE.update(checked_at=now, snapshot=snapshot)
+    return snapshot
+
+
+def ytdlp_update_status(installed_version, *, check_online=False, now=None):
+    """Compare an installed yt-dlp release with PyPI without changing it."""
+    installed = str(installed_version or "").strip()
+    unknown = {
+        "state": "unknown",
+        "summary": "unknown",
+        "detail": (
+            "Newest known yt-dlp release: unknown (offline or unavailable)."
+        ),
+        "installed_version": installed,
+        "latest_version": "",
+        "latest_release_at": "",
+        "installed_release_at": "",
+        "age_days": None,
+        "installed_age_days": None,
+        "behind_days": None,
+        "warning": "",
+    }
+    snapshot = _cached_ytdlp_release_snapshot(check_online)
+    latest = str((snapshot or {}).get("latest_version") or "").strip()
+    if not installed or not latest:
+        return unknown
+
+    installed_parts = parse_version(installed)
+    latest_parts = parse_version(latest)
+    if not installed_parts or not latest_parts:
+        return unknown | {
+            "installed_version": installed,
+            "latest_version": latest,
+        }
+
+    release_dates = (snapshot or {}).get("release_dates") or {}
+    installed_key = _release_key_for(release_dates, installed)
+    installed_at = _parse_release_timestamp(release_dates.get(installed_key))
+    latest_at = _parse_release_timestamp(
+        (snapshot or {}).get("latest_release_at")
+    )
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    current_time = current_time.astimezone(timezone.utc)
+    installed_age_days = (
+        max(0, (current_time - installed_at).days) if installed_at else None
+    )
+    behind_days = (
+        max(0, (latest_at - installed_at).days)
+        if latest_at and installed_at else None
+    )
+    result = {
+        **unknown,
+        "installed_version": installed,
+        "latest_version": latest,
+        "latest_release_at": latest_at.isoformat() if latest_at else "",
+        "installed_release_at": installed_at.isoformat() if installed_at else "",
+        "age_days": behind_days,
+        "installed_age_days": installed_age_days,
+        "behind_days": behind_days,
+    }
+    if installed_parts < latest_parts:
+        result["state"] = "stale"
+        age = (
+            f", {behind_days} days older"
+            if behind_days is not None else ""
+        )
+        result["summary"] = f"Stale ({installed} → {latest}{age})"
+        result["warning"] = (
+            f"yt-dlp {installed} is behind the newest known release {latest}"
+            f"{f' by {behind_days} days' if behind_days is not None else ''}. "
+            "Point StreamKeep at an external yt-dlp executable in Settings "
+            "to track extractor fixes without waiting for a StreamKeep release."
+        )
+        result["detail"] = result["warning"]
+    elif installed_parts == latest_parts:
+        result["state"] = "current"
+        result["summary"] = f"Current ({installed})"
+        if installed_age_days is not None:
+            result["summary"] += f"; release age {installed_age_days} days"
+        result["detail"] = f"yt-dlp {installed} is the newest known release."
+    else:
+        result["state"] = "ahead"
+        result["summary"] = f"Ahead ({installed}; newest known {latest})"
+        result["detail"] = (
+            f"yt-dlp {installed} is newer than the newest known stable release {latest}."
+        )
+    return result
 
 
 #: yt-dlp update channels (V42). ``bundled`` is the frozen build that ships
