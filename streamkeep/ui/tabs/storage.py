@@ -767,6 +767,8 @@ class StorageTabMixin:
         worker = _StorageScanWorker(root, self)
         worker.scanned.connect(self._on_storage_scan_done)
         worker.failed.connect(self._on_storage_scan_failed)
+        busy_done = self._begin_background_activity("Scanning archive storage…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._storage_scan_worker = worker
         worker.start()
@@ -870,6 +872,8 @@ class StorageTabMixin:
             )
         )
         worker.failed.connect(self._on_integrity_scrub_failed)
+        busy_done = self._begin_background_activity("Checking archive integrity…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._integrity_worker = worker
         worker.start()
@@ -1006,6 +1010,8 @@ class StorageTabMixin:
         worker = _AdoptionWorker(root, archives, parent=self)
         worker.completed.connect(self._on_adoption_preview_done)
         worker.failed.connect(self._on_adoption_failed)
+        busy_done = self._begin_background_activity("Previewing library adoption…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._adoption_worker = worker
         worker.start()
@@ -1065,6 +1071,8 @@ class StorageTabMixin:
         )
         worker.completed.connect(self._on_adoption_apply_done)
         worker.failed.connect(self._on_adoption_failed)
+        busy_done = self._begin_background_activity("Applying library adoption…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._adoption_worker = worker
         worker.start()
@@ -1139,6 +1147,8 @@ class StorageTabMixin:
         )
         worker.completed.connect(self._on_maintenance_preview_done)
         worker.failed.connect(self._on_maintenance_failed)
+        busy_done = self._begin_background_activity("Previewing archive re-template…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._maintenance_worker = worker
         worker.start()
@@ -1160,6 +1170,8 @@ class StorageTabMixin:
         )
         worker.completed.connect(self._on_maintenance_preview_done)
         worker.failed.connect(self._on_maintenance_failed)
+        busy_done = self._begin_background_activity("Previewing archive maintenance…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._maintenance_worker = worker
         worker.start()
@@ -1279,6 +1291,8 @@ class StorageTabMixin:
             )
         worker.completed.connect(self._on_maintenance_apply_done)
         worker.failed.connect(self._on_maintenance_failed)
+        busy_done = self._begin_background_activity("Applying archive maintenance…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(worker.deleteLater)
         self._maintenance_worker = worker
         worker.start()

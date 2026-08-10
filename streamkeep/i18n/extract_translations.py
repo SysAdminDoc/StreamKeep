@@ -34,6 +34,7 @@ FIRST_ARG_CALLS = {
 ALL_ARG_CALLS = {
     "make_dialog_hero", "make_dialog_section", "make_empty_state",
     "make_field_block", "make_metric_card", "update_status_banner",
+    "_begin_background_activity",
 }
 LIST_ARG_CALLS = {"addItems", "setHorizontalHeaderLabels", "setHeaderLabels"}
 WEB_CALLS = {"_web_text"}

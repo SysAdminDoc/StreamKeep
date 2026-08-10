@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Background storage, Settings, health, and clip workers now share an
+  indeterminate busy indicator with an accessible live status, so slow work
+  remains visibly active until it succeeds, fails, or is cancelled.
+
 - Settings now has a searchable section rail: labels, help text, and setting
   keys filter the large form to matching controls, and clearing the search
   restores every setting.
@@ -1815,3 +1819,407 @@ Probed a spread of popular video/livestream hosts (YouTube, TikTok, Vimeo, Daily
 - v4.26.x: browser cookies, account manager, proxy pool, DASH, speed scheduling.
 - v4.25.x: SQLite migration, CLI/headless mode, portable mode, URL import, global search, hover previews.
 - v1.0-v4.24: native extractor system, monitor, queue, templates, post-processing, chat, storage, and modularization groundwork.
+
+## Roadmap archive — 2026-08-10 — ROADMAP.md
+
+<details>
+<summary>Original roadmap snapshot</summary>
+
+```markdown
+# StreamKeep Roadmap
+
+StreamKeep is a Python/PyQt6 desktop downloader and archive manager for live streams, VODs, podcasts, and direct media URLs. This roadmap tracks pending work only.
+
+## Planning Docs
+
+- Research synthesis: `RESEARCH.md`
+- Blocked work with its blocker reason: `Roadmap_Blocked.md`
+
+## Current Baseline
+
+- Current package version: v4.57.0.
+- Current architecture is modular: extractors, declarative YAML source adapters, workers, post-processing, player, local server, SQLite library, plugin manager, upload adapters, intelligence helpers, and UI modules.
+- History, monitor channels, and queue state live in SQLite (schema v24); user preferences remain in JSON config.
+- The release lane and local release gate require Python 3.14.6 or newer (`packaging/release_gate.py`); source installs retain the 3.11+ floor.
+- ID scheme: `V<n>`. Highest allocated ID is **V255** (2026-08-08 second research pass).
+
+## Active Roadmap
+
+### 0. Versatility Program (active drain queue)
+
+Mission: any video or audio, from any website, in any format, at any quality the source offers, with full user control. DRM circumvention is out of bounds throughout.
+
+### 1. Security and Reliability Hardening
+
+- Continue audit passes across subprocess boundaries, path normalization, URL handling, local API auth, upload destinations, updater downloads, and credential storage.
+- Keep subprocess URL/argument handling using explicit separators and platform-safe quoting.
+- Keep local server endpoints localhost-only and token-gated.
+- Add visible error propagation for background workers that still fail silently.
+  > Specified by the 2026-08-08 research: V185 (crash recovery and queue resume), V196 (in-window channel for 32 log-only sites), V217 (unhandled exceptions in threads). This generic line is the parent of those, not a separate task.
+
+### 2. Future Feature Queue
+
+- Remote/headless management polish for the REST server and local web gallery.
+- More extractor-specific resilience for API churn on Kick, Twitch, Rumble, SoundCloud, Reddit, Audius, and yt-dlp fallback paths.
+- Deeper library views for very large archives: filters, smart collections, transcript search, notes, bandwidth/storage trends, and channel statistics.
+  > 2026-08-08 research: V190 wired the existing notes and channel-statistics helpers into supported History and Monitor paths. Transcript search exists; whether it is *semantic* is V202.
+- Optional integrations where they stay local-first and user-controlled.
+
+### 3. Unaudited — needs a dedicated pass
+
+The modules added on 2026-08-04 received their first audit on 2026-08-06 and their findings are itemised below. Still without a dedicated pass: a profiling run over large-archive History/Storage/Analytics rendering with 100k+ rows, and the `player/` package's interaction with the new taskbar/power surfaces.
+
+## Definition of Done
+
+- Active planning remains in this file.
+- Shipped state is recorded in `CHANGELOG.md`.
+- Research and rationale are summarized in `RESEARCH.md`.
+- Legacy planning artifacts stay archived and out of the repo root.
+
+## Research-Driven Additions
+
+### 2026-08-06 Research-Driven Additions
+
+Evidence synthesis in `RESEARCH.md` (2026-08-06). Baseline at `fead7d6` (v4.45.0): release gate **GREEN** on Python 3.14.6, 1,712 tests, coverage floor 64.0, pyflakes clean, 47 ruff findings (all `E402`). The whole 2026-08-04 finding set is verified closed in source — do not re-open it; `RESEARCH.md` "Rejected Ideas" also lists what was audited and found clean this pass. New IDs continue the V-scheme (highest prior = V137).
+
+#### P1 — Next
+
+#### P1 — Next
+
+#### P2 — Later
+
+- [ ] P2 — V181 — Make the performance guards measure the code, not the machine
+  Why: nine wall-clock assertions across five test files report host load rather than the property they guard, so a contended machine produces false failures that a drain has to spend time disproving — and that could mask a real regression sitting next to them.
+  Evidence: observed 2026-08-07 with three unrelated batch jobs holding the CPU at 100% (suite 1,155s against a normal ~310s). Five tests failed and **all five passed in isolation**: `tests/test_live_capture_truncation.py` (3, plus one in the baseline run), `tests/test_operations.py::test_operations_page_stays_bounded_for_one_hundred_thousand_jobs` (`assert elapsed < 5.0`), and a `/api/queue` host-substitution subtest in `tests/test_local_server.py`. The other budgets are `tests/test_declarative.py:868` (2.0s), `tests/test_history_paging.py:58,85` (5.0s), `tests/test_metadata.py:36,52,76` (2s).
+  Touches: the five test modules above, plus a shared helper if one earns its place.
+  Acceptance: each guard asserts the property it was proxying rather than an absolute duration — the boundedness ones already assert `len(rows) == 50`, so what the timing adds is "no full scan", which a **ratio against a small-N measurement taken in the same process** captures load-invariantly. Inflating the budgets is not acceptable: that blinds the guard instead of fixing it. A deliberately quadratic implementation must still fail the rewritten guard (bait it), and the suite must stay green on a machine held at 100% CPU.
+  Complexity: M
+
+- [ ] P2 — V163 — Move behaviour out of `db/_legacy.py` and `server/_legacy.py`
+  Why: the 2026-08-04 "split" created facades over unchanged monoliths — `db/_legacy.py` is 6,624 LOC and actually grew during the split; `server/_legacy.py` is 2,748 — and the boundary test asserts the facade forwards the entire legacy surface, which makes the monolith a tested contract and the commit message read as finished work.
+  Evidence: `streamkeep/db/__init__.py` (attribute-forwarding `ModuleType` subclass), `streamkeep/db/_legacy.py`, `streamkeep/server/_legacy.py`, `tests/test_architecture_boundaries.py:11-21`; sibling modules `db/history.py` (1.2 KB), `db/queue.py` (723 B) are re-export shims.
+  Touches: `streamkeep/db/*`, `streamkeep/server/*`, `tests/test_architecture_boundaries.py`.
+  Acceptance: each domain module owns its own statements rather than re-exporting; the boundary test asserts what each module implements (not that the facade is surface-identical); `_legacy.py` shrinks measurably per increment and the facade remains patch-compatible for existing tests.
+  Complexity: XL
+  > Note (2026-08-08 research): the largest monoliths are no longer the `_legacy` pair. `cli.py` is 3,360, `ui/tabs/settings.py` 3,291, `ui/main_window.py` 3,133, `workers/download.py` 3,132 against `db/_legacy.py` 4,013 and `server/_legacy.py` 2,340. Churn analysis puts `settings.py` at 47 touches in 250 commits — one per gated subsystem, making it the app's de-facto feature registry and the natural next target after the `_legacy` pair.
+  > Progress: eight increments done. `db/_legacy.py` 6,737 -> 4,013 (projections, schema/migrations, history-log + tombstones + publishing ids, connection layer, monitor family + the shared write lock into `primitives`, the 18-function download-queue/executor-lease family); `server/_legacy.py` 2,748 -> 2,340 (auth/token/replay layer, host+origin validation, remote-UI rendering). Both facades now use the same `_owner`/`_holders` split: a write reaches every module holding the name, a read resolves through the first that can serve it. Two traps are banked in CLAUDE.md — `ClassDef.lineno` excludes decorators (a hardcoded-span move orphaned a `@dataclass` onto the next class and still parsed clean), and a name moving out of a monolith vanishes from the public surface unless its new module is added to `_DOMAINS`. Remaining: `_build_handler` is 1,867 of the 2,340 remaining server lines — one function, so the next server cut is by route group inside it, not by top-level name. In `db/_legacy.py` the remaining families by size are history (~1,190 lines / 35 fns), uploads (~300), intelligence (~250), backup (~240). Each needs the shared `_write_lock` from `primitives`, never re-imported from `_legacy`. **Scope a family from its re-export shim's `_EXPORTED` set, never from a regex over `_legacy`** — that mistake made the queue family look like 6 functions when it was 18.
+
+#### P3 — Under Consideration
+
+### 2026-08-08 Research-Driven Additions
+
+Evidence synthesis in `RESEARCH.md` (2026-08-08). Baseline v4.55.0, schema v24, 380 modules / 108.6k LOC. No full suite ran (machine held at 100% CPU by unrelated batch jobs), so **no item below rests on a coverage number** — the `.coverage` artefact on disk is a targeted 84-test run. The whole 2026-08-06 finding set is verified closed in source and is listed in `RESEARCH.md` "Rejected Ideas" — do not re-open it. Every claim below was re-verified against current source; three agent findings were discarded as false (pre-migration snapshot, CELT gating, Reddit credential UI) and are recorded there too. New IDs continue the V-scheme from V181.
+
+#### P0 — Now
+
+#### P1 — Next
+
+#### P2 — Later
+
+- [ ] P2 — V203 — Move global search and analytics off the UI thread
+  Why: typing in the header search runs four database queries including the semantic index synchronously on the UI thread, so the whole window stutters on a large library — and there is no busy indicator anywhere in the app to explain it.
+  Evidence: `streamkeep/ui/main_window.py:3000-3095 _on_global_search` calls `_db.search_history`, `search_transcripts`, `search_comments` and `search_moments` from a 300ms debounce timer with no worker. `ui/tabs/analytics.py:326-385 _refresh_analytics` runs `_db.history_analytics()` synchronously on `currentIndexChanged` (`:261`) with no feedback and no `try/except`. Grep confirms zero `WaitCursor`/`setOverrideCursor` and zero indeterminate `setRange(0, 0)` anywhere in `streamkeep/ui/`.
+  Touches: `streamkeep/ui/main_window.py`, `streamkeep/ui/tabs/analytics.py`, `streamkeep/workers/`.
+  Acceptance: both run on a worker whose result is discarded if superseded, with a visible busy state. Any new worker must be discoverable by `_owned_workers` (assign it to a window attribute) or it reintroduces V186. This is the natural place to adopt the scan/analyse/refresh phase split before the unprofiled 100k-row path in section 3 is profiled — see `RESEARCH.md` on Komga/Immich.
+  Complexity: M
+
+- [ ] P2 — V204 — Author a source adapter from a HAR capture
+  Why: the Versatility Program's main lever is unusable. The declarative adapter system is hardened, cached, ReDoS-bounded, review-gated and tested — and zero adapters ship, there is no serializer or template, and `path_regex` appears nowhere in README or docs. HAR capture is already wired, so this closes "any website" with no new trust surface.
+  Evidence: `streamkeep/declarative.py:1218 parse_definition_text` is read-only with no writer; `find . -name "*.yaml"` returns only packaging manifests; `grep path_regex README.md docs/` returns nothing. HAR is reachable at `cli.py:1676` and `ui/tabs/download_queue.py:105`. The review gate that makes this safe already exists (`declarative.py` inert-until-reviewed, `backup.py:101 ADAPTER_REVIEW_CONFIG_KEY`).
+  Touches: `streamkeep/har.py`, `streamkeep/declarative.py`, `streamkeep/cli.py`, `README.md`, `tests/test_declarative.py`.
+  Acceptance: a HAR containing a media request produces a draft adapter that round-trips through `parse_definition_text`, lands **unapproved** in the existing review queue, and is documented in README with one worked example. The draft must never be auto-enabled — the review gate is the whole reason this is safe to add. Ship at least one reference adapter so the format has a worked example in-tree.
+  Complexity: M
+
+- [ ] P2 — V205 — Recognise competitor archive layouts during adoption
+  > 2026-08-08 (second pass): **raise to P1 on new market evidence.** Pinchflat (5,217★) has been dead since 2025-12-16 (issue #800, 255 reactions); its community fork Tubeless was deleted with full git history ~2026-08-05 and rebuilt at 6★, whose maintainer wrote they doubt it will go far (#897). Youtarr #531 ("import an existing library from disk — migrate off Pinchflat/TubeArchivist") is open and unclaimed. `importer.py` already does ~90% of this. The window closes the moment a competitor lands an importer. Bound layout detection to fixtures (data, not code).
+  Why: Pinchflat has been dead since 2025-12-16 with 255 reactions on its pause notice, TubeArchivist and Youtarr users are asking for the same migration path, and no maintained desktop alternative exists. Adoption is already built — it just cannot read anyone else's tree.
+  Evidence: `streamkeep/importer.py` is preview-first and transactional with `plan_library_adoption`/`apply_library_adoption` wired to a threaded Storage-tab worker (`ui/tabs/storage.py:122-140`), and `grep -ic "pinchflat\|tubearchivist\|tubesync\|youtarr\|ganymede" importer.py` returns 0. Demand: https://github.com/DialmasterOrg/Youtarr/issues/531 , https://github.com/Zibbp/ganymede/issues/1043 , https://github.com/kieraneglin/pinchflat/issues/800
+  Touches: `streamkeep/importer.py`, `tests/test_importer.py`, `README.md`.
+  Acceptance: pointing adoption at a Pinchflat, TubeArchivist, tubesync or Youtarr tree recognises its sidecar shape and naming convention and proposes correct history rows, with the detection driven by **fixtures, not code**, so a layout change upstream is a data edit. Add one real captured tree per competitor as a test fixture. Do not extend scope to importing their databases — the on-disk tree plus sidecars is the durable contract.
+  Complexity: M
+
+- [ ] P2 — V206 — Fix the web remote's stuck status and swallowed failures
+  Why: the remote UI reports "Loading…" permanently, keeps `aria-busy="true"` forever on two panels, and stays red after a single transient error — so a working remote looks broken and a broken one looks busy.
+  Evidence: `streamkeep/server/web_ui.html:213` sets `app-status` to `T('loading')` every 5s cycle and nothing clears it on success; `:243-257` swallows `/api/library` and `/api/monitor` failures with `.catch(()=>{})` while only `renderItems:196` ever clears `aria-busy`; `:244` sets `className = 'status-region error'` and never resets it. No `navigator.onLine` or `online`/`offline` listener anywhere, so with a 5s poll a dropped connection is indistinguishable from an idle app. Resumable items are listed at `:228-230` with no Resume button.
+  Touches: `streamkeep/server/web_ui.html`, `tests/test_local_server.py`.
+  Acceptance: status clears on success, a failed panel shows an error and drops `aria-busy`, the error class resets, and an offline state is indicated distinctly from idle. The remote's accessibility work is otherwise good (roles, `aria-live`, roving tabindex, `:focus-visible`) — do not regress it.
+  Complexity: S
+
+- [ ] P2 — V207 — Make runtime-composed strings translatable and stop fixed-width clipping
+  > 2026-08-08 (second pass): scope measured — ~1,200 explicit `tr()` calls against roughly **700 bare user-facing literals** (~480 in widget constructors, ~114 `.setText(...)`, ~107 `setToolTip`/`setPlaceholderText`). The runtime widget-tree walker catches many, so the practical gap is smaller, but any f-string status message is unreachable by it. Weakest files: `calendar_widget.py` (1 `tr`), `ui/tabs/download.py` (8 `tr` for 1,512 LOC), `monitor_entry_dialog.py` (4), `notification_log_dialog.py` (0). Fix those four first.
+  Why: every footer status message in the app is untranslatable, so switching to Spanish leaves the most frequently-read surface in English — and the labels that *are* translated will clip, because their containers are fixed-width in pixels.
+  Evidence: 68 `_set_status(f"...")` call sites and 44 `setText(f"...")`/`setToolTip(f"...")` sites across `streamkeep/ui/`; the runtime walker (`i18n/__init__.py:305 translate_widget_tree`) re-captures these as new sources on every `setText` and can never match a catalog entry. `ui/tabs/analytics.py` has zero `tr()` calls and its combo items bypass `_translate_combo:243`. Fixed widths that will clip a 20-30% longer string: `ui/tabs/settings.py:469,521,539`, `ui/tabs/download.py:573,581`, `ui/tabs/monitor.py:187,192,197`, `ui/main_window.py:2149`.
+  Touches: `streamkeep/ui/` (broadly), `streamkeep/i18n/`, `tests/test_i18n.py`.
+  Acceptance: status and composed strings use `tr_format()` with placeholders so one catalog entry covers every value, and the named fixed widths become minimums or size-to-content. Note `tests/test_i18n.py` fails after any edit to a file containing UI strings until the catalogs are regenerated — see `CLAUDE.md`. Spanish coverage itself stays blocked on human translators; this item is about making the strings *reachable* by a catalog, which is the prerequisite.
+  Complexity: M
+
+- [ ] P2 — V208 — Give the seven tables without an empty state one
+  Why: a channel that resolves to zero VODs, an Operations page with nothing durable, and five Settings tables all paint a blank grid with headers, which reads as a failure rather than an empty collection. The styled empty-state card already exists and is used correctly in eight other places.
+  Evidence: no empty state at `ui/tabs/operations.py:309`, `ui/tabs/download_vod.py:78,245`, `ui/tabs/settings.py:573,652,736,1741,2057`; `ui/tabs/analytics.py` metric cards show `0 / 0 GB / - / -` with no explanation. `ui/tabs/storage.py:622-628 storage_empty_label` is a bare `QLabel` with no `objectName`, so it gets none of the `emptyStateCard`/`emptyStateTitle`/`emptyStateBody` styling the others do. The pattern to copy is `make_empty_state` as used at `ui/tabs/history.py:278` and `ui/tabs/monitor.py:251`.
+  Touches: `streamkeep/ui/tabs/operations.py`, `download_vod.py`, `settings.py`, `analytics.py`, `storage.py`.
+  Acceptance: each renders an informative empty state with a next action where one exists, and `storage_empty_label` is converted to the shared component. `ui/main_window.py:2632-2634` fakes one with a spanned cell — convert it too rather than copying that approach. Scope note: the Operations table does populate correctly (`operations.py:104 setRowCount(len(result.rows))`, summary replaced at `:99`), so this is purely a missing zero-row state, not a broken query.
+  Complexity: S
+
+- [ ] P2 — V209 — Reconcile the destructive-action surfaces with the project's own policy
+  Why: the policy is immediate action plus a toast and, where possible, an undo — no confirmation dialogs. The app currently does the opposite in both directions: eleven modal confirms (including one on an action whose own badge says "Reversible"), and four destructions with no confirm, no toast and no undo.
+  Evidence: modal confirms at `ui/tabs/history.py:689`, `download_queue.py:308,2164`, `storage.py:702,1018,1225`, `settings_preferences.py:650,675,763`, `settings_companion.py:450`, `settings_tools.py:245,665,1481,1503`, plus the only raw `QMessageBox.question` left at `download_single.py:785`. Silent destructions at `ui/main_window.py:2947-2949` (clears the notification ring buffer), `ui/tabs/settings_presets.py:188-196` (deletes a preset with no feedback, where `settings_tools.py:987,1136` do the same job correctly), `ui/tabs/operations.py:160-172`, and `server/web_ui.html:208-211`. Also `ui/rename_dialog.py:292` swallows the `rename_undo.json` write *after* renaming at `:269`, and nothing in the tree ever reads that file.
+  Touches: `streamkeep/ui/tabs/` (several), `streamkeep/ui/main_window.py`, `streamkeep/ui/rename_dialog.py`, `streamkeep/server/web_ui.html`.
+  Acceptance: destructive actions act immediately with a visible confirmation of what happened and an undo where the operation is reversible; the confirms that remain are only those that are genuinely irreversible, and each states what cannot be undone. Either implement the rename undo the journal was written for or stop writing the journal — a file written for a feature that does not exist is worse than neither. Depends on V196 for the toast surface.
+  Complexity: M
+
+- [ ] P2 — V210 — Untrack the compiled translation catalogs and add ruff to the gate
+  > 2026-08-08 (second pass): both halves confirmed still open. `git ls-files "*.qm"` returns `streamkeep_en.qm` and `streamkeep_es.qm`. `ruff check streamkeep packaging` on the PATH ruff reports **32 findings — 31× E402 (module-level import not at top of file, e.g. `workers/download.py:50,54,55`) and 1× E731 (lambda assignment)** — with no `[tool.ruff]` section anywhere, so these are default-rule results. Decide the E402 policy (the re-exec launcher genuinely needs late imports) before wiring the stage, or it fails on landing.
+  Why: two compiled binaries churn 57 times per 250 commits as tracked build artefacts, and the linter that would catch the 31 standing findings is not a gate stage, so those findings persist indefinitely with nothing raising them.
+  Evidence: `git ls-files` lists `streamkeep/i18n/streamkeep_en.qm` and `streamkeep_es.qm` alongside their `.ts` sources; `streamkeep_en.qm` appears in 57 of the last 250 commits. `packaging/release_gate.py:313-325 STAGES` has 13 entries and no lint stage.
+  > Corrected 2026-08-08 (audit): the ruff count in this item was stale. Measured with ruff 0.15.22: **48 findings repo-wide** — 46 `E402`, 1 `E731` (`streamkeep/db/_legacy.py:949`), and 1 `F401` (`tests/test_retention_backfill.py:9`, `time` imported but unused, auto-fixable). Scoped to `streamkeep packaging StreamKeep.py` it is 36. The `F401` is real dead code rather than an import-order convention, so fix it regardless of how the `E402` policy is settled.
+  Touches: `.gitignore`, `packaging/release_gate.py`, `packaging/build.py`, `streamkeep/i18n/compile_translations.py`, `tests/test_release_gate.py`.
+  Acceptance: `.qm` files are gitignored and compiled by the build and the `translations` gate stage instead of being committed — verify a clean checkout can still run and package before removing them, since a frozen build must carry its catalogs. Ruff runs as a gate stage; either fix the 31 findings or configure the ignores deliberately, but do not add a stage that passes on findings it was added to catch.
+  Complexity: S
+
+#### P3 — Under Consideration
+
+- [ ] P3 — V211 — Windows shell integration a downloader should have
+  Why: two cheap platform wins are absent — a taskbar Tasks list, and notifications that survive in Action Center rather than vanishing when they are dismissed.
+  Evidence: `streamkeep/windows_integration.py` implements only `ITaskbarList3` progress (no `ICustomDestinationList`). Unpackaged apps need a registered AUMID **plus** a stub COM CLSID on the shortcut for Action Center persistence, which nothing here does, so `native_notify.py` toasts vanish after display. https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/toast-desktop-apps
+  Touches: `streamkeep/windows_integration.py`, `streamkeep/native_notify.py`.
+  Acceptance: a jump list offers at least "Paste URL and capture" and "Open library"; a completed-capture notification remains clickable in Action Center after dismissal. Keep both failure-tolerant in the style of the existing `TaskbarProgress` wrapper — neither is worth an exception on a machine where the COM call fails.
+  Rejected sub-idea, recorded so it is not re-proposed: **ReFS block cloning for collection homes.** It looks like a free win (independent file, near-zero cost and space) but it contradicts a guarantee v4.54.0 shipped deliberately — `integrations/media_server.py:289` names the primary "the single on-disk copy", `HOME_STRATEGIES = ("hardlink", "strm")` at `:251`, and copying is explicitly never a fallback. A block clone is semantically a copy: edit one and the other no longer matches, which is exactly what the hardlink/`.strm` pair exists to prevent. Revisit only if the single-copy guarantee is itself reconsidered.
+  Complexity: M
+
+- [ ] P3 — V212 — Add `libsvtav1` and a faster transcription backend
+  > 2026-08-08 (second pass): the transcription half now has a named target — **Parakeet TDT 0.6B v3** leads Open ASR at 6.32% avg WER vs Whisper's 7.44% and is ~4× faster on CPU with native punctuation, but covers 25 languages to Whisper's 99. Ship it as the English default with faster-whisper retained for everything else, not as a replacement. Alternative if a GPU-free bundle matters more: whisper.cpp 1.8.3 gained real iGPU Vulkan (up to 12× on integrated graphics). Do **not** target AV2 — its bitstream spec froze 2026-05-28 but hardware decode is 2027-28.
+  Why: the two slowest post-processing paths both have an order-of-magnitude faster option that the ladder does not offer. `libaom-av1` is the difference between "AV1 archive transcode is theoretical" and "it runs overnight".
+  Evidence: `streamkeep/postprocess/codecs.py:20` maps `"av1": "libaom-av1"` with no `libsvtav1` entry; SVT-AV1 3.0 gives ~15-25% speedup at M3-M10 https://aomedia.org/blog%20posts/SVT-AV1-V3_0-is-Now-Available/ . `postprocess/transcribe_worker.py:34-65` ladders whisperx → faster-whisper → whisper.cpp → ffmpeg-whisper with no TDT option; Parakeet TDT 0.6B v3 leads the Open ASR Leaderboard at ~6.34% avg WER against Whisper large-v3's ~7.4% at much higher throughput https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks
+  Touches: `streamkeep/postprocess/codecs.py`, `streamkeep/postprocess/transcribe_worker.py`, `streamkeep/capabilities.py`.
+  Acceptance: `libsvtav1` is probed and preferred over `libaom-av1` when present with sensible presets (6 for VOD), falling back cleanly; a Parakeet backend joins the ladder without displacing Whisper, which keeps the multilingual breadth. Both must degrade to current behaviour when absent — the existing runtime probe pattern (`_probe_hw_encoder`) is correct, keep it. Any new floor needs a `MINIMUM_VERSIONS` entry (see V194).
+  Complexity: M
+
+- [ ] P3 — V213 — Verify a resumed download against the server's own digest
+  Why: a resumed multi-connection download that silently received a *different* representation — a rotated CDN, a re-encode — passes every local size check at v4.55.0. RFC 9530 exists specifically to validate a representation reassembled from Range requests.
+  Evidence: `streamkeep/verify.py` verifies post-hoc against locally computed digests; `streamkeep/http.py` does parallel Range downloads with no representation check. https://www.rfc-editor.org/rfc/rfc9530.html
+  Touches: `streamkeep/http.py`, `streamkeep/verify.py`, `streamkeep/resume.py`, `tests/test_http.py`.
+  Acceptance: `Want-Repr-Digest` is sent on the first request and a returned `Repr-Digest` is verified against the reassembled file; a mismatch fails the download by name rather than storing corrupt bytes. Pair with strong-ETag `If-Range` and treat a weak or absent ETag as "resume is unsafe, restart" — that decision matters more than the digest.
+  Complexity: M
+
+- [ ] P3 — V214 — Give the fixed-size dialogs room to breathe
+  Why: at `spacious` density and 125% DPI several dialogs and embedded tables clip with no scroll affordance and, in one case, no resize handle at all.
+  Evidence: `ui/onboarding.py:34 setFixedSize(640, 500)` non-resizable with no `QScrollArea`, wrapping four pages of body copy plus two status banners whose bodies include a version, provenance and path (`:236-238`). Containers that do not participate in density scaling while their contents do (`widgets.py:791` scales row height by `get_density()["scale"]`): `ui/tabs/settings.py:1752` (`setFixedHeight(170)`, ~2 visible rows at spacious), `ui/tabs/download.py:272`, `ui/clip_dialog.py:769,879`. `ui/tabs/settings.py` has 66 fixed-size calls in total. `ui/main_window.py:1914 nav_rail.setFixedWidth(220)` hard-clips longer translated tab labels with no elide.
+  Touches: `streamkeep/ui/onboarding.py`, `streamkeep/ui/tabs/settings.py`, `streamkeep/ui/tabs/download.py`, `streamkeep/ui/clip_dialog.py`, `streamkeep/ui/widgets.py`.
+  Acceptance: dialogs are resizable or scrollable, embedded tables scale with density or scroll, and clipped labels elide with a tooltip carrying the full text. A test renders the affected surfaces at `spacious` and asserts no widget's `sizeHint` exceeds its allocation. Overlaps V207 — do the fixed-width labels once.
+  Complexity: M
+
+- [ ] P3 — V215 — Correct the BagIt second-algorithm manifest
+  Why: `sha384-sri` is not a valid BagIt algorithm token, so a standards-conformant BagIt consumer will not treat the file as a payload manifest. BagIt explicitly permits multiple payload manifests with different algorithms, so the fix is to emit a real one.
+  Evidence: `streamkeep/verify.py` recognises `manifest-sha384-sri.txt` alongside `manifest-sha256.txt` and `tagmanifest-sha256.txt`. RFC 8493 §2.1.3: https://www.rfc-editor.org/rfc/rfc8493.html
+  Touches: `streamkeep/verify.py`, `streamkeep/integrity.py`, `tests/test_verify.py`.
+  Acceptance: a second payload manifest uses a registered algorithm token (`manifest-sha512.txt`), and the SRI file is retained as a tag file only, which BagIt tolerates. Keep reading the old name so existing bags still verify.
+  Complexity: S
+
+- [ ] P3 — V216 — Report post-processing outcomes per stage, with per-stage retry
+  Why: a failed chat render or transcription currently colours the whole item as failed, so the user cannot see which part broke or redo just that part. ArchiveBox's per-extractor result rows are the proven shape for exactly this.
+  Evidence: the finalize chain runs stages in sequence (`streamkeep/workers/finalize.py`, `streamkeep/postprocess/processor.py`) with a single outcome per item; the swallow sites at `ui/tabs/download_finalize.py:181` and `workers/finalize.py:652` leave an upgrade decision stuck in its pre-failure state, so Operations can report an upgrade as still running after it failed. Demand for an auditable journal: https://github.com/jmbannon/ytdl-sub/issues/746 . Model: https://github.com/ArchiveBox/ArchiveBox/wiki/Configuration
+  Touches: `streamkeep/workers/finalize.py`, `streamkeep/postprocess/processor.py`, `streamkeep/db/schema.py`, `streamkeep/ui/tabs/history.py`.
+  Acceptance: each finalize stage records success/fail/skip independently and is individually re-runnable from History, and one failed stage does not mark the recording failed. This needs a schema migration — follow the existing guarded-`ALTER` pattern in `db/schema.py`. Fix the two stuck-state swallows in the same pass; they are the reason Operations currently lies about outcomes.
+  Complexity: L
+
+## Audit Findings — 2026-08-08
+
+Full-repository audit pass (correctness, security, reliability, UX, a11y, visual, perf, maintainability, testing). **Baseline measured this pass, and it is clean:** `py -3.14 -m pytest -p no:randomly -q` → **2157 passed, 1 skipped, 169 subtests passed in 375.07s**, coverage **66.66%** against a 64.0 floor. **There are no pre-existing test failures.** `py -3.14 -m compileall` clean; `py -3.14 -m pyflakes streamkeep packaging StreamKeep.py` clean; `py -3.12 -m ruff check .` → 48 findings (see the correction on V210); all version strings agree at 4.55.0.
+
+Areas checked and confirmed genuinely clean — **do not re-investigate**: FTP/FTPS/SFTP transport (`upload/ftp.py` disables plain FTP by default, pins an SSL context, rejects unknown host keys), S3 and WebDAV `allow_insecure_http` opt-in guards, ffmpeg filter-graph construction (`clip_dialog._build_social_vf` uses preset constants and a numeric slider only, no user text), Twitch GQL query interpolation (`schedule.py` gates on `_SAFE_LOGIN` first), IRC TLS (port 6697 with a verified default context), `single_instance.py` (`QLockFile` non-blocking, reference held on the `QApplication`), OpenAPI drift (gated in *both* directions by `tests/test_openapi.py:99,104`), theme contrast (`tests/test_visual_system.py` already measures **every rendered QSS rule block in every palette**, not a token list), `datetime.utcnow()` (absent), mutable default arguments (absent), and `db/{transfers,integrity,maintenance}.py` (legitimate `_EXPORTED` re-export shims pending V163). One suspected perf issue was disproved: `youtube_backend._backend_config` would load the config three times when passed `None`, but both production callers pass a config.
+
+#### P1 — Next
+
+- [ ] P1 — V220 — Make the artifact smoke contract exercise the startup work it currently disables
+  Category: testing
+  Where: `streamkeep/ui/main_window.py:431,469,475,479,1063,1173,2560` (`self._startup_check` branches); `streamkeep/startup_check.py`; `packaging/artifact_smoke.py:95`; `packaging/release_gate.py:279-295` (`stage_artifact_smoke`)
+  Problem: the gate stage whose docstring is "Start the built executable and prove it comes up on a clean profile" runs the app with `startup_check=True`, and that flag suppresses precisely the deferred startup work most likely to fail: the scheduler timer and immediate bandwidth-rule application (`:431`), the orphan resume-sidecar disk scan (`:469` — a shipped bug class, v4.43.5), the update check (`:475`), the companion server socket (`:479`), the transcript index build (`:1063`), tray-icon creation and its documented fallback (`:1173`), and the health monitor timer plus its immediate probe (`:2560` — the exact subsystem behind the V177/V179/V180 access-violation chain). So the release contract certifies that the window constructs with seven subsystems switched off, and cannot see a regression in any of them. `startup_check.py` itself has **0% coverage** (109 statements), so the harness that issues this certificate is also unverified.
+  Evidence: `packaging/artifact_smoke.py:95` passes the `startup-check` subcommand; `cli.py:3337` dispatches it to `startup_check.run_startup_check`, which constructs `MainWindow(startup_check=True)`. Each of the seven line numbers above is a `if not self._startup_check:` / `if self._startup_check: return` guard, read and confirmed. Coverage from the clean full-suite run this pass: `streamkeep\startup_check.py 109 statements, 0.0%`.
+  Fix: split the flag by intent instead of using one blanket suppressor. Keep suppressing what genuinely cannot run in a smoke context (the update check's network call, the tray icon on a headless session) and **start** the rest under the contract with a short bounded deadline, asserting each reached a known state — scheduler tick applied, resume scan completed, index build started, health probe completed or cleanly cancelled. The health probe especially must run, since it is the documented cause of three shipped crashes. Add tests for `startup_check.py`'s own assertions, including one that makes a fixture count mismatch and confirms the harness fails rather than passing.
+  Acceptance: `packaging/artifact_smoke.py` reports per-subsystem startup outcomes rather than a single boot flag; a deliberately broken health probe or resume scan makes the `artifact-smoke` stage fail; `startup_check.py` has coverage and a test proving a mismatched fixture count is rejected.
+  Confidence: Verified
+  Effort: M
+
+#### P2 — Later
+
+- [ ] P2 — V221 — Keep `add_to_collection` idempotent for position, not just membership
+  Category: correctness
+  Where: `streamkeep/tags.py:405-426` (`add_to_collection`)
+  Problem: the docstring says "Add a recording to a collection. Idempotent." Membership is idempotent, but ordering is not. With `position=None` (the default, and what the CLI uses) the function computes `MAX(position) + 1` and then issues `INSERT OR REPLACE`, so re-adding a recording that is **already** in the collection rewrites its row with a new trailing position — silently moving it from wherever the operator put it to the end of the list. Ordering is an explicit product promise for this feature ("Membership is explicit and ordered"), so a repeated `collections add` quietly reorders a curated list.
+  Evidence: `:413-419` computes the next position unconditionally, without checking whether the row exists; `:420-423` is `INSERT OR REPLACE INTO collection_members (collection_id, recording_path, position)`, and the table's primary key is `(collection_id, recording_path)` (`_COLLECTION_SCHEMA`), so the REPLACE overwrites the existing member's position. `tests/test_collections.py:48 test_membership_is_idempotent` calls `add_to_collection` twice and asserts only the member **list**, never a position, so the reorder is invisible to the suite; `test_members_keep_the_operators_order:66` always passes explicit positions and so never exercises this path.
+  Fix: when `position is None`, look up the existing row first and keep its position if the member is already present; only compute `MAX(position) + 1` for a genuinely new member. An explicit `position` argument should still move the member deliberately.
+  Acceptance: extend `test_membership_is_idempotent` to assert the member's position is unchanged after a second `add_to_collection`, and add a case where a member added at position 0 of three stays first after being re-added.
+  Confidence: Verified
+  Effort: S
+
+- [ ] P2 — V222 — Bound the chat readers' accumulation
+  Category: reliability
+  Where: `streamkeep/chat/twitch_irc.py:197-213` (`iter_messages`); `streamkeep/chat/kick_ws.py:196,221,236`
+  Problem: both chat readers accumulate without any cap, in threads that are expected to run for the length of a multi-hour capture. In `twitch_irc.py` the loop does `buf += data.decode(...)` and only drains `buf` while `"\r\n" in buf`, so a peer that sends data containing no line terminator grows the string until memory is exhausted — there is no length limit anywhere in the file (the only `CAP` match is the IRC `CAP REQ` command). In `kick_ws.py` the connection is created with `websocket.create_connection(url, timeout=10)` and no `max_size`, and `recv()`'s result goes straight into `json.loads(raw)`, so a single oversized or endlessly fragmented frame is assembled in full before any size check. Both connections are TLS with verification, so this is not remotely attacker-injectable; the realistic trigger is a malfunctioning or hostile endpoint, and the cost is the capture process dying with the recording in progress.
+  Evidence: `twitch_irc.py:197` initialises `buf = ""`; `:209` appends; `:212` drains only on `"\r\n"`; `grep -nE "MAX|CAP|_LIMIT" streamkeep/chat/twitch_irc.py` matches only the `CAP REQ` string at `:172`. `kick_ws.py:196` creates the socket with no `max_size`; `:221` is a bare `recv()`; `:236` is `json.loads(raw)` with no length check.
+  Fix: cap `buf` in `twitch_irc.py` — an IRC line is bounded by the protocol, so if `buf` exceeds a generous limit (say 64 KiB) with no terminator, log it and reset the buffer or drop the connection rather than continuing to append. For `kick_ws.py`, pass a `max_size` to `create_connection` and reject an oversized payload before parsing. Both should surface the condition rather than failing quietly (see V196 for the channel).
+  Acceptance: a test feeding a fake socket 1 MB of terminator-free data asserts memory does not grow unboundedly and that the reader reports the condition; a test delivering an oversized websocket frame asserts it is rejected rather than parsed.
+  Confidence: Verified
+  Effort: S
+
+- [ ] P2 — V223 — Say "Recycle" where the operation recycles
+  Category: ux
+  Where: `streamkeep/ui/tabs/settings.py:2558` and `:2595`
+  Problem: the two controls that configure automatic retention read "**Delete** recordings older than" and "**Delete** watched recordings automatically", but the operation they enable never deletes — `lifecycle.py:4` states the invariant outright ("always uses `send2trash` (recycle bin) — never permanent") and `:247-273` sends each directory to the Recycle Bin. Every other string describing the same operation says so correctly: "would be moved to the Recycle Bin", "You can still restore the folders later from the system Recycle Bin", "[LIFECYCLE] Recycled {removed} recording(s)". The result is that the one place a user decides whether to switch on unattended cleanup uses the most alarming available verb for the single operation the codebase guarantees is reversible — which both suppresses adoption of a safe feature and is inconsistent with fourteen sibling strings.
+  Evidence: `grep -rn "Delete recordings older than\|Delete watched recordings automatically" streamkeep/ui/` → `settings.py:2558,2595`. `streamkeep/lifecycle.py:4,247-273` confirms the recycle-only path. `grep -rhoE "\"[^\"]*Recycle[^\"]*\"" streamkeep/ui/` returns 14 distinct strings using the correct term for the same concept.
+  Fix: reword both to "Recycle recordings older than" and "Recycle watched recordings automatically", and add the reassurance already used elsewhere ("Files stay recoverable through the Recycle Bin…") as helper text on the section. Use `tr_format()` rather than an f-string so the strings are catalog-reachable (see V207). Sweep the surrounding retention section for the same substitution.
+  Acceptance: no user-facing string in the retention settings says "Delete" for a recycle operation; the i18n catalogs regenerate with the new sources; the strings agree with the terminology used in the preview and log output.
+  Confidence: Verified
+  Effort: S
+
+- [ ] P2 — V224 — Test the two zero-coverage surfaces that carry startup and crash behaviour
+  Category: testing
+  Where: `streamkeep/startup_check.py` (109 statements, 0.0%); `streamkeep/ui/intelligence_dialog.py` (103 statements, 0.0%); `streamkeep/crash_log.py` (36 statements, 27.8%)
+  Problem: measured on the clean full-suite run this pass, three modules that decide whether the app boots, whether a crash is recorded, and a whole user-facing dialog are effectively unexercised. `startup_check.py` is the release contract itself (see V220). `crash_log.py` is the only crash-recording path (see V217) and no test asserts it writes anything. `ui/intelligence_dialog.py` is reachable from History (`ui/tabs/history.py:1568`) and has no test at all — it is also one of the dialogs with zero `configure_accessibility` coverage.
+  Evidence: coverage lines from the 2026-08-08 baseline run: `streamkeep\startup_check.py 109 109 0.0%`, `streamkeep\ui\intelligence_dialog.py 103 103 0.0%`, `streamkeep\crash_log.py 36 26 27.8%`. `grep -rln "setup_crash_logging" tests/` matches nothing.
+  Fix: add a test module per surface following the existing style — `tests/test_gui_smoke.py` is the pattern for constructing a dialog under `QT_QPA_PLATFORM=offscreen` and driving it, and `tests/test_release_gate.py` is the pattern for harness assertions. Minimum viable coverage: `crash_log` writes a rotated entry for a raised exception and survives an unwritable log directory; `startup_check` rejects a fixture-count mismatch; `intelligence_dialog` constructs, renders each state, and its workers are joined on close (which also feeds V186).
+  Acceptance: all three modules exceed the 64% floor individually, and the new crash-log test fails if `setup_crash_logging` is stubbed out.
+  Confidence: Verified
+  Effort: M
+
+#### P3 — Under Consideration
+
+- [ ] P3 — V225 — Correct the stale port in the IRC reader's docstring
+  Category: maintainability
+  Where: `streamkeep/chat/twitch_irc.py:3`
+  Problem: the module docstring says it "Connects to `irc.chat.twitch.tv:6667`", which is the **plaintext** IRC port. The code actually uses `PORT = 6697` (`:19`) and wraps the socket with `ssl.create_default_context()` and `server_hostname=SERVER` (`:169-170`). A reader auditing the transport sees a docstring describing an unencrypted connection and either wastes time confirming it or, worse, "fixes" the port to match the comment.
+  Evidence: `:3` reads `6667`; `:18-19` are `SERVER = "irc.chat.twitch.tv"` / `PORT = 6697`; `:169-170` perform the TLS wrap with hostname verification.
+  Fix: update the docstring to `irc.chat.twitch.tv:6697` and state that the connection is TLS with certificate and hostname verification, so the security posture is documented where it is read.
+  Acceptance: the docstring names 6697 and TLS; no other occurrence of 6667 remains in the module.
+  Confidence: Verified
+  Effort: S
+
+- [ ] P3 — V226 — Correct the v4.55.0 release date in CHANGELOG and the AppStream metainfo
+  Category: docs
+  Where: `CHANGELOG.md:5` (`## [4.55.0] - 2026-08-07`); `packaging/flatpak/com.github.SysAdminDoc.StreamKeep.metainfo.xml:32` (`<release version="4.55.0" date="2026-08-07">`)
+  Problem: both documents date v4.55.0 to 2026-08-07, but the release commit landed 2026-08-08. The AppStream date is user-facing store metadata and the CHANGELOG is the shipped release history, so the published record is off by a day. This is a version-metadata accuracy issue, deliberately logged rather than fixed here because touching version strings is out of scope for an audit pass.
+  Evidence: `git log -3 --format='%ad %s' --date=short` → `2026-08-08 chore(release): bump to v4.55.0 and sync every version string`, while `CHANGELOG.md:5` and the metainfo `<release>` block both say `2026-08-07`. Note the preceding entry (v4.54.0, 2026-08-07) is correct, so the stamp appears to have carried the previous day forward.
+  Fix: set both to 2026-08-08. Check whether `packaging/versioning.py` derives the date from the commit or from the previous entry — if it copies the prior release's date, that is the root cause and the stamper should read the current date (or take it as an argument) so the next release is not wrong the same way.
+  Acceptance: both files read 2026-08-08 for 4.55.0, and `packaging/versioning.py`'s date handling is either confirmed correct or fixed so a subsequent bump stamps the actual release date.
+  Confidence: Verified
+  Effort: S
+
+### Unaudited — needs a dedicated pass
+
+Recorded honestly so the next pass knows where the gaps are. This audit prioritised correctness, security, data safety and the newest code; the following received no more than incidental inspection:
+
+- **`streamkeep/workers/download.py` (3,132 lines) and `streamkeep/cli.py` (3,360 lines) internals.** The two largest non-`_legacy` modules. Only their subprocess-encoding and argv-quoting surfaces were checked.
+- **`streamkeep/headless_service.py` (1,719 lines)** — executor-lease acquisition, renewal and expiry under concurrency, and the REST-to-worker handoff.
+- **The extractor family** (`extractors/kick.py`, `twitch.py`, `rumble.py`, `soundcloud.py`, `reddit.py`, `audius.py`, `podcast.py`) — untrusted API response parsing and field bounds were not systematically reviewed.
+- **`streamkeep/player/`** — mpv widget lifecycle, PiP window, and the sync viewer's interaction with the taskbar/power surfaces (this repeats a gap already noted in section 3 above).
+- **`streamkeep/backup.py`, `rebuild.py`, `maintenance.py` internals** — the crash-consistency logic itself, as opposed to the swallowed finalizers logged as V185.
+- **`browser-extension/`** — only the manifest's `host_permissions` and `minimum_chrome_version` were verified (during the 2026-08-08 research pass); the content script and service worker were not read.
+- **Live GUI observation.** No finding in this pass came from driving the running application: the machine was under sustained load from unrelated batch jobs and the standing rule is that visible work runs on the isolated virtual display. All UX, visual and a11y findings here and in the research additions above are traced from source. A pass that actually drives the UI on the virtual display — every tab, every dialog, all three palettes, both densities — is the single highest-value remaining audit activity.
+- **`streamkeep/governor.py`, `retry.py`, `bandwidth.py`** — backoff, rate and budget arithmetic was not verified against its own edge cases.
+
+## Research-Driven Additions — 2026-08-08 (second pass)
+
+Evidence synthesis in `RESEARCH.md` (2026-08-08, second pass). Baseline **v4.57.0**, HEAD `795c213`, schema v23, 219 modules / 110,861 LOC, 156 test files / 2,023 test functions. The full suite was not run (~19 min, and a loaded machine manufactures timing failures — V181), so **no item below rests on a coverage number**. Everything from the first 2026-08-08 pass that has since landed (V182–V188, V190, V195) is verified closed in source and recorded in `RESEARCH.md`; do not re-open it. Items shipped that competitors are still asking for — season/episode NFO, RSS output, SponsorBlock chapters, chat-to-ASS, watch-state sync, start-from-beginning capture, first-run Deno/JS-runtime provisioning, `curl_cffi` impersonation — are listed in `RESEARCH.md` "Rejected Ideas" as *already built*; market them, do not build them. New IDs continue the V-scheme from V227.
+
+#### P0 — Now
+
+#### P1 — Next
+
+#### P2 — Later
+
+
+- [ ] P2 — V243 — Bring filter, sort and search to the views that lack them
+  Why: History is well served and nothing else is. Storage has platform/channel combos but no text search; Monitor, Analytics, Operations and the Queue have no filtering or sorting at all — which is precisely the "very large archive" case the roadmap's own Future Feature Queue names.
+  Evidence: History search at `ui/tabs/history.py:191-194` and `ui/history_model.py:195`; `StorageFilterProxyModel` at `ui/storage_model.py:98`, applied `ui/tabs/storage.py:193-205`, with no text field; sorting explicitly disabled at `ui/main_window.py:2682`. Competitor expectation is set by TubeArchivist's Elasticsearch-backed search.
+  Touches: `streamkeep/ui/tabs/storage.py`, `monitor.py`, `operations.py`, `download_queue.py`, `streamkeep/ui/storage_model.py`, `tests/test_history_paging.py` (pattern to copy).
+  Acceptance: Storage gains text search over path, channel and title; Monitor and Operations gain a filter field; the Queue and Monitor tables sort by their meaningful columns. All of it stays on the keyset-paged model path, not per-row widgets.
+  Complexity: M
+
+- [ ] P2 — V244 — Give the keyboard a defined path through Settings and the dialogs
+  Why: keyboard access is claimed as a feature, but traversal order falls back entirely to widget construction order — across ~175 Settings controls that is technically functional and practically unusable.
+  Evidence: `setTabOrder`, `setBuddy`, `setShortcut` and `QShortcut` total **17 occurrences** across all of `streamkeep/ui/`; `setFocusPolicy` appears 5 times; `setAccessibleDescription` 22 times against ~40 `setAccessibleName`. The helpers already exist (`ui/widgets.py:442-468 set_accessible`, `update_accessible_status`) and `_FocusRevealFilter` at `ui/widgets.py:764` already scrolls focus into view. README "Desktop Keyboard Access" makes the claim.
+  Touches: `streamkeep/ui/tabs/settings*.py`, `streamkeep/ui/monitor_entry_dialog.py`, `rename_dialog.py`, `recover_dialog.py`, `notification_log_dialog.py`, `tests/test_accessibility.py`.
+  Acceptance: an offscreen test walks Tab from each page's first control and asserts the order matches the visual order and that every interactive control is reachable and carries an accessible name.
+  Complexity: M
+
+- [ ] P2 — V245 — Build a large-library fixture and a scale test
+  Why: nothing in the repo establishes a baseline for the 100k-row History/Storage/Analytics path, so V181 (perf guards that measure the code, not the machine) and V203 (move search and analytics off the UI thread) both have to invent one before they can start. Runaway memory in unattended archivers is a documented category failure (Pinchflat #866: 30.8 GB RES, recurring every 1–2 days).
+  Evidence: no `tests/test_*perf*`, `*bench*`, `*scale*` or `*large*` file exists; `ui/tabs/analytics.py:360 _refresh_analytics` calls `_db.history_analytics(...)` synchronously with no worker (that is V203's target — do not fix it here).
+  Touches: `tests/conftest.py`, `tests/test_scale.py` (new), `streamkeep/db/`.
+  Acceptance: a seeded fixture builds a 100k-row history plus manifests deterministically and is reusable; a test records query and model-load timings and peak RSS as a recorded baseline, not a pass/fail threshold, so V181 can decide the guard afterwards.
+  Complexity: M
+
+- [ ] P2 — V246 — Retire the aria2c external-downloader path
+  Why: aria2 has had no release since 1.37.0 (2023-11-15); yt-dlp removed its manifest support after CVE-2026-50574 (RCE via manifest downloads with aria2c), so the remaining surface is plain HTTP where StreamKeep's own parallel range downloader already applies. Fifteen modules still carry the option.
+  Evidence: `aria2` appears in `cli.py`, `config.py`, `download_options.py`, `extractors/ytdlp.py`, `headless_service.py`, `job_spec.py`, `models.py`, `resume.py`, `ui/main_window.py`, `ui/main_window_jobs.py`, `ui/tabs/download_queue.py`, `download_single.py`, `download_vod.py`, `monitor.py`, `workers/download.py`; commit `b456462` already gated it to direct HTTP. `streamkeep/http.py parallel_http_download` is the replacement.
+  Touches: all fifteen modules above, `streamkeep/capabilities.py`, `README.md`, `tests/test_download_options.py`.
+  Acceptance: the option, its config key and its capability probe are removed; an existing config naming aria2c migrates to the built-in parallel downloader with a one-line notice rather than failing.
+  Complexity: M
+
+- [ ] P2 — V247 — Ratchet the coverage floor and cover the four largest untested UI modules
+  Why: `fail_under = 64.0` leaves a wide slack band in which a real regression passes, and fifteen modules are never imported or named by any test — led by the one that owns four QThread workers, which is exactly the class of code that produced V228.
+  Evidence: `.coveragerc:6`. Never-imported modules by size: `ui/tabs/storage.py` (65 KB, workers at `:33,53,84,122`), `ui/tabs/download_vod.py` (27 KB), `ui/tabs/analytics.py` (16 KB), `player/chapter_panel.py` (10 KB), `intelligence/highlight.py`, `ui/intelligence_dialog.py`, `workers/monitor_ops.py`, `db/channel_stats.py`, `db/transfers.py`, `db/integrity.py`, `db/maintenance.py`, `workers/backup.py`, `ui/preview_art.py`, `i18n/compile_translations.py`. V224 already covers `startup_check.py` and the crash surface — do not duplicate it here.
+  Touches: `.coveragerc`, `tests/test_storage_ui.py`, `test_analytics.py`, `test_download_vod.py`, `test_channel_stats.py` (new).
+  Acceptance: the four largest untested modules have tests that construct and drive their real code paths offscreen; `fail_under` is raised to the measured value minus one and a note records the ratchet policy.
+  Complexity: M
+
+- [ ] P2 — V248 — Build the rename undo the journal implies, or stop writing it
+  Why: files are renamed, then a journal is written for an undo that does not exist and that nothing ever reads — and the journal write is swallowed, so even the record can fail silently after the rename has already happened.
+  Evidence: `streamkeep/ui/rename_dialog.py:283` is the only repo-wide reference to `rename_undo.json`; the write at `:292` is inside a swallowing handler and the rename at `:269` precedes it. The project's own destructive-action policy prefers toast + undo, and notification clearing already implements that shape correctly (`ui/main_window.py:2980-3015`).
+  Touches: `streamkeep/ui/rename_dialog.py`, `streamkeep/ui/main_window.py`, `tests/test_rename_dialog.py`.
+  Acceptance: either an "Undo rename" action restores every file the journal names and reports what it could not restore, or the journal is removed and the dialog stops claiming reversibility. Related to V209 (destructive-action policy) but distinct — this one is a dead artefact, not a modal.
+  Complexity: S
+
+#### P3 — Under Consideration
+
+- [ ] P3 — V249 — Verify C2PA Content Credentials on downloaded media
+  Why: no media archiver in the surveyed field records provenance, and an archive's value rests on being able to say what a file is. C2PA verification became practical in 2026: spec 2.3 (2026-01-05) extends provenance to live streaming via CMAF segment signing, a public Trust List and conformance programme exist, and a maintained Python SDK ships. EU AI Act Art. 50 machine-readable AI-content marking took effect 2026-08-02, so the number of signed assets is about to rise sharply.
+  Evidence: zero `c2pa` hits across `streamkeep/`. `spec.c2pa.org` 2.3; `opensource.contentauthenticity.org/docs/c2pa-python/`; `c2patool` v0.26.27 (2026-02-09). Distinct from the previously rejected C2PA *generation* — StreamKeep is not the authoring tool.
+  Touches: `streamkeep/verify.py`, `streamkeep/metadata.py`, `streamkeep/capabilities.py`, `streamkeep/ui/tabs/history.py`, `tests/test_verify.py`.
+  Acceptance: when the optional dependency is present, a completed recording's manifest is read, validated against the Trust List, and the verdict (signed/unsigned/invalid, signer, assertions) is written to the public sidecar and shown in History. Absent the dependency, nothing fails. Never mutate the media.
+  Complexity: L
+
+- [ ] P3 — V250 — Emit CMCD v2 on native HLS and DASH captures
+  Why: CDNs treat requests carrying Common Media Client Data as player traffic; StreamKeep's native captures currently look like a bare fetcher, and 403/429 on non-YouTube hosts is a top-five category complaint. Cheap patch, measurable effect.
+  Evidence: zero `cmcd` hits across `streamkeep/`. CTA-5004-A published February 2026 with structured-field encoding and event-mode reporting. Category evidence: yt-dlp #16142 (Kick), #16535 (Rumble), #13831 (429s). **Overlaps V201** (treat extraction identity and throttling as managed state): CMCD is the standardised *client-hint* half of that surface, not the identity/rotation half. Land V201 first if both are taken, or fold this in as its transport-hint component.
+  Touches: `streamkeep/hls.py`, `streamkeep/dash.py`, `streamkeep/net_guard.py`, `streamkeep/http.py`, `tests/test_hls.py`.
+  Acceptance: session and object keys are emitted per CTA-5004-A as request headers, off by default and toggleable; the payload carries no user identifier beyond a per-session random id, and a test asserts no stable cross-session identifier is sent.
+  Complexity: M
+
+- [ ] P3 — V251 — Add an Internet Archive destination preset over the existing S3 adapter
+  Why: offsite push to a permanent public archive is an explicit competitor ask, and the transport already works — IA speaks S3 and the adapter already accepts a custom endpoint. What is missing is the item-metadata convention, which is a preset, not an adapter.
+  Evidence: `streamkeep/upload/s3.py:6` documents `endpoint_url`, validated at `:78`, `:89-99`; `upload_file` at `:52` sets no `x-archive-meta-*` headers and IA's bucket-is-the-item-identifier convention is unmodelled. Ganymede #807 asks for exactly this.
+  Touches: `streamkeep/upload/s3.py`, `streamkeep/upload/runtime.py`, `streamkeep/ui/tabs/settings.py`, `tests/test_upload_adapters.py`.
+  Acceptance: an "Internet Archive" profile type pre-fills the endpoint, maps recording metadata to `x-archive-meta-*` headers, and requires explicit per-profile confirmation that uploads are public and permanent. Reuses the existing credential storage; adds no new dependency.
+  Complexity: S
+
+- [ ] P3 — V252 — Rename one of the two `HighlightWorker` classes
+  Why: two unrelated QThread classes share a name, so `from … import HighlightWorker` reads correctly and can be wrong.
+  Evidence: `streamkeep/intelligence/highlight.py:180` detects highlight ranges and emits `list`; `streamkeep/postprocess/clip_worker.py:194` concatenates ranges into a reel and emits `(bool, str)`.
+  Touches: `streamkeep/postprocess/clip_worker.py`, `streamkeep/intelligence/highlight.py`, callers, `tests/`.
+  Acceptance: names state what each does (for example `HighlightDetectWorker` and `HighlightReelWorker`); no import in the tree is ambiguous.
+  Complexity: S
+
+- [ ] P3 — V253 — Refresh the optional-engine currency claims
+  Why: the README recommends installing two engines whose upstream state has moved — one is migrating off GitHub, the other has had no release in over two years — and the capability registry cannot refuse an outdated copy of either.
+  Evidence: `streamkeep/integrations/gallery_dl.py:4` points at `github.com/mikf/gallery-dl`, which is moving to Codeberg (issue #9374, 128 reactions); `README.md:297` recommends `go install github.com/iawia002/lux@latest`, whose last release is v0.24.1 (2024-05-06) with 545 open issues. V194 added floors for `gallery_dl` and `transcribe_worker` — verify that claim actually covers both and that `faster-whisper` has one.
+  Touches: `streamkeep/integrations/gallery_dl.py`, `streamkeep/integrations/lux.py`, `streamkeep/capabilities.py`, `README.md`.
+  Acceptance: source URLs point at the maintained upstream, every optional engine has a declared floor the registry can enforce, and the README states lux's maintenance status rather than recommending it unqualified.
+  Complexity: S
+
+- [ ] P3 — V254 — Measure and publish time-to-capture for monitored channels
+  Why: detection latency is the axis competitors advertise on and nobody in the field measures — LiveStreamDVR documents capture starting roughly two minutes after a stream goes live. StreamKeep already has escalated polling and start-from-beginning capture, so this is likely a strength that is currently invisible.
+  Evidence: `streamkeep/monitor.py` `ChannelMonitor` polls on a QTimer tick through a two-slot `QThreadPool`; `db/channel_stats.py` already records live/offline transitions (wired by `795c213`), which is where the measurement belongs. Confidence: **Needs live validation** — no measurement was taken this pass.
+  Touches: `streamkeep/monitor.py`, `streamkeep/db/channel_stats.py`, `streamkeep/ui/tabs/monitor.py` (Channel Insights), `README.md`.
+  Acceptance: Channel Insights reports median and worst observed seconds between a channel going live and capture starting, over a bounded window; the number is derived from recorded transitions, not estimated.
+  Complexity: M
+
+- [ ] P3 — V255 — Move the installer to Inno Setup 7 x64 with extended-length path support
+  Why: deep archive trees plus long channel and title templates hit MAX_PATH, which is a recurring failure mode for downloaders (yt-dlp #1136, 32 reactions). IS7 removes the limit at the installer level and installs alongside IS6, so the migration is reversible. Distinct from the previously rejected application-level long-path work.
+  Evidence: `packaging/installer/streamkeep.iss` targets the IS6 lane; Inno Setup 7.0.2 (2026-07-13) adds a 64-bit edition (`SetupArchitecture=x64`), extended-length path support, and high-entropy ASLR.
+  Touches: `packaging/installer/streamkeep.iss`, `packaging/build.py`, `tests/test_packaging.py`.
+  Acceptance: the installer builds unsigned under IS7 x64, installs to a path longer than 260 characters, and the artifact smoke suite passes from that install. The unsigned posture is unchanged — no certificate, no signing step.
+  Complexity: M
+```
+
+</details>

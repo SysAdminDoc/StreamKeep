@@ -8,7 +8,7 @@ without importing the god object.
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, QTimer, Qt
+from PyQt6.QtCore import QEvent, QObject, QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractButton, QAbstractItemView, QAbstractSpinBox, QCheckBox,
     QComboBox, QFrame,
@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import CAT, get_density
-from ..i18n import TranslatableDialog
+from ..i18n import TranslatableDialog, tr
 
 
 # Platform badge mapping — key → (CAT colour key, display text).
@@ -224,6 +224,118 @@ def update_accessible_status(widget, text, *, tone="info", label="Status"):
     set_accessible(widget, f"{label}: {message}", f"{state} status update")
     revision = int(widget.property("accessibleStatusRevision") or 0) + 1
     widget.setProperty("accessibleStatusRevision", revision)
+
+
+class BusyIndicator(QFrame):
+    """Compact indeterminate activity indicator for background workers.
+
+    ``begin`` returns an idempotent callback intended for a worker's
+    ``finished`` signal. Keeping one callback per activity lets unrelated
+    background jobs overlap without hiding the indicator when only one of
+    them has completed.
+    """
+
+    _finish_requested = pyqtSignal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("busyIndicator")
+        self.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._activities = {}
+        self._finish_requested.connect(self.end)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 3, 8, 3)
+        layout.setSpacing(7)
+
+        self.status_label = QLabel("Working…", self)
+        self.status_label.setObjectName("busyIndicatorLabel")
+        self.status_label.setMaximumWidth(190)
+        self.status_label.setToolTip("Background activity")
+        layout.addWidget(self.status_label)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setObjectName("busyIndicatorBar")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedWidth(86)
+        self.progress_bar.setFixedHeight(10)
+        set_accessible(
+            self.progress_bar,
+            "Background activity progress",
+            "Indeterminate progress while background work is running",
+        )
+        layout.addWidget(self.progress_bar, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        set_accessible(
+            self,
+            "Background activity",
+            "Shows when a background worker is running",
+        )
+        self.setVisible(False)
+        self._refresh()
+
+    @property
+    def active_count(self):
+        """Return the number of background activities still in flight."""
+        return len(self._activities)
+
+    @property
+    def is_busy(self):
+        """Whether at least one tracked activity is still running."""
+        return bool(self._activities)
+
+    def begin(self, message="Working…"):
+        """Show *message* and return a callback that clears this activity."""
+        token = object()
+        self._activities[token] = str(message or "Working…").strip()
+        self._refresh()
+
+        def finish(*_args):
+            if QThread.currentThread() is self.thread():
+                self.end(token)
+            else:
+                self._finish_requested.emit(token)
+
+        return finish
+
+    def end(self, token):
+        """Clear one activity token; repeated completion is harmless."""
+        if self._activities.pop(token, None) is not None:
+            self._refresh()
+
+    def _refresh(self):
+        active = list(self._activities.values())
+        if active:
+            source = active[-1] or "Working…"
+            message = tr(source)
+            if len(active) > 1:
+                message = f"{message} ({len(active)} active)"
+            self.status_label.setText(message)
+            self.status_label.setToolTip(message)
+            self.setProperty("activityState", "working")
+            update_accessible_status(
+                self,
+                message,
+                tone="working",
+                label="Background activity",
+            )
+            self.setVisible(True)
+            return
+
+        self.status_label.setText(tr("Working…"))
+        self.status_label.setToolTip("Background activity")
+        self.setProperty("activityState", "idle")
+        update_accessible_status(
+            self,
+            "No background activity",
+            tone="idle",
+            label="Background activity",
+        )
+        self.setVisible(False)
 
 
 def TAB_STYLE():

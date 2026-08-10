@@ -877,6 +877,8 @@ class SettingsToolsMixin:
             return
         self._deno_worker = _DenoInstallWorker(archive_path, self)
         self._deno_worker.result.connect(self._on_deno_install_result)
+        busy_done = self._begin_background_activity("Installing Deno runtime…")
+        self._deno_worker.finished.connect(busy_done)
         self._deno_worker.finished.connect(self._clear_deno_worker)
         self._deno_worker.finished.connect(self._deno_worker.deleteLater)
         self.deno_install_btn.setEnabled(False)

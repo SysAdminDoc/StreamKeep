@@ -36,6 +36,7 @@ from ..postprocess.codecs import VIDEO_CODECS
 from ..utils import fmt_duration
 from .worker_teardown import WorkerOwnerMixin
 from .widgets import (
+    BusyIndicator,
     bind_label,
     configure_accessibility,
     make_dialog_hero,
@@ -622,6 +623,7 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         self._preview_worker = None
         self._waveform_worker = None
         self._scene_worker = None
+        self._export_busy_done = None
         self._duration = probe_duration(source_path)
         if default_end is None:
             default_end = self._duration or 0.0
@@ -642,6 +644,9 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
 
         self._status_banner, self._status_title, self._status_body = make_status_banner()
         root.addWidget(self._status_banner)
+
+        self.busy_indicator = BusyIndicator(self)
+        root.addWidget(self.busy_indicator)
 
         source_card, source_content = make_dialog_section(
             "Source media",
@@ -931,6 +936,8 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
             self.source_path, count=THUMB_COUNT, width=THUMB_W,
         )
         self._thumb_worker.thumb_ready.connect(self.scrubber.set_thumb)
+        busy_done = self._begin_background_activity("Loading clip thumbnails…")
+        self._thumb_worker.finished.connect(busy_done)
         self._thumb_worker.start()
 
     def _kick_off_waveform(self):
@@ -938,6 +945,8 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         cols = max(200, self.waveform.width() or 600)
         self._waveform_worker = _WaveformWorker(self.source_path, columns=cols)
         self._waveform_worker.ready.connect(self._on_waveform_ready)
+        busy_done = self._begin_background_activity("Loading audio waveform…")
+        self._waveform_worker.finished.connect(busy_done)
         self._waveform_worker.start()
 
     def _on_waveform_ready(self, peaks):
@@ -989,6 +998,8 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
             return
         pw = _PreviewWorker(self.source_path, at)
         pw.ready.connect(self._on_preview_ready)
+        busy_done = self._begin_background_activity("Rendering clip preview…")
+        pw.finished.connect(busy_done)
         self._preview_worker = pw
         pw.start()
 
@@ -1183,6 +1194,10 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
     def _log_line(self, msg):
         self.log_view.append(msg)
 
+    def _begin_background_activity(self, message):
+        """Track clip-dialog workers in the shared indeterminate indicator."""
+        return self.busy_indicator.begin(message)
+
     def _set_busy(self, busy):
         self.trim_btn.setEnabled(not busy)
         self.start_input.setEnabled(not busy)
@@ -1196,12 +1211,19 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         self.crop_slider.setEnabled(not busy)
         self.cancel_btn.setText("Cancel" if busy else "Close")
         if busy:
+            if self._export_busy_done is None:
+                self._export_busy_done = self._begin_background_activity(
+                    "Exporting clip…"
+                )
             mode = "highlight reel" if len(self._ranges) > 1 else "clip"
             self._set_status(
                 f"Exporting {mode}",
                 "StreamKeep is processing the selected range and will keep logging progress below.",
                 tone="info",
             )
+        elif self._export_busy_done is not None:
+            self._export_busy_done()
+            self._export_busy_done = None
 
     def _on_trim(self):
         out_path = self.out_input.text().strip()
@@ -1308,6 +1330,8 @@ class ClipDialog(WorkerOwnerMixin, TranslatableDialog):
         self._scene_worker = SceneWorker(self.source_path)
         self._scene_worker.log.connect(self._log_line)
         self._scene_worker.scenes_ready.connect(self._on_scenes_ready)
+        busy_done = self._begin_background_activity("Detecting clip scenes…")
+        self._scene_worker.finished.connect(busy_done)
         self._scene_worker.start()
         self._set_status(
             "Detecting scenes",

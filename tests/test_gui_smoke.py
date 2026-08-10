@@ -160,6 +160,16 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             ]
             assert window._global_search.accessibleName() == "Search StreamKeep"
             assert window.url_input.accessibleName() == "Source URL"
+            assert window.busy_indicator.progress_bar.minimum() == 0
+            assert window.busy_indicator.progress_bar.maximum() == 0
+            initial_busy_count = window.busy_indicator.active_count
+            busy_done = window._begin_background_activity("Storage scan")
+            assert window.busy_indicator.isHidden() is False
+            assert "Storage scan" in window.busy_indicator.accessibleName()
+            busy_done()
+            assert window.busy_indicator.active_count == initial_busy_count
+            if initial_busy_count == 0:
+                assert window.busy_indicator.isHidden()
             for table, expected_name in (
                 (window.table, "Available stream segments"),
                 (window.queue_table, "Download queue"),

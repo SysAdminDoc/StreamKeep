@@ -329,6 +329,8 @@ class SettingsPreferencesMixin:
         worker = _MediaServerWorker("users", config, parent=self)
         worker.result_ready.connect(self._on_media_server_users_ready)
         worker.error.connect(self._on_media_server_probe_error)
+        busy_done = self._begin_background_activity("Loading media-server users…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(lambda: self.ms_load_users_btn.setEnabled(True))
         self._media_server_worker = worker
         worker.start()
@@ -369,6 +371,8 @@ class SettingsPreferencesMixin:
         worker = _MediaServerWorker("watched", config, user_id=user_id, parent=self)
         worker.result_ready.connect(self._on_media_server_watched_ready)
         worker.error.connect(self._on_media_server_probe_error)
+        busy_done = self._begin_background_activity("Loading media-server history…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(lambda: self.ms_preview_watched_btn.setEnabled(True))
         self._media_server_worker = worker
         worker.start()
@@ -917,6 +921,8 @@ class SettingsPreferencesMixin:
         self._cred_probe_worker = _CredentialProbeWorker(platforms, parent=self)
         self._cred_probe_worker.result_ready.connect(self._on_credential_result)
         self._cred_probe_worker.finished_all.connect(self._on_credential_probe_done)
+        busy_done = self._begin_background_activity("Checking platform credentials…")
+        self._cred_probe_worker.finished.connect(busy_done)
         self._cred_probe_worker.start()
         self._set_status("Checking platform credentials…", "info")
 

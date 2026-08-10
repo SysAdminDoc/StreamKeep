@@ -214,6 +214,7 @@ def _status_icon(color_key="green"):
 # working until a future pass switches each call site.
 from .worker_teardown import iter_owned_workers, stop_worker as _stop_worker
 from .widgets import (
+    BusyIndicator,
     ToastOverlay,
     configure_accessibility,
     make_metric_card,
@@ -1841,6 +1842,13 @@ class StreamKeep(
         )
         self._refresh_shell_overview()
 
+    def _begin_background_activity(self, message):
+        """Track a worker in the shared footer activity indicator."""
+        indicator = getattr(self, "busy_indicator", None)
+        if indicator is None:
+            return lambda *_args: None
+        return indicator.begin(message)
+
     def _refresh_shell_overview(self):
         """Update the compact shell snapshot in the app header."""
         if not hasattr(self, "shell_snapshot_value"):
@@ -2267,6 +2275,13 @@ class StreamKeep(
         self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
         footer_lay.addWidget(self.status_label, 1)
+
+        self.busy_indicator = BusyIndicator(self)
+        footer_lay.addWidget(
+            self.busy_indicator,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
 
         self.disk_status = QLabel("")
         self.disk_status.setObjectName("diskStatus")
@@ -2768,6 +2783,8 @@ class StreamKeep(
             return
         worker = _HealthCheckWorker(self._config, self)
         worker.result_ready.connect(self._on_health_snapshot)
+        busy_done = self._begin_background_activity("Checking system health…")
+        worker.finished.connect(busy_done)
         worker.finished.connect(
             lambda current=worker: self._on_health_worker_finished(current)
         )

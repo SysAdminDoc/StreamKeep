@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from streamkeep.ui.calendar_widget import _GridCanvas
 from streamkeep.ui.clip_dialog import ScrubberView, WaveformWidget
 from streamkeep.ui.widgets import (
-    set_accessible_slider, set_accessible_switch, style_table,
+    BusyIndicator, set_accessible_slider, set_accessible_switch, style_table,
     update_accessible_status, wrap_scroll_page,
 )
 
@@ -39,6 +39,36 @@ def test_tables_and_status_expose_keyboard_and_text_state(qt_application):
     assert status.accessibleName() == "Status: Ready to retry"
     assert status.accessibleDescription() == "success status update"
     assert status.property("accessibleStatusRevision") == first_revision + 1
+
+
+def test_busy_indicator_tracks_overlapping_workers_and_clears_idempotently(
+    qt_application,
+):
+    indicator = BusyIndicator()
+    indicator.show()
+    try:
+        assert indicator.progress_bar.minimum() == 0
+        assert indicator.progress_bar.maximum() == 0
+        assert not indicator.is_busy
+
+        first_done = indicator.begin("Storage scan")
+        second_done = indicator.begin("Health check")
+        assert indicator.is_busy
+        assert indicator.active_count == 2
+        assert indicator.isVisible()
+        assert "Health check" in indicator.accessibleName()
+        assert indicator.accessibleDescription() == "working status update"
+
+        first_done()
+        assert indicator.is_busy
+        assert indicator.active_count == 1
+        second_done()
+        second_done()
+        assert not indicator.is_busy
+        assert indicator.active_count == 0
+        assert indicator.isHidden()
+    finally:
+        indicator.close()
 
 
 def test_calendar_blocks_are_keyboard_operable(qt_application):
