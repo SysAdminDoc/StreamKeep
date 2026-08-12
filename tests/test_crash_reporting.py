@@ -8,6 +8,7 @@ health worker produced no ``crash.log`` entry, no dialog and no stderr at all
 (V217).
 """
 
+import sys
 import threading
 
 import pytest
@@ -61,6 +62,50 @@ def test_a_qthread_run_crash_reaches_the_crash_log(qt_application, crash_log_pat
     text = crash_log_path.read_text(encoding="utf-8")
     assert "qthread exploded" in text
     assert "_Exploding" in text, "the entry must name the worker class"
+
+
+def test_a_raised_exception_rotates_and_writes_a_new_crash_entry(
+    qt_application, crash_log_path, monkeypatch,
+):
+    previous = "previous crash\n" * 8
+    crash_log_path.write_text(previous, encoding="utf-8")
+    monkeypatch.setattr(crash_log, "_CRASH_LOG_MAX_BYTES", 32)
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QMessageBox.critical", lambda *_args, **_kwargs: None,
+    )
+
+    try:
+        raise RuntimeError("new crash")
+    except RuntimeError:
+        written = crash_log.record_crash(
+            *sys.exc_info(), context="rotation test",
+        )
+
+    assert written is True
+    assert crash_log._CRASH_LOG_BACKUP.read_text(encoding="utf-8") == previous
+    text = crash_log_path.read_text(encoding="utf-8")
+    assert "new crash" in text
+    assert "rotation test" in text
+
+
+def test_crash_recording_survives_an_unwritable_log(
+    qt_application, crash_log_path, monkeypatch,
+):
+    del crash_log_path
+    monkeypatch.setattr(
+        "builtins.open",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("read only")),
+    )
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QMessageBox.critical", lambda *_args, **_kwargs: None,
+    )
+
+    written = crash_log.record_crash(
+        RuntimeError, RuntimeError("cannot log"), None,
+        context="unwritable test",
+    )
+
+    assert written is False
 
 
 def test_the_guard_is_idempotent(qt_application):

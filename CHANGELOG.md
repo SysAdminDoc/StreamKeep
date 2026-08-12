@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Startup-contract, crash-log, and intelligence-consent tests now cover each
+  surface above the project floor, including crash rotation, unwritable logs,
+  populated startup fixtures, local/cloud consent, and preview failures.
+
 - Performance guards now measure deterministic work or same-process CPU-cost
   scaling instead of wall-clock time, eliminating host-load failures while
   retaining a quadratic-regression bait. Declarative HTML descendant selectors

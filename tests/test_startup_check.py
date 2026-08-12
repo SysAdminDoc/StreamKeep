@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from streamkeep import startup_check
 
 
@@ -92,6 +94,27 @@ def test_the_contract_cleanly_cancels_a_health_probe_at_its_deadline():
     assert all(startup_check._startup_contract_checks(outcomes).values())
 
 
+def test_the_contract_pumps_events_until_subsystems_finish():
+    class Window:
+        def __init__(self):
+            self.outcomes = _complete_outcomes()
+            self.outcomes["scheduler"] = {"state": "running"}
+            self._health_worker = None
+
+        def startup_outcomes(self):
+            return {name: dict(value) for name, value in self.outcomes.items()}
+
+    window = Window()
+
+    class App:
+        def processEvents(self):
+            window.outcomes["scheduler"] = {"state": "completed"}
+
+    outcomes = startup_check._wait_for_startup_contract(App(), window, timeout=1)
+
+    assert outcomes["scheduler"]["state"] == "completed"
+
+
 def test_empty_and_migrated_fixtures_are_written_to_fresh_profiles(tmp_path):
     empty = tmp_path / "empty"
     startup_check._prepare_fixture(empty, "empty")
@@ -108,6 +131,30 @@ def test_empty_and_migrated_fixtures_are_written_to_fresh_profiles(tmp_path):
     assert len(migrated_config["monitor_channels"]) == 1
     assert len(migrated_config["download_queue"]) == 1
     assert (migrated / "fixture-recording" / "capture.mp4").is_file()
+
+
+def test_populated_fixture_seeds_the_database_and_requires_a_fresh_profile(
+    tmp_path, monkeypatch,
+):
+    from streamkeep import db
+
+    populated = tmp_path / "populated"
+    monkeypatch.setattr(db, "CONFIG_DIR", populated)
+    monkeypatch.setattr(db, "DB_PATH", populated / "library.db")
+
+    startup_check._prepare_fixture(populated, "populated")
+
+    counts = db.db_diagnostics()["row_counts"]
+    assert {
+        name: counts[name]
+        for name in ("history", "monitor_channels", "download_queue")
+    } == {
+        "history": 1,
+        "monitor_channels": 1,
+        "download_queue": 1,
+    }
+    with pytest.raises(RuntimeError, match="fresh isolated config"):
+        startup_check._prepare_fixture(populated, "empty")
 
 
 def test_unknown_fixture_writes_a_failed_readiness_marker(tmp_path):
