@@ -665,4 +665,8 @@ def index_all_async(history, log_fn=None):
                     f"{semantic_truncated} recording bound(s) reached."
                 )
                 log_fn(f"[SEMANTIC] Rebuilt optional index.{suffix}")
-    threading.Thread(target=_run, daemon=True).start()
+    worker = threading.Thread(
+        target=_run, daemon=True, name="streamkeep-startup-index",
+    )
+    worker.start()
+    return worker

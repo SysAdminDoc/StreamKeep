@@ -156,6 +156,18 @@ def _run_case(executable, run_root, fixture, timeout):
         "no_visible_windows": marker.get("visible_top_level_widgets") == 0,
         "single_qapplication": marker.get("qt_application_instances") == 1,
         "single_application_window": marker.get("application_windows") == 1,
+        "startup_contract": all(
+            bool(marker.get("checks", {}).get(name))
+            for name in (
+                "startup_scheduler_applied",
+                "startup_resume_scan_completed",
+                "startup_transcript_index_started",
+                "startup_health_probe_bounded",
+                "startup_companion_evaluated",
+                "startup_update_network_suppressed",
+                "startup_tray_suppressed",
+            )
+        ),
         "no_unexpected_same_image_reentry": not unexpected_reentry_pids,
     }
     return {
@@ -168,6 +180,7 @@ def _run_case(executable, run_root, fixture, timeout):
         "unexpected_reentry_pids": sorted(unexpected_reentry_pids),
         "checks": checks,
         "passed": all(checks.values()),
+        "startup_outcomes": marker.get("startup_outcomes", {}),
         "marker": marker,
     }
 

@@ -53,9 +53,10 @@ class MainWindowJobsMixin:
             found = scan_for_orphan_sidecars(roots)
         except Exception as e:
             self._log(f"[RESUME] Scan failed: {e}")
-            return
+            return False
         self._resume_candidates = found
         self._refresh_resume_banner()
+        return True
 
     def _refresh_resume_banner(self):
         """Show/hide the resume banner based on candidate count."""

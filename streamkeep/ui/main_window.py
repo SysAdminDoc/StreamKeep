@@ -241,10 +241,19 @@ class StreamKeep(
 ):
     _log_requested = pyqtSignal(str)
 
-    def __init__(self, *, startup_check=False):
+    def __init__(self, *, startup_check=False, startup_contract=False):
         super().__init__()
+        if startup_check and startup_contract:
+            raise ValueError("startup_check and startup_contract are mutually exclusive")
         self._log_requested.connect(self._log)
+        # ``startup_check`` is the lightweight unit-test window: it suppresses
+        # every deferred subsystem so individual UI tests stay deterministic.
+        # ``startup_contract`` is the release-artifact path: it exercises the
+        # bounded local startup work while suppressing only host/network side
+        # effects that cannot be validly tested offscreen (V220).
         self._startup_check = bool(startup_check)
+        self._startup_contract = bool(startup_contract)
+        self._startup_outcomes = {}
         self.setWindowTitle(f"StreamKeep v{VERSION}")
         self.setMinimumSize(1020, 800)
         self.resize(1120, 900)
@@ -408,15 +417,23 @@ class StreamKeep(
         self._init_disk_monitor()
         self._init_health_monitor()
         self._init_windows_integration()
-        if not self._startup_check:
+        if not self._startup_check and not self._startup_contract:
             self._power_request_timer.start()
             self._sync_power_requests()
+        elif self._startup_contract:
+            self._record_startup_outcome(
+                "power_policy", "suppressed", "host power state is outside the smoke contract",
+            )
         # Scheduler tick: checks scheduled queue items and bandwidth rules every 30s
         self._scheduler_timer = QTimer(self)
         self._scheduler_timer.timeout.connect(self._scheduler_tick)
         if not self._startup_check:
             self._scheduler_timer.start(30_000)
             self._scheduler_tick()  # Apply bandwidth rule immediately on startup
+            if self._startup_contract:
+                self._record_startup_outcome(
+                    "scheduler", "completed", "initial tick applied and timer started",
+                )
         # Hook history-table context menu (right-click → Trim / Open / Remove).
         try:
             self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -453,21 +470,68 @@ class StreamKeep(
         # Deferred startup scan for orphan resume sidecars — run on the
         # Qt event loop so the main window paints before we hit disk I/O.
         if not self._startup_check:
-            QTimer.singleShot(800, self._scan_for_resumable_downloads)
+            delay_ms = 0 if self._startup_contract else 800
+            QTimer.singleShot(delay_ms, self._run_startup_resume_scan)
         # Auto-update check — opt-in, deferred so the UI paints first and
         # so the release-API call doesn't block startup.
         self._update_check_worker = None
         self._latest_update_payload = None
-        if not self._startup_check:
+        if not self._startup_check and not self._startup_contract:
             QTimer.singleShot(2500, self._maybe_check_for_updates)
+        elif self._startup_contract:
+            self._record_startup_outcome(
+                "update_check", "suppressed", "network calls are outside the smoke contract",
+            )
         # Start the browser-companion local server if the user opted in.
         # Deferred so the UI paints before we open a socket.
         if not self._startup_check:
-            QTimer.singleShot(1000, self._maybe_start_companion_server)
+            delay_ms = 0 if self._startup_contract else 1000
+            QTimer.singleShot(delay_ms, self._run_startup_companion_check)
         from streamkeep.config import install_gui_logging
         self._gui_log_handler = install_gui_logging(self._log)
         # Keyboard shortcuts (F11)
         self._setup_shortcuts()
+
+    def _record_startup_outcome(self, subsystem, state, detail=""):
+        """Record one release-smoke startup result without affecting normal UI."""
+        if not self._startup_contract:
+            return
+        self._startup_outcomes[str(subsystem)] = {
+            "state": str(state),
+            "detail": str(detail or ""),
+        }
+
+    def startup_outcomes(self):
+        """Return a detached snapshot for the artifact readiness marker."""
+        return {
+            name: dict(outcome)
+            for name, outcome in self._startup_outcomes.items()
+        }
+
+    def _run_startup_resume_scan(self):
+        ok = self._scan_for_resumable_downloads()
+        if self._startup_contract:
+            self._record_startup_outcome(
+                "resume_scan",
+                "completed" if ok else "failed",
+                f"{len(self._resume_candidates)} resumable download(s) found" if ok
+                else "resume discovery raised an error",
+            )
+
+    def _run_startup_companion_check(self):
+        self._maybe_start_companion_server()
+        if not self._startup_contract:
+            return
+        enabled = bool(self._config.get("companion_server_enabled", False))
+        server = getattr(self, "_companion_server", None)
+        error = str(getattr(self, "_companion_last_error", "") or "")
+        if server is not None:
+            state, detail = "running", f"loopback port {server.port}"
+        elif not enabled:
+            state, detail = "disabled", "disabled by the isolated fixture"
+        else:
+            state, detail = "failed", error or "listener did not start"
+        self._record_startup_outcome("companion_server", state, detail)
 
     def _maybe_show_onboarding(self):
         """Show first-run setup once, after the main window has painted."""
@@ -1083,7 +1147,11 @@ class StreamKeep(
         # Build transcript search index in background (F27)
         if not self._startup_check:
             from ..search import index_all_async
-            index_all_async(None, log_fn=self._log)
+            self._startup_index_thread = index_all_async(None, log_fn=self._log)
+            if self._startup_contract:
+                self._record_startup_outcome(
+                    "transcript_index", "started", "background index thread started",
+                )
 
     def _persist_config(self):
         cfg = self._config
@@ -1191,7 +1259,11 @@ class StreamKeep(
     def _init_tray_icon(self):
         """Create a system tray icon with badge overlay and live dropdown (F28).
         Falls back gracefully if tray isn't supported."""
-        if self._startup_check:
+        if self._startup_check or self._startup_contract:
+            if self._startup_contract:
+                self._record_startup_outcome(
+                    "tray_icon", "suppressed", "headless smoke has no system tray",
+                )
             return
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
@@ -2775,6 +2847,10 @@ class StreamKeep(
         if bool(self._config.get("health_monitor_enabled", True)) and not self._startup_check:
             self._health_timer.start()
             QTimer.singleShot(0, self._start_health_check)
+        elif self._startup_contract:
+            self._record_startup_outcome(
+                "health_probe", "disabled", "disabled by the isolated fixture",
+            )
 
     def _start_health_check(self):
         """Run one health pass unless the previous pass is still active."""
@@ -2794,6 +2870,16 @@ class StreamKeep(
         worker.start()
 
     def _on_health_worker_finished(self, worker):
+        if self._startup_contract:
+            current = self._startup_outcomes.get("health_probe", {}).get("state")
+            if current not in {"completed", "failed"}:
+                cancelled = bool(getattr(worker, "_cancelled", False))
+                self._record_startup_outcome(
+                    "health_probe",
+                    "cancelled" if cancelled else "failed",
+                    "probe cancelled cleanly at the startup deadline" if cancelled
+                    else "probe finished without a snapshot",
+                )
         if getattr(self, "_health_worker", None) is worker:
             self._health_worker = None
         if hasattr(self, "health_run_btn"):
@@ -2803,7 +2889,13 @@ class StreamKeep(
     def _on_health_snapshot(self, snapshot):
         """Update the panel and fan out newly transitioned conditions."""
         if not isinstance(snapshot, dict):
+            self._record_startup_outcome(
+                "health_probe", "failed", "health worker returned an invalid snapshot",
+            )
             return
+        self._record_startup_outcome(
+            "health_probe", "completed", "health snapshot received",
+        )
         self._health_snapshot = snapshot
         self._refresh_health_panel(snapshot)
         for event in snapshot.get("events", []):

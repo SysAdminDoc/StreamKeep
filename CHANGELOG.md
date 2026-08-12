@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Release artifact smoke checks now exercise the real bounded startup work:
+  scheduler application, resume discovery, transcript indexing, companion
+  configuration, and health probing report independent outcomes. Network
+  update checks and tray UI remain explicitly suppressed in the headless
+  contract, and a failed or unbounded subsystem now fails the release gate.
+
 - Background storage, Settings, health, and clip workers now share an
   indeterminate busy indicator with an accessible live status, so slow work
   remains visibly active until it succeeds, fails, or is cancelled.

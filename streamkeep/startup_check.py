@@ -15,6 +15,63 @@ _FIXTURE_COUNTS = {
     "populated": {"history": 1, "monitor_channels": 1, "download_queue": 1},
 }
 
+_STARTUP_CONTRACT_TIMEOUT_SECONDS = 20.0
+
+
+def _fixture_counts_match(counts, expected):
+    """Return whether every expected fixture table has its exact row count."""
+    return all(
+        int(counts.get(name, -1)) == value
+        for name, value in expected.items()
+    )
+
+
+def _startup_contract_checks(outcomes):
+    """Translate per-subsystem outcomes into the artifact's pass/fail checks."""
+    states = {
+        name: str((outcome or {}).get("state") or "")
+        for name, outcome in (outcomes or {}).items()
+    }
+    return {
+        "startup_scheduler_applied": states.get("scheduler") == "completed",
+        "startup_resume_scan_completed": states.get("resume_scan") == "completed",
+        "startup_transcript_index_started": states.get("transcript_index")
+        in {"started", "completed"},
+        "startup_health_probe_bounded": states.get("health_probe")
+        in {"completed", "cancelled"},
+        "startup_companion_evaluated": states.get("companion_server")
+        in {"disabled", "running"},
+        "startup_update_network_suppressed": states.get("update_check")
+        == "suppressed",
+        "startup_tray_suppressed": states.get("tray_icon") == "suppressed",
+    }
+
+
+def _wait_for_startup_contract(app, window, timeout=None):
+    """Pump Qt until bounded startup work finishes, then cancel health cleanly."""
+    deadline = time.monotonic() + float(
+        timeout if timeout is not None else _STARTUP_CONTRACT_TIMEOUT_SECONDS
+    )
+    outcomes = window.startup_outcomes()
+    while not all(_startup_contract_checks(outcomes).values()):
+        if time.monotonic() >= deadline:
+            break
+        app.processEvents()
+        time.sleep(0.01)
+        outcomes = window.startup_outcomes()
+
+    health = getattr(window, "_health_worker", None)
+    health_state = str(outcomes.get("health_probe", {}).get("state") or "")
+    if health_state not in {"completed", "cancelled"} and health is not None:
+        try:
+            if health.isRunning():
+                health.cancel()
+                health.wait(6_000)
+                app.processEvents()
+        except RuntimeError:
+            pass
+    return window.startup_outcomes()
+
 
 def _write_result(path, payload):
     target = Path(path).expanduser().resolve()
@@ -143,9 +200,9 @@ def run_startup_check(*, ready_file, fixture="empty"):
         from .ui.main_window import StreamKeep
         from yt_dlp.version import __version__ as ytdlp_version
 
-        window = StreamKeep(startup_check=True)
-        for _ in range(3):
-            app.processEvents()
+        window = StreamKeep(startup_contract=True)
+        startup_outcomes = _wait_for_startup_contract(app, window)
+        startup_checks = _startup_contract_checks(startup_outcomes)
 
         diagnostics = db.db_diagnostics()
         counts = diagnostics.get("row_counts", {})
@@ -182,10 +239,7 @@ def run_startup_check(*, ready_file, fixture="empty"):
         checks = {
             "database_path_bound": Path(diagnostics.get("path", "")).resolve()
             == config_dir / "library.db",
-            "database_counts": all(
-                int(counts.get(name, -1)) == value
-                for name, value in expected.items()
-            ),
+            "database_counts": _fixture_counts_match(counts, expected),
             "history_loaded": window.history_model.total_count == expected["history"],
             "history_table_initialized": window.history_model.rowCount()
             == expected["history"],
@@ -215,10 +269,12 @@ def run_startup_check(*, ready_file, fixture="empty"):
             "single_qapplication": QApplication.instance() is app,
             "single_application_window": len(application_windows) == 1,
             "no_visible_windows": not visible_top_levels,
+            **startup_checks,
         }
         payload.update({
             "checks": checks,
             "ready": all(checks.values()),
+            "startup_outcomes": startup_outcomes,
             "config_dir": str(config_dir),
             "database": diagnostics,
             "history_loaded": window.history_model.total_count,
