@@ -3239,6 +3239,10 @@ class StreamKeep(
         if getattr(self, "_cleared_notifications", None):
             undo_act = menu.addAction("Undo clear")
             undo_act.triggered.connect(self._on_undo_clear_notifications)
+        from .rename_dialog import rename_undo_available
+        if rename_undo_available():
+            rename_undo_act = menu.addAction("Undo last rename")
+            rename_undo_act.triggered.connect(self._on_undo_last_rename)
         menu.addSeparator()
         log_act = menu.addAction("View full log\u2026")
         log_act.triggered.connect(self._on_show_notification_log)
@@ -3283,6 +3287,42 @@ class StreamKeep(
         self._cleared_notifications = None
         self._refresh_notif_badge()
         self._set_status(f"Restored {len(cleared)} notification(s).", "success")
+
+    def _on_undo_last_rename(self):
+        """Restore the newest durable rename batch and report partial failures."""
+        from .rename_dialog import undo_last_rename
+
+        result = undo_last_rename()
+        restored = len(result.restored)
+        failed = len(result.failed)
+        if restored:
+            self._refresh_history_table()
+            self._persist_config()
+        if not restored and not failed:
+            if result.journal_error:
+                self._report_failure(result.journal_error)
+            else:
+                self._set_status("There is no rename to undo.", "idle")
+            return
+        if failed or result.journal_error:
+            message = f"Restored {restored} renamed recording(s)"
+            if failed:
+                first = result.failed[0]
+                detail = str(first.get("error", "could not restore"))
+                message += f"; could not restore {failed}: {detail}"
+            if result.journal_error:
+                message += f"; {result.journal_error}"
+            self._set_status(message, "warning")
+            self._notifications.push(message, level="warning")
+            self._refresh_notif_badge()
+            self._toast(
+                f"Undo restored {restored}; {failed} need attention.",
+                "warning",
+            )
+            return
+        message = f"Restored {restored} recording name(s)."
+        self._set_status(message, "success")
+        self._notify_center(message, "success")
 
     def _on_show_notification_log(self):
         from .notification_log_dialog import NotificationLogDialog

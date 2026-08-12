@@ -444,12 +444,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1461" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1466" />
             <source>A bundle is already in progress.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1415" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1420" />
             <source>A chat render is already running.</source>
             <translation type="unfinished" />
         </message>
@@ -480,12 +480,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1081" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1086" />
             <source>A salvage pass is already running.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1341" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1346" />
             <source>A transcription is already running.</source>
             <translation type="unfinished" />
         </message>
@@ -591,7 +591,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1187" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1192" />
             <source>Add Bookmark</source>
             <translation type="unfinished" />
         </message>
@@ -788,7 +788,7 @@ Archive workstation</source>
             <translation>Analíticas</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1623" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1628" />
             <source>Analyzing for highlights...</source>
             <translation type="unfinished" />
         </message>
@@ -1206,7 +1206,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="83" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="231" />
             <source>Batch Rename Studio</source>
             <translation type="unfinished" />
         </message>
@@ -1216,7 +1216,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="241" />
             <source>BATCH TOOLS</source>
             <translation type="unfinished" />
         </message>
@@ -1330,7 +1330,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="241" />
             <source>Build a consistent naming pattern before you commit changes. Preview updates instantly, duplicate names are flagged, and an undo log is written after the batch runs.</source>
             <translation type="unfinished" />
         </message>
@@ -1350,12 +1350,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1496" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1501" />
             <source>Bundle failed: {path_or_err}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1492" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1497" />
             <source>Bundle ready: {path_or_err}</source>
             <translation type="unfinished" />
         </message>
@@ -1365,12 +1365,12 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1476" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1481" />
             <source>Bundling {os.path.basename(src_dir)}...</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1480" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1485" />
             <source>Bundling: {status} ({pct}%)</source>
             <translation type="unfinished" />
         </message>
@@ -1407,7 +1407,7 @@ Archive workstation</source>
         </message>
         <message>
             <location filename="streamkeep/ui/monitor_entry_dialog.py" line="72" />
-            <location filename="streamkeep/ui/rename_dialog.py" line="165" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="314" />
             <location filename="streamkeep/ui/tabs/settings.py" line="3313" />
             <location filename="streamkeep/ui/tabs/storage.py" line="362" />
             <location filename="streamkeep/ui/tabs/storage.py" line="420" />
@@ -1583,17 +1583,17 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1451" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1456" />
             <source>Chat render complete.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1455" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1460" />
             <source>Chat render failed: {path_or_err}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1439" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1444" />
             <source>Chat render: {status} ({pct}%)</source>
             <translation type="unfinished" />
         </message>
@@ -1738,11 +1738,6 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="216" />
-            <source>Choose one or more recordings from History to generate a rename preview.</source>
-            <translation type="unfinished" />
-        </message>
-        <message>
             <location filename="streamkeep/ui/tabs/download.py" line="602" />
             <source>Choose output folder</source>
             <translation type="unfinished" />
@@ -1820,7 +1815,7 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="3266" />
+            <location filename="streamkeep/ui/main_window.py" line="3270" />
             <source>Cleared {len(cleared)} notification(s).</source>
             <translation type="unfinished" />
         </message>
@@ -1966,11 +1961,6 @@ Archive workstation</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="228" />
-            <source>Conflicting rows are highlighted in red. Adjust the template before renaming.</source>
-            <translation type="unfinished" />
-        </message>
-        <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="3150" />
             <location filename="streamkeep/ui/tabs/settings.py" line="3220" />
             <source>Container:</source>
@@ -2092,7 +2082,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="984" />
+            <location filename="streamkeep/ui/tabs/history.py" line="989" />
             <source>Could not save recording notes.</source>
             <translation type="unfinished" />
         </message>
@@ -2146,7 +2136,7 @@ flac/pcm = lossless</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="289" />
             <source>Current name</source>
             <translation type="unfinished" />
         </message>
@@ -2596,7 +2586,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="228" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="377" />
             <source>Duplicate names detected</source>
             <translation type="unfinished" />
         </message>
@@ -2651,7 +2641,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1191" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1196" />
             <source>e.g. Funny moment</source>
             <translation type="unfinished" />
         </message>
@@ -2921,11 +2911,6 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <location filename="streamkeep/ui/tabs/download.py" line="1220" />
             <source>Events appear here as capture tasks run.</source>
             <translation>Los eventos aparecen aquí mientras se ejecutan las capturas.</translation>
-        </message>
-        <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="238" />
-            <source>Every selected recording has a unique destination name.</source>
-            <translation type="unfinished" />
         </message>
         <message>
             <location filename="streamkeep/ui/tabs/settings.py" line="1664" />
@@ -3354,7 +3339,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1639" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1644" />
             <source>Found {len(results)} highlight(s). See log.</source>
             <translation type="unfinished" />
         </message>
@@ -3501,7 +3486,7 @@ Forces a re-encode when not 'original' (copy codec ignored).</source>
         <message>
             <location filename="streamkeep/ui/tabs/download.py" line="576" />
             <location filename="streamkeep/ui/tabs/download.py" line="584" />
-            <location filename="streamkeep/ui/tabs/history.py" line="1194" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1199" />
             <source>HH:MM:SS</source>
             <translation type="unfinished" />
         </message>
@@ -3796,7 +3781,7 @@ https://youtu.be/*</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1166" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1171" />
             <source>Integrity manifest rescan failed.</source>
             <translation type="unfinished" />
         </message>
@@ -4592,7 +4577,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="140" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="289" />
             <source>New name</source>
             <translation type="unfinished" />
         </message>
@@ -4688,12 +4673,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1244" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1249" />
             <source>No chat spikes detected in this recording.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1412" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1417" />
             <source>No chat.jsonl found in that folder.</source>
             <translation type="unfinished" />
         </message>
@@ -4726,12 +4711,12 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation>Aún no hay eventos</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1005" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1010" />
             <source>No existing media files were available to publish.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1629" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1634" />
             <source>No highlights found (needs chat/audio/scene data).</source>
             <translation type="unfinished" />
         </message>
@@ -4799,7 +4784,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1614" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1619" />
             <source>No playable media found in selected entries.</source>
             <translation type="unfinished" />
         </message>
@@ -4835,7 +4820,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1085" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1090" />
             <source>No raw captures are available to salvage.</source>
             <translation type="unfinished" />
         </message>
@@ -4850,7 +4835,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="215" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="364" />
             <source>No recordings selected</source>
             <translation type="unfinished" />
         </message>
@@ -4881,7 +4866,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1302" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1307" />
             <source>No scenes detected or scenedetect not installed.</source>
             <translation type="unfinished" />
         </message>
@@ -4967,22 +4952,22 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1366" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1371" />
             <source>No video file to transcribe in that folder.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1318" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1323" />
             <source>No video files found in folder.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1273" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1278" />
             <source>No video files found.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1512" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1517" />
             <source>No video/audio files found in that folder to trim.</source>
             <translation type="unfinished" />
         </message>
@@ -4992,7 +4977,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1332" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1337" />
             <source>No Whisper runtime installed. Install `faster-whisper` or put whisper.cpp in PATH, or configure a local FFmpeg whisper model in Settings.</source>
             <translation type="unfinished" />
         </message>
@@ -5040,7 +5025,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="216" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="365" />
             <source>Nothing selected</source>
             <translation type="unfinished" />
         </message>
@@ -5050,7 +5035,7 @@ Set to 1 to disable and always use ffmpeg.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="153" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="302" />
             <source>Nothing to rename</source>
             <translation type="unfinished" />
         </message>
@@ -5502,7 +5487,7 @@ Lines starting with # are comments and will be skipped.</source>
             <translation>Ruta</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1551" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1556" />
             <source>Path missing and no saved URL to retry.</source>
             <translation type="unfinished" />
         </message>
@@ -5849,7 +5834,7 @@ Saves your settings first.</source>
         <message>
             <location filename="streamkeep/ui/history_model.py" line="21" />
             <location filename="streamkeep/ui/history_model.py" line="138" />
-            <location filename="streamkeep/ui/rename_dialog.py" line="134" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="283" />
             <location filename="streamkeep/ui/storage_model.py" line="12" />
             <location filename="streamkeep/ui/storage_model.py" line="67" />
             <source>Preview</source>
@@ -5876,7 +5861,7 @@ Saves your settings first.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="238" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="387" />
             <source>Preview looks good</source>
             <translation type="unfinished" />
         </message>
@@ -6030,17 +6015,17 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1041" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1046" />
             <source>Published RSS feed.{suffix}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1014" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1019" />
             <source>Published {len(published)} recording share(s).{suffix}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1606" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1611" />
             <source>python-mpv not available for sync viewer.</source>
             <translation type="unfinished" />
         </message>
@@ -6133,7 +6118,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="119" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="267" />
             <source>Quick presets</source>
             <translation type="unfinished" />
         </message>
@@ -6199,7 +6184,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1546" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1551" />
             <source>Re-fetching {h.title or h.url}...</source>
             <translation type="unfinished" />
         </message>
@@ -6313,19 +6298,19 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="944" />
-            <location filename="streamkeep/ui/tabs/history.py" line="1052" />
-            <location filename="streamkeep/ui/tabs/history.py" line="1160" />
+            <location filename="streamkeep/ui/tabs/history.py" line="949" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1057" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1165" />
             <source>Recording folder is missing.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="948" />
+            <location filename="streamkeep/ui/tabs/history.py" line="953" />
             <source>Recording Notes</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="982" />
+            <location filename="streamkeep/ui/tabs/history.py" line="987" />
             <source>Recording notes saved.</source>
             <translation type="unfinished" />
         </message>
@@ -6492,12 +6477,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Eliminar</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="840" />
+            <location filename="streamkeep/ui/tabs/history.py" line="843" />
             <source>Remove from History</source>
             <translation>Eliminar del historial</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="850" />
+            <location filename="streamkeep/ui/tabs/history.py" line="853" />
             <source>Remove loaded missing entries ({orphan_count})</source>
             <translation type="unfinished" />
         </message>
@@ -6533,7 +6518,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="937" />
+            <location filename="streamkeep/ui/tabs/history.py" line="942" />
             <source>Removed {removed} missing history entries.</source>
             <translation type="unfinished" />
         </message>
@@ -6548,27 +6533,32 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1323" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1328" />
             <source>Removing silence — this may take a minute…</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="299" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="483" />
             <source>Rename pass complete</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="241" />
             <source>Rename recordings with a live preview</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="169" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="318" />
             <source>Rename selected</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="311" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="463" />
+            <source>Renamed {renamed} recording(s).</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/rename_dialog.py" line="501" />
             <source>Renamed {renamed} • Skipped {skipped}</source>
             <translation type="unfinished" />
         </message>
@@ -6578,7 +6568,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1435" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1440" />
             <source>Rendering chat overlay ({label})...</source>
             <translation type="unfinished" />
         </message>
@@ -6665,7 +6655,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation>Restaurar el audio sin silenciar disponible en los VOD de Twitch</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="3285" />
+            <location filename="streamkeep/ui/main_window.py" line="3289" />
             <source>Restored {len(cleared)} notification(s).</source>
             <translation type="unfinished" />
         </message>
@@ -6765,7 +6755,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="134" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="283" />
             <source>Review the current folder names against the generated results before renaming anything on disk.</source>
             <translation type="unfinished" />
         </message>
@@ -6795,12 +6785,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1045" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1050" />
             <source>Revoked RSS feed.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1026" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1031" />
             <source>Revoked {revoked} recording share(s).</source>
             <translation type="unfinished" />
         </message>
@@ -6820,12 +6810,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1034" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1039" />
             <source>RSS feed not published: {error}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1047" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1052" />
             <source>RSS feed was already revoked.</source>
             <translation type="unfinished" />
         </message>
@@ -6870,7 +6860,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1292" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1297" />
             <source>Running scene detection…</source>
             <translation type="unfinished" />
         </message>
@@ -6913,12 +6903,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1120" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1125" />
             <source>Salvage cancelled; raw captures were left unchanged.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1116" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1121" />
             <source>Salvage failed: {error}</source>
             <translation type="unfinished" />
         </message>
@@ -6928,7 +6918,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1092" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1097" />
             <source>Salvaging {len(staging_dirs)} raw capture(s) in the background...</source>
             <translation type="unfinished" />
         </message>
@@ -7405,7 +7395,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="153" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="302" />
             <source>Select one or more finished recordings from History, then reopen Batch Rename Studio.</source>
             <translation type="unfinished" />
         </message>
@@ -7582,7 +7572,7 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1325" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1330" />
             <source>Silence removal complete.</source>
             <translation type="unfinished" />
         </message>
@@ -7661,12 +7651,12 @@ Capability: {(preview.get('capability') or {}).get('detail', 'ready')}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1721" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1726" />
             <source>Smart thumbnail not started: {error}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1724" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1729" />
             <source>Smart thumbnail queued.</source>
             <translation type="unfinished" />
         </message>
@@ -7987,7 +7977,7 @@ http://fallback:3128||Global fallback</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1298" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1303" />
             <source>Storyboard ready — {n} scenes. Open Trim dialog to view.</source>
             <translation type="unfinished" />
         </message>
@@ -8134,7 +8124,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1696" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1701" />
             <source>Summary not started: {error}</source>
             <translation type="unfinished" />
         </message>
@@ -8144,7 +8134,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1702" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1707" />
             <source>Summary queued.</source>
             <translation type="unfinished" />
         </message>
@@ -8183,7 +8173,7 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation>El idioma de destino sigue Configuración → Apariencia. Los errores de traducción nunca hacen fallar una descarga.</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="101" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="249" />
             <source>Template</source>
             <translation type="unfinished" />
         </message>
@@ -8332,12 +8322,17 @@ Supported platforms: {', '.join(Extractor.all_names())}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="3279" />
+            <location filename="streamkeep/ui/main_window.py" line="3305" />
+            <source>There is no rename to undo.</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/main_window.py" line="3283" />
             <source>There is nothing to restore.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="3263" />
+            <location filename="streamkeep/ui/main_window.py" line="3267" />
             <source>There were no notifications to clear.</source>
             <translation type="unfinished" />
         </message>
@@ -8483,7 +8478,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="105" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="253" />
             <source>Tokens: {channel}  {date}  {title}  {quality}  {duration}  {platform}  {seq:001}</source>
             <translation type="unfinished" />
         </message>
@@ -8550,22 +8545,22 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1397" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1402" />
             <source>Transcribe complete. SRT, VTT, and auto-chapters saved.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1404" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1409" />
             <source>Transcribe failed: {path_or_err}</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1378" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1383" />
             <source>Transcribing {os.path.basename(media)} with {runtime} ({model})...</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1385" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1390" />
             <source>Transcribing: {status} ({pct}%)</source>
             <translation type="unfinished" />
         </message>
@@ -8687,6 +8682,12 @@ Download again?</source>
         <message>
             <location filename="streamkeep/ui/main_window.py" line="3240" />
             <source>Undo clear</source>
+            <translation type="unfinished" />
+        </message>
+        <message>
+            <location filename="streamkeep/ui/main_window.py" line="3244" />
+            <location filename="streamkeep/ui/tabs/history.py" line="841" />
+            <source>Undo last rename</source>
             <translation type="unfinished" />
         </message>
         <message>
@@ -8842,7 +8843,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="101" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="249" />
             <source>Use tokens to build a naming pattern that stays readable across platforms, dates, and long recording libraries.</source>
             <translation type="unfinished" />
         </message>
@@ -8897,7 +8898,7 @@ Download again?</source>
             <translation>Ver diagnósticos</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/main_window.py" line="3243" />
+            <location filename="streamkeep/ui/main_window.py" line="3247" />
             <source>View full log…</source>
             <translation type="unfinished" />
         </message>
@@ -9130,7 +9131,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="955" />
+            <location filename="streamkeep/ui/tabs/history.py" line="960" />
             <source>Write a note about this recording…</source>
             <translation type="unfinished" />
         </message>
@@ -9331,7 +9332,7 @@ Download again?</source>
             <translation>Comprobando el estado de {component}</translation>
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="227" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="376" />
             <source>{conflicts} naming conflict(s) detected</source>
             <translation type="unfinished" />
         </message>
@@ -9411,12 +9412,12 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1667" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1672" />
             <source>{label} cancelled.</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1659" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1664" />
             <source>{label} complete.</source>
             <translation type="unfinished" />
         </message>
@@ -9426,7 +9427,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1662" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1667" />
             <source>{label} failed: {(job or {}).get('error', 'unknown error')}</source>
             <translation type="unfinished" />
         </message>
@@ -9458,7 +9459,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1669" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1674" />
             <source>{label}: {int(float(job.get('progress', 0)) * 100)}%</source>
             <translation type="unfinished" />
         </message>
@@ -9468,7 +9469,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="93" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="241" />
             <source>{len(entries)} selected</source>
             <translation type="unfinished" />
         </message>
@@ -9503,7 +9504,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/rename_dialog.py" line="237" />
+            <location filename="streamkeep/ui/rename_dialog.py" line="386" />
             <source>{len(self._entries)} recording(s) ready to rename</source>
             <translation type="unfinished" />
         </message>
@@ -9533,7 +9534,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1256" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1261" />
             <source>{len(spikes)} chat spike(s) found — see log.</source>
             <translation type="unfinished" />
         </message>
@@ -9618,7 +9619,7 @@ Download again?</source>
             <translation type="unfinished" />
         </message>
         <message>
-            <location filename="streamkeep/ui/tabs/history.py" line="1099" />
+            <location filename="streamkeep/ui/tabs/history.py" line="1104" />
             <source>{status} ({int(index)}/{int(total)})</source>
             <translation type="unfinished" />
         </message>

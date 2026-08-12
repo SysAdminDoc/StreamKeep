@@ -837,6 +837,9 @@ class HistoryTabMixin:
         redownload_act = menu.addAction("Re-download")
         redownload_act.setEnabled(bool(h.url))
         rename_act = menu.addAction("Batch Rename…")
+        from ..rename_dialog import rename_undo_available
+        undo_rename_act = menu.addAction("Undo last rename")
+        undo_rename_act.setEnabled(rename_undo_available())
         remove_act = menu.addAction("Remove from History")
         # Orphan cleanup (F14) — only show when orphans exist
         loaded_entries = self.history_model.loaded_entries()
@@ -920,6 +923,8 @@ class HistoryTabMixin:
             ]
             if entries:
                 RenameDialog(self, entries).exec()
+        elif chosen == undo_rename_act:
+            self._on_undo_last_rename()
         elif chosen == redownload_act and h.url:
             self._redownload_from_history(h)
         elif chosen == remove_act:

@@ -2,7 +2,9 @@
 
 import json
 import os
+from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -68,6 +70,152 @@ def _resolve_template(template, meta, seq):
     return result.strip() or f"recording_{seq}"
 
 
+@dataclass
+class RenameUndoResult:
+    """Outcome of replaying the newest durable rename batch."""
+
+    restored: list[dict] = field(default_factory=list)
+    failed: list[dict] = field(default_factory=list)
+    journal_error: str = ""
+
+
+def _rename_undo_path(log_path=None):
+    if log_path is not None:
+        return Path(log_path)
+    # Read the paths module at call time so test/startup config rebinding is
+    # honoured rather than capturing the operator profile during import.
+    from .. import paths
+
+    return paths.CONFIG_DIR / "rename_undo.json"
+
+
+def _load_rename_batches(log_path=None):
+    path = _rename_undo_path(log_path)
+    if not path.exists():
+        return []
+    batches = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(batches, list):
+        raise ValueError("rename undo journal must contain a list")
+    for batch in batches:
+        if not isinstance(batch, dict) or not isinstance(batch.get("ops"), list):
+            raise ValueError("rename undo journal contains an invalid batch")
+        for operation in batch["ops"]:
+            if not isinstance(operation, dict):
+                raise ValueError("rename undo journal contains an invalid operation")
+            if not str(operation.get("old", "")) or not str(operation.get("new", "")):
+                raise ValueError("rename undo operation is missing a path")
+    return batches
+
+
+def _write_rename_batches(batches, log_path=None):
+    """Replace the journal atomically, or remove it when fully consumed."""
+    path = _rename_undo_path(log_path)
+    if not batches:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(batches[-20:], handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def record_rename_undo(operations, log_path=None):
+    """Append one completed rename batch to the durable undo journal."""
+    batches = _load_rename_batches(log_path)
+    batches.append({"ts": datetime.now().isoformat(), "ops": list(operations)})
+    _write_rename_batches(batches, log_path)
+
+
+def rename_undo_available(log_path=None):
+    """Return whether a valid, non-empty rename batch can be restored."""
+    try:
+        batches = _load_rename_batches(log_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return bool(batches and batches[-1].get("ops"))
+
+
+def undo_last_rename(log_path=None, *, relocate_history=None):
+    """Restore the newest rename batch and retain only operations that failed."""
+    result = RenameUndoResult()
+    try:
+        batches = _load_rename_batches(log_path)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        result.journal_error = f"Could not read rename undo history: {error}"
+        return result
+    if not batches:
+        return result
+
+    batch = batches[-1]
+    failed_operations = []
+    for operation in reversed(batch["ops"]):
+        old_path = str(operation["old"])
+        new_path = str(operation["new"])
+        failure = dict(operation)
+        if os.path.exists(old_path):
+            failure["error"] = "the original path is occupied"
+            result.failed.append(failure)
+            failed_operations.append(operation)
+            continue
+        if not os.path.exists(new_path):
+            failure["error"] = "the renamed path is missing"
+            result.failed.append(failure)
+            failed_operations.append(operation)
+            continue
+        try:
+            os.rename(new_path, old_path)
+        except OSError as error:
+            failure["error"] = str(error)
+            result.failed.append(failure)
+            failed_operations.append(operation)
+            continue
+
+        history_relocated = bool(
+            operation.get("history_relocated", operation.get("db_id"))
+        )
+        if history_relocated:
+            try:
+                if relocate_history is None:
+                    from streamkeep import db as _db
+
+                    _db.relocate_history_recording(
+                        int(operation["db_id"]), new_path, old_path,
+                    )
+                else:
+                    relocate_history(
+                        int(operation["db_id"]), new_path, old_path,
+                    )
+            except Exception as error:
+                # Put the directory back under its current database path. The
+                # failed operation remains journaled and visible to the user.
+                try:
+                    os.rename(old_path, new_path)
+                    failure["error"] = f"library update failed: {error}"
+                except OSError as rollback_error:
+                    failure["error"] = (
+                        f"library update failed: {error}; filesystem rollback "
+                        f"also failed: {rollback_error}"
+                    )
+                result.failed.append(failure)
+                failed_operations.append(operation)
+                continue
+        result.restored.append(dict(operation))
+
+    if failed_operations:
+        batch["ops"] = list(reversed(failed_operations))
+    else:
+        batches.pop()
+    try:
+        _write_rename_batches(batches, log_path)
+    except OSError as error:
+        result.journal_error = f"Could not update rename undo history: {error}"
+    return result
+
+
 class RenameDialog(TranslatableDialog):
     """Batch rename dialog for History entries."""
 
@@ -81,7 +229,7 @@ class RenameDialog(TranslatableDialog):
     def __init__(self, parent, entries):
         super().__init__(parent)
         self.setWindowTitle("Batch Rename Studio")
-        self.setMinimumSize(860, 580)
+        self.setMinimumSize(900, 700)
         self.setModal(True)
         self._entries = entries
         self._parent_win = parent
@@ -128,6 +276,7 @@ class RenameDialog(TranslatableDialog):
         template_content.addLayout(preset_row)
 
         self.status_banner, self.status_title, self.status_body = make_status_banner()
+        self.status_banner.setMinimumHeight(48)
         template_content.addWidget(self.status_banner)
         root.addWidget(template_card)
 
@@ -218,7 +367,7 @@ class RenameDialog(TranslatableDialog):
                 self.status_title,
                 self.status_body,
                 title="Nothing selected",
-                body="Choose one or more recordings from History to generate a rename preview.",
+                body="",
                 tone="warning",
             )
             return
@@ -230,7 +379,7 @@ class RenameDialog(TranslatableDialog):
                 self.status_title,
                 self.status_body,
                 title="Duplicate names detected",
-                body="Conflicting rows are highlighted in red. Adjust the template before renaming.",
+                body="",
                 tone="error",
             )
         else:
@@ -240,7 +389,7 @@ class RenameDialog(TranslatableDialog):
                 self.status_title,
                 self.status_body,
                 title="Preview looks good",
-                body="Every selected recording has a unique destination name.",
+                body="",
                 tone="success",
             )
 
@@ -249,6 +398,7 @@ class RenameDialog(TranslatableDialog):
         undo_log = []
         renamed = 0
         skipped = 0
+        recovery_warnings = 0
 
         for i, (entry, meta) in enumerate(zip(self._entries, self._metas)):
             if not entry.path or not os.path.isdir(entry.path):
@@ -266,35 +416,69 @@ class RenameDialog(TranslatableDialog):
                 continue
             try:
                 os.rename(entry.path, new_path)
-                undo_log.append({"old": entry.path, "new": new_path})
+                old_path = entry.path
                 entry.path = new_path
+                history_relocated = False
                 if getattr(entry, "db_id", 0):
                     from streamkeep import db as _db
 
-                    _db.update_history_entry(entry.db_id, {"path": new_path})
+                    try:
+                        _db.relocate_history_recording(
+                            entry.db_id, old_path, new_path,
+                        )
+                        history_relocated = True
+                    except Exception:
+                        # A failed database move must not leave the filesystem
+                        # silently ahead of History. Roll it back when possible;
+                        # otherwise journal the filesystem-only move for undo.
+                        try:
+                            os.rename(new_path, old_path)
+                            entry.path = old_path
+                            skipped += 1
+                            continue
+                        except OSError:
+                            recovery_warnings += 1
+                undo_log.append({
+                    "old": old_path,
+                    "new": new_path,
+                    "db_id": int(getattr(entry, "db_id", 0) or 0),
+                    "history_relocated": history_relocated,
+                })
                 renamed += 1
             except OSError:
                 skipped += 1
                 continue
 
+        journal_error = ""
         if undo_log:
-            from ..paths import CONFIG_DIR
-
-            log_path = CONFIG_DIR / "rename_undo.json"
             try:
-                existing = []
-                if log_path.exists():
-                    with open(log_path, "r", encoding="utf-8") as f:
-                        existing = json.load(f)
-                existing.append({"ts": datetime.now().isoformat(), "ops": undo_log})
-                with open(log_path, "w", encoding="utf-8") as f:
-                    json.dump(existing[-20:], f, indent=2)
-            except Exception:
-                pass  # safe: best-effort fallback; preserve the primary operation
+                record_rename_undo(undo_log)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                journal_error = str(error)
 
         if self._parent_win:
             self._parent_win._refresh_history_table()
             self._parent_win._persist_config()
+            if renamed and not journal_error:
+                self._parent_win._set_status(
+                    f"Renamed {renamed} recording(s).", "success",
+                )
+                self._parent_win._toast(
+                    f"Renamed {renamed} recording(s). Use Undo last rename.",
+                    "success",
+                )
+            elif renamed:
+                self._parent_win._report_failure(
+                    f"Renamed {renamed} recording(s), but undo history could "
+                    f"not be saved: {journal_error}",
+                    level="warning",
+                )
+            if recovery_warnings:
+                self._parent_win._report_failure(
+                    f"{recovery_warnings} recording(s) were renamed on disk "
+                    "but could not be updated in History; use Undo last rename.",
+                    level="warning",
+                )
 
         update_status_banner(
             self.status_banner,
@@ -304,9 +488,15 @@ class RenameDialog(TranslatableDialog):
             body=(
                 f"Renamed {renamed} recording(s)"
                 + (f" and skipped {skipped}." if skipped else ".")
-                + " An undo log was saved for recovery."
+                + (
+                    " Use Undo last rename to restore them."
+                    if undo_log and not journal_error
+                    else " Undo history could not be saved."
+                    if journal_error
+                    else ""
+                )
             ),
-            tone="success" if renamed else "warning",
+            tone="success" if renamed and not journal_error else "warning",
         )
         self.count_label.setText(
             f"Renamed {renamed} • Skipped {skipped}"

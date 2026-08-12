@@ -971,7 +971,6 @@ class ToastOverlay(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
-        self._layout.addStretch(1)
         self._toasts = []
         self._attached = parent is not None
         set_accessible_role(self, "alert")
@@ -1011,9 +1010,22 @@ class ToastOverlay(QWidget):
             return
         if parent is None:
             return
+        # A second toast can arrive before Qt's next layout pass. Without an
+        # explicit activation sizeHint() still describes the previous stack,
+        # so both cards are squeezed into one card's height and their text is
+        # clipped until another parent resize happens.
+        self._layout.invalidate()
+        self._layout.activate()
         hint = self.sizeHint()
+        card_width = max(
+            (card.sizeHint().width() for card in self._toasts), default=0,
+        )
+        card_height = sum(card.sizeHint().height() for card in self._toasts)
+        if len(self._toasts) > 1:
+            card_height += self._layout.spacing() * (len(self._toasts) - 1)
         width = min(max(320, hint.width()), max(320, parent.width() - 2 * self.MARGIN))
-        height = hint.height()
+        width = min(max(width, card_width), max(320, parent.width() - 2 * self.MARGIN))
+        height = max(hint.height(), card_height)
         self.setGeometry(
             parent.width() - width - self.MARGIN,
             parent.height() - height - self.MARGIN,

@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Batch Rename Studio now exposes a durable **Undo last rename** action in
+  History and the notification menu. Undo restores every available directory,
+  keeps failed conflicts queued for retry, updates History and manifest paths,
+  and reports partial or journal failures instead of swallowing them.
+
 - Compiled Qt catalogs are now generated during release validation and builds
   instead of being versioned binary artifacts, and ruff now gates product,
   packaging, and test code with intentional late-import exceptions scoped to

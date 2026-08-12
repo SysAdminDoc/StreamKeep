@@ -59,7 +59,6 @@ _BOILERPLATE_BUDGET = {
     "streamkeep/ui/main_window_jobs.py": 2,
     "streamkeep/ui/monitor_entry_dialog.py": 1,
     "streamkeep/ui/recover_dialog.py": 2,
-    "streamkeep/ui/rename_dialog.py": 1,
     "streamkeep/ui/tabs/download_finalize.py": 2,
     "streamkeep/ui/tabs/download_queue.py": 10,
     "streamkeep/ui/tabs/download_single.py": 15,

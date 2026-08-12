@@ -93,6 +93,16 @@ def test_the_stack_is_bounded(overlay):
     )
 
 
+def test_a_second_toast_expands_the_overlay_before_paint(overlay, qt_application):
+    overlay.show_toast("Rename completed", "success")
+    overlay.show_toast("One rename needs attention", "warning")
+    qt_application.processEvents()
+
+    required = sum(card.sizeHint().height() for card in overlay._toasts)
+    required += overlay._layout.spacing() * (len(overlay._toasts) - 1)
+    assert overlay.height() >= required
+
+
 def test_a_toast_never_swallows_a_click(overlay):
     from PyQt6.QtCore import Qt
     assert overlay.testAttribute(
