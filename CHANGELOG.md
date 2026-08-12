@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Twitch and Kick chat capture now rejects unterminated or oversized transport
+  input under explicit memory bounds, including fragmented WebSocket messages,
+  and reports the endpoint failure through the existing capture log.
+
 - Re-adding an existing collection member without an explicit position now
   preserves its curated order; callers can still move it by supplying a new
   position.

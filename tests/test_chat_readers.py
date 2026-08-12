@@ -7,14 +7,21 @@ connection.
 
 import json
 import socket
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from streamkeep.chat import kick_ws
 from streamkeep.chat.chat_worker import ChatWorker
 from streamkeep.chat.kick_ws import KickChatReader
+from streamkeep.chat.limits import (
+    ChatPayloadTooLarge,
+    IRC_BUFFER_LIMIT,
+    KICK_PAYLOAD_LIMIT,
+)
 from streamkeep.chat.twitch_irc import TwitchIRCReader, _parse_tags
 from streamkeep.chat.spike_detect import detect_spikes
 from streamkeep.postprocess.chat_render_worker import _load_chat_jsonl
@@ -94,6 +101,19 @@ class TwitchIRCReaderTests(unittest.TestCase):
         ])
         messages = list(reader.iter_messages())
         self.assertEqual(messages[0]["message"], "split message")
+
+    def test_unterminated_input_is_bounded_and_reported(self):
+        reader = TwitchIRCReader("chan")
+        sock = _FakeSocket([b"x" * (1024 * 1024)])
+        reader._sock = sock
+
+        with self.assertRaisesRegex(
+            ChatPayloadTooLarge,
+            f"exceeded {IRC_BUFFER_LIMIT} bytes",
+        ):
+            list(reader.iter_messages())
+
+        self.assertIsNone(reader._sock)
 
     def test_event_commands_round_trip_as_typed_rows(self):
         lines = [
@@ -183,6 +203,17 @@ class _FakeWS:
         self.connected = False
 
 
+class _FakeFrameWS(_FakeWS):
+    def recv_frame(self):
+        if not self._frames:
+            self.connected = False
+            raise OSError("closed")
+        return self._frames.pop(0)
+
+    def pong(self, data):
+        self.sent.append(data)
+
+
 def _chat_frame(username, content):
     return json.dumps({
         "event": "App\\Events\\ChatMessageEvent",
@@ -244,6 +275,60 @@ class KickChatReaderTests(unittest.TestCase):
     def test_slug_is_stripped(self):
         self.assertEqual(KickChatReader("/some-slug/").channel_slug, "some-slug")
 
+    def test_connect_requests_a_bounded_websocket(self):
+        ws = _FakeWS([])
+        create_connection = mock.Mock(return_value=ws)
+        websocket_module = SimpleNamespace(create_connection=create_connection)
+        with (
+            mock.patch.dict(sys.modules, {"websocket": websocket_module}),
+            mock.patch.object(kick_ws, "_channel_meta", return_value=(42, "channel")),
+            mock.patch.object(
+                kick_ws,
+                "_probe_pusher_constants",
+                return_value=("key", "cluster"),
+            ),
+        ):
+            KickChatReader("channel").connect()
+
+        self.assertEqual(
+            create_connection.call_args.kwargs["max_size"],
+            KICK_PAYLOAD_LIMIT,
+        )
+
+    def test_oversized_websocket_payload_is_rejected_before_parsing(self):
+        reader = KickChatReader("someslug")
+        ws = _FakeWS(["x" * (KICK_PAYLOAD_LIMIT + 1)])
+        reader._ws = ws
+
+        with (
+            mock.patch.object(kick_ws.json, "loads") as loads,
+            self.assertRaisesRegex(ChatPayloadTooLarge, "payload exceeded"),
+        ):
+            list(reader.iter_messages())
+
+        loads.assert_not_called()
+        self.assertFalse(ws.connected)
+
+    def test_fragmented_websocket_payload_is_bounded(self):
+        reader = KickChatReader("someslug")
+        reader._ws = _FakeFrameWS([
+            SimpleNamespace(
+                opcode=1,
+                data=b"x" * (KICK_PAYLOAD_LIMIT // 2 + 1),
+                fin=False,
+            ),
+            SimpleNamespace(
+                opcode=0,
+                data=b"x" * (KICK_PAYLOAD_LIMIT // 2),
+                fin=True,
+            ),
+        ])
+
+        with self.assertRaisesRegex(ChatPayloadTooLarge, "payload exceeded"):
+            list(reader.iter_messages())
+
+        self.assertFalse(reader._ws)
+
     def test_event_envelopes_and_unknown_payloads_are_archived(self):
         frames = [
             _kick_event_frame("SubscriptionEvent", {"username": "Alice"}),
@@ -274,6 +359,23 @@ class KickChatReaderTests(unittest.TestCase):
 
 
 class ChatEventArchiveTests(unittest.TestCase):
+    def test_chat_worker_surfaces_transport_limit_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch(
+            "streamkeep.chat.chat_worker.TwitchIRCReader"
+        ) as reader_cls:
+            reader_cls.return_value.iter_messages.side_effect = (
+                ChatPayloadTooLarge("Twitch IRC buffer exceeded its limit")
+            )
+            logs = []
+            worker = ChatWorker("chan", tmpdir, render_ass=False)
+            worker.log.connect(logs.append)
+            worker.run()
+
+        self.assertIn(
+            "[CHAT] Reader error: Twitch IRC buffer exceeded its limit",
+            logs,
+        )
+
     def test_chat_worker_writes_events_and_distinct_ass_rows(self):
         rows = [
             {

@@ -15,6 +15,8 @@ import socket
 import ssl
 import time
 
+from .limits import ChatPayloadTooLarge, IRC_BUFFER_LIMIT
+
 SERVER = "irc.chat.twitch.tv"
 PORT = 6697
 
@@ -237,3 +239,9 @@ class TwitchIRCReader:
                     yield _event_row(
                         command, tags, prefix, params, trailing, line,
                     )
+            if len(buf) > IRC_BUFFER_LIMIT:
+                self.close()
+                raise ChatPayloadTooLarge(
+                    "Twitch IRC buffer exceeded "
+                    f"{IRC_BUFFER_LIMIT} bytes without a line terminator"
+                )

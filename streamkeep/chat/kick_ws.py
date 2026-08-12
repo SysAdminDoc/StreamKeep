@@ -23,6 +23,8 @@ import time
 import urllib.error
 import urllib.request
 
+from .limits import ChatPayloadTooLarge, KICK_PAYLOAD_LIMIT
+
 # Known-good defaults as of late 2025. If Kick rotates these, the page
 # scrape path below picks up the new values.
 _DEFAULT_APP_KEY = "32cbd69e4b950bf97679"
@@ -193,7 +195,12 @@ class KickChatReader:
             f"wss://ws-{cluster}.pusher.com/app/{app_key}"
             "?protocol=7&client=js&version=7.6.0&flash=false"
         )
-        self._ws = websocket.create_connection(url, timeout=10)
+        self._ws = websocket.create_connection(
+            url,
+            timeout=10,
+            max_size=KICK_PAYLOAD_LIMIT,
+        )
+        self._install_frame_limit()
         # Pusher sends pusher:connection_established first; we subscribe
         # to the chatroom channel and then consume indefinitely.
         sub_msg = json.dumps({
@@ -201,6 +208,86 @@ class KickChatReader:
             "data": {"auth": "", "channel": f"chatrooms.{self.chatroom_id}.v2"},
         })
         self._ws.send(sub_msg)
+
+    def _install_frame_limit(self):
+        """Reject websocket-client frames from their header, before allocation.
+
+        websocket-client currently accepts but ignores ``max_size``. Hooking its
+        frame reader keeps that compatibility option honest while the bounded
+        fragment assembly below limits the complete message too.
+        """
+        frame_buffer = getattr(self._ws, "frame_buffer", None)
+        recv_length = getattr(frame_buffer, "recv_length", None)
+        if frame_buffer is None or not callable(recv_length):
+            return
+
+        def recv_bounded_length():
+            recv_length()
+            length = int(getattr(frame_buffer, "length", 0) or 0)
+            if length > KICK_PAYLOAD_LIMIT:
+                raise ChatPayloadTooLarge(
+                    f"Kick chat frame exceeded {KICK_PAYLOAD_LIMIT} bytes"
+                )
+
+        frame_buffer.recv_length = recv_bounded_length
+
+    @staticmethod
+    def _payload_size(raw):
+        if isinstance(raw, bytes):
+            return len(raw)
+        return len(str(raw).encode("utf-8"))
+
+    def _recv_payload(self):
+        """Receive one complete WebSocket message under a hard byte limit."""
+        recv_frame = getattr(self._ws, "recv_frame", None)
+        if not callable(recv_frame):
+            raw = self._ws.recv()
+            if self._payload_size(raw) > KICK_PAYLOAD_LIMIT:
+                raise ChatPayloadTooLarge(
+                    f"Kick chat payload exceeded {KICK_PAYLOAD_LIMIT} bytes"
+                )
+            return raw
+
+        # RFC 6455 opcodes. Reading frames ourselves avoids websocket-client's
+        # unbounded continuous-frame accumulator.
+        continuation, text, binary, close, ping, pong = 0, 1, 2, 8, 9, 10
+        chunks = []
+        total = 0
+        message_opcode = None
+        while True:
+            frame = recv_frame()
+            opcode = int(frame.opcode)
+            if opcode == close:
+                self.close()
+                return None
+            if opcode == ping:
+                self._ws.pong(frame.data)
+                continue
+            if opcode == pong:
+                continue
+            if opcode in (text, binary):
+                if message_opcode is not None:
+                    raise ValueError("Kick chat websocket started overlapping messages")
+                message_opcode = opcode
+            elif opcode != continuation or message_opcode is None:
+                raise ValueError(f"Kick chat websocket sent invalid opcode {opcode}")
+
+            data = frame.data
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            else:
+                data = bytes(data)
+            total += len(data)
+            if total > KICK_PAYLOAD_LIMIT:
+                raise ChatPayloadTooLarge(
+                    f"Kick chat payload exceeded {KICK_PAYLOAD_LIMIT} bytes"
+                )
+            chunks.append(data)
+            if frame.fin:
+                payload = b"".join(chunks)
+                if message_opcode == text:
+                    return payload.decode("utf-8", errors="replace")
+                return payload
 
     def close(self):
         if self._ws is not None:
@@ -218,7 +305,10 @@ class KickChatReader:
         self._ws.settimeout(1.0)
         while not self.should_cancel():
             try:
-                raw = self._ws.recv()
+                raw = self._recv_payload()
+            except ChatPayloadTooLarge:
+                self.close()
+                raise
             except Exception:
                 # Includes websocket._exceptions.WebSocketTimeoutException and
                 # a hard-close during shutdown. Both end the iteration.
@@ -230,6 +320,8 @@ class KickChatReader:
                 if not is_open:
                     return
                 continue
+            if raw is None:
+                return
             if not raw:
                 continue
             try:
