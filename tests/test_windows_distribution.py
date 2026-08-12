@@ -47,6 +47,28 @@ class BuildDriverTests(unittest.TestCase):
             build_mod.main([])
         self.assertNotIn("STREAMKEEP_ONEFILE", seen["env"])
 
+    def test_catalogs_are_compiled_before_pyinstaller(self):
+        commands = []
+
+        def fake_call(command, cwd=None, env=None):
+            commands.append([str(part) for part in command])
+            return 0
+
+        with mock.patch.object(build_mod, "stamp_versions"), \
+                mock.patch.object(build_mod.subprocess, "call", fake_call):
+            self.assertEqual(build_mod.main([]), 0)
+
+        self.assertIn("streamkeep.i18n.compile_translations", commands[0])
+        self.assertIn("--check", commands[0])
+        self.assertIn("PyInstaller", commands[1])
+
+    def test_a_failed_catalog_compile_never_reaches_pyinstaller(self):
+        with mock.patch.object(build_mod, "stamp_versions"), \
+                mock.patch.object(build_mod.subprocess, "call", return_value=2) as call:
+            self.assertEqual(build_mod.main([]), 2)
+
+        self.assertEqual(call.call_count, 1)
+
     def test_onefile_is_requested_explicitly(self):
         seen = {}
 
@@ -69,7 +91,7 @@ class BuildDriverTests(unittest.TestCase):
 
     def test_a_failed_pyinstaller_run_never_reaches_the_installer(self):
         with mock.patch.object(build_mod, "stamp_versions"), \
-                mock.patch.object(build_mod.subprocess, "call", return_value=3), \
+                mock.patch.object(build_mod.subprocess, "call", side_effect=[0, 3]), \
                 mock.patch.object(build_mod, "build_installer") as installer:
             code = build_mod.main(["--installer"])
         installer.assert_not_called()

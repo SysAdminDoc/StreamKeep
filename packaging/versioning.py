@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+OPTIONAL_TARGETS = frozenset({Path("ROADMAP.md")})
 
 
 def read_version(root: Path = ROOT) -> str:
@@ -106,6 +107,8 @@ def version_drift(root: Path = ROOT) -> list[str]:
     if problem:
         drift.append(problem)
     for path, pattern, replacement in _targets(version, root):
+        if not path.exists() and path.relative_to(root) in OPTIONAL_TARGETS:
+            continue
         source = path.read_text(encoding="utf-8")
         updated, count = pattern.subn(replacement, source, count=1)
         if count != 1:
@@ -120,6 +123,8 @@ def stamp_versions(root: Path = ROOT) -> list[Path]:
     version = read_version(root)
     changed: list[Path] = []
     for path, pattern, replacement in _targets(version, root):
+        if not path.exists() and path.relative_to(root) in OPTIONAL_TARGETS:
+            continue
         source = path.read_text(encoding="utf-8")
         updated, count = pattern.subn(replacement, source, count=1)
         if count != 1:

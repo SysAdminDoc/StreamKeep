@@ -6,8 +6,6 @@ has the whole window left and the oldest may have hours, so a long queue loses
 the oldest reachable VOD first — permanently, because the platform deletes it.
 """
 
-import time
-
 import pytest
 
 from streamkeep import retention

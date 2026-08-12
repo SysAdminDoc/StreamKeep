@@ -65,6 +65,12 @@ def test_version_stamper_derives_all_metadata_from_package_version(tmp_path):
     assert "/v5.2.1/StreamKeep-5.2.1-setup.exe" in winget
     assert stamp_versions(tmp_path) == []
 
+    # ROADMAP.md is an ignored operator tracker, so a clean clone used for a
+    # release build must not require it. When present it is still kept in sync.
+    (tmp_path / "ROADMAP.md").unlink()
+    assert stamp_versions(tmp_path) == []
+    assert version_drift(tmp_path) == []
+
     # Drift must *report* a release list that no longer leads with VERSION,
     # rather than silently rewriting it into agreement.
     metainfo_path = (

@@ -22,6 +22,8 @@ class StageDriverTests(unittest.TestCase):
         names = [name for name, _func in gate.STAGES]
         self.assertEqual(names[0], "release-python")
         self.assertEqual(names[1], "compileall")
+        self.assertLess(names.index("pyflakes"), names.index("ruff"))
+        self.assertLess(names.index("ruff"), names.index("translations"))
         # The expensive build stages must come after the cheap checks so a
         # trivial failure never costs a full PyInstaller run.
         for build_stage in gate.BUILD_STAGES:
@@ -95,6 +97,24 @@ class StageDriverTests(unittest.TestCase):
     def test_dependency_floor_stage_passes_for_the_checked_in_lock(self):
         ok, detail = gate.stage_dependency_floors()
         self.assertTrue(ok, detail)
+
+    @mock.patch.object(gate, "_run", return_value=(True, ""))
+    def test_ruff_stage_checks_product_packaging_and_tests(self, run):
+        self.assertEqual(gate.stage_ruff(), (True, ""))
+        command = [str(part) for part in run.call_args.args[0]]
+        self.assertEqual(command[1:4], ["-m", "ruff", "check"])
+        for target in ("StreamKeep.py", "streamkeep", "packaging", "tests"):
+            self.assertIn(target, command)
+
+    @mock.patch.object(gate, "_run", return_value=(True, ""))
+    def test_translation_stage_compiles_ignored_qm_assets(self, run):
+        ok, detail = gate.stage_translations()
+        self.assertTrue(ok, detail)
+        commands = [[str(part) for part in call.args[0]] for call in run.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertIn("streamkeep.i18n.extract_translations", commands[0])
+        self.assertIn("streamkeep.i18n.compile_translations", commands[1])
+        self.assertIn("--check", commands[1])
 
     @mock.patch.object(gate, "_run", return_value=(True, ""))
     def test_test_stage_uses_a_dedicated_basetemp(self, run):

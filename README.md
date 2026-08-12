@@ -242,7 +242,7 @@ Custom drag surfaces also provide 24px interaction targets and equivalent keyboa
 
 ### Desktop Languages
 
-Choose English or Spanish under Settings → Appearance. **Spanish is beta:** the core shell, navigation, dialogs, and status messages are translated, and any string that is not yet covered falls back to English rather than showing a placeholder. The caveat is no longer only here — the language selector states each catalog's translated percentage and marks anything below 85% as beta, its tooltip gives the exact message counts, and the release gate reports coverage so a regression is visible before a release rather than after a user switches language. Switching language updates the open shell, dialogs, table headings, status messages, and embedded player surfaces immediately, without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`, and `python -m streamkeep.i18n.compile_translations` refreshes the catalogs before compiling the matching QM assets included in frozen builds.
+Choose English or Spanish under Settings → Appearance. **Spanish is beta:** the core shell, navigation, dialogs, and status messages are translated, and any string that is not yet covered falls back to English rather than showing a placeholder. The caveat is no longer only here — the language selector states each catalog's translated percentage and marks anything below 85% as beta, its tooltip gives the exact message counts, and the release gate reports coverage so a regression is visible before a release rather than after a user switches language. Switching language updates the open shell, dialogs, table headings, status messages, and embedded player surfaces immediately, without restarting. The pseudo locale is a developer-facing layout audit that expands every static label so constrained controls can be caught by offscreen tests. Hand-authored UI/player strings are extracted deterministically into tracked Qt TS catalogs with `python -m streamkeep.i18n.extract_translations`. The matching QM binaries are generated, gitignored build assets: `python -m streamkeep.i18n.compile_translations` creates them locally, and both the release gate and PyInstaller builder compile them before validating or freezing a release.
 
 ### Desktop Appearance
 
@@ -324,7 +324,7 @@ Credential values are stored outside `config.json` in the operating-system crede
 
 Source checkouts run directly with `python StreamKeep.py`. Release packaging currently has scaffolds for:
 
-- Reproducible PyInstaller **onedir** builds for Windows with `py -3.14 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep/`. Onedir replaced the legacy one-file executable: the single file re-extracted its whole ~500 MB payload to a temp directory on every launch (measured 11.9s cold start versus 0.24s for onedir), maximised the unsigned-binary AV surface, and let simultaneous launches each create their own `_MEIxxxx` extraction (four concurrent launches: four temp directories for onefile, zero for onedir). Build the legacy shape with `packaging/build.py --onefile` if you need it. `streamkeep/__init__.py::VERSION` is the release version source; `packaging/versioning.py` stamps the README, Flatpak metainfo, WinGet manifest, and roadmap baseline before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds and refuses an older release interpreter.
+- Reproducible PyInstaller **onedir** builds for Windows with `py -3.14 packaging/reproducible_build.py --verify-reproducible`. The builder creates a clean environment from hash-checked `requirements-build.lock`, compares two artifacts, inventories the runtime-only `requirements.lock` in CycloneDX and license JSON, and runs the hidden artifact smoke suite before publishing `dist/StreamKeep/`. Onedir replaced the legacy one-file executable: the single file re-extracted its whole ~500 MB payload to a temp directory on every launch (measured 11.9s cold start versus 0.24s for onedir), maximised the unsigned-binary AV surface, and let simultaneous launches each create their own `_MEIxxxx` extraction (four concurrent launches: four temp directories for onefile, zero for onedir). Build the legacy shape with `packaging/build.py --onefile` if you need it. `streamkeep/__init__.py::VERSION` is the release version source; `packaging/versioning.py` stamps the README and WinGet manifest, updates the roadmap baseline when that ignored local tracker exists, and verifies the hand-authored Flatpak release entry before packaging. The release builder pins and SHA3-verifies an upstream SQLite runtime containing the WAL-reset fix; the spec rejects unsafe frozen builds and refuses an older release interpreter.
 - Windows desktop builds use the unsigned top-level window handle for aggregate queue progress, paused state, and failed-job state on the taskbar. An opt-in power policy holds new queue work on battery or Energy Saver while active downloads finish and resumes on AC. A long-queue progress notification is optional and dynamically uses an already-installed WinRT bridge when available; no package identity, code signing, or required WinRT dependency is needed.
 - An unsigned Inno Setup installer from `packaging/build.py --installer` (`packaging/installer/streamkeep.iss`). It installs the whole onedir tree, supports `/VERYSILENT` for package managers, and leaves the user profile untouched on uninstall so a library, history, or queue is never destroyed.
 - Flatpak packaging under `packaging/flatpak/`, using the KDE/PyQt 6.10 base and a separate hash-checked Linux dependency lock plus generated offline source manifest. The self-build lane uses Qt's native FileChooser and persistent Document Portals for the archive root (tested with `xdg-desktop-portal >= 1.22.1`), drops broad home access, and falls back to an explicitly configured path when a portal is unavailable; it is not a Flathub submission.
@@ -363,7 +363,7 @@ py -3.14 packaging/release_gate.py --list    # show the stages
 ```
 
 Stages run cheapest-first and stop at the first failure, which the gate names
-explicitly: `compileall`, `pyflakes`, `translations` (deterministic extraction
+explicitly: `compileall`, `pyflakes`, `ruff`, `translations` (deterministic extraction
 plus catalog compilation), `dependency-floors` (direct source floors cannot
 exceed the hashed runtime lock), `tests`, `capability-claims` (every shipped claim
 has a reachable, tested path and a matching README token), `release-claims`
@@ -379,6 +379,7 @@ The individual commands behind those stages remain available:
 
 ```powershell
 python -m compileall StreamKeep.py streamkeep tests
+py -3.14 -m ruff check StreamKeep.py streamkeep packaging tests
 python -m streamkeep.i18n.extract_translations --check
 python -m streamkeep.i18n.compile_translations
 python packaging/versioning.py
@@ -391,7 +392,7 @@ python StreamKeep.py server --help
 
 Install test tooling with `py -3.14 -m pip install -r requirements-dev.txt`. The default pytest run measures `streamkeep/`, prints uncovered lines, and enforces the current 47.5% project floor; raise the floor as the GUI and integration seams gain coverage.
 
-When pyflakes is installed, also run:
+The release gate also retains the narrower pyflakes pass:
 
 ```powershell
 py -3.14 -m pyflakes StreamKeep.py streamkeep tests

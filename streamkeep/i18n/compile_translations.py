@@ -8,6 +8,7 @@ Requires PyQt6 (uses lrelease from the Qt tools bundled with PyQt6).
 Falls back to system lrelease6 / lrelease if available.
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -38,10 +39,11 @@ def _find_lrelease():
     return None
 
 
-def compile_all():
+def compile_all(*, check=False):
     from .extract_translations import update_catalogs
 
-    update_catalogs()
+    if not update_catalogs(check=check):
+        return False
     lrelease = _find_lrelease()
     if not lrelease:
         print("ERROR: lrelease not found. Install PyQt6-tools or Qt Linguist.")
@@ -65,5 +67,16 @@ def compile_all():
     return ok
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if TS sources are stale before compiling generated QM assets",
+    )
+    args = parser.parse_args(argv)
+    return 0 if compile_all(check=args.check) else 1
+
+
 if __name__ == "__main__":
-    sys.exit(0 if compile_all() else 1)
+    sys.exit(main())

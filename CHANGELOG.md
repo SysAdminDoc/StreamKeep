@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Compiled Qt catalogs are now generated during release validation and builds
+  instead of being versioned binary artifacts, and ruff now gates product,
+  packaging, and test code with intentional late-import exceptions scoped to
+  the bootstrap/facade modules and extractor test harness that require them.
+
 - The browser remote now clears stale loading/error status after recovery,
   reports library and monitor failures inside their panels, releases every
   `aria-busy` state on failure, and distinguishes an offline browser from an

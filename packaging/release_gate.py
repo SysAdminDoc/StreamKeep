@@ -126,6 +126,14 @@ def stage_pyflakes() -> tuple[bool, str]:
     return _run([sys.executable, "-m", "pyflakes", "streamkeep", "packaging"])
 
 
+def stage_ruff() -> tuple[bool, str]:
+    """Apply the configured lint contract to every Python product/test lane."""
+    return _run([
+        sys.executable, "-m", "ruff", "check",
+        "StreamKeep.py", "streamkeep", "packaging", "tests",
+    ])
+
+
 def stage_translations() -> tuple[bool, str]:
     """Extraction must be deterministic and the compiled assets must match."""
     ok, detail = _run([
@@ -136,11 +144,6 @@ def stage_translations() -> tuple[bool, str]:
     ok, detail = _run([
         sys.executable, "-m", "streamkeep.i18n.compile_translations", "--check",
     ])
-    if not ok:
-        # Older builds have no --check; fall back to proving compilation works.
-        ok, detail = _run([
-            sys.executable, "-m", "streamkeep.i18n.compile_translations",
-        ])
     if not ok:
         return ok, detail
     # V171: report coverage so a catalog regressing becomes visible here
@@ -331,6 +334,7 @@ STAGES = (
     ("release-python", stage_release_python),
     ("compileall", stage_compileall),
     ("pyflakes", stage_pyflakes),
+    ("ruff", stage_ruff),
     ("translations", stage_translations),
     ("dependency-floors", stage_dependency_floors),
     ("tests", stage_tests),

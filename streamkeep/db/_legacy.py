@@ -950,7 +950,8 @@ def record_upgrade_decision(
     if isinstance(decision, Mapping):
         get = decision.get
     else:
-        get = lambda key, default="": getattr(decision, key, default)
+        def get(key, default=""):
+            return getattr(decision, key, default)
     outcome = str(get("decision", "rejected") or "rejected").strip().lower()
     if outcome not in {"accepted", "rejected", "deferred"}:
         outcome = "rejected"

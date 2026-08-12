@@ -63,6 +63,18 @@ def main(argv=None):
 
     stamp_versions(ROOT)
 
+    translation_code = subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "streamkeep.i18n.compile_translations",
+            "--check",
+        ],
+        cwd=ROOT,
+    )
+    if translation_code != 0:
+        return translation_code
+
     environment = os.environ.copy()
     sqlite_dll = args.sqlite_dll
     if sqlite_dll is None and not _wal_reset_is_fixed(sqlite3.sqlite_version_info):
