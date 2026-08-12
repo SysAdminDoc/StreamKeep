@@ -664,6 +664,14 @@ def test_download_parser_exposes_format_container_and_audio_controls():
     assert transfer_args.embed_thumbnail is True
 
 
+def test_download_parser_rejects_the_retired_aria2_option():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args([
+            "download", "https://example.com/watch",
+            "--external-downloader", "aria2c",
+        ])
+
+
 def test_mse_capture_parser_exposes_headless_drm_free_controls():
     args = cli.build_parser().parse_args([
         "mse-capture", "https://example.com/player",

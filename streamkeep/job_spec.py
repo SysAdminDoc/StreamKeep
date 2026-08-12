@@ -156,11 +156,6 @@ class DownloadJobSpec:
     ytdlp_template_name: str = ""
     ytdlp_template_args: tuple[str, ...] = ()
 
-    ytdlp_external_downloader: str = ""
-    ytdlp_aria2c_connections: int = 0
-    ytdlp_aria2c_splits: int = 0
-    ytdlp_aria2c_min_split_size: str = ""
-
     hls_key_override: str = ""
     hls_key_iv: str = ""
 
@@ -298,10 +293,6 @@ class DownloadJobSpec:
         worker.ytdlp_embed_thumbnail = self.ytdlp_embed_thumbnail
         worker.ytdlp_template_name = self.ytdlp_template_name
         worker.ytdlp_template_args = self.ytdlp_template_args
-        worker.ytdlp_external_downloader = self.ytdlp_external_downloader
-        worker.ytdlp_aria2c_connections = self.ytdlp_aria2c_connections
-        worker.ytdlp_aria2c_splits = self.ytdlp_aria2c_splits
-        worker.ytdlp_aria2c_min_split_size = self.ytdlp_aria2c_min_split_size
         worker.hls_key_override = self.hls_key_override
         worker.hls_key_iv = self.hls_key_iv
         worker.download_sections = self.download_sections
@@ -393,16 +384,6 @@ class DownloadJobSpec:
             ytdlp_embed_thumbnail=worker.ytdlp_embed_thumbnail,
             ytdlp_template_name=worker.ytdlp_template_name or "",
             ytdlp_template_args=tuple(worker.ytdlp_template_args or ()),
-            ytdlp_external_downloader=(
-                worker.ytdlp_external_downloader or ""
-            ),
-            ytdlp_aria2c_connections=int(
-                worker.ytdlp_aria2c_connections or 0
-            ),
-            ytdlp_aria2c_splits=int(worker.ytdlp_aria2c_splits or 0),
-            ytdlp_aria2c_min_split_size=(
-                worker.ytdlp_aria2c_min_split_size or ""
-            ),
             hls_key_override=worker.hls_key_override or "",
             hls_key_iv=worker.hls_key_iv or "",
             download_sections=worker.download_sections or "",

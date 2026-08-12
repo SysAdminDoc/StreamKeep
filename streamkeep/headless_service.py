@@ -1059,7 +1059,6 @@ class HeadlessJobService(QObject):
             )
             return
         from .download_options import (
-            resolve_external_downloader_options,
             resolve_ytdlp_arg_template, resolve_ytdlp_transfer_options,
         )
         from .job_spec import DownloadJobSpec
@@ -1084,7 +1083,6 @@ class HeadlessJobService(QObject):
             return
 
         transfer = resolve_ytdlp_transfer_options(self.config)
-        ext_dl = resolve_external_downloader_options(self.config)
         chunk_secs = 0
         if bool(self.config.get("chunk_long_captures", False)):
             try:
@@ -1162,10 +1160,6 @@ class HeadlessJobService(QObject):
             ytdlp_embed_chapters=transfer.get("embed_chapters"),
             ytdlp_embed_metadata=transfer.get("embed_metadata"),
             ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
-            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
-            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
-            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
-            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
             ytdlp_template_name=template_name,
             ytdlp_template_args=tuple(ytdlp_template_args),
             chunk_length_secs=chunk_secs,

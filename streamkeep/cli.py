@@ -158,7 +158,6 @@ def _run_download(args):
 
     from .download_options import (
         resolve_dubbed_format_spec, validate_download_options,
-        validate_external_downloader_options,
         validate_sponsorblock_options,
         validate_subtitle_options, validate_ytdlp_transfer_options,
     )
@@ -244,12 +243,6 @@ def _run_download(args):
             embed_chapters=getattr(args, "embed_chapters", None),
             embed_metadata=getattr(args, "embed_metadata", None),
             embed_thumbnail=getattr(args, "embed_thumbnail", None),
-        )
-        external_downloader_options = validate_external_downloader_options(
-            downloader=getattr(args, "external_downloader", ""),
-            connections=getattr(args, "aria2c_connections", 0),
-            splits=getattr(args, "aria2c_splits", 0),
-            min_split_size=getattr(args, "aria2c_min_split_size", ""),
         )
         if (output_options["audio_format"] and subtitle_options["enabled"]
                 and subtitle_options["embed"]):
@@ -529,10 +522,6 @@ def _run_download(args):
             ytdlp_embed_chapters=transfer_options.get("embed_chapters"),
             ytdlp_embed_metadata=transfer_options.get("embed_metadata"),
             ytdlp_embed_thumbnail=transfer_options.get("embed_thumbnail"),
-            ytdlp_external_downloader=external_downloader_options["downloader"],
-            ytdlp_aria2c_connections=int(getattr(args, "aria2c_connections", 0) or 0),
-            ytdlp_aria2c_splits=int(getattr(args, "aria2c_splits", 0) or 0),
-            ytdlp_aria2c_min_split_size=getattr(args, "aria2c_min_split_size", "") or "",
             ytdlp_template_name=template_name,
             ytdlp_template_args=tuple(ytdlp_template_args),
             proxy=proxy,
@@ -2656,24 +2645,6 @@ def build_parser():
             "For Twitch VODs, probe and restore copyright-muted fragments "
             "when the same-format unmuted CDN URL is available"
         ),
-    )
-    dl.add_argument(
-        "--external-downloader", default="", choices=["", "aria2c"],
-        help="Route direct HTTP downloads through aria2c; HLS/DASH sources "
-             "use native -N instead since yt-dlp 2026.07.04 removed aria2c "
-             "HLS/DASH support (source URL sanitized; CVE-2026-50574)",
-    )
-    dl.add_argument(
-        "--aria2c-connections", type=int, default=0,
-        help="aria2c connections per server (1-16; requires --external-downloader aria2c)",
-    )
-    dl.add_argument(
-        "--aria2c-splits", type=int, default=0,
-        help="aria2c download splits (1-16; requires --external-downloader aria2c)",
-    )
-    dl.add_argument(
-        "--aria2c-min-split-size", default="",
-        help="aria2c minimum split size, e.g. 1M (requires --external-downloader aria2c)",
     )
     dl.add_argument(
         "--wait-for-video", default="",

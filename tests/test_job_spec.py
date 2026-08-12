@@ -95,8 +95,6 @@ def test_full_roundtrip_with_all_fields():
         ytdlp_live_from_start=True,
         ytdlp_embed_chapters=True,
         ytdlp_template_args=("--no-part",),
-        ytdlp_external_downloader="aria2c",
-        ytdlp_aria2c_connections=8,
         download_sections="*0:00-5:00",
         max_retries=5,
         parallel_connections=8,
@@ -181,10 +179,6 @@ def test_from_worker_captures_state():
         ytdlp_embed_thumbnail = None
         ytdlp_template_name = ""
         ytdlp_template_args = ()
-        ytdlp_external_downloader = ""
-        ytdlp_aria2c_connections = 0
-        ytdlp_aria2c_splits = 0
-        ytdlp_aria2c_min_split_size = ""
         hls_key_override = ""
         hls_key_iv = ""
         download_sections = ""

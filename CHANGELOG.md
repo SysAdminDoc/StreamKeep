@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- The retired aria2c external-downloader option has been removed. Existing
+  aria2c connection/split settings migrate once to StreamKeep's built-in
+  parallel downloader with a visible log notice.
+
 - Startup-contract, crash-log, and intelligence-consent tests now cover each
   surface above the project floor, including crash rotation, unwritable logs,
   populated startup fixtures, local/cloud consent, and preview failures.

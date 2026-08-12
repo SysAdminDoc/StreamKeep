@@ -186,13 +186,11 @@ class MainWindowJobsMixin:
                 info=None,
             )
             from streamkeep.download_options import (
-                resolve_external_downloader_options,
                 resolve_ytdlp_arg_template,
                 resolve_ytdlp_transfer_options,
             )
             from streamkeep.job_spec import DownloadJobSpec
             transfer = resolve_ytdlp_transfer_options(state)
-            ext_dl = resolve_external_downloader_options(state)
             template_name = state.ytdlp_template_name or ""
             spec = DownloadJobSpec(
                 source_platform=state.platform or "",
@@ -254,10 +252,6 @@ class MainWindowJobsMixin:
                 ytdlp_embed_chapters=transfer.get("embed_chapters"),
                 ytdlp_embed_metadata=transfer.get("embed_metadata"),
                 ytdlp_embed_thumbnail=transfer.get("embed_thumbnail"),
-                ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or ""),
-                ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
-                ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
-                ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or ""),
                 ytdlp_template_name=template_name,
                 ytdlp_template_args=tuple(resolve_ytdlp_arg_template(
                     self._config.get("ytdlp_arg_templates", {}), template_name,

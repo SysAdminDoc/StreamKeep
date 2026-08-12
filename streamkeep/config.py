@@ -16,6 +16,7 @@ from .paths import CONFIG_DIR, CONFIG_FILE, LOG_FILE, LOG_FILE_BACKUP, LOG_FILE_
 _SAVE_LOCK = threading.Lock()
 _LOG_LOCK = threading.Lock()
 _LAST_CONFIG_ERROR = ""
+_MIGRATION_NOTICES = []
 
 CONFIG_EXPORT_FORMAT = "streamkeep-config"
 CONFIG_EXPORT_SCHEMA_VERSION = 1
@@ -24,6 +25,13 @@ MAX_CONFIG_IMPORT_DEPTH = 8
 MAX_CONFIG_IMPORT_NODES = 5000
 MAX_CONFIG_IMPORT_CONTAINER_ITEMS = 512
 MAX_CONFIG_IMPORT_STRING_CHARS = 16384
+
+_RETIRED_ARIA2_KEYS = frozenset({
+    "ytdlp_external_downloader",
+    "ytdlp_aria2c_connections",
+    "ytdlp_aria2c_splits",
+    "ytdlp_aria2c_min_split_size",
+})
 
 
 class ConfigImportError(ValueError):
@@ -96,7 +104,6 @@ _STRING_CONFIG_KEYS = frozenset({
     "ytdlp_retries", "ytdlp_fragment_retries", "ytdlp_retry_sleep",
     "ytdlp_unavailable_fragments", "ytdlp_throttled_rate",
     "ytdlp_wait_for_video",
-    "ytdlp_external_downloader", "ytdlp_aria2c_min_split_size",
     "ytdlp_channel", "ytdlp_external_command",
     "streamlink_hls_start_offset",
     "queue_complete_action",
@@ -141,7 +148,6 @@ _INT_CONFIG_KEYS = frozenset({
     "segment_idx", "parallel_connections", "parallel_autorecords",
     "max_concurrent_downloads", "chunk_length_secs", "chat_render_width",
     "ytdlp_concurrent_fragments",
-    "ytdlp_aria2c_connections", "ytdlp_aria2c_splits",
     "chat_render_height", "chat_render_font_size", "chat_render_msg_duration",
     "chat_render_bg_opacity", "pp_silence_noise_db",
     "disk_warning_gb", "disk_critical_gb", "health_interval_minutes",
@@ -184,6 +190,7 @@ def load_config():
                 continue
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if isinstance(data, dict):
+                data, aria2_migrated = _migrate_retired_aria2(data)
                 from .secrets import (
                     SecretStorageError,
                     prepare_config_for_storage,
@@ -194,6 +201,7 @@ def load_config():
                     stored, migrated = prepare_config_for_storage(data)
                 except SecretStorageError:
                     return runtime
+                migrated = migrated or aria2_migrated
                 if migrated:
                     try:
                         with _SAVE_LOCK:
@@ -208,6 +216,37 @@ def load_config():
         except Exception:
             continue
     return {}
+
+
+def _migrate_retired_aria2(data):
+    """Map stale aria2 tuning to the built-in parallel downloader once."""
+    if not any(key in data for key in _RETIRED_ARIA2_KEYS):
+        return data, False
+    migrated = dict(data)
+    tuning = []
+    for key in ("ytdlp_aria2c_connections", "ytdlp_aria2c_splits"):
+        try:
+            tuning.append(int(migrated.get(key, 0) or 0))
+        except (TypeError, ValueError):
+            pass
+    if tuning and max(tuning) > 0:
+        migrated["parallel_connections"] = max(1, min(16, max(tuning)))
+    for key in _RETIRED_ARIA2_KEYS:
+        migrated.pop(key, None)
+    notice = (
+        "aria2c settings were retired; using StreamKeep's built-in "
+        "parallel downloader"
+    )
+    _MIGRATION_NOTICES.append(notice)
+    logging.getLogger(__name__).warning(notice)
+    return migrated, True
+
+
+def take_migration_notices():
+    """Return and clear notices created before the GUI log bridge existed."""
+    notices = tuple(_MIGRATION_NOTICES)
+    _MIGRATION_NOTICES.clear()
+    return notices
 
 
 def save_config(cfg):

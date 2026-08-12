@@ -1156,14 +1156,12 @@ class DownloadQueueMixin:
         self._log(f"[QUEUE] Downloading: {info.title or item.get('title', '')[:60]} → {out_dir}")
         # --- Resolve config-driven options before building the spec ---
         from ...download_options import (
-            resolve_external_downloader_options,
             resolve_ytdlp_arg_template,
             resolve_ytdlp_transfer_options,
         )
         from ...job_spec import DownloadJobSpec
 
         transfer = resolve_ytdlp_transfer_options(YtDlpExtractor)
-        ext_dl = resolve_external_downloader_options(YtDlpExtractor)
         template_name = str(item.get("ytdlp_template_name", "") or "")
         try:
             template_args = resolve_ytdlp_arg_template(
@@ -1291,10 +1289,6 @@ class DownloadQueueMixin:
             ytdlp_embed_thumbnail=transfer["embed_thumbnail"],
             ytdlp_template_name=template_name,
             ytdlp_template_args=tuple(template_args),
-            ytdlp_external_downloader=str(ext_dl.get("external_downloader", "") or "").strip().lower(),
-            ytdlp_aria2c_connections=int(ext_dl.get("aria2c_connections", 0) or 0),
-            ytdlp_aria2c_splits=int(ext_dl.get("aria2c_splits", 0) or 0),
-            ytdlp_aria2c_min_split_size=str(ext_dl.get("aria2c_min_split_size", "") or "").strip(),
             download_archive=str(item.get("download_archive", "") or ""),
             break_on_existing=bool(item.get("break_on_existing", False)),
             parallel_connections=self._parallel_connections,

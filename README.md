@@ -149,7 +149,6 @@ python StreamKeep.py intelligence preview C:\Videos\recording --redact
 python StreamKeep.py intelligence summary C:\Videos\recording
 python StreamKeep.py intelligence thumbnail C:\Videos\recording
 python StreamKeep.py download "https://example.com/live" -N 4 --retries infinite --fragment-retries 20 --retry-sleep "fragment:exp=1:20" --live-from-start
-python StreamKeep.py download "https://example.com/video" --external-downloader aria2c --aria2c-connections 8 --aria2c-splits 8 --aria2c-min-split-size 1M
 python StreamKeep.py credentials
 python StreamKeep.py credentials twitch --json
 python StreamKeep.py health --json

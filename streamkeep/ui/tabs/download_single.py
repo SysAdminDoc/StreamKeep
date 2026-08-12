@@ -1102,26 +1102,6 @@ class DownloadSingleMixin:
             history_url=self._resolve_history_url(),
             info=self.stream_info,
         )
-        # Resolve external downloader options (silently disables on error)
-        from ...download_options import (
-            resolve_external_downloader_options,
-            validate_external_downloader_options,
-        )
-        try:
-            _ext_dl = resolve_external_downloader_options(YtDlpExtractor)
-            validate_external_downloader_options(
-                downloader=_ext_dl["external_downloader"],
-                connections=_ext_dl["aria2c_connections"],
-                splits=_ext_dl["aria2c_splits"],
-                min_split_size=_ext_dl["aria2c_min_split_size"],
-            )
-            _ext_dl_name = str(_ext_dl["external_downloader"] or "").strip().lower()
-            _ext_dl_connections = int(_ext_dl["aria2c_connections"] or 0)
-            _ext_dl_splits = int(_ext_dl["aria2c_splits"] or 0)
-            _ext_dl_min_split = str(_ext_dl["aria2c_min_split_size"] or "").strip()
-        except (ValueError, TypeError):
-            _ext_dl_name, _ext_dl_connections, _ext_dl_splits, _ext_dl_min_split = "", 0, 0, ""
-
         # Compute download_sections for time-range crop (F21)
         _download_sections = ""
         if ((fmt_type == "ytdlp_direct" or hls_key_options["value"])
@@ -1216,10 +1196,6 @@ class DownloadSingleMixin:
             ytdlp_embed_thumbnail=transfer_options["embed_thumbnail"],
             ytdlp_template_name=ytdlp_template_name,
             ytdlp_template_args=ytdlp_template_args,
-            ytdlp_external_downloader=_ext_dl_name,
-            ytdlp_aria2c_connections=_ext_dl_connections,
-            ytdlp_aria2c_splits=_ext_dl_splits,
-            ytdlp_aria2c_min_split_size=_ext_dl_min_split,
             hls_key_override=hls_key_options["value"],
             hls_key_iv=hls_key_options["iv"],
             download_sections=_download_sections,

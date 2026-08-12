@@ -43,6 +43,33 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(data, {"theme": "dark"})
 
+    def test_load_config_migrates_retired_aria2_tuning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                '{"theme":"dark","ytdlp_external_downloader":"aria2c",'
+                '"ytdlp_aria2c_connections":6,"ytdlp_aria2c_splits":8,'
+                '"ytdlp_aria2c_min_split_size":"1M"}',
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(config, "CONFIG_DIR", config_dir), mock.patch.object(
+                config, "CONFIG_FILE", config_file,
+            ), self.assertLogs("streamkeep.config", level="WARNING") as notices:
+                data = config.load_config()
+
+            self.assertEqual(data["parallel_connections"], 8)
+            self.assertFalse(any(key in data for key in config._RETIRED_ARIA2_KEYS))
+            persisted = config_file.read_text(encoding="utf-8")
+            self.assertNotIn("aria2", persisted)
+            self.assertIn("built-in parallel downloader", notices.output[0])
+            self.assertEqual(
+                config.take_migration_notices(),
+                ("aria2c settings were retired; using StreamKeep's built-in "
+                 "parallel downloader",),
+            )
+
 
 class GuiLogBridgeTests(unittest.TestCase):
     def setUp(self):

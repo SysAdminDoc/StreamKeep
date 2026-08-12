@@ -487,8 +487,10 @@ class StreamKeep(
         if not self._startup_check:
             delay_ms = 0 if self._startup_contract else 1000
             QTimer.singleShot(delay_ms, self._run_startup_companion_check)
-        from streamkeep.config import install_gui_logging
+        from streamkeep.config import install_gui_logging, take_migration_notices
         self._gui_log_handler = install_gui_logging(self._log)
+        for notice in take_migration_notices():
+            self._log(f"[CONFIG] {notice}")
         # Keyboard shortcuts (F11)
         self._setup_shortcuts()
 
@@ -943,33 +945,6 @@ class StreamKeep(
             transfer_options = validate_ytdlp_transfer_options()
         for name, value in transfer_options.items():
             setattr(YtDlpExtractor, f"ytdlp_{name}", value)
-        from streamkeep.download_options import (
-            validate_external_downloader_options,
-        )
-        try:
-            validate_external_downloader_options(
-                downloader=cfg.get("ytdlp_external_downloader", ""),
-                connections=cfg.get("ytdlp_aria2c_connections", 0),
-                splits=cfg.get("ytdlp_aria2c_splits", 0),
-                min_split_size=cfg.get("ytdlp_aria2c_min_split_size", ""),
-            )
-            YtDlpExtractor.ytdlp_external_downloader = str(
-                cfg.get("ytdlp_external_downloader", "") or ""
-            ).strip().lower()
-            YtDlpExtractor.ytdlp_aria2c_connections = int(
-                cfg.get("ytdlp_aria2c_connections", 0) or 0
-            )
-            YtDlpExtractor.ytdlp_aria2c_splits = int(
-                cfg.get("ytdlp_aria2c_splits", 0) or 0
-            )
-            YtDlpExtractor.ytdlp_aria2c_min_split_size = str(
-                cfg.get("ytdlp_aria2c_min_split_size", "") or ""
-            ).strip()
-        except (ValueError, TypeError):
-            YtDlpExtractor.ytdlp_external_downloader = ""
-            YtDlpExtractor.ytdlp_aria2c_connections = 0
-            YtDlpExtractor.ytdlp_aria2c_splits = 0
-            YtDlpExtractor.ytdlp_aria2c_min_split_size = ""
         try:
             self._config["ytdlp_arg_templates"] = normalize_ytdlp_arg_templates(
                 cfg.get("ytdlp_arg_templates", {})
