@@ -84,6 +84,10 @@ datas += collect_tree(
     'streamkeep/reference_adapters', 'streamkeep/reference_adapters',
 )
 datas.append((
+    str(ROOT / 'streamkeep/import_layouts.json'),
+    'streamkeep',
+))
+datas.append((
     str(ROOT / 'streamkeep/server/web_ui.html'),
     'streamkeep/server',
 ))

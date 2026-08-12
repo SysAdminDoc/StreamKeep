@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "layouts": [
+    {
+      "id": "pinchflat",
+      "name": "Pinchflat",
+      "platform": "YouTube",
+      "grouping": "directory",
+      "webpage_url": "https://www.youtube.com/watch?v={source_id}",
+      "patterns": [
+        "^(?:[^/]+/)*?(?P<channel>[^/]+)/(?P<date>\\d{4}-\\d{2}-\\d{2}) [^/]*/(?P<title>.+) \\[(?P<source_id>[A-Za-z0-9_-]{10,12})\\]\\.(?:mp4|mkv|webm|m4v|avi)$"
+      ],
+      "sidecars": [
+        "{stem}.info.json",
+        "{name}.info.json",
+        "{stem}.nfo"
+      ]
+    },
+    {
+      "id": "tubearchivist",
+      "name": "TubeArchivist",
+      "platform": "YouTube",
+      "grouping": "media",
+      "webpage_url": "https://www.youtube.com/watch?v={source_id}",
+      "patterns": [
+        "^(?:[^/]+/)*?(?P<channel>UC[A-Za-z0-9_-]{22})/(?P<source_id>[A-Za-z0-9_-]{11})\\.mp4$"
+      ],
+      "sidecars": [
+        "{source_id}.info.json",
+        "{source_id}.nfo"
+      ]
+    },
+    {
+      "id": "tubesync",
+      "name": "TubeSync",
+      "platform": "YouTube",
+      "grouping": "media",
+      "webpage_url": "https://www.youtube.com/watch?v={source_id}",
+      "patterns": [
+        "^(?:[^/]+/)*?(?:video|audio)/(?P<channel>[^/]+)/(?P<date>\\d{4}-\\d{2}-\\d{2})_(?P<title>.+)_(?P<source_id>[A-Za-z0-9_-]{11})_[^/]+\\.(?:mp4|mkv|webm|m4a|mp3|opus)$"
+      ],
+      "replace": {
+        "title": [
+          ["_", " "]
+        ]
+      },
+      "sidecars": [
+        "{stem}.info.json",
+        "{name}.info.json",
+        "{stem}.nfo"
+      ]
+    },
+    {
+      "id": "youtarr",
+      "name": "Youtarr",
+      "platform": "YouTube",
+      "grouping": "directory",
+      "webpage_url": "https://www.youtube.com/watch?v={source_id}",
+      "patterns": [
+        "^(?:[^/]+/)*?(?:__[^/]+/)?(?P<channel>[^/]+)/[^/]+ - (?P<source_id>[A-Za-z0-9_-]{10,12})/(?P<title>.+) \\[(?P=source_id)\\]\\.(?:mp4|mkv|webm|m4v|avi|mp3)$"
+      ],
+      "sidecars": [
+        "{source_id}.info.json",
+        "{stem}.nfo"
+      ]
+    }
+  ]
+}

@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- External-library adoption now recognises Pinchflat, TubeArchivist, TubeSync,
+  and Youtarr media trees through packaged declarative layout fixtures. Flat
+  competitor channel folders produce one preview row per recording, sidecars
+  remain authoritative, and no competitor database is opened.
+
 - HAR imports can now author deterministic declarative-adapter drafts in the
   existing review queue. Generated YAML strips captured secrets and query
   values, revokes stale approvals, round-trips through the hardened parser,

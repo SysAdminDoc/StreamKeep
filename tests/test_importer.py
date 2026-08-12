@@ -1,8 +1,12 @@
 import json
+import shutil
 from pathlib import Path
 
 from streamkeep import db
 from streamkeep.importer import apply_adoption, preview_adoption
+
+
+LAYOUT_FIXTURES = Path(__file__).parent / "fixtures" / "import_layouts"
 
 
 def _metadata(
@@ -189,3 +193,55 @@ def test_preview_walks_arbitrarily_deep_media_trees(tmp_path, monkeypatch):
     assert len(plan.items) == 1
     assert plan.items[0]["action"] == "adopt"
     assert plan.items[0]["record"]["source_id"] == "vod:deep"
+
+
+def test_competitor_layout_fixtures_propose_history_rows(tmp_path, monkeypatch):
+    database = tmp_path / "library.db"
+    monkeypatch.setattr(db, "DB_PATH", database)
+    library = tmp_path / "competitor-library"
+    shutil.copytree(LAYOUT_FIXTURES, library)
+
+    plan = preview_adoption(library, db_module=db)
+
+    assert all(item["action"] == "adopt" for item in plan.items)
+    by_layout = {}
+    for item in plan.items:
+        by_layout.setdefault(item["layout_id"], []).append(item["record"])
+    assert set(by_layout) == {
+        "pinchflat", "tubearchivist", "tubesync", "youtarr",
+    }
+    assert {
+        record["source_id"] for record in by_layout["tubearchivist"]
+    } == {"M7lc1UVf-VE", "dQw4w9WgXcQ"}
+    assert all(
+        Path(record["path"]).is_file()
+        for record in by_layout["tubearchivist"]
+    )
+    expected = {
+        "pinchflat": (
+            "aqz-KE-bpKQ", "Pinchflat Capture", "The Example Channel",
+            "2025-06-01",
+        ),
+        "tubesync": (
+            "BaW_jenozKc", "TubeSync Capture", "TubeSync Example",
+            "2025-06-02",
+        ),
+        "youtarr": (
+            "jNQXAC9IVRw", "Youtarr Capture", "Youtarr Example",
+            "2025-06-03",
+        ),
+    }
+    for layout_id, values in expected.items():
+        record = by_layout[layout_id][0]
+        assert (
+            record["source_id"], record["title"], record["channel"],
+            record["date"],
+        ) == values
+        assert record["platform"].casefold() == "youtube"
+        assert record["webpage_url"].endswith(record["source_id"])
+    assert plan.diagnostics["recognized_layouts"] == {
+        "pinchflat": 1,
+        "tubearchivist": 2,
+        "tubesync": 1,
+        "youtarr": 1,
+    }
