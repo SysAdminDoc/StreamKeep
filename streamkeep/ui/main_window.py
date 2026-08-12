@@ -2936,14 +2936,14 @@ class StreamKeep(
             if isinstance(item, dict)
         ]
         table.setSortingEnabled(False)
-        if table.rowCount():
-            table.setSpan(0, 0, 1, 1)
+        table.clearSpans()
         table.clearContents()
-        table.setRowCount(len(conditions) or 1)
-        if not conditions:
-            table.setItem(0, 0, QTableWidgetItem("No active health conditions."))
-            table.setSpan(0, 0, 1, 4)
-        else:
+        table.setRowCount(len(conditions))
+        table.setVisible(bool(conditions))
+        empty_state = getattr(self, "health_empty_state", None)
+        if empty_state is not None:
+            empty_state.setVisible(not conditions)
+        if conditions:
             for row, condition in enumerate(conditions):
                 table.setItem(row, 0, QTableWidgetItem(
                     str(condition.get("title") or condition.get("id") or "Condition")

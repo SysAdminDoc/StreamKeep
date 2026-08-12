@@ -213,6 +213,21 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             assert window.findChild(QFrame, "archiveHealthPane") is not None
             assert len(window.findChildren(QFrame, "dataPane")) == 6
             assert len(window.findChildren(QFrame, "analyticsPanel")) == 3
+            for empty_state in (
+                window.operations_empty_state,
+                window.vod_empty_state,
+                window.analytics_empty_state,
+                window.storage_empty_state,
+                window.health_empty_state,
+                window.plugin_trust_empty_state,
+                window.source_adapter_empty_state,
+                window.source_engine_empty_state,
+                window.companion_tokens_empty_state,
+            ):
+                assert empty_state.objectName() == "emptyStateCard"
+            assert window.health_table.rowCount() == 0
+            assert window.health_table.isHidden()
+            assert not window.health_empty_state.isHidden()
             work_surface = window.findChild(QSplitter, "workSurface")
             assert work_surface is not None
             assert work_surface.orientation() == Qt.Orientation.Horizontal

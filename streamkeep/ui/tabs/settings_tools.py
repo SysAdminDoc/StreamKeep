@@ -164,6 +164,10 @@ class SettingsToolsMixin:
                     item.setData(Qt.ItemDataRole.UserRole, report.get("id", ""))
                 table.setItem(row, column, item)
         table.blockSignals(False)
+        table.setVisible(bool(reports))
+        empty_state = getattr(self, "plugin_trust_empty_state", None)
+        if empty_state is not None:
+            empty_state.setVisible(not reports)
         if reports:
             table.selectRow(0)
         else:
@@ -487,6 +491,10 @@ class SettingsToolsMixin:
             )
             table.setCellWidget(index, 2, combo)
         table.blockSignals(False)
+        table.setVisible(bool(rows))
+        empty_state = getattr(self, "source_engine_empty_state", None)
+        if empty_state is not None:
+            empty_state.setVisible(not rows)
         self._update_source_engine_status()
 
     def _update_source_engine_status(self):
@@ -570,6 +578,10 @@ class SettingsToolsMixin:
                     item.setData(Qt.ItemDataRole.UserRole, adapter.get("id", ""))
                 table.setItem(row, column, item)
         table.blockSignals(False)
+        table.setVisible(bool(rows))
+        empty_state = getattr(self, "source_adapter_empty_state", None)
+        if empty_state is not None:
+            empty_state.setVisible(not rows)
         if rows:
             table.selectRow(0)
         else:

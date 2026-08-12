@@ -133,6 +133,12 @@ class DownloadVodMixin:
             self.vod_table.setItem(i, 6, views_item)
 
         self._vod_last_checked_row = -1  # shift-click anchor
+        has_vods = bool(vod_list)
+        self.vod_table.setVisible(has_vods)
+        self.vod_empty_state.setVisible(not has_vods)
+        self.vod_select_all_cb.setVisible(has_vods)
+        for button_name in ("vod_load_btn", "vod_queue_btn", "vod_dl_all_btn"):
+            getattr(self, button_name).setEnabled(has_vods)
         self.vod_widget.setVisible(True)
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Resolve")
@@ -141,7 +147,16 @@ class DownloadVodMixin:
             self.vod_load_more_btn.setVisible(bool(next_cursor))
             self.vod_load_more_btn.setEnabled(bool(next_cursor))
             self.vod_load_more_btn.setText("Load more VODs")
-        self._set_status(f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.", "success")
+        if has_vods:
+            self._set_status(
+                f"Found {len(vod_list)} VOD(s). Select one to inspect or batch download.",
+                "success",
+            )
+        else:
+            self._set_status(
+                "No VODs were found. Try another channel URL or resolve the source again later.",
+                "info",
+            )
 
     def _on_vod_cb_toggled(self, row):
         """Handle a VOD checkbox toggle — supports shift-click range select."""

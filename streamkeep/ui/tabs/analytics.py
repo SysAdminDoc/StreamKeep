@@ -15,7 +15,7 @@ from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 
 from ...theme import CAT
 from ... import db as _db
-from ..widgets import make_metric_card
+from ..widgets import make_empty_state, make_metric_card
 
 
 # ── Chart widgets ───────────────────────────────────────────────────
@@ -297,6 +297,24 @@ def build_analytics_tab(win):
     filter_row.addWidget(win.analytics_range)
     lay.addWidget(filter_card)
 
+    (
+        win.analytics_empty_state,
+        win.analytics_empty_title,
+        win.analytics_empty_body,
+    ) = make_empty_state(
+        "No archive analytics yet",
+        "Complete a download or adopt an existing library; its History entry "
+        "will become the first analytics data point.",
+    )
+    win.analytics_empty_state.setMinimumHeight(190)
+    win.analytics_empty_state.setVisible(False)
+    lay.addWidget(win.analytics_empty_state)
+
+    win.analytics_charts = QWidget()
+    analytics_charts_lay = QVBoxLayout(win.analytics_charts)
+    analytics_charts_lay.setContentsMargins(0, 0, 0, 0)
+    analytics_charts_lay.setSpacing(12)
+
     # Charts row
     charts_row = QHBoxLayout()
     charts_row.setSpacing(12)
@@ -332,7 +350,7 @@ def build_analytics_tab(win):
     win.analytics_platform_chart = DonutChartWidget()
     platform_lay.addWidget(win.analytics_platform_chart)
     charts_row.addWidget(platform_card, 1)
-    lay.addLayout(charts_row)
+    analytics_charts_lay.addLayout(charts_row)
 
     # Top channels
     channels_card = QFrame()
@@ -351,7 +369,8 @@ def build_analytics_tab(win):
     win.analytics_channels_chart = HBarChartWidget()
     win.analytics_channels_chart.setMinimumHeight(160)
     channels_lay.addWidget(win.analytics_channels_chart)
-    lay.addWidget(channels_card)
+    analytics_charts_lay.addWidget(channels_card)
+    lay.addWidget(win.analytics_charts)
 
     lay.addStretch(1)
     return page
@@ -379,6 +398,21 @@ def _refresh_analytics(win):
     # Metric cards
     total = stats["total"]
     win.analytics_total_val.setText(str(total))
+    has_data = bool(total)
+    win.analytics_charts.setVisible(has_data)
+    win.analytics_empty_state.setVisible(not has_data)
+    if not has_data and range_idx:
+        win.analytics_empty_title.setText("No archive activity in this range")
+        win.analytics_empty_body.setText(
+            "Choose All Time to see older downloads, or complete a new download "
+            "to add activity to this range."
+        )
+    elif not has_data:
+        win.analytics_empty_title.setText("No archive analytics yet")
+        win.analytics_empty_body.setText(
+            "Complete a download or adopt an existing library; its History entry "
+            "will become the first analytics data point."
+        )
 
     total_gb = stats["size_gb"]
     win.analytics_size_val.setText(f"{total_gb:.1f} GB")

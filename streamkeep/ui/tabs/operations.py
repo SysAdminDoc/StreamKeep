@@ -30,7 +30,7 @@ from ...operations import (
 from ...i18n import tr
 from ...theme import CAT
 from ...utils import fmt_size
-from ..widgets import make_metric_card, set_accessible, style_table
+from ..widgets import make_empty_state, make_metric_card, set_accessible, style_table
 
 
 def _format_duration(seconds):
@@ -79,6 +79,12 @@ def _refresh_operations(win):
         result = query_operations(_current_filters(win))
     except Exception as error:
         win.operations_table.setRowCount(0)
+        win.operations_table.setVisible(False)
+        win.operations_empty_title.setText("Operations are unavailable")
+        win.operations_empty_body.setText(
+            "Check the local data directory, then press Refresh to try again."
+        )
+        win.operations_empty_state.setVisible(True)
         win.operations_summary.setText("Operations state is temporarily unavailable.")
         win.operations_page_label.setText("Page unavailable")
         win.operations_status.setText(f"Could not read operations: {error}")
@@ -153,6 +159,27 @@ def _refresh_operations(win):
                     state_color = CAT["subtext1"]
                 item.setForeground(QBrush(QColor(state_color)))
             table.setItem(row_index, column, item)
+    has_rows = bool(result.rows)
+    table.setVisible(has_rows)
+    if has_rows:
+        win.operations_empty_state.setVisible(False)
+    else:
+        filters = result.filters
+        has_filters = any((
+            filters.state, filters.source, filters.stage, filters.kind,
+            filters.search,
+        ))
+        win.operations_empty_title.setText(
+            "No operations match these filters"
+            if has_filters else "No durable operations yet"
+        )
+        win.operations_empty_body.setText(
+            "Clear or change a filter, then press Refresh."
+            if has_filters else
+            "Resolve a source on Download or add a channel on Monitor; queued, "
+            "scheduled, and retryable work will appear here."
+        )
+        win.operations_empty_state.setVisible(True)
     table.setSortingEnabled(False)
     table.resizeRowsToContents()
     page_number = result.filters.page + 1
@@ -372,6 +399,15 @@ def build_operations_tab(win):
     )
     win.operations_table.itemSelectionChanged.connect(lambda: _update_operation_actions(win))
     table_lay.addWidget(win.operations_table, 1)
+
+    (
+        win.operations_empty_state,
+        win.operations_empty_title,
+        win.operations_empty_body,
+    ) = make_empty_state("No durable operations yet")
+    win.operations_empty_state.setMinimumHeight(230)
+    win.operations_empty_state.setVisible(False)
+    table_lay.addWidget(win.operations_empty_state, 1)
 
     footer = QHBoxLayout()
     win.operations_page_label = QLabel("Page 1")

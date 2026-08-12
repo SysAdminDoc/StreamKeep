@@ -26,7 +26,9 @@ from ...integrity import IntegrityScrubWorker
 from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
-from ..widgets import ask_premium_confirmation, make_metric_card, style_table
+from ..widgets import (
+    ask_premium_confirmation, make_empty_state, make_metric_card, style_table,
+)
 from ..storage_model import StorageFilterProxyModel, StorageTableModel
 
 
@@ -647,13 +649,17 @@ def build_storage_tab(win):
     )
     card_lay.addWidget(win.storage_table)
 
-    win.storage_empty_label = QLabel(
-        "No recordings found in the scan root. Download something, then "
-        "press Rescan."
+    (
+        win.storage_empty_state,
+        win.storage_empty_title,
+        win.storage_empty_body,
+    ) = make_empty_state(
+        "No recordings found",
+        "Download something or adopt an existing library, then press Rescan.",
     )
-    win.storage_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    win.storage_empty_label.setVisible(False)
-    card_lay.addWidget(win.storage_empty_label)
+    win.storage_empty_state.setMinimumHeight(190)
+    win.storage_empty_state.setVisible(False)
+    card_lay.addWidget(win.storage_empty_state)
 
     lay.addWidget(card, 1)
     return page
@@ -714,7 +720,9 @@ def populate_storage_table(win, scan):
     win.storage_channels_value.setText(str(len(scan.by_channel)))
 
     win.storage_model.set_groups(scan.groups)
-    win.storage_empty_label.setVisible(len(scan.groups) == 0)
+    has_groups = bool(scan.groups)
+    win.storage_table.setVisible(has_groups)
+    win.storage_empty_state.setVisible(not has_groups)
     win.storage_delete_btn.setEnabled(False)
     _apply_storage_filter(win)
     QTimer.singleShot(0, win._schedule_visible_storage_thumbnails)

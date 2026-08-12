@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 from ...utils import default_output_dir as _default_output_dir
 from ...theme import CAT
 from ...i18n import tr, tr_format
-from ..widgets import make_field_block, path_label, style_table
+from ..widgets import make_empty_state, make_field_block, path_label, style_table
 from .download_queue import DownloadQueueMixin
 from .download_vod import DownloadVodMixin
 from .download_finalize import DownloadFinalizeMixin
@@ -507,6 +507,19 @@ def build_download_tab(win):
         )
     )
     vod_main_lay.addWidget(win.vod_table)
+
+    (
+        win.vod_empty_state,
+        win.vod_empty_title,
+        win.vod_empty_body,
+    ) = make_empty_state(
+        "No VODs found",
+        "Try another channel URL, then press Resolve again.",
+        compact=True,
+    )
+    win.vod_empty_state.setMinimumHeight(150)
+    win.vod_empty_state.setVisible(False)
+    vod_main_lay.addWidget(win.vod_empty_state)
 
     vod_btn_row = QHBoxLayout()
     win.vod_load_more_btn = QPushButton("Load more VODs")

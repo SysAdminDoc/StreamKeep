@@ -183,6 +183,10 @@ def test_operations_tab_refresh_passes_the_window_filters(qt_application):
             assert window.operations_summary.text() != (
                 "Operations state is temporarily unavailable."
             )
+            assert window.operations_table.isHidden()
+            assert not window.operations_empty_state.isHidden()
+            assert window.operations_empty_title.text() == "No durable operations yet"
+            assert "Download" in window.operations_empty_body.text()
         finally:
             tab.close()
             window.close()

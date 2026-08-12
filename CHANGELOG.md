@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Empty Operations and VOD results, archive Analytics and Storage, and the
+  data-driven Settings tables now use the shared empty-state card with a clear
+  next action instead of showing unexplained zero metrics or blank grids.
+
 - Batch Rename Studio now exposes a durable **Undo last rename** action in
   History and the notification menu. Undo restores every available directory,
   keeps failed conflicts queued for retry, updates History and manifest paths,

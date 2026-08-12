@@ -36,6 +36,7 @@ from ...utils import (
 )
 from ..widgets import (
     make_dialog_section,
+    make_empty_state,
     make_field_block,
     make_metric_card,
     make_status_banner,
@@ -259,6 +260,18 @@ def build_settings_tab(win):
         accessible_description="Severity-ranked conditions with repair actions.",
     )
     health_lay.addWidget(win.health_table)
+    (
+        win.health_empty_state,
+        win.health_empty_title,
+        win.health_empty_body,
+    ) = make_empty_state(
+        "No active health conditions",
+        "Everything checked is healthy. Run a health check again after changing tools, credentials, or storage.",
+        compact=True,
+    )
+    win.health_empty_state.setFixedHeight(112)
+    win.health_table.setVisible(False)
+    health_lay.addWidget(win.health_empty_state)
     lay.addWidget(health_block)
 
     # ── Card body ───────────────────────────────────────────────────
@@ -618,6 +631,18 @@ def build_settings_tab(win):
         win._on_plugin_selection_changed
     )
     plugin_lay.addWidget(win.plugin_trust_table)
+    (
+        win.plugin_trust_empty_state,
+        win.plugin_trust_empty_title,
+        win.plugin_trust_empty_body,
+    ) = make_empty_state(
+        "No plugins installed",
+        "Add a plugin to the configured plugins directory, then press Refresh plugins.",
+        compact=True,
+    )
+    win.plugin_trust_empty_state.setMinimumHeight(150)
+    win.plugin_trust_empty_state.setVisible(False)
+    plugin_lay.addWidget(win.plugin_trust_empty_state)
 
     plugin_actions = QHBoxLayout()
     plugin_actions.setSpacing(8)
@@ -696,6 +721,18 @@ def build_settings_tab(win):
         win._on_source_adapter_selection_changed
     )
     adapter_lay.addWidget(win.source_adapter_table)
+    (
+        win.source_adapter_empty_state,
+        win.source_adapter_empty_title,
+        win.source_adapter_empty_body,
+    ) = make_empty_state(
+        "No source adapters to review",
+        "Add a .yaml definition to the adapters directory, then press Rescan adapters.",
+        compact=True,
+    )
+    win.source_adapter_empty_state.setMinimumHeight(150)
+    win.source_adapter_empty_state.setVisible(False)
+    adapter_lay.addWidget(win.source_adapter_empty_state)
 
     adapter_actions = QHBoxLayout()
     adapter_actions.setSpacing(8)
@@ -764,6 +801,18 @@ def build_settings_tab(win):
         accessible_name="Per-source download engines",
     )
     engine_lay.addWidget(win.source_engine_table)
+    (
+        win.source_engine_empty_state,
+        win.source_engine_empty_title,
+        win.source_engine_empty_body,
+    ) = make_empty_state(
+        "No source overrides or recent failures",
+        "Automatic engine selection is active. Press Refresh sources after a platform failure to review alternatives.",
+        compact=True,
+    )
+    win.source_engine_empty_state.setMinimumHeight(130)
+    win.source_engine_empty_state.setVisible(False)
+    engine_lay.addWidget(win.source_engine_empty_state)
     engine_actions = QHBoxLayout()
     engine_actions.setSpacing(8)
     win.source_engine_refresh_btn = QPushButton("Refresh sources")
@@ -1779,6 +1828,18 @@ def build_settings_tab(win):
     token_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     token_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
     companion_panel_lay.addWidget(win.companion_tokens_table)
+    (
+        win.companion_tokens_empty_state,
+        win.companion_tokens_empty_title,
+        win.companion_tokens_empty_body,
+    ) = make_empty_state(
+        "No paired clients",
+        "Start the companion, generate a one-time code, and pair the browser extension or web remote.",
+        compact=True,
+    )
+    win.companion_tokens_empty_state.setFixedHeight(170)
+    win.companion_tokens_empty_state.setVisible(False)
+    companion_panel_lay.addWidget(win.companion_tokens_empty_state)
 
     companion_hint = QLabel(
         "The master token is generated with 256 bits and kept in the operating-system secure store. This inventory shows only scoped-token metadata; bearer values are never displayed. Mutating calls are nonce-protected."

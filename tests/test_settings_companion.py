@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QFrame, QTableWidget
 
 from streamkeep.ui.tabs.settings_companion import SettingsCompanionMixin
 
@@ -40,6 +40,7 @@ def test_companion_local_url_and_scoped_token_inventory_are_redacted_ui_data(
     window = SimpleNamespace(
         _companion_server=_Server(),
         companion_tokens_table=QTableWidget(0, 6),
+        companion_tokens_empty_state=QFrame(),
     )
     window._on_revoke_companion_token = mock.Mock()
 
@@ -49,6 +50,8 @@ def test_companion_local_url_and_scoped_token_inventory_are_redacted_ui_data(
     SettingsCompanionMixin._refresh_companion_tokens(window)
     table = window.companion_tokens_table
     assert table.rowCount() == 1
+    assert not table.isHidden()
+    assert window.companion_tokens_empty_state.isHidden()
     assert table.item(0, 0).text() == "Phone"
     assert table.item(0, 1).text() == "queue, status"
     assert table.item(0, 2).text() == "https://remote.example"
@@ -58,6 +61,26 @@ def test_companion_local_url_and_scoped_token_inventory_are_redacted_ui_data(
     table.cellWidget(0, 5).click()
     qt_application.processEvents()
     window._on_revoke_companion_token.assert_called_once_with("token-id")
+
+
+def test_companion_inventory_explains_how_to_pair_when_empty(qt_application):
+    class _Server:
+        port = 4567
+
+        @staticmethod
+        def list_scoped_tokens():
+            return []
+
+    window = SimpleNamespace(
+        _companion_server=_Server(),
+        companion_tokens_table=QTableWidget(0, 6),
+        companion_tokens_empty_state=QFrame(),
+    )
+
+    SettingsCompanionMixin._refresh_companion_tokens(window)
+
+    assert window.companion_tokens_table.isHidden()
+    assert not window.companion_tokens_empty_state.isHidden()
 
 
 def test_companion_pairing_expiration_does_not_clear_a_newer_code():

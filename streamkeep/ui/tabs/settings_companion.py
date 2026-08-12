@@ -303,8 +303,17 @@ class SettingsCompanionMixin:
         table.setRowCount(0)
         srv = getattr(self, "_companion_server", None)
         if srv is None or int(getattr(srv, "port", 0) or 0) <= 0:
+            table.setVisible(False)
+            empty_state = getattr(self, "companion_tokens_empty_state", None)
+            if empty_state is not None:
+                empty_state.setVisible(True)
             return
-        for metadata in srv.list_scoped_tokens():
+        tokens = srv.list_scoped_tokens()
+        table.setVisible(bool(tokens))
+        empty_state = getattr(self, "companion_tokens_empty_state", None)
+        if empty_state is not None:
+            empty_state.setVisible(not tokens)
+        for metadata in tokens:
             row = table.rowCount()
             table.insertRow(row)
             values = (
