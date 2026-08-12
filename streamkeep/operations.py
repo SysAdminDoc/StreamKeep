@@ -558,3 +558,37 @@ def discard_failure_ids(failure_ids: Iterable[int | str]) -> list[dict[str, Any]
             db.mark_failed_job_discarded(failure_id)
         results.append({"failure_id": failure_id, "ok": found})
     return results
+
+
+def restore_discarded_failure_ids(
+    failure_ids: Iterable[int | str],
+) -> list[dict[str, Any]]:
+    """Restore selected discarded failures to manual intervention."""
+    results = []
+    for raw_id in failure_ids:
+        try:
+            failure_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if failure_id <= 0:
+            continue
+        results.append({
+            "failure_id": failure_id,
+            "ok": db.restore_discarded_failed_job(failure_id),
+        })
+    return results
+
+
+def run_failure_action(
+    action: str, failure_ids: Iterable[int | str],
+) -> list[dict[str, Any]]:
+    """Dispatch one bounded failure action shared by REST callers."""
+    handlers = {
+        "retry": retry_failure_ids,
+        "discard": discard_failure_ids,
+        "restore": restore_discarded_failure_ids,
+    }
+    handler = handlers.get(str(action or "").strip().lower())
+    if handler is None:
+        raise ValueError("action must be retry, discard, or restore")
+    return handler(failure_ids)

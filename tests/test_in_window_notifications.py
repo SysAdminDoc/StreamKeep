@@ -187,9 +187,41 @@ def test_clearing_an_empty_buffer_says_there_was_nothing(window):
     window._notifications.clear()
 
     window._on_clear_notifications()
-
     assert statuses and "no notifications" in statuses[-1][0].lower()
 
+
+def test_removed_queue_jobs_can_be_restored_from_notifications(window, monkeypatch):
+    pending = {"job_id": "removed-job", "url": "https://example.test/video"}
+    restored = {**pending, "status": "queued"}
+    window._removed_queue_items_for_undo = [pending]
+    window._download_queue = []
+    monkeypatch.setattr(
+        "streamkeep.ui.main_window._db.enqueue_queue_job",
+        lambda item: dict(restored),
+    )
+    window._persist_config = lambda: None
+    window._refresh_queue_table = lambda: None
+
+    window._on_undo_queue_removal()
+
+    assert window._download_queue == [restored]
+    assert window._removed_queue_items_for_undo == []
+    assert any(
+        "Restored 1 removed queue" in note.text
+        for note in window._notifications.items()
+    )
+
+
+def test_deleted_preset_can_be_restored_from_notifications(window):
+    snapshot = {"extract_audio": True}
+    window._config["pp_presets"] = {}
+    window._preset_change_for_undo = ("Archive copy", snapshot)
+    window._persist_config = lambda: None
+
+    window._on_undo_preset_change()
+
+    assert window._config["pp_presets"]["Archive copy"] == snapshot
+    assert window._preset_change_for_undo is None
 
 def test_a_degraded_search_does_not_claim_no_results(window):
     """An empty result set with a broken index must not read as an empty archive."""

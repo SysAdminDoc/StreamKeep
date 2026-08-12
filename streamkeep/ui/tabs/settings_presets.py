@@ -2,7 +2,6 @@
 
 from ...postprocess import PostProcessor
 from ..widgets import (
-    ask_premium_confirmation,
     ask_premium_text_input,
     show_premium_message,
 )
@@ -163,26 +162,23 @@ def _on_pp_preset_save(win):
         )
         return
     presets = _get_user_presets(win)
-    if name in presets and not ask_premium_confirmation(
-        win,
-        title="Replace the existing preset?",
-        body="Saving again will update this preset with the current post-processing settings.",
-        eyebrow="POST-PROCESSING",
-        badge_text="Overwrite",
-        tone="warning",
-        summary_title=f'"{name}" already exists.',
-        summary_body="Replace it only if these are the settings you want the picker to load next time.",
-        primary_label="Replace preset",
-        secondary_label="Cancel",
-        default_action="secondary",
-    ):
-        return
+    replaced = presets.get(name)
+    if replaced is not None:
+        win._preset_change_for_undo = (name, dict(replaced))
     presets[name] = _pp_snapshot()
     _save_user_presets(win, presets)
     _populate_pp_presets(win)
     idx = win.pp_preset_combo.findData(name)
     if idx >= 0:
         win.pp_preset_combo.setCurrentIndex(idx)
+    action = "Replaced" if replaced is not None else "Saved"
+    win._set_status(f'{action} preset "{name}".', "success")
+    if replaced is not None:
+        win._notify_center(
+            f'Replaced preset "{name}". Use Undo preset change in Notifications '
+            "to restore the previous settings.",
+            "success",
+        )
 
 
 def _on_pp_preset_delete(win):
@@ -191,9 +187,18 @@ def _on_pp_preset_delete(win):
     if not name or name in BUILTIN_PRESETS:
         return
     presets = _get_user_presets(win)
-    presets.pop(name, None)
+    snapshot = presets.pop(name, None)
+    if snapshot is None:
+        return
+    win._preset_change_for_undo = (name, dict(snapshot))
     _save_user_presets(win, presets)
     _populate_pp_presets(win)
+    win._set_status(f'Deleted preset "{name}".', "success")
+    win._notify_center(
+        f'Deleted preset "{name}". Use Undo preset change in Notifications '
+        "to restore it.",
+        "success",
+    )
 
 
 __all__ = [

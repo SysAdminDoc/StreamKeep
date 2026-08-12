@@ -3239,6 +3239,15 @@ class StreamKeep(
         if getattr(self, "_cleared_notifications", None):
             undo_act = menu.addAction("Undo clear")
             undo_act.triggered.connect(self._on_undo_clear_notifications)
+        if getattr(self, "_discarded_operation_failure_ids", None):
+            undo_failures_act = menu.addAction("Undo discarded failures")
+            undo_failures_act.triggered.connect(self._on_undo_discarded_failures)
+        if getattr(self, "_removed_queue_items_for_undo", None):
+            undo_queue_act = menu.addAction("Undo queue removal")
+            undo_queue_act.triggered.connect(self._on_undo_queue_removal)
+        if getattr(self, "_preset_change_for_undo", None):
+            undo_preset_act = menu.addAction("Undo preset change")
+            undo_preset_act.triggered.connect(self._on_undo_preset_change)
         from .rename_dialog import rename_undo_available
         if rename_undo_available():
             rename_undo_act = menu.addAction("Undo last rename")
@@ -3287,6 +3296,64 @@ class StreamKeep(
         self._cleared_notifications = None
         self._refresh_notif_badge()
         self._set_status(f"Restored {len(cleared)} notification(s).", "success")
+
+    def _on_undo_discarded_failures(self):
+        """Return the last discarded failure batch to manual intervention."""
+        from .tabs.operations import undo_discarded_operations
+
+        restored, failed = undo_discarded_operations(self)
+        if not restored and not failed:
+            self._set_status("There are no discarded failures to restore.", "idle")
+            return
+        message = f"Restored {restored} discarded failure(s)."
+        if failed:
+            message += f" {failed} could not be restored."
+        self._notify_center(message, "success" if not failed else "warning")
+
+    def _on_undo_queue_removal(self):
+        """Reinsert the last user-removed queue batch at the durable tail."""
+        pending = list(getattr(self, "_removed_queue_items_for_undo", ()))
+        if not pending:
+            self._set_status("There are no queue jobs to restore.", "idle")
+            return
+        restored = []
+        failed = []
+        for item in pending:
+            try:
+                restored.append(_db.enqueue_queue_job(dict(item)))
+            except Exception as error:
+                failed.append(item)
+                self._log(f"[QUEUE] Could not restore removed job: {error}")
+        self._removed_queue_items_for_undo = failed
+        if restored:
+            self._download_queue.extend(restored)
+            self._persist_config()
+            self._refresh_queue_table()
+        message = f"Restored {len(restored)} removed queue job(s)."
+        if failed:
+            message += f" {len(failed)} could not be restored."
+        self._notify_center(message, "success" if not failed else "warning")
+
+    def _on_undo_preset_change(self):
+        """Restore the custom preset replaced or deleted by the last action."""
+        pending = getattr(self, "_preset_change_for_undo", None)
+        if not pending:
+            self._set_status("There is no preset change to undo.", "idle")
+            return
+        from .tabs.settings_presets import (
+            _get_user_presets,
+            _populate_pp_presets,
+            _save_user_presets,
+        )
+
+        name, snapshot = pending
+        presets = _get_user_presets(self)
+        presets[name] = dict(snapshot)
+        _save_user_presets(self, presets)
+        _populate_pp_presets(self)
+        self._preset_change_for_undo = None
+        self._persist_config()
+        self._notify_center(f'Restored preset "{name}".', "success")
 
     def _on_undo_last_rename(self):
         """Restore the newest durable rename batch and report partial failures."""

@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Queue and custom-preset removals, failed-operation discards, storage
+  recycling, low-space warnings, and maintenance applies now follow the same
+  immediate-action policy. Reversible queue, preset, and failure changes expose
+  Undo through Notifications (and failure discard through the web remote),
+  while irreversible history and credential deletion still require review.
+
 - Empty Operations and VOD results, archive Analytics and Storage, and the
   data-driven Settings tables now use the shared empty-state card with a clear
   next action instead of showing unexplained zero metrics or blank grids.

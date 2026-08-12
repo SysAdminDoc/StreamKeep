@@ -1,5 +1,6 @@
 import json
 import time
+from types import SimpleNamespace
 from unittest import mock
 
 from PyQt6.QtWidgets import QWidget
@@ -117,6 +118,11 @@ def test_operations_actions_persist_and_reappear_after_query(tmp_path):
         failed_rows = operations.query_operations({"state": "failed"}).rows
         assert all(row.item_id != str(discarded_id) for row in failed_rows)
 
+        restored = operations.restore_discarded_failure_ids([discarded_id])
+        assert restored == [{"failure_id": discarded_id, "ok": True}]
+        restored_failure = db.load_failed_job(discarded_id)
+        assert restored_failure["status"] == "intervention"
+
 
 def test_operations_page_stays_bounded_for_one_hundred_thousand_jobs(tmp_path):
     db_path = tmp_path / "library.db"
@@ -190,3 +196,29 @@ def test_operations_tab_refresh_passes_the_window_filters(qt_application):
         finally:
             tab.close()
             window.close()
+
+
+def test_operations_discard_reports_and_exposes_undo(qt_application):
+    from PyQt6.QtWidgets import QLabel
+    from streamkeep.ui.tabs import operations as operations_tab
+
+    notifications = []
+    window = SimpleNamespace(
+        operations_status=QLabel(),
+        _notify_center=lambda message, tone: notifications.append((message, tone)),
+    )
+    with mock.patch.object(
+        operations_tab, "_selected_failure_ids", return_value=[7, 8],
+    ), mock.patch.object(
+        operations_tab,
+        "discard_failure_ids",
+        return_value=[
+            {"failure_id": 7, "ok": True},
+            {"failure_id": 8, "ok": True},
+        ],
+    ), mock.patch.object(operations_tab, "_refresh_operations"):
+        operations_tab._run_operation_action(window, "discard")
+
+    assert window._discarded_operation_failure_ids == [7, 8]
+    assert "Undo discarded failures" in window.operations_status.text()
+    assert notifications[-1][1] == "success"

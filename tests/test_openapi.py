@@ -25,6 +25,10 @@ class OpenApiSpecTests(unittest.TestCase):
             "description"
         ]
         self.assertIn("Sec-Fetch-Site: same-origin", auth_description)
+        actions = spec["paths"]["/api/operations/action"]["post"][
+            "requestBody"
+        ]["content"]["application/json"]["schema"]["properties"]["action"]
+        self.assertEqual(actions["enum"], ["retry", "discard", "restore"])
 
     def test_post_operations_document_mutation_proof_headers(self):
         spec = openapi.build_openapi_spec()

@@ -39,7 +39,6 @@ from ...workers import (
 )
 from ..widgets import (
     PLATFORM_BADGES,
-    ask_premium_confirmation,
     path_label as _path_label,
 )
 from .download_controls import (
@@ -504,33 +503,6 @@ class DownloadSingleMixin:
                 f"Possible duplicate of \"{dup.title}\" ({dup.date}). Download anyway if intentional.",
                 "warning",
             )
-            # Advisory dialog — non-blocking for queue/batch, shown for manual fetches
-            if not self._queue_autostart:
-                details = (
-                    f"Title: {dup.title}\n"
-                    f"Downloaded: {dup.date}\n"
-                    f"Quality: {dup.quality}\n"
-                    f"Size: {dup.size}\n"
-                    f"Location: {dup.path}"
-                )
-                if not ask_premium_confirmation(
-                    self,
-                    title="Possible duplicate found",
-                    body="StreamKeep found a recording in your library that closely matches what you are about to download.",
-                    eyebrow="DOWNLOAD",
-                    badge_text="Potential match",
-                    tone="warning",
-                    summary_title="Downloading again may waste storage and clutter history.",
-                    summary_body="Continue only if you intentionally want another copy or a better variant.",
-                    details_title="Existing recording",
-                    details_body=details,
-                    primary_label="Download anyway",
-                    secondary_label="Skip download",
-                    default_action="secondary",
-                    min_width=640,
-                ):
-                    self._set_status("Download skipped — duplicate detected.", "idle")
-                    return
         elif info.is_live or info.total_secs <= 0:
             self._set_status("Live source ready. Start recording and stop it when you have enough footage.", "success")
         else:
@@ -806,15 +778,11 @@ class DownloadSingleMixin:
         if src_url and not self.stream_info.is_live:
             prev = _db.find_history_by_url(src_url)
             if prev:
-                from PyQt6.QtWidgets import QMessageBox
-                ans = QMessageBox.question(
-                    self, "Already Downloaded",
-                    f"This URL was downloaded on {prev.get('date', '?')}\n"
-                    f"to: {prev.get('path', '?')[:80]}\n\n"
-                    "Download again?",
+                self._set_status(
+                    "Downloading again; this URL was previously saved on "
+                    f"{prev.get('date', '?')}.",
+                    "warning",
                 )
-                if ans != QMessageBox.StandardButton.Yes:
-                    return False
         # Disk-space preflight — catches "no more room on device" before
         # ffmpeg runs for three hours and exits with a muxing error. Only
         # warns when we have a meaningful estimate; lives / unknown-duration

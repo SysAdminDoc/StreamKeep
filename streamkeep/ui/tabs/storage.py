@@ -27,7 +27,7 @@ from ...storage import scan_storage
 from ...theme import CAT
 from ...utils import default_output_dir as _default_output_dir, fmt_size
 from ..widgets import (
-    ask_premium_confirmation, make_empty_state, make_metric_card, style_table,
+    make_empty_state, make_metric_card, style_table,
 )
 from ..storage_model import StorageFilterProxyModel, StorageTableModel
 
@@ -728,34 +728,6 @@ def populate_storage_table(win, scan):
     QTimer.singleShot(0, win._schedule_visible_storage_thumbnails)
 
 
-def prompt_confirm_delete(parent, group_count, total_size, sample_paths):
-    """Confirmation dialog for bulk recycle-bin delete."""
-    details = "\n".join(
-        f"- {os.path.basename(p) or p}" for p in sample_paths[:5]
-    )
-    if len(sample_paths) > 5:
-        details += f"\n- ...and {len(sample_paths) - 5} more"
-    return ask_premium_confirmation(
-        parent,
-        title="Recycle selected recordings?",
-        body=(
-            f"Move {group_count} recording folder(s) totalling {fmt_size(total_size)} "
-            "to the system Recycle Bin."
-        ),
-        eyebrow="STORAGE",
-        badge_text="Reversible",
-        tone="warning",
-        summary_title="Nothing will be permanently deleted inside StreamKeep.",
-        summary_body="You can still restore the folders later from the system Recycle Bin.",
-        details_title="Selected folders",
-        details_body=details,
-        primary_label="Move to Recycle Bin",
-        secondary_label="Cancel",
-        default_action="secondary",
-        min_width=620,
-    )
-
-
 # ── Storage tab handler mixin ────────────────────────────────────────
 
 class StorageTabMixin:
@@ -1057,21 +1029,6 @@ class StorageTabMixin:
         plan = getattr(self, "_adoption_plan", None)
         if plan is None:
             return
-        if not ask_premium_confirmation(
-            self,
-            title="Apply external library adoption?",
-            body=(
-                "Add only the ADOPT rows from the current preview. "
-                "StreamKeep creates a backup and never moves or rewrites media."
-            ),
-            eyebrow="ADOPTION", badge_text="Backup first", tone="warning",
-            summary_title="Existing files stay in place.",
-            summary_body="If the library changed since preview, the batch is refused.",
-            details_title="Preview", details_body=self.adoption_summary.text(),
-            primary_label="Create Backup and Apply", secondary_label="Cancel",
-            default_action="secondary", min_width=680,
-        ):
-            return
         self._set_adoption_running(True)
         self._set_status("Applying external library adoption in the background.", "working")
         worker = _AdoptionWorker(
@@ -1260,31 +1217,14 @@ class StorageTabMixin:
         if plan is None:
             return
         approved = []
-        details = []
         for index in range(self.maintenance_tree.topLevelItemCount()):
             item = self.maintenance_tree.topLevelItem(index)
             if item.checkState(0) == Qt.CheckState.Checked:
                 approved.append(str(item.data(0, Qt.ItemDataRole.UserRole)))
-                details.append(f"- {item.text(1)}: {item.text(2)}")
         if not approved:
             self._set_status("Select at least one maintenance action to apply.", "warning")
             return
         is_retemplate = getattr(self, "_maintenance_mode", "maintenance") == "retemplate"
-        if not ask_premium_confirmation(
-            self,
-            title=("Apply approved archive re-template?" if is_retemplate
-                   else "Apply approved archive maintenance?"),
-            body=(f"Apply {len(approved)} selected action(s) from the current preview. "
-                  "StreamKeep creates a backup first and records every outcome."),
-            eyebrow=("RE-TEMPLATE" if is_retemplate else "MAINTENANCE"),
-            badge_text="Backup first", tone="warning",
-            summary_title="Only checked actions will run.",
-            summary_body="If the library changed since preview, the batch is refused.",
-            details_title="Approved actions", details_body="\n".join(details),
-            primary_label="Create Backup and Apply", secondary_label="Cancel",
-            default_action="secondary", min_width=680,
-        ):
-            return
         self._set_maintenance_running(True)
         self._set_status("Applying approved maintenance in the background.", "working")
         if is_retemplate:
@@ -1406,9 +1346,6 @@ class StorageTabMixin:
         if not targets:
             return
         total_size = sum(g.total_size for g in targets)
-        sample_paths = [g.dir_path for g in targets]
-        if not prompt_confirm_delete(self, len(targets), total_size, sample_paths):
-            return
         try:
             from send2trash import send2trash as _send2trash
         except ImportError:
@@ -1454,6 +1391,12 @@ class StorageTabMixin:
             f"Recycled {recycled} of {len(targets)} folder(s).",
             "success" if recycled == len(targets) else "warning",
         )
+        if recycled:
+            self._notify_center(
+                f"Recycled {recycled} recording folder(s). Restore them from "
+                "the system Recycle Bin if needed.",
+                "success" if recycled == len(targets) else "warning",
+            )
         self._on_storage_rescan()
 
     def _on_storage_thumb_ready(self, row_key, pix):

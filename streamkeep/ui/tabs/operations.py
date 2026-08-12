@@ -24,6 +24,7 @@ from ...operations import (
     OperationsFilters,
     discard_failure_ids,
     query_operations,
+    restore_discarded_failure_ids,
     retry_failure_ids,
     write_operations_report,
 )
@@ -214,10 +215,38 @@ def _run_operation_action(win, action):
     else:
         results = discard_failure_ids(failure_ids)
     succeeded = sum(1 for result in results if result.get("ok"))
-    win.operations_status.setText(
-        f"{action.title()}ed {succeeded} of {len(failure_ids)} selected failure(s)."
-    )
     _refresh_operations(win)
+    if action == "discard":
+        restored_ids = [
+            result["failure_id"] for result in results if result.get("ok")
+        ]
+        message = (
+            f"Discarded {succeeded} of {len(failure_ids)} selected failure(s)."
+        )
+        if restored_ids:
+            win._discarded_operation_failure_ids = restored_ids
+            message += " Use Undo discarded failures in Notifications to restore them."
+            win._notify_center(message, "success")
+    else:
+        message = (
+            f"Retried {succeeded} of {len(failure_ids)} selected failure(s)."
+        )
+    win.operations_status.setText(message)
+
+
+def undo_discarded_operations(win):
+    """Restore the last desktop discard batch for a notification-menu undo."""
+    failure_ids = list(getattr(win, "_discarded_operation_failure_ids", ()))
+    if not failure_ids:
+        return 0, 0
+    results = restore_discarded_failure_ids(failure_ids)
+    restored = sum(1 for result in results if result.get("ok"))
+    failed_ids = [
+        result["failure_id"] for result in results if not result.get("ok")
+    ]
+    win._discarded_operation_failure_ids = []
+    _refresh_operations(win)
+    return restored, len(failed_ids)
 
 
 def _export_operations(win):

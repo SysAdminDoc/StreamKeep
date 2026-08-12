@@ -1,6 +1,6 @@
 """Queue, scheduling, and failure-recovery handlers for the Download tab."""
 
-from ...capabilities import resolve_source_engine
+import copy
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
+
+from ...capabilities import resolve_source_engine
 
 from ... import db as _db
 from ...extractors import YtDlpExtractor
@@ -45,7 +47,7 @@ from ...upgrade import (
 )
 from ...i18n import TranslatableDialog, tr
 from ...retry import failure_remediation
-from ..widgets import ask_premium_confirmation, ask_premium_text_input
+from ..widgets import ask_premium_text_input
 
 
 def _as_int(value, default=0):
@@ -305,22 +307,9 @@ class DownloadQueueMixin:
         if not removable:
             self._set_status("Queue is already empty.", "info")
             return
-        if len(removable) > 1 and not ask_premium_confirmation(
-            self,
-            title="Clear the download queue?",
-            body=(
-                f"Remove {len(removable)} queued job(s). Any download in progress "
-                "keeps running."
-            ),
-            eyebrow="QUEUE",
-            badge_text="Cannot be undone",
-            tone="warning",
-            primary_label="Clear queue",
-            secondary_label="Cancel",
-            default_action="secondary",
-        ):
-            return
+        snapshots = [(item, copy.deepcopy(item)) for item in removable]
         removed = self._remove_queue_items_durably(removable)
+        self._remember_removed_queue_items(snapshots)
         if removed != len(removable):
             self._set_status(
                 "Some jobs changed in another StreamKeep process and were kept.",
@@ -328,7 +317,26 @@ class DownloadQueueMixin:
             )
         self._persist_config()
         self._refresh_queue_table()
-        self._set_status("Queue cleared.", "success")
+        self._set_status(
+            f"Removed {removed} queue job(s). Undo is available in Notifications.",
+            "success" if removed else "warning",
+        )
+
+    def _remember_removed_queue_items(self, snapshots):
+        """Expose successfully removed queue rows to the notification-menu undo."""
+        remaining = {id(item) for item in self._download_queue}
+        removed = [
+            snapshot for original, snapshot in snapshots
+            if id(original) not in remaining
+        ]
+        if not removed:
+            return
+        self._removed_queue_items_for_undo = removed
+        self._notify_center(
+            f"Removed {len(removed)} queue job(s). Use Undo queue removal "
+            "in Notifications to restore them.",
+            "success",
+        )
 
 
     # ── Queue management ────────────────────────────────────────
@@ -659,6 +667,7 @@ class DownloadQueueMixin:
             if item is self._queue_active_item or item.get("status") in ("fetching", "downloading"):
                 self._set_status("The active queue job cannot be removed while it is running.", "warning")
                 return None
+            snapshots = [(item, copy.deepcopy(item))]
             removed = self._remove_queue_items_durably([item])
             if not removed:
                 latest = _db.load_queue_job(str(item.get("job_id", "") or ""))
@@ -669,6 +678,7 @@ class DownloadQueueMixin:
                     "warning",
                 )
                 return None
+            self._remember_removed_queue_items(snapshots)
             self._persist_config()
             if hasattr(self, "queue_table"):
                 self._refresh_queue_table()
@@ -1669,7 +1679,9 @@ class DownloadQueueMixin:
             if item.get("_ui_selected", True) and item.get("status", "queued") not in locked
         ]
         selected = [self._download_queue[index] for index in removable]
+        snapshots = [(item, copy.deepcopy(item)) for item in selected]
         removed = self._remove_queue_items_durably(selected)
+        self._remember_removed_queue_items(snapshots)
         if removed:
             self._queue_status_changed()
         self._set_status(
@@ -2196,9 +2208,7 @@ class DownloadQueueMixin:
         return 0
 
     def _preflight_disk_space(self):
-        """Show a confirm dialog when the estimated download size is more
-        than 80% of free space. Returns True if the user wants to proceed
-        (or the check is inapplicable), False to abort.
+        """Warn when the estimate exceeds 80% of free space without blocking.
 
         Lives and unknown-duration streams pass through silently since we
         can't estimate them meaningfully.
@@ -2211,29 +2221,14 @@ class DownloadQueueMixin:
                 return True
             if estimate <= free * 0.8:
                 return True
-            return ask_premium_confirmation(
-                self,
-                title="Low free space on the output drive",
-                body=(
-                    f"This download may need about {_fmt_size(estimate)}, but only "
-                    f"{_fmt_size(free)} is currently free in the output location."
-                ),
-                eyebrow="PREFLIGHT",
-                badge_text="Capacity risk",
-                tone="warning",
-                summary_title="Continuing could leave you with a partial or failed download.",
-                summary_body="Free up space first if you want the safest path.",
-                details_title="Capacity estimate",
-                details_body=(
-                    f"Estimated download size: {_fmt_size(estimate)}\n"
-                    f"Free space available: {_fmt_size(free)}\n"
-                    f"Output folder: {out_dir}"
-                ),
-                primary_label="Continue anyway",
-                secondary_label="Cancel",
-                default_action="secondary",
-                min_width=620,
+            message = (
+                f"Low free space: this download may need {_fmt_size(estimate)}, "
+                f"but only {_fmt_size(free)} is free. It will continue and may "
+                "finish partially; pause it and free space if needed."
             )
+            self._log(f"[PREFLIGHT] {message} Output folder: {out_dir}")
+            self._notify_center(message, "warning")
+            return True
         except Exception as e:
             self._log(f"[PREFLIGHT] disk-space check failed: {e}")
             return True
@@ -2498,6 +2493,7 @@ class DownloadQueueMixin:
 
     def _discard_failed_job(self, job_id):
         _db.mark_failed_job_discarded(job_id)
+        self._discarded_operation_failure_ids = [int(job_id)]
         removed = 0
         kept = []
         for q in self._download_queue:
@@ -2510,7 +2506,12 @@ class DownloadQueueMixin:
                 q for q in self._download_queue if q not in kept
             ])
             self._queue_status_changed()
-        self._set_status("Failed-job recovery item discarded.", "success")
+        message = (
+            "Failed-job recovery item discarded. Use Undo discarded failures "
+            "in Notifications to restore it."
+        )
+        self._set_status(message, "success")
+        self._notify_center(message, "success")
 
     def _release_queue_item(self, status=None, note=""):
         item = self._queue_active_item

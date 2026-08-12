@@ -3122,6 +3122,27 @@ def mark_failed_job_discarded(job_id: int) -> None:
             db.close()
 
 
+def restore_discarded_failed_job(job_id: int) -> bool:
+    """Return one discarded failure to manual intervention."""
+    if not job_id:
+        return False
+    with _write_lock:
+        db = _connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute("""
+                UPDATE failed_jobs SET status='intervention', updated_at=?
+                 WHERE id=? AND status='discarded'
+            """, (_utc_now_iso(), int(job_id)))
+            db.commit()
+            return result.rowcount == 1
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
 def mark_failed_job_resolved(job_id: int) -> None:
     """Mark a failed job resolved after a successful retry."""
     if not job_id:

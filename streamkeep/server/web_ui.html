@@ -24,6 +24,7 @@ button:disabled{cursor:wait;opacity:.65}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
   clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .status-region{min-height:1.4em;color:#a6e3a1;margin:4px 0 8px}
+.status-region button{margin-left:8px;padding:4px 9px}
 .status-region.error{color:#f38ba8}
 .status-region.offline{color:#fab387}
 .panel-list[aria-busy="true"]{opacity:.65}
@@ -79,7 +80,10 @@ button:disabled{cursor:wait;opacity:.65}
 </main>
 <main id="app" aria-labelledby="app-title">
 <h1 id="app-title">{{t:app_title}}</h1>
-<div class="status-region" id="app-status" role="status" aria-live="polite"></div>
+<div class="status-region" id="app-status" role="status" aria-live="polite">
+  <span id="app-status-text"></span>
+  <button type="button" id="undo-failure" hidden onclick="undoDiscardFailure()"></button>
+</div>
 <div class="tab-bar" role="tablist" aria-label="{{t:remote_navigation}}">
 <button id="tab-status-button" type="button" role="tab" aria-selected="true" aria-controls="tab-status" tabindex="0" class="active" onclick="switchTab('status',this)">{{t:status}}</button>
 <button id="tab-queue-button" type="button" role="tab" aria-selected="false" aria-controls="tab-queue" tabindex="-1" onclick="switchTab('queue',this)">{{t:add_url}}</button>
@@ -199,10 +203,13 @@ function renderItems(el,items,empty,renderFn){
   if(!items||!items.length){el.innerHTML='<p class="empty">'+empty+'</p>';return;}
   el.innerHTML=items.map(renderFn).join('');
 }
+let pendingFailureUndo=0;
 function setAppStatus(message,state){
   const status=document.getElementById('app-status');
   status.className='status-region'+(state?' '+state:'');
-  status.textContent=message||'';
+  document.getElementById('app-status-text').textContent=message||'';
+  const undo=document.getElementById('undo-failure');
+  undo.hidden=!pendingFailureUndo;undo.textContent=T('undo');
 }
 function failureText(error){
   if(navigator.onLine===false)return T('remote_offline');
@@ -227,9 +234,20 @@ function cancelFailureRetry(id){
 }
 function discardFailure(id){
   api('/api/failures/discard',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({id})}).then(()=>refresh());
+    body:JSON.stringify({id})}).then(()=>{
+      pendingFailureUndo=Number(id||0);refresh(T('failure_discarded'));
+    });
 }
-function refresh(){
+function undoDiscardFailure(){
+  const id=pendingFailureUndo;if(!id)return;
+  api('/api/operations/action',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'restore',failure_ids:[id]})}).then(d=>{
+      if(!d.results||!d.results[0]||!d.results[0].ok)
+        throw new Error(T('failure_restore_failed'));
+      pendingFailureUndo=0;refresh(T('failure_restored'));
+    }).catch(e=>setAppStatus(failureText(e),'error'));
+}
+function refresh(successMessage){
   const statusPanels=['dl-list','q-list','worker-list','resume-list','failure-list'];
   markBusy(statusPanels.concat(['lib-list','mon-list']));
   setAppStatus(T('loading'),'');
@@ -263,7 +281,8 @@ function refresh(){
         (i.auto_retry?'<button type="button" onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
         '<button type="button" onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
     if(navigator.onLine===false)setAppStatus(T('remote_offline'),'offline');
-    else setAppStatus('','');
+    else setAppStatus(successMessage||
+      (pendingFailureUndo?T('failure_discarded'):''),successMessage?'success':'');
   }).catch(e=>{
     const state=navigator.onLine===false?'offline':'error';
     setAppStatus(failureText(e),state);

@@ -1428,7 +1428,7 @@ def _build_handler(
             self._json_response(200, {"ok": True, "report": report})
 
         def _handle_api_operations_action(self):
-            from ..operations import discard_failure_ids, retry_failure_ids
+            from ..operations import run_failure_action
 
             data = self._read_body()
             action = str(data.get("action") or "").strip().lower()
@@ -1438,13 +1438,11 @@ def _build_handler(
             if not isinstance(raw_ids, list):
                 raw_ids = [raw_ids]
             raw_ids = raw_ids[:100]
-            if action == "retry":
-                results = retry_failure_ids(raw_ids)
-            elif action == "discard":
-                results = discard_failure_ids(raw_ids)
-            else:
+            try:
+                results = run_failure_action(action, raw_ids)
+            except ValueError as error:
                 self._json_response(400, {
-                    "ok": False, "err": "action must be retry or discard",
+                    "ok": False, "err": str(error),
                 })
                 return
             self._json_response(200, {

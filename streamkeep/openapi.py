@@ -1255,13 +1255,16 @@ def build_openapi_spec(version=VERSION, *, server_url="http://127.0.0.1:8787"):
             },
             "/api/operations/action": {
                 "post": {
-                    "summary": "Retry or discard up to 100 selected failures.",
+                    "summary": "Retry, discard, or restore up to 100 selected failures.",
                     "tags": ["operations"],
                     "security": bearer,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": {
                         "type": "object",
                         "properties": {
-                            "action": {"type": "string", "enum": ["retry", "discard"]},
+                            "action": {
+                                "type": "string",
+                                "enum": ["retry", "discard", "restore"],
+                            },
                             "failure_ids": {"type": "array", "items": {"type": "integer"}},
                         },
                         "required": ["action", "failure_ids"],

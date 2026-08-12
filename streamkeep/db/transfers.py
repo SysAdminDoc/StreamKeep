@@ -14,6 +14,7 @@ _EXPORTED = frozenset({
     "request_intelligence_cancel", "recover_intelligence_jobs", "save_failed_job",
     "load_failed_jobs", "load_failed_job", "mark_failed_job_retrying",
     "mark_failed_job_discarded", "mark_failed_job_resolved",
+    "restore_discarded_failed_job",
     "mark_failed_jobs_resolved_for_url", "load_due_failed_jobs",
     "promote_failed_job_retry", "promote_due_failed_jobs",
     "cancel_failed_job_retry", "load_retry_circuits", "load_backup_state",

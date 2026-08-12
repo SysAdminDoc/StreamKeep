@@ -339,12 +339,17 @@ class LocalServerTests(unittest.TestCase):
         with self._open("/?lang=en") as response:
             html = response.read().decode("utf-8")
 
-        self.assertIn("else setAppStatus('','');", html)
+        self.assertIn("else setAppStatus(successMessage||", html)
+        self.assertIn("pendingFailureUndo?T('failure_discarded')", html)
         self.assertIn("status.className='status-region'+(state?' '+state:'');", html)
         self.assertIn("el.setAttribute('aria-busy','false');", html)
         self.assertIn("renderPanelError(\n    document.getElementById('lib-list')", html)
         self.assertIn("renderPanelError(\n    document.getElementById('mon-list')", html)
         self.assertIn("navigator.onLine===false", html)
+        self.assertIn("pendingFailureUndo=Number(id||0)", html)
+        self.assertIn("function undoDiscardFailure()", html)
+        self.assertIn("action:'restore'", html)
+        self.assertIn("Failure discarded.", html)
         self.assertIn("window.addEventListener('offline'", html)
         self.assertIn("window.addEventListener('online'", html)
         self.assertIn("StreamKeep is unreachable. Check your connection.", html)
@@ -1353,6 +1358,18 @@ class LocalServerTests(unittest.TestCase):
                         server=operations_server,
                         token=operations_server.token,
                     )
+                    restore, restore_status = self._open_json(
+                        "/api/operations/action",
+                        server=operations_server,
+                        token=operations_server.token,
+                        method="POST",
+                        data={"action": "restore", "failure_ids": [failure_id]},
+                    )
+                    after_restore, _ = self._open_json(
+                        "/api/operations?state=failed",
+                        server=operations_server,
+                        token=operations_server.token,
+                    )
                 finally:
                     operations_server.stop()
 
@@ -1368,6 +1385,10 @@ class LocalServerTests(unittest.TestCase):
             self.assertNotIn("url", json.dumps(report_response))
             self.assertEqual(action_status, 200)
             self.assertTrue(action["results"][0]["ok"])
+            self.assertEqual(after["total_count"], 0)
+            self.assertEqual(restore_status, 200)
+            self.assertTrue(restore["results"][0]["ok"])
+            self.assertEqual(after_restore["total_count"], 1)
             self.assertEqual(after["total_count"], 0)
 
     # ── Clip-range handoff ──────────────────────────────────────────
