@@ -411,12 +411,20 @@ def add_to_collection(db, path, name, *, position=None):
     collection_id = get_or_create_collection(db, name)
     key = str(path)
     if position is None:
-        row = db.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM collection_members "
-            "WHERE collection_id=?",
-            (collection_id,),
+        existing = db.execute(
+            "SELECT position FROM collection_members "
+            "WHERE collection_id=? AND recording_path=?",
+            (collection_id, key),
         ).fetchone()
-        position = int(row[0] if row else 0)
+        if existing is not None:
+            position = int(existing[0])
+        else:
+            row = db.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM collection_members "
+                "WHERE collection_id=?",
+                (collection_id,),
+            ).fetchone()
+            position = int(row[0] if row else 0)
     db.execute(
         "INSERT OR REPLACE INTO collection_members "
         "(collection_id, recording_path, position) VALUES (?, ?, ?)",

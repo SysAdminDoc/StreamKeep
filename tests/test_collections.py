@@ -47,9 +47,33 @@ def test_adding_to_one_collection_does_not_remove_the_others(tagdb):
 
 def test_membership_is_idempotent(tagdb):
     tags.add_to_collection(tagdb, "/media/a.mp4", "Tutorials")
+    collection_id = tags.get_or_create_collection(tagdb, "Tutorials")
+    original_position = tagdb.execute(
+        "SELECT position FROM collection_members "
+        "WHERE collection_id=? AND recording_path=?",
+        (collection_id, "/media/a.mp4"),
+    ).fetchone()[0]
     tags.add_to_collection(tagdb, "/media/a.mp4", "Tutorials")
 
     assert tags.get_collection_members(tagdb, "Tutorials") == ["/media/a.mp4"]
+    current_position = tagdb.execute(
+        "SELECT position FROM collection_members "
+        "WHERE collection_id=? AND recording_path=?",
+        (collection_id, "/media/a.mp4"),
+    ).fetchone()[0]
+    assert current_position == original_position
+
+
+def test_readding_member_without_position_preserves_operator_order(tagdb):
+    tags.add_to_collection(tagdb, "/media/a.mp4", "Ordered", position=0)
+    tags.add_to_collection(tagdb, "/media/b.mp4", "Ordered", position=1)
+    tags.add_to_collection(tagdb, "/media/c.mp4", "Ordered", position=2)
+
+    tags.add_to_collection(tagdb, "/media/a.mp4", "Ordered")
+
+    assert tags.get_collection_members(tagdb, "Ordered") == [
+        "/media/a.mp4", "/media/b.mp4", "/media/c.mp4",
+    ]
 
 
 def test_removing_one_membership_leaves_the_rest(tagdb):

@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Re-adding an existing collection member without an explicit position now
+  preserves its curated order; callers can still move it by supplying a new
+  position.
+
 - Release artifact smoke checks now exercise the real bounded startup work:
   scheduler application, resume discovery, transcript indexing, companion
   configuration, and health probing report independent outcomes. Network
