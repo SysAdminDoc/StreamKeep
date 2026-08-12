@@ -324,6 +324,20 @@ def test_main_window_tabs_dialogs_and_language_smoke(tmp_path, qt_application):
             ]
             settings_page = window._stack.widget(5).widget()
             assert settings_page.property("responsiveLayout") is True
+            settings_labels = {
+                label.text() for label in settings_page.findChildren(QLabel)
+            }
+            assert "Recycle recordings older than" in settings_labels
+            assert "GB (recycle oldest first when exceeded)" in settings_labels
+            assert window.lc_watched_check.text() == (
+                "Recycle watched recordings automatically"
+            )
+            assert window.lc_max_days_spin.minimumWidth() >= 120
+            assert window.lc_max_gb_spin.minimumWidth() >= 120
+            assert any(
+                "Files stay recoverable through the Recycle Bin" in text
+                for text in settings_labels
+            )
             window.settings_search.setText("rate_limit")
             qt_application.processEvents()
             assert not window.rate_limit_input.isHidden()

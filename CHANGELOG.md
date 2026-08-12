@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Automatic-retention settings now consistently say "Recycle," explain that
+  files remain recoverable through the Recycle Bin, and avoid implying that
+  unattended cleanup permanently deletes recordings.
+
 - Twitch and Kick chat capture now rejects unterminated or oversized transport
   input under explicit memory bounds, including fragmented WebSocket messages,
   and reports the endpoint failure through the existing capture log.

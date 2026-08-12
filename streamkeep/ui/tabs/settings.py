@@ -20,7 +20,7 @@ from ...extractors import Extractor
 from ...extractors.twitch import TwitchExtractor
 from ...extractors.ytdlp import YtDlpExtractor, ytdlp_runtime_status
 from ...http import set_native_proxy
-from ...i18n import available_languages
+from ...i18n import available_languages, tr_format
 from ...paths import CONFIG_FILE
 from ...postprocess import (
     AUDIO_CODECS, AUDIO_CONTAINERS, PostProcessor,
@@ -2566,9 +2566,18 @@ def build_settings_tab(win):
     from ...lifecycle import DEFAULT_POLICY
     lc_block, lc_lay = make_field_block(
         "Auto-Cleanup Lifecycle",
-        "Automatically recycle old or watched recordings to reclaim disk space. "
-        "Always uses the recycle bin — never permanent delete.",
+        tr_format(
+            "Automatically recycle old or watched recordings to reclaim disk space."
+        ),
     )
+    win.lc_recycle_hint = QLabel(
+        tr_format(
+            "Files stay recoverable through the Recycle Bin until you empty it."
+        )
+    )
+    win.lc_recycle_hint.setObjectName("fieldHint")
+    win.lc_recycle_hint.setWordWrap(True)
+    lc_lay.addWidget(win.lc_recycle_hint)
     lc_cfg = win._config.get("lifecycle", dict(DEFAULT_POLICY))
     win.lc_enable_check = QCheckBox("Enable auto-cleanup after each download")
     win.lc_enable_check.setChecked(bool(lc_cfg.get("enabled")))
@@ -2576,12 +2585,12 @@ def build_settings_tab(win):
 
     lc_days_row = QHBoxLayout()
     lc_days_row.setSpacing(8)
-    lc_days_row.addWidget(QLabel("Delete recordings older than"))
+    lc_days_row.addWidget(QLabel(tr_format("Recycle recordings older than")))
     win.lc_max_days_spin = QSpinBox()
     win.lc_max_days_spin.setRange(0, 9999)
     win.lc_max_days_spin.setValue(int(lc_cfg.get("max_days", 0) or 0))
     win.lc_max_days_spin.setSpecialValueText("disabled")
-    win.lc_max_days_spin.setFixedWidth(80)
+    win.lc_max_days_spin.setMinimumWidth(120)
     lc_days_row.addWidget(win.lc_max_days_spin)
     lc_days_row.addWidget(QLabel("days"))
     lc_days_row.addStretch(1)
@@ -2594,9 +2603,11 @@ def build_settings_tab(win):
     win.lc_max_gb_spin.setRange(0, 99999)
     win.lc_max_gb_spin.setValue(int(lc_cfg.get("max_total_gb", 0) or 0))
     win.lc_max_gb_spin.setSpecialValueText("unlimited")
-    win.lc_max_gb_spin.setFixedWidth(80)
+    win.lc_max_gb_spin.setMinimumWidth(120)
     lc_gb_row.addWidget(win.lc_max_gb_spin)
-    lc_gb_row.addWidget(QLabel("GB (remove oldest first when exceeded)"))
+    lc_gb_row.addWidget(
+        QLabel(tr_format("GB (recycle oldest first when exceeded)"))
+    )
     lc_gb_row.addStretch(1)
     lc_lay.addLayout(lc_gb_row)
 
@@ -2607,13 +2618,15 @@ def build_settings_tab(win):
     win.lc_keep_last_spin.setRange(0, 9999)
     win.lc_keep_last_spin.setValue(int(lc_cfg.get("keep_last_per_source", 0) or 0))
     win.lc_keep_last_spin.setSpecialValueText("all")
-    win.lc_keep_last_spin.setFixedWidth(80)
+    win.lc_keep_last_spin.setMinimumWidth(120)
     lc_keep_row.addWidget(win.lc_keep_last_spin)
     lc_keep_row.addWidget(QLabel("recordings per source channel"))
     lc_keep_row.addStretch(1)
     lc_lay.addLayout(lc_keep_row)
 
-    win.lc_watched_check = QCheckBox("Delete watched recordings automatically")
+    win.lc_watched_check = QCheckBox(
+        tr_format("Recycle watched recordings automatically")
+    )
     win.lc_watched_check.setChecked(bool(lc_cfg.get("delete_watched")))
     lc_lay.addWidget(win.lc_watched_check)
     win.lc_fav_exempt_check = QCheckBox("Favorited recordings are exempt from cleanup")
