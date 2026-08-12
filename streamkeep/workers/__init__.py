@@ -10,6 +10,7 @@ from .backup import ScheduledBackupWorker
 from .raw_capture import RawCaptureWorker
 from .index import RecordingIndexWorker
 from .salvage import SalvageWorker
+from .query import QueryWorker
 
 __all__ = [
     "FetchWorker",
@@ -24,4 +25,5 @@ __all__ = [
     "RawCaptureWorker",
     "RecordingIndexWorker",
     "SalvageWorker",
+    "QueryWorker",
 ]

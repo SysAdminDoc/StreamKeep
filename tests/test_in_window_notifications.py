@@ -225,15 +225,21 @@ def test_deleted_preset_can_be_restored_from_notifications(window):
 
 def test_a_degraded_search_does_not_claim_no_results(window):
     """An empty result set with a broken index must not read as an empty archive."""
-    source = (
-        __import__("pathlib").Path("streamkeep/ui/main_window.py")
-        .read_text(encoding="utf-8")
+    window._global_search_generation = 7
+
+    window._apply_global_search_results(
+        7,
+        {
+            "items": [],
+            "errors": [("transcript", "index unavailable")],
+        },
     )
-    assert "transcript search is unavailable" in source, (
+
+    assert window._global_results.count() == 1
+    assert "transcript search is unavailable" in window._global_results.item(0).text(), (
         "the no-results branch must distinguish a broken index from an "
         "empty archive"
     )
-    assert "degraded = False" in source and "degraded = True" in source
 
 
 def test_the_toast_overlay_survives_a_missing_body_label(overlay):

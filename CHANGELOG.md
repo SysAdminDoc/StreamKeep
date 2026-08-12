@@ -4,6 +4,10 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Global archive search and Analytics refreshes now run on supersedable
+  background workers with visible activity status, so large libraries no
+  longer stall the window and late results cannot overwrite a newer query.
+
 - The retired aria2c external-downloader option has been removed. Existing
   aria2c connection/split settings migrate once to StreamKeep's built-in
   parallel downloader with a visible log notice.

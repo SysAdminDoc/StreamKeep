@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 
 from ...theme import CAT
 from ... import db as _db
+from ...workers.query import QueryWorker
 from ..widgets import make_empty_state, make_metric_card
 
 
@@ -377,10 +378,8 @@ def build_analytics_tab(win):
 
 
 def _refresh_analytics(win):
-    """Recalculate analytics with bounded SQLite aggregate queries."""
+    """Refresh analytics off-thread and discard superseded results."""
     range_idx = win.analytics_range.currentIndex() if hasattr(win, "analytics_range") else 0
-
-    # Date filter
     now = datetime.now()
     cutoff = None
     if range_idx == 1:
@@ -393,7 +392,47 @@ def _refresh_analytics(win):
         cutoff = datetime(now.year, 1, 1)
 
     cutoff_text = cutoff.strftime("%Y-%m-%d") if cutoff else ""
-    stats = _db.history_analytics(cutoff_text)
+    generation = int(getattr(win, "_analytics_generation", 0)) + 1
+    win._analytics_generation = generation
+    workers = getattr(win, "_analytics_workers", None)
+    if workers is None:
+        workers = {}
+        win._analytics_workers = workers
+    for worker in workers.values():
+        worker.cancel()
+
+    worker = QueryWorker(
+        generation,
+        lambda: _db.history_analytics(cutoff_text),
+    )
+    workers[generation] = worker
+    begin_busy = getattr(win, "_begin_background_activity", None)
+    busy_done = (
+        begin_busy("Refreshing archive analytics…")
+        if callable(begin_busy) else lambda: None
+    )
+    worker.succeeded.connect(
+        lambda token, stats: _apply_analytics_result(
+            win, token, range_idx, stats,
+        )
+    )
+    worker.failed.connect(
+        lambda token, error: _show_analytics_error(win, token, error)
+    )
+
+    def finish():
+        workers.pop(generation, None)
+        busy_done()
+
+    worker.finished.connect(finish)
+    worker.start()
+    return worker
+
+
+def _apply_analytics_result(win, generation, range_idx, stats):
+    """Render a current analytics result on the UI thread."""
+    if generation != getattr(win, "_analytics_generation", 0):
+        return
 
     # Metric cards
     total = stats["total"]
@@ -451,6 +490,19 @@ def _refresh_analytics(win):
         chan_counts,
         title="Top Channels"
     )
+
+
+def _show_analytics_error(win, generation, error):
+    """Expose a current analytics failure instead of leaving stale metrics."""
+    if generation != getattr(win, "_analytics_generation", 0):
+        return
+    win.analytics_charts.setVisible(False)
+    win.analytics_empty_state.setVisible(True)
+    win.analytics_empty_title.setText("Analytics unavailable")
+    win.analytics_empty_body.setText(str(error or "The archive query failed."))
+    notify = getattr(win, "_notify_center", None)
+    if callable(notify):
+        notify(f"Analytics refresh failed: {error}", "warning")
 
 
 def _parse_size_gb(s):

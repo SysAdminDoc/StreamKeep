@@ -33,13 +33,18 @@ def test_analytics_explains_an_empty_archive_and_selected_range(qt_application):
     }
     try:
         with mock.patch.object(analytics._db, "history_analytics", return_value=empty_stats):
-            analytics._refresh_analytics(window)
+            worker = analytics._refresh_analytics(window)
+            assert worker.wait(5000)
+            qt_application.processEvents()
             assert not window.analytics_empty_state.isHidden()
             assert window.analytics_charts.isHidden()
             assert window.analytics_empty_title.text() == "No archive analytics yet"
             assert "History entry" in window.analytics_empty_body.text()
 
             window.analytics_range.setCurrentIndex(1)
+            worker = window._analytics_workers[window._analytics_generation]
+            assert worker.wait(5000)
+            qt_application.processEvents()
             assert window.analytics_empty_title.text() == (
                 "No archive activity in this range"
             )

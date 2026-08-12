@@ -62,7 +62,7 @@ from streamkeep.monitor import ChannelMonitor
 from streamkeep.clipboard import ClipboardMonitor
 from streamkeep.power import PowerRequestLease
 from streamkeep import db as _db
-from streamkeep.workers import ScheduledBackupWorker
+from streamkeep.workers import QueryWorker, ScheduledBackupWorker
 from streamkeep.windows_integration import (
     TaskbarProgress,
     aggregate_queue_progress,
@@ -102,6 +102,96 @@ class _HealthCheckWorker(QThread):
         )
         if snapshot is not None and not self._cancelled:
             self.result_ready.emit(snapshot)
+
+
+def _run_global_search_query(query, cap, monitor_entries, queue_items):
+    """Return widget-neutral global-search rows from a background thread."""
+    items = []
+    errors = []
+    for row in _db.search_history(query, limit=cap):
+        entry = HistoryEntry.from_dict(row)
+        items.append((
+            "history", entry,
+            f"[History] {entry.platform}: {entry.channel} - {entry.title[:50]}",
+        ))
+    try:
+        from .. import notes as _notes
+        note_hits = _notes.search_notes(
+            (row.get("path", "") for row in _db.iter_history(newest_first=True)),
+            query,
+            limit=cap,
+        )
+        for recording_dir, matching_line in note_hits:
+            items.append((
+                "notes", {"path": recording_dir, "line": matching_line},
+                f"[Note] {matching_line[:90]} ({recording_dir[-40:]})",
+            ))
+    except Exception as error:
+        errors.append(("notes", str(error)))
+
+    matched_monitor = 0
+    for entry in monitor_entries:
+        if matched_monitor >= cap:
+            break
+        if (query in (entry.channel_id or "").lower()
+                or query in (entry.url or "").lower()
+                or query in (entry.platform or "").lower()):
+            items.append((
+                "monitor", entry,
+                f"[Monitor] {entry.platform}: {entry.channel_id} ({entry.url})",
+            ))
+            matched_monitor += 1
+    matched_queue = 0
+    for row in queue_items:
+        if matched_queue >= cap:
+            break
+        if (query in (row.get("title", "") or "").lower()
+                or query in (row.get("url", "") or "").lower()):
+            items.append((
+                "queue", row,
+                f"[Queue] {row.get('title', row.get('url', ''))[:60]}",
+            ))
+            matched_queue += 1
+
+    try:
+        from ..search import (
+            hybrid_search_transcripts, search_comments, search_transcripts,
+        )
+        try:
+            from .. import semantic
+            semantic_enabled = semantic.is_enabled()
+        except Exception:
+            semantic_enabled = False
+        hits = (
+            hybrid_search_transcripts(query, limit=cap)
+            if semantic_enabled else search_transcripts(query, limit=cap)
+        )
+        for hit in hits:
+            snippet = (hit.get("text", "") or "")[:80]
+            source = (
+                "semantic"
+                if hit.get("search_source") in {"semantic", "hybrid"}
+                else "transcript"
+            )
+            label = (
+                f"[Moment:{hit.get('modality', 'transcript')}]"
+                if source == "semantic" else "[Transcript]"
+            )
+            items.append((
+                source, hit,
+                f"{label} {snippet}... ({hit.get('recording_path', '')[-40:]})",
+            ))
+        for hit in search_comments(query, limit=cap):
+            snippet = (hit.get("text", "") or "")[:80]
+            author = (hit.get("author", "") or "anonymous")[:32]
+            items.append((
+                "comment", hit,
+                f"[Comment] {author}: {snippet}... "
+                f"({hit.get('recording_path', '')[-40:]})",
+            ))
+    except Exception as error:
+        errors.append(("transcript", str(error)))
+    return {"items": items, "errors": errors}
 
 
 def _chrome_icon(kind, *, active=False):
@@ -3420,143 +3510,81 @@ class StreamKeep(
         query = self._global_search.text().strip().lower()
         results_widget = self._global_results
         results_widget.clear()
-        degraded = False
-
+        generation = int(getattr(self, "_global_search_generation", 0)) + 1
+        self._global_search_generation = generation
+        workers = getattr(self, "_global_search_workers", None)
+        if workers is None:
+            workers = {}
+            self._global_search_workers = workers
+        for worker in workers.values():
+            worker.cancel()
         if not query or len(query) < 2:
             results_widget.setVisible(False)
             return
-
-        from PyQt6.QtWidgets import QListWidgetItem
-        items = []
         cap = 15  # max results per source
+        monitor_entries = list(self.monitor.entries)
+        queue_items = [dict(row) for row in self._download_queue]
+        worker = QueryWorker(
+            generation,
+            lambda: _run_global_search_query(
+                query, cap, monitor_entries, queue_items,
+            ),
+        )
+        workers[generation] = worker
+        busy_done = self._begin_background_activity("Searching archive…")
+        worker.succeeded.connect(self._apply_global_search_results)
+        worker.failed.connect(self._show_global_search_error)
 
-        # History search
-        for row in _db.search_history(query, limit=cap):
-            h = HistoryEntry.from_dict(row)
-            item = QListWidgetItem(
-                f"[History] {h.platform}: {h.channel} - {h.title[:50]}"
-            )
-            item.setData(Qt.ItemDataRole.UserRole, ("history", h))
-            items.append(item)
+        def finish():
+            workers.pop(generation, None)
+            busy_done()
 
-        # Recording notes live as local sidecars so they remain portable with
-        # the media. Search the bounded history iterator and expose a direct
-        # editor entry alongside metadata/transcript results.
-        try:
-            from .. import notes as _notes
-            note_hits = _notes.search_notes(
-                (row.get("path", "") for row in _db.iter_history(newest_first=True)),
-                query,
-                limit=cap,
-            )
-            for recording_dir, matching_line in note_hits:
-                item = QListWidgetItem(
-                    f"[Note] {matching_line[:90]} ({recording_dir[-40:]})"
-                )
-                item.setData(
-                    Qt.ItemDataRole.UserRole,
-                    ("notes", {"path": recording_dir, "line": matching_line}),
-                )
-                items.append(item)
-        except Exception as error:
-            degraded = True
-            self._log(f"[SEARCH] Notes search unavailable: {error}")
+        worker.finished.connect(finish)
+        worker.start()
+        return worker
 
-        # Monitor search
-        count = 0
-        for e in self.monitor.entries:
-            if count >= cap:
-                break
-            if (query in (e.channel_id or "").lower()
-                    or query in (e.url or "").lower()
-                    or query in (e.platform or "").lower()):
-                item = QListWidgetItem(
-                    f"[Monitor] {e.platform}: {e.channel_id} ({e.url})"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, ("monitor", e))
-                items.append(item)
-                count += 1
+    def _apply_global_search_results(self, generation, payload):
+        """Render only the newest background search result."""
+        if generation != getattr(self, "_global_search_generation", 0):
+            return
+        from PyQt6.QtWidgets import QListWidgetItem
 
-        # Queue search
-        count = 0
-        for q in self._download_queue:
-            if count >= cap:
-                break
-            if (query in (q.get("title", "") or "").lower()
-                    or query in (q.get("url", "") or "").lower()):
-                item = QListWidgetItem(
-                    f"[Queue] {q.get('title', q.get('url', ''))[:60]}"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, ("queue", q))
-                items.append(item)
-                count += 1
-
-        # Transcript/comment search with optional semantic RRF fusion (F27/V100/V202)
-        try:
-            from ..search import (
-                hybrid_search_transcripts, search_comments, search_transcripts,
-            )
-            try:
-                from .. import semantic
-
-                semantic_enabled = semantic.is_enabled()
-            except Exception:
-                semantic_enabled = False
-            hits = (
-                hybrid_search_transcripts(query, limit=cap)
-                if semantic_enabled else search_transcripts(query, limit=cap)
-            )
-            for hit in hits:
-                snippet = (hit.get("text", "") or "")[:80]
-                source = (
-                    "semantic"
-                    if hit.get("search_source") in {"semantic", "hybrid"}
-                    else "transcript"
-                )
-                label = (
-                    f"[Moment:{hit.get('modality', 'transcript')}]"
-                    if source == "semantic" else "[Transcript]"
-                )
-                item = QListWidgetItem(
-                    f"{label} {snippet}... ({hit.get('recording_path', '')[-40:]})"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, (source, hit))
-                items.append(item)
-            for hit in search_comments(query, limit=cap):
-                snippet = (hit.get("text", "") or "")[:80]
-                author = (hit.get("author", "") or "anonymous")[:32]
-                item = QListWidgetItem(
-                    f"[Comment] {author}: {snippet}... "
-                    f"({hit.get('recording_path', '')[-40:]})"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, ("comment", hit))
-                items.append(item)
-        except Exception as error:
-            # Degrading to history-only is fine; reporting "No results found."
-            # afterwards is not, because the user cannot tell an empty archive
-            # from a broken index (V196).
-            degraded = True
-            self._log(
-                f"[SEARCH] Transcript/comment/moment search unavailable: {error}"
-            )
+        results_widget = self._global_results
+        results_widget.clear()
+        errors = list(payload.get("errors", ()))
+        for source, error in errors:
+            self._log(f"[SEARCH] {source.title()} search unavailable: {error}")
+        if any(source == "transcript" for source, _error in errors):
             self._toast(
                 "Transcript and comment search is unavailable — showing "
                 "history matches only.",
                 "warning",
             )
-
-        if items:
-            for it in items:
-                results_widget.addItem(it)
-            results_widget.setVisible(True)
-        else:
+        for source, entry, label in payload.get("items", ()):
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, (source, entry))
+            results_widget.addItem(item)
+        if not results_widget.count():
             no_result = QListWidgetItem(
                 "No history matches — transcript search is unavailable."
-                if degraded else "No results found."
+                if errors else "No results found."
             )
             no_result.setData(Qt.ItemDataRole.UserRole, None)
             results_widget.addItem(no_result)
-            results_widget.setVisible(True)
+        results_widget.setVisible(True)
+
+    def _show_global_search_error(self, generation, error):
+        """Expose an unexpected background search failure."""
+        if generation != getattr(self, "_global_search_generation", 0):
+            return
+        from PyQt6.QtWidgets import QListWidgetItem
+
+        self._global_results.clear()
+        item = QListWidgetItem(f"Search unavailable: {error}")
+        item.setData(Qt.ItemDataRole.UserRole, None)
+        self._global_results.addItem(item)
+        self._global_results.setVisible(True)
+        self._log(f"[SEARCH] Search failed: {error}")
 
     def _on_global_result_click(self, item):
         """Navigate to the source tab when a global search result is clicked."""
