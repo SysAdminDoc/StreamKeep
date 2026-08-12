@@ -21,6 +21,11 @@ def test_catalogs_cover_hand_authored_ui_and_match_frozen_assets():
         message.context for message in messages
     }
     assert update_catalogs(check=True)
+    web_sources = {
+        message.source for message in messages if message.context == "WebRemote"
+    }
+    assert "StreamKeep is unreachable. Check your connection." in web_sources
+    assert "Could not load {panel}: {error}" in web_sources
     assert i18n.translate_catalog("Status", "es", context="WebRemote") == "Estado"
     assert i18n.translate_catalog(
         "Not in the catalog", "es", context="WebRemote"

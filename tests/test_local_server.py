@@ -335,6 +335,20 @@ class LocalServerTests(unittest.TestCase):
             self.assertIn('<html lang="en">', html)
             self.assertIn(">Status<", html)
 
+    def test_web_remote_refresh_recovers_and_reports_each_failed_panel(self):
+        with self._open("/?lang=en") as response:
+            html = response.read().decode("utf-8")
+
+        self.assertIn("else setAppStatus('','');", html)
+        self.assertIn("status.className='status-region'+(state?' '+state:'');", html)
+        self.assertIn("el.setAttribute('aria-busy','false');", html)
+        self.assertIn("renderPanelError(\n    document.getElementById('lib-list')", html)
+        self.assertIn("renderPanelError(\n    document.getElementById('mon-list')", html)
+        self.assertIn("navigator.onLine===false", html)
+        self.assertIn("window.addEventListener('offline'", html)
+        self.assertIn("window.addEventListener('online'", html)
+        self.assertIn("StreamKeep is unreachable. Check your connection.", html)
+
     def test_request_log_records_safe_request_details_and_rotates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "server-requests.jsonl"

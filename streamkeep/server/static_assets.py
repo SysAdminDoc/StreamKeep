@@ -42,6 +42,10 @@ _WEB_UI_TEXT = {
     "resumable": _web_text("Resumable"),
     "failures": _web_text("Failures"),
     "loading": _web_text("Loading..."),
+    "remote_offline": _web_text(
+        "StreamKeep is unreachable. Check your connection."
+    ),
+    "panel_load_failed": _web_text("Could not load {panel}: {error}"),
     "add_to_queue": _web_text("Add to Queue"),
     "url_placeholder": _web_text("Paste a stream or VOD URL..."),
     "add": _web_text("Add"),

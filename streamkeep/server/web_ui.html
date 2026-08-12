@@ -25,7 +25,9 @@ button:disabled{cursor:wait;opacity:.65}
   clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .status-region{min-height:1.4em;color:#a6e3a1;margin:4px 0 8px}
 .status-region.error{color:#f38ba8}
+.status-region.offline{color:#fab387}
 .panel-list[aria-busy="true"]{opacity:.65}
+.panel-error{color:#f38ba8;font-style:normal}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;
   font-weight:600;margin-right:6px}
 .badge-live{background:#a6e3a1;color:#1e1e2e}
@@ -197,6 +199,24 @@ function renderItems(el,items,empty,renderFn){
   if(!items||!items.length){el.innerHTML='<p class="empty">'+empty+'</p>';return;}
   el.innerHTML=items.map(renderFn).join('');
 }
+function setAppStatus(message,state){
+  const status=document.getElementById('app-status');
+  status.className='status-region'+(state?' '+state:'');
+  status.textContent=message||'';
+}
+function failureText(error){
+  if(navigator.onLine===false)return T('remote_offline');
+  return error&&error.message?error.message:T('request_failed').replace('{status}','?');
+}
+function renderPanelError(el,panel,error){
+  el.setAttribute('aria-busy','false');
+  const message=T('panel_load_failed')
+    .replace('{panel}',panel).replace('{error}',failureText(error));
+  el.innerHTML='<p class="empty panel-error" role="alert">'+esc(message)+'</p>';
+}
+function markBusy(ids){
+  ids.forEach(id=>document.getElementById(id).setAttribute('aria-busy','true'));
+}
 function retryFailure(id){
   api('/api/failures/retry',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id})}).then(()=>refresh());
@@ -210,7 +230,9 @@ function discardFailure(id){
     body:JSON.stringify({id})}).then(()=>refresh());
 }
 function refresh(){
-  document.getElementById('app-status').textContent=T('loading');
+  const statusPanels=['dl-list','q-list','worker-list','resume-list','failure-list'];
+  markBusy(statusPanels.concat(['lib-list','mon-list']));
+  setAppStatus(T('loading'),'');
   api('/api/status').then(d=>{
     renderItems(document.getElementById('dl-list'),d.downloads,T('no_active_downloads'),
       i=>'<div class="item"><div class="title">'+esc(i.title||i.url||T('download'))+'</div>'+
@@ -240,22 +262,34 @@ function refresh(){
         '<div class="item-actions"><button type="button" onclick="retryFailure('+Number(i.id||0)+')">'+T('retry')+'</button>'+
         (i.auto_retry?'<button type="button" onclick="cancelFailureRetry('+Number(i.id||0)+')">'+T('cancel_auto_retry')+'</button>':'')+
         '<button type="button" onclick="discardFailure('+Number(i.id||0)+')">'+T('discard')+'</button></div></div>');
+    if(navigator.onLine===false)setAppStatus(T('remote_offline'),'offline');
+    else setAppStatus('','');
   }).catch(e=>{
-    document.getElementById('app-status').className='status-region error';
-    document.getElementById('app-status').textContent=e&&e.message?e.message:T('request_failed').replace('{status}','?');
+    const state=navigator.onLine===false?'offline':'error';
+    setAppStatus(failureText(e),state);
+    statusPanels.forEach(id=>renderPanelError(
+      document.getElementById(id),T('status'),e));
   });
   api('/api/library').then(d=>{
     renderItems(document.getElementById('lib-list'),d.history,T('no_recordings'),
       i=>'<div class="item"><div class="title">'+esc(i.title||T('untitled'))+'</div>'+
         '<div class="meta">'+esc(i.platform||'')+' &middot; '+esc(i.date||'')+' &middot; '+esc(i.quality||'')+'</div></div>');
-  }).catch(()=>{});
+  }).catch(e=>renderPanelError(
+    document.getElementById('lib-list'),T('library'),e));
   api('/api/monitor').then(d=>{
     renderItems(document.getElementById('mon-list'),d.channels,T('no_channels'),
       i=>'<div class="item"><span class="badge '+(i.status==='live'?'badge-live':'badge-offline')+'">'+
         esc(T(i.status==='live'?'live':'offline').toUpperCase())+'</span>'+esc(i.channel||i.channel_id||'?')+
         ' <span style="color:#6c7086">('+esc(i.platform||'')+')</span></div>');
-  }).catch(()=>{});
+  }).catch(e=>renderPanelError(
+    document.getElementById('mon-list'),T('channels'),e));
 }
+window.addEventListener('offline',()=>{
+  setAppStatus(T('remote_offline'),'offline');
+});
+window.addEventListener('online',()=>{
+  if(TOKEN)refresh();
+});
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 let _refreshId=0;
 </script>

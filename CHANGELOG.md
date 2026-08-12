@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- The browser remote now clears stale loading/error status after recovery,
+  reports library and monitor failures inside their panels, releases every
+  `aria-busy` state on failure, and distinguishes an offline browser from an
+  idle connection.
+
 - Automatic-retention settings now consistently say "Recycle," explain that
   files remain recoverable through the Recycle Bin, and avoid implying that
   unattended cleanup permanently deletes recordings.

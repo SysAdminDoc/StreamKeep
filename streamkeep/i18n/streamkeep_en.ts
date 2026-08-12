@@ -9787,198 +9787,262 @@ Download again?</translation>
     <context>
         <name>WebRemote</name>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="69" />
             <source>(running)</source>
             <translation>(running)</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="39" />
             <source>Active Downloads</source>
             <translation>Active Downloads</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="40" />
             <source>Active Workers</source>
             <translation>Active Workers</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="51" />
             <source>Add</source>
             <translation>Add</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="49" />
             <source>Add to Queue</source>
             <translation>Add to Queue</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="36" />
             <source>Add URL</source>
             <translation>Add URL</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="59" />
             <source>Added to queue!</source>
             <translation>Added to queue!</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="79" />
             <source>Cancel auto retry</source>
             <translation>Cancel auto retry</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="38" />
             <source>Channels</source>
             <translation>Channels</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="48" />
+            <source>Could not load {panel}: {error}</source>
+            <translation>Could not load {panel}: {error}</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/server/static_assets.py" line="80" />
             <source>Discard</source>
             <translation>Discard</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="63" />
             <source>Download</source>
             <translation>Download</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="73" />
             <source>failed</source>
             <translation>failed</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="74" />
             <source>Failed job</source>
             <translation>Failed job</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="60" />
             <source>Failed: </source>
             <translation>Failed: </translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="43" />
             <source>Failures</source>
             <translation>Failures</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="29" />
             <source>Generate a one-time pairing code in StreamKeep Settings, then enter it here.</source>
             <translation>Generate a one-time pairing code in StreamKeep Settings, then enter it here.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="37" />
             <source>Library</source>
             <translation>Library</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="85" />
             <source>live</source>
             <translation>live</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="44" />
             <source>Loading...</source>
             <translation>Loading...</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="52" />
             <source>Monitored Channels</source>
             <translation>Monitored Channels</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="76" />
             <source>next {value}</source>
             <translation>next {value}</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="62" />
             <source>No active downloads.</source>
             <translation>No active downloads.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="66" />
             <source>No active workers.</source>
             <translation>No active workers.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="83" />
             <source>No channels monitored.</source>
             <translation>No channels monitored.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="72" />
             <source>No failures requiring action.</source>
             <translation>No failures requiring action.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="81" />
             <source>No recordings yet.</source>
             <translation>No recordings yet.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="70" />
             <source>No resumable downloads.</source>
             <translation>No resumable downloads.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="84" />
             <source>offline</source>
             <translation>offline</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="32" />
             <source>One-time pairing code</source>
             <translation>One-time pairing code</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="33" />
             <source>Pair and connect</source>
             <translation>Pair and connect</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="55" />
             <source>Pairing failed</source>
             <translation>Pairing failed</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="56" />
             <source>Pairing failed. Generate a fresh code in StreamKeep Settings.</source>
             <translation>Pairing failed. Generate a fresh code in StreamKeep Settings.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="50" />
             <source>Paste a stream or VOD URL...</source>
             <translation>Paste a stream or VOD URL...</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="41" />
             <source>Queue</source>
             <translation>Queue</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="64" />
             <source>Queue empty.</source>
             <translation>Queue empty.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="65" />
             <source>queued</source>
             <translation>queued</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="34" />
+            <source>Remote navigation</source>
+            <translation>Remote navigation</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/server/static_assets.py" line="54" />
             <source>Request failed ({status})</source>
             <translation>Request failed ({status})</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="42" />
             <source>Resumable</source>
             <translation>Resumable</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="77" />
             <source>resume available</source>
             <translation>resume available</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="78" />
             <source>Retry</source>
             <translation>Retry</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="75" />
             <source>retry {count}</source>
             <translation>retry {count}</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="35" />
             <source>Status</source>
             <translation>Status</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="45" />
+            <source>StreamKeep is unreachable. Check your connection.</source>
+            <translation>StreamKeep is unreachable. Check your connection.</translation>
+        </message>
+        <message>
+            <location filename="streamkeep/server/static_assets.py" line="53" />
             <source>StreamKeep rejected this session.</source>
             <translation>StreamKeep rejected this session.</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="28" />
             <source>StreamKeep Remote</source>
             <translation>StreamKeep Remote</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="61" />
             <source>unknown</source>
             <translation>unknown</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="82" />
             <source>Untitled</source>
             <translation>Untitled</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="68" />
             <source>Worker</source>
             <translation>Worker</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="67" />
             <source>worker</source>
             <translation>worker</translation>
         </message>
         <message>
+            <location filename="streamkeep/server/static_assets.py" line="71" />
             <source>{count} segments remaining</source>
             <translation>{count} segments remaining</translation>
         </message>

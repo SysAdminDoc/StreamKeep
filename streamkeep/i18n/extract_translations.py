@@ -21,6 +21,7 @@ I18N_DIR = Path(__file__).parent
 SOURCE_DIRS = (ROOT / "streamkeep" / "ui", ROOT / "streamkeep" / "player")
 SOURCE_FILES = (
     ROOT / "streamkeep" / "local_server.py",
+    ROOT / "streamkeep" / "server" / "static_assets.py",
     ROOT / "streamkeep" / "retry.py",
 )
 
