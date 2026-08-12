@@ -4,6 +4,11 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- Performance guards now measure deterministic work or same-process CPU-cost
+  scaling instead of wall-clock time, eliminating host-load failures while
+  retaining a quadratic-regression bait. Declarative HTML descendant selectors
+  now traverse each document edge once instead of revisiting nested subtrees.
+
 - Queue and custom-preset removals, failed-operation discards, storage
   recycling, low-space warnings, and maintenance applies now follow the same
   immediate-action policy. Reversible queue, preset, and failure changes expose

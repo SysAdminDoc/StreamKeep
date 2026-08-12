@@ -1,4 +1,3 @@
-import time
 from collections import deque
 from unittest import mock
 
@@ -11,11 +10,14 @@ from streamkeep.ui.history_model import HistoryTableModel
 from streamkeep.ui.thumb_loader import ThumbLoader
 
 
-def _seed_history(count):
+MAX_TENFOLD_COST_RATIO = 25
+
+
+def _seed_history(count, *, start=0):
     connection = db._connect()
     try:
         rows = []
-        for index in range(count):
+        for index in range(start, start + count):
             marker = " needle" if index % 10_000 == 0 else ""
             rows.append((
                 f"2026-01-{(index % 28) + 1:02d} 12:00",
@@ -43,19 +45,29 @@ def _seed_history(count):
 
 
 def test_100k_archive_uses_bounded_snapshot_paging_and_fts(
-    tmp_path, monkeypatch, qt_application,
+    tmp_path, monkeypatch, qt_application, measure_process_cost,
 ):
     monkeypatch.setattr(db, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "library.db")
     db.init_db()
-    _seed_history(100_000)
+    _seed_history(10_000)
 
-    started = time.perf_counter()
-    model = HistoryTableModel(page_size=128)
-    open_elapsed = time.perf_counter() - started
+    small_open_cost, _ = measure_process_cost(
+        lambda: HistoryTableModel(page_size=128),
+    )
+    small_model = HistoryTableModel(page_size=128)
+    small_filter_cost, _ = measure_process_cost(
+        lambda: small_model.set_filter("needle"),
+    )
+
+    _seed_history(90_000, start=10_000)
+
+    open_cost, model = measure_process_cost(
+        lambda: HistoryTableModel(page_size=128),
+    )
     assert model.total_count == 100_000
     assert model.loaded_count == 128
-    assert open_elapsed < 5.0
+    assert open_cost < small_open_cost * MAX_TENFOLD_COST_RATIO
 
     view = QTableView()
     view.setModel(model)
@@ -76,13 +88,11 @@ def test_100k_archive_uses_bounded_snapshot_paging_and_fts(
         model.fetchMore()
     assert model.row_for_id(new_id) == -1
 
-    filtered_started = time.perf_counter()
-    model.set_filter("needle")
-    filter_elapsed = time.perf_counter() - filtered_started
+    filter_cost, _ = measure_process_cost(lambda: model.set_filter("needle"))
     assert model.total_count == 10
     assert model.loaded_count == 10
     assert all("needle" in model.entry_at(row).title for row in range(10))
-    assert filter_elapsed < 5.0
+    assert filter_cost < small_filter_cost * MAX_TENFOLD_COST_RATIO
 
     model.set_filter("")
     assert model.entry_at(0).db_id == new_id

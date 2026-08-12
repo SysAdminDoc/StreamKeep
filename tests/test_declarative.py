@@ -857,19 +857,27 @@ def test_a_selector_does_not_return_the_same_node_more_than_once():
     assert nodes[0].tag == "span"
 
 
-def test_a_wide_nested_document_matches_in_bounded_time():
-    import time
-
+def test_a_wide_nested_document_matches_with_one_tree_walk():
     body = "<div class='a'>" * 200 + "<span class='t'>x</span>" + "</div>" * 200
     root = declarative._HTMLDocumentParser.parse(body.encode("utf-8"))
+    document_nodes = list(declarative._walk_html(root))
+    traversed_edges = 0
 
-    started = time.monotonic()
+    class CountedChildren(list):
+        def __reversed__(self):
+            nonlocal traversed_edges
+            traversed_edges += len(self)
+            return super().__reversed__()
+
+    for node in [root, *document_nodes]:
+        node.children = CountedChildren(node.children)
+
     nodes = declarative._select_html_nodes(root, ".a .a .a .t")
-    elapsed = time.monotonic() - started
 
     assert len(nodes) == 1
-    # Without per-token dedupe this is combinatorial in the token count.
-    assert elapsed < 2.0, f"selector matching took {elapsed:.1f}s"
+    # A descendant selector should visit every edge once. The former nested
+    # subtree walks traversed 59,902 edges for this 201-edge document.
+    assert traversed_edges == len(document_nodes)
 
 
 def test_selector_matching_stops_once_nothing_matches():

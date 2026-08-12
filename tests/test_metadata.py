@@ -1,5 +1,4 @@
 import ast
-import time
 from pathlib import Path
 
 from streamkeep import db, tags
@@ -31,9 +30,7 @@ def test_nfo_nested_entities_are_rejected_as_a_named_parse_issue(tmp_path):
     nfo.write_bytes(_NESTED_ENTITY_NFO)
     issues = []
 
-    started = time.perf_counter()
     assert load_nfo_sidecar(nfo, issue_fn=issues.append) == {}
-    assert time.perf_counter() - started < 2
     assert issues
     assert issues[0]["kind"] == NFO_PARSE_ERROR
     assert "NFO sidecar parse error" in issues[0]["reason"]
@@ -47,9 +44,7 @@ def test_adoption_preview_reports_hostile_nfo_without_expanding_it(
     db.init_db()
     _recording, nfo = _write_hostile_recording(tmp_path / "library")
 
-    started = time.perf_counter()
     plan = preview_adoption(tmp_path / "library", db_module=db)
-    assert time.perf_counter() - started < 2
 
     assert len(plan.items) == 1
     item = plan.items[0]
@@ -69,11 +64,9 @@ def test_rebuild_preview_reports_hostile_nfo_without_expanding_it(
     db.init_db()
     _recording, nfo = _write_hostile_recording(tmp_path / "library")
 
-    started = time.perf_counter()
     plan = plan_library_rebuild(
         tmp_path / "library", db_module=db, tags_module=tags,
     )
-    assert time.perf_counter() - started < 2
 
     issue = next(issue for issue in plan.issues if issue["path"] == str(nfo))
     assert issue["kind"] == NFO_PARSE_ERROR

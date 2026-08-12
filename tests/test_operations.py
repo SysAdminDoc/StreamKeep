@@ -1,11 +1,13 @@
 import json
-import time
 from types import SimpleNamespace
 from unittest import mock
 
 from PyQt6.QtWidgets import QWidget
 
 from streamkeep import db, operations
+
+
+MAX_TENFOLD_COST_RATIO = 25
 
 
 def _seed_small_database(db_path):
@@ -124,7 +126,25 @@ def test_operations_actions_persist_and_reappear_after_query(tmp_path):
         assert restored_failure["status"] == "intervention"
 
 
-def test_operations_page_stays_bounded_for_one_hundred_thousand_jobs(tmp_path):
+def _insert_queue_jobs(connection, start, count):
+    rows = [(
+        f"job-{index:06d}", index, f"https://example.test/{index}",
+        f"Job {index}", "Synthetic", "", "queued", "", 0,
+        "2026-08-02T00:00:00Z", "2026-08-02T00:00:00Z", "{}",
+    ) for index in range(start, start + count)]
+    connection.executemany(
+        "INSERT INTO download_queue "
+        "(job_id, position, url, title, platform, quality, status, "
+        "recurrence, failure_id, created_at, updated_at, data) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    connection.commit()
+
+
+def test_operations_page_stays_bounded_for_one_hundred_thousand_jobs(
+    tmp_path, measure_process_cost,
+):
     db_path = tmp_path / "library.db"
     with mock.patch.object(db, "DB_PATH", db_path), mock.patch.object(
         operations.db, "DB_PATH", db_path,
@@ -132,28 +152,42 @@ def test_operations_page_stays_bounded_for_one_hundred_thousand_jobs(tmp_path):
         db.init_db()
         conn = db._connect()
         try:
-            rows = [(
-                f"job-{index:06d}", index, f"https://example.test/{index}",
-                f"Job {index}", "Synthetic", "", "queued", "", 0,
-                "2026-08-02T00:00:00Z", "2026-08-02T00:00:00Z", "{}",
-            ) for index in range(100_000)]
-            conn.executemany(
-                "INSERT INTO download_queue "
-                "(job_id, position, url, title, platform, quality, status, "
-                "recurrence, failure_id, created_at, updated_at, data) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                rows,
+            _insert_queue_jobs(conn, 0, 10_000)
+            small_cost, small_page = measure_process_cost(
+                lambda: operations.query_operations({
+                    "page": 100, "page_size": 50,
+                }),
             )
-            conn.commit()
+            assert small_page.total_count == 10_000
+            assert len(small_page.rows) == 50
+
+            _insert_queue_jobs(conn, 10_000, 90_000)
         finally:
             conn.close()
 
-        started = time.monotonic()
-        page = operations.query_operations({"page": 1_000, "page_size": 50})
-        elapsed = time.monotonic() - started
+        cost, page = measure_process_cost(
+            lambda: operations.query_operations({
+                "page": 1_000, "page_size": 50,
+            }),
+        )
         assert page.total_count == 100_000
         assert len(page.rows) == 50
-        assert elapsed < 5.0
+        assert cost < small_cost * MAX_TENFOLD_COST_RATIO
+
+
+def test_process_cost_guard_rejects_quadratic_bait(measure_process_cost):
+    """A tenfold input increase must expose deliberately quadratic work."""
+    def quadratic(width):
+        checksum = 0
+        for outer in range(width):
+            for inner in range(width):
+                checksum += outer ^ inner
+        return checksum
+
+    small_cost, _ = measure_process_cost(lambda: quadratic(100))
+    large_cost, _ = measure_process_cost(lambda: quadratic(1_000))
+
+    assert large_cost > small_cost * MAX_TENFOLD_COST_RATIO
 
 
 def test_operations_tab_refresh_passes_the_window_filters(qt_application):

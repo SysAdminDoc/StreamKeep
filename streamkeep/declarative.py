@@ -914,26 +914,37 @@ def _select_html_nodes(root: _HTMLNode, selector: str):
     tokens = [item for item in str(selector or "").strip().split() if item]
     if not tokens:
         return []
-    candidates = [root]
-    for token in tokens:
-        found = []
-        # Descendant combinators overlap: a node nested under two matched
-        # ancestors was collected once per ancestor, so each token could
-        # multiply the candidate set and the next token re-walked the same
-        # subtree that many times again. Dedupe by identity per token, which
-        # keeps the result set correct and the cost linear in the document.
-        seen = set()
-        for candidate in candidates:
-            for node in _walk_html(candidate):
-                if id(node) in seen:
-                    continue
-                if _selector_matches(node, token):
-                    seen.add(id(node))
-                    found.append(node)
-        candidates = found
-        if not candidates:
-            break
-    return candidates
+    found = []
+    # Track which selector prefixes are satisfied by the current ancestor
+    # chain. A descendant selector can then be evaluated in one tree walk;
+    # walking every matched ancestor's subtree separately is quadratic even
+    # when duplicate result nodes are discarded afterwards.
+    active_prefixes = [0] * len(tokens)
+    stack = [
+        (node, False, ()) for node in reversed(root.children)
+    ]
+    while stack:
+        node, leaving, matched_prefixes = stack.pop()
+        if leaving:
+            for index in matched_prefixes:
+                active_prefixes[index] -= 1
+            continue
+
+        matched = tuple(
+            index for index, token in enumerate(tokens)
+            if (index == 0 or active_prefixes[index - 1] > 0)
+            and _selector_matches(node, token)
+        )
+        if matched:
+            for index in matched:
+                active_prefixes[index] += 1
+            if len(tokens) - 1 in matched:
+                found.append(node)
+            stack.append((node, True, matched))
+        stack.extend(
+            (child, False, ()) for child in reversed(node.children)
+        )
+    return found
 
 
 def _extract_html_value(root: _HTMLNode, selector: str):

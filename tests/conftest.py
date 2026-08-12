@@ -165,3 +165,35 @@ def _isolate_rate_governor():
     )
     yield
     governor.reset()
+
+
+@pytest.fixture
+def measure_process_cost():
+    """Return a median CPU-cost sample and the operation's last result.
+
+    Process time excludes time spent descheduled by other workloads. Comparing
+    a large input with a smaller input in the same process therefore guards
+    scaling behaviour without turning host contention into a test failure.
+    """
+    def measure(operation, *, repeats=5):
+        operation()  # Warm caches and one-time imports outside the sample.
+        samples = []
+        result = None
+        batch_size = 1
+        for _ in range(repeats):
+            while True:
+                started = time.process_time_ns()
+                for _ in range(batch_size):
+                    result = operation()
+                elapsed = time.process_time_ns() - started
+                if elapsed:
+                    samples.append(elapsed / batch_size)
+                    break
+                # GetProcessTimes advances on scheduler ticks despite exposing
+                # 100 ns units. Batch very fast operations until one tick is
+                # observable instead of treating a rounded zero as free work.
+                batch_size *= 2
+        samples.sort()
+        return samples[len(samples) // 2], result
+
+    return measure
