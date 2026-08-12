@@ -80,6 +80,9 @@ datas += collect_tree('assets', 'assets')
 datas += collect_tree('browser-extension', 'browser-extension')
 datas += collect_tree('packaging', 'packaging')
 datas += collect_tree('streamkeep/i18n', 'streamkeep/i18n')
+datas += collect_tree(
+    'streamkeep/reference_adapters', 'streamkeep/reference_adapters',
+)
 datas.append((
     str(ROOT / 'streamkeep/server/web_ui.html'),
     'streamkeep/server',

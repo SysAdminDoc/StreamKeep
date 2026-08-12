@@ -16,7 +16,9 @@ argv without shell interpretation.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 import urllib.parse
 
 
@@ -244,3 +246,147 @@ def har_entry_ytdlp_headers(link):
     for name, value in (link.get("headers") or {}).items():
         argv.extend(["--add-header", f"{name}: {value}"])
     return argv
+
+
+def _draft_url(url):
+    """Return a credential-free HTTP(S) URL suitable for a saved draft."""
+    try:
+        parsed = urllib.parse.urlsplit(str(url or "").strip())
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    host = parsed.hostname.rstrip(".").lower()
+    url_host = f"[{host}]" if ":" in host else host
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if port:
+        url_host = f"{url_host}:{port}"
+    return urllib.parse.urlunsplit((
+        parsed.scheme.lower(), url_host, parsed.path or "/", "", "",
+    ))
+
+
+def _draft_adapter_id(value, source_host, links):
+    requested = str(value or "").strip().lower()
+    if requested:
+        slug = re.sub(r"[^a-z0-9._-]+", "-", requested).strip(".-")
+    else:
+        host_slug = re.sub(r"[^a-z0-9]+", "-", source_host).strip("-")
+        digest = hashlib.sha256(
+            "\n".join(str(link.get("url", "")) for link in links).encode("utf-8")
+        ).hexdigest()[:8]
+        slug = f"har-{host_slug}-{digest}"
+    if not slug:
+        raise ValueError("Adapter id must contain a letter or number")
+    return slug[:128]
+
+
+def _draft_format_type(link):
+    path = urllib.parse.urlsplit(str(link.get("url", ""))).path.lower()
+    if path.endswith(".m3u8"):
+        return "hls"
+    if path.endswith(".mpd"):
+        return "dash"
+    return "mp4"
+
+
+def source_adapter_draft(data, *, adapter_id="", name="", include_segments=False):
+    """Author a safe, inert-until-reviewed source adapter from a HAR capture.
+
+    HAR query values, cookies, authorization headers, fragments, and user-info
+    are never persisted in the YAML. The result is deliberately a draft: it
+    uses the capture's page/manifest paths and may need edited selectors or
+    query parameters before the operator approves its outbound contract.
+    """
+    links = parse_har(data, include_segments=include_segments)
+    if not links:
+        raise ValueError("HAR capture has no media request to draft an adapter from")
+
+    source_url = ""
+    for link in links:
+        source_url = _draft_url((link.get("headers") or {}).get("Referer", ""))
+        if source_url:
+            break
+    if not source_url:
+        source_url = _draft_url(links[0].get("url", ""))
+    parsed_source = urllib.parse.urlsplit(source_url)
+    source_host = str(parsed_source.hostname or "").lower()
+    if not source_host:
+        raise ValueError("HAR capture has no usable HTTP(S) source URL")
+
+    qualities = []
+    quality_hosts = set()
+    seen_urls = set()
+    for link in links:
+        media_url = _draft_url(link.get("url", ""))
+        if not media_url or media_url in seen_urls:
+            continue
+        media_host = urllib.parse.urlsplit(media_url).hostname or ""
+        if media_host not in quality_hosts and len(quality_hosts) >= 8:
+            continue
+        quality_hosts.add(media_host)
+        seen_urls.add(media_url)
+        kind = _draft_format_type(link)
+        qualities.append({
+            "name": f"captured-{kind}-{len(qualities) + 1}",
+            "url": f"literal:{media_url}",
+            "format_type": kind,
+        })
+        if len(qualities) >= 32:
+            break
+    if not qualities:
+        raise ValueError("HAR capture has no credential-free media URL")
+
+    display_host = source_host.removeprefix("www.")
+    display_name = str(name or "").strip() or f"HAR draft: {display_host}"
+    if len(display_name) > 128:
+        display_name = display_name[:128]
+    generated_id = _draft_adapter_id(adapter_id, source_host, links)
+    source_path = parsed_source.path or "/"
+    path_regex = f"^{re.escape(source_path)}$"
+    if len(path_regex) > 512:
+        path_regex = r"^/.*$"
+
+    request_headers = {}
+    first_headers = links[0].get("headers") or {}
+    user_agent = first_headers.get("User-Agent", "")
+    if user_agent:
+        request_headers["User-Agent"] = user_agent
+    referer = _draft_url(first_headers.get("Referer", ""))
+    if referer:
+        request_headers["Referer"] = referer
+
+    from .declarative import serialize_definition
+    return serialize_definition({
+        "schema_version": 1,
+        "id": generated_id,
+        "name": display_name,
+        "version": "0.1.0",
+        "enabled": True,
+        "platform": display_host,
+        "direct": True,
+        "match": {
+            "hosts": [source_host],
+            "path_regex": path_regex,
+        },
+        "resolve": {
+            "request": {
+                "url": qualities[0]["url"][8:],
+                "method": "HEAD",
+                "headers": request_headers,
+                "timeout_seconds": 8,
+                "max_response_bytes": 1024,
+            },
+            "response": {
+                "format": "html",
+                "fields": {
+                    "title": f"literal:Captured media from {display_host}",
+                    "webpage_url": f"literal:{source_url}",
+                },
+                "qualities": qualities,
+            },
+        },
+    })

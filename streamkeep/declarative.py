@@ -1234,6 +1234,95 @@ def parse_definition_text(text: str, source: str = "") -> DeclarativeDefinition:
     return parse_definition(_parse_yaml(text, source), source)
 
 
+def serialize_definition(raw: Mapping[str, Any]) -> str:
+    """Return deterministic YAML that round-trips through the safe parser."""
+    errors = validate_definition(raw, "generated definition")
+    if errors:
+        raise DeclarativeAdapterError(
+            "generated definition: " + "; ".join(errors)
+        )
+    try:
+        import yaml
+    except ImportError as error:
+        raise DeclarativeAdapterError(
+            "PyYAML is required for declarative source adapters"
+        ) from error
+    text = yaml.safe_dump(
+        copy.deepcopy(dict(raw)),
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+        width=1000,
+    )
+    parse_definition_text(text, "generated definition")
+    return text
+
+
+def write_source_adapter_draft(text: str, directory=None, config=None):
+    """Create one new adapter file without overwriting an existing draft.
+
+    The helper fails closed if the id still has any stored approval. Merely
+    writing the definition never approves it; normal registry discovery places
+    it in the pending-review collection.
+    """
+    definition = parse_definition_text(text, "generated definition")
+    if not definition.enabled:
+        raise DeclarativeAdapterError(
+            "a disabled definition cannot enter the pending review queue"
+        )
+    if config is None:
+        try:
+            from .config import load_config
+            config = load_config()
+        except Exception as error:
+            raise DeclarativeAdapterError(
+                f"cannot verify adapter review state: {error}"
+            ) from error
+    if definition.adapter_id in _reviewed_fingerprints(config):
+        raise DeclarativeAdapterError(
+            "adapter id still has a stored approval; revoke it before "
+            "writing a new draft"
+        )
+    target_dir = Path(directory or SOURCE_ADAPTERS_DIR)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        existing = [
+            path for path in target_dir.iterdir()
+            if not path.is_symlink()
+            and path.is_file()
+            and path.suffix.lower() in {".yaml", ".yml"}
+        ]
+    except OSError as error:
+        raise DeclarativeAdapterError(
+            f"cannot prepare source adapter directory: {error}"
+        ) from error
+    if len(existing) >= MAX_DEFINITIONS:
+        raise DeclarativeAdapterError(
+            f"source adapter directory already has the {MAX_DEFINITIONS} definition limit"
+        )
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", definition.adapter_id).strip(".-")
+    if not safe_id:
+        raise DeclarativeAdapterError("adapter id cannot form a safe file name")
+    target = target_dir / f"{safe_id}.yaml"
+    try:
+        with target.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except FileExistsError as error:
+        raise DeclarativeAdapterError(
+            f"adapter draft already exists: {target}"
+        ) from error
+    except OSError as error:
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise DeclarativeAdapterError(
+            f"cannot write adapter draft: {error}"
+        ) from error
+    invalidate_registry_cache()
+    return target, definition
+
+
 def validate_definition_text(text: str, source: str = "") -> list[str]:
     try:
         if not isinstance(text, str):

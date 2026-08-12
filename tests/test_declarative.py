@@ -153,6 +153,18 @@ def test_declarative_validation_rejects_code_and_unsafe_headers():
     assert any("forbidden header" in error for error in errors)
 
 
+def test_definition_serializer_round_trips_the_review_contract():
+    raw = declarative._parse_yaml(DEFINITION, "test definition")
+
+    text = declarative.serialize_definition(raw)
+    reparsed = declarative.parse_definition_text(text)
+
+    assert reparsed.adapter_id == "example-source"
+    assert reparsed.review_contract() == (
+        declarative.parse_definition_text(DEFINITION).review_contract()
+    )
+
+
 def test_declarative_request_rejects_private_targets(monkeypatch):
     monkeypatch.setattr(
         declarative,

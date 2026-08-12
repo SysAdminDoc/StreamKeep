@@ -1689,7 +1689,7 @@ def _run_backup(args):
 
 def _run_har_import(args):
     """Extract media/manifest URLs (and replay headers) from a HAR capture."""
-    from .har import har_entry_ytdlp_headers, parse_har
+    from .har import har_entry_ytdlp_headers, parse_har, source_adapter_draft
 
     path = str(getattr(args, "path", "") or "")
     try:
@@ -1708,6 +1708,65 @@ def _run_har_import(args):
 
     if not links:
         _print_line("No media or streaming-manifest requests found in the HAR capture.")
+        return
+
+    draft_id = getattr(args, "draft_adapter", None)
+    if draft_id is not None:
+        from . import declarative
+        from .config import (
+            get_last_config_error, load_config, save_config,
+        )
+
+        path = None
+        try:
+            text = source_adapter_draft(
+                raw,
+                adapter_id=draft_id,
+                name=getattr(args, "adapter_name", ""),
+                include_segments=bool(getattr(args, "include_segments", False)),
+            )
+            definition = declarative.parse_definition_text(
+                text, "generated HAR adapter",
+            )
+            config = load_config()
+            reviews = config.get(declarative.REVIEW_CONFIG_KEY, {})
+            if isinstance(reviews, dict) and definition.adapter_id in reviews:
+                declarative.revoke_source_adapter(definition.adapter_id, config)
+                if not save_config(config):
+                    raise declarative.DeclarativeAdapterError(
+                        "cannot revoke the previous approval: "
+                        + (get_last_config_error() or "config write failed")
+                    )
+            path, definition = declarative.write_source_adapter_draft(
+                text, config=config,
+            )
+            pending = declarative.pending_source_adapters(config=config)
+            if definition.adapter_id not in {
+                item.adapter_id for item in pending
+            }:
+                raise declarative.DeclarativeAdapterError(
+                    "draft was written but did not enter the review queue"
+                )
+        except (ValueError, declarative.DeclarativeAdapterError) as error:
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                    declarative.invalidate_registry_cache()
+                except OSError:
+                    pass
+            _print_line(f"Error: cannot create adapter draft: {error}")
+            sys.exit(2)
+        _print_line(f"Draft adapter written to {path}")
+        _print_line(
+            f"Adapter {definition.adapter_id!r} is inert until reviewed."
+        )
+        _print_line(
+            "Inspect it with: streamkeep source-adapters"
+        )
+        _print_line(
+            f"Approve only after editing/reviewing: streamkeep source-adapters "
+            f"--approve {definition.adapter_id}"
+        )
         return
 
     if getattr(args, "json", False):
@@ -2964,6 +3023,14 @@ def build_parser():
     har_p.add_argument(
         "--include-segments", action="store_true",
         help="Keep individual HLS/DASH segment URLs instead of collapsing to manifests",
+    )
+    har_p.add_argument(
+        "--draft-adapter", nargs="?", const="", default=None, metavar="ID",
+        help="Write an unapproved YAML adapter draft (optional custom id)",
+    )
+    har_p.add_argument(
+        "--adapter-name", default="", metavar="NAME",
+        help="Display name for the generated adapter draft",
     )
     har_p.add_argument("--config-dir", default=argparse.SUPPRESS,
                        help="Override the config/database directory")

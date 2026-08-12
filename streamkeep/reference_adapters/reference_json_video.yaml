@@ -1,0 +1,28 @@
+schema_version: 1
+id: reference-json-video
+name: Reference JSON Video API
+version: 1.0.0
+enabled: true
+platform: Example
+direct: true
+match:
+  hosts:
+  - video.example.com
+  path_regex: ^/watch/(?P<id>[A-Za-z0-9_-]+)$
+  channel_group: id
+resolve:
+  request:
+    url: https://api.example.com/videos/{id}
+    method: GET
+    headers:
+      Accept: application/json
+    timeout_seconds: 8
+    max_response_bytes: 2097152
+  response:
+    format: json
+    fields:
+      title: $.title
+      channel: $.channel
+      source_id: $.id
+      webpage_url: $.page
+      media_url: $.media

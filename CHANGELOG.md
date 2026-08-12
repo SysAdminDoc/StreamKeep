@@ -4,6 +4,12 @@ All notable changes to StreamKeep are recorded here. This file and `README.md` a
 
 ## Unreleased
 
+- HAR imports can now author deterministic declarative-adapter drafts in the
+  existing review queue. Generated YAML strips captured secrets and query
+  values, revokes stale approvals, round-trips through the hardened parser,
+  and remains inert until its exact outbound contract is approved; a packaged
+  reference adapter and worked README flow document the format.
+
 - Global archive search and Analytics refreshes now run on supersedable
   background workers with visible activity status, so large libraries no
   longer stall the window and late results cannot overwrite a newer query.

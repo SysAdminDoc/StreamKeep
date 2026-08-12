@@ -103,6 +103,31 @@ StreamKeep is a local-first desktop downloader and archive manager for live stre
 - Integrate SponsorBlock markers, platform subtitles, Twitch/Kick chat capture, and emote-aware chat rendering.
 - **Plugin adapters** cover versioned extractor, post-process, upload, and optional `youtube_backend` contracts through `plugins --json`; the Settings → Plugin trust panel and `plugins --load-trusted` print each manifest's permissions, dependencies, compatibility range, and entry points before enabling it. Trust is tied to a contract fingerprint, so a changed manifest — including a new permission — requires explicit review again. Manifest permissions, dependencies, compatibility, timeouts, and typed outcomes are enforced by the adapter broker. Backend results are restricted to validated YouTube extractor-argument pairs and never receive cookies or request headers from the host.
 - **Declarative source adapters** extend extraction without shipping Python: place a versioned, data-only YAML definition in `%APPDATA%\StreamKeep\source_adapters\` (or inspect a directory with `source-adapters --json`). Definitions support guarded JSON/HTML requests, field mapping, quality lists, VOD pagination, and live checks; they hot-reload on the next detection, reject code/filesystem/process capabilities, enforce the normal SSRF policy for every URL, and travel with a backup as inert definitions — a restore strips the per-adapter approvals, so one carried in from another machine stays review-required until you approve it here. Plugins are never restored: they are executable Python, and the restore report says so rather than leaving their absence to be discovered.
+
+#### Author a source adapter from a browser capture
+
+Export a browser Network-panel capture as `capture.har`, then create a draft:
+
+```powershell
+python StreamKeep.py import-har capture.har --draft-adapter my-video-site
+python StreamKeep.py source-adapters
+```
+
+StreamKeep removes cookies, authorization headers, query values, fragments,
+and URL user-info before writing the YAML. The generated definition is placed
+in the profile's `source_adapters` directory and appears under **Awaiting
+Review**; it cannot handle a URL or make its guarded `HEAD` request yet. Edit
+its exact `path_regex`, request URL, and response mappings as needed, inspect
+the contract, then explicitly enable that version:
+
+```powershell
+python StreamKeep.py source-adapters --approve my-video-site
+```
+
+Changing its hosts, request URL, method, headers, or parameters invalidates
+that approval. A complete JSON-response example ships at
+`streamkeep/reference_adapters/reference_json_video.yaml`; copy it into the
+profile adapter directory to customize it, where it will also begin inert.
 - **Operations view** unifies durable queue, monitor, and failure state across the desktop, CLI, and authenticated local API. Filter by state/source/stage, inspect totals and retry health, retry or discard selected failures, undo an accidental discard from Notifications or the web remote, and export a redacted report without URLs or paths.
 
 ### Backup and Recovery
